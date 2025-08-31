@@ -1,0 +1,34 @@
+version = 0.1
+
+[default]
+[default.build]
+use_container = true
+parameter_overrides = [
+  "MemorySize=3008",
+  "Timeout=60",
+  "SimThreshold=\"0.60\"",
+  "MarginThreshold=\"0.08\"",
+  "EmbedPrefix=\"ecommerce intent: \""
+]
+
+[default.deploy]
+stack_name = "dialogcart-intents"
+region = "eu-west-2"
+capabilities = "CAPABILITY_IAM"
+resolve_s3 = true
+image_repositories = ["IntentFunction=992382357956.dkr.ecr.eu-west-2.amazonaws.com/dialogcart-intents"]
+s3_prefix = "dialogcart-intents"
+confirm_changeset = false
+fail_on_empty_changeset = false
+force_upload = true
+
+[default.deploy.parameters]
+stack_name = "sam-app"
+resolve_s3 = true
+s3_prefix = "sam-app"
+region = "eu-west-2"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+disable_rollback = true
+parameter_overrides = "ProvisionedConcurrency=\"0\" MemorySize=\"3008\" Timeout=\"60\" SimThreshold=\"0.60\" MarginThreshold=\"0.08\" EmbedPrefix=\"ecommerce intent: \""
+image_repositories = ["IntentFunction=992382357956.dkr.ecr.eu-west-2.amazonaws.com/samapp7427b055/intentfunction1cdc2f58repo"]
