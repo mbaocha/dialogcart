@@ -9,6 +9,8 @@ pipeline:
     max_replacements_per_text: 50
     force_reload: true 
   - name: WhitespaceTokenizer
+    intent_tokenization_flag: true
+    intent_split_symbol: "+"
   - name: RegexFeaturizer
   - name: LexicalSyntacticFeaturizer
   - name: CountVectorsFeaturizer

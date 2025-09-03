@@ -1,6 +1,25 @@
 version: "3.1"
 
 nlu:
+- lookup: product
+  examples: |
+    - kwulikwili
+    - yam
+    - rice
+    - beans
+    - fish
+    - plantains
+    - oil
+    - sugar
+    - salt
+    - crayfish
+    - tomatoes
+    - noodles
+    - garri
+    - milk
+    - flour
+    - bread
+    - butter
 - intent: SHOW_PRODUCT_LIST
   examples: |
     - show product list
@@ -492,3 +511,14 @@ nlu:
     - I need assistance
     - connect me with support
     - escalate to human
+
+
+- intent: CHECK_PRODUCT_EXISTENCE+ADD_TO_CART
+  examples: |
+    - check if [yam](product) is in stock and add [2](quantity) [kg](unit) to cart
+    - check if [rice](product) is in stock and add [3](quantity) [kg](unit) to cart
+    - check if [beans](product) is in stock and add [4](quantity) [kg](unit) to cart
+    - check if [fish](product) is in stock and add [5](quantity) [kg](unit) to cart
+    - check if [plantains](product) is in stock and add [6](quantity) [kg](unit) to cart
+    - check if [oil](product) is in stock and add [7](quantity) [kg](unit) to cart
+
