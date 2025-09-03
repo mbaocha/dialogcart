@@ -1,0 +1,13 @@
+rasa==3.6.10
+flask
+sqlalchemy<2.0
+aiohttp
+matplotlib
+joblib
+python-dateutil
+cloudpickle
+scikit-learn
+uvicorn  # Optional: only needed if using FastAPI or uvicorn server
+gunicorn
+filelock
+

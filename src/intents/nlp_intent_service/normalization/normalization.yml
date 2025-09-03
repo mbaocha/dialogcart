@@ -1,0 +1,11 @@
+# data/normalization.yml
+products:
+  garri: ["gari", "garry", "gárì", "gári"]
+  semovita: ["semo", "semovitta"]
+  plantain: ["plantin", "plaintain"]
+  noodles: ["indomiee", "indomie", "noodels"]
+units:
+  kg: ["kgs", "kilogram", "kilo"]
+  carton: ["ctn", "cartn", "cartoon"]
+synonyms:
+  basket: ["bag", "trolley", "shopping bag"]
