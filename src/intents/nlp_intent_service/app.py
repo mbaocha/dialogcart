@@ -47,6 +47,41 @@ _lock = threading.Lock()
 app = Flask(__name__)
 _global_agent = None
 
+# ─────────────────────────────────────────────────────────────
+# Minimal per-user slot memory (thread-safe)
+# ─────────────────────────────────────────────────────────────
+_user_slots_lock = threading.Lock()
+_user_slots = {}  # { sender_id: { "product": str, "quantity": float/int/str, "unit": str } }
+
+def _update_user_slots_from_entities(sender_id: str, entities: list):
+    """Map recognized entities into our simple per-user slot store."""
+    if not sender_id:
+        sender_id = "anonymous"
+
+    # Normalize keys we care about
+    # NOTE: adjust/add your own entity↔slot mapping if needed.
+    slot_map = {
+        "product": "product",
+        "quantity": "quantity",
+        "unit": "unit",
+    }
+
+    with _user_slots_lock:
+        current = _user_slots.get(sender_id, {}).copy()
+        for ent in entities or []:
+            name = ent.get("entity")
+            value = ent.get("value")
+            if name in slot_map and value is not None:
+                current[slot_map[name]] = value
+        _user_slots[sender_id] = current
+        return current
+
+def _get_user_slots(sender_id: str):
+    with _user_slots_lock:
+        return (_user_slots.get(sender_id) or {}).copy()
+
+# ─────────────────────────────────────────────────────────────
+
 
 def initialize_app():
     """Initialize the app by loading or training a model."""
@@ -248,6 +283,20 @@ def parse_text_sync(text):
     finally:
         asyncio.set_event_loop(None)
 
+@app.route("/slots/get", methods=["POST"])
+def get_slots():
+    body = request.get_json(force=True)
+    sender_id = body.get("sender_id", "anonymous")
+    return _resp(200, {"sender_id": sender_id, "slots": _get_user_slots(sender_id)})
+
+@app.route("/slots/clear", methods=["POST"])
+def clear_slots():
+    body = request.get_json(force=True)
+    sender_id = body.get("sender_id", "anonymous")
+    with _user_slots_lock:
+        _user_slots.pop(sender_id, None)
+    return _resp(200, {"sender_id": sender_id, "cleared": True})
+
 
 @app.route("/", methods=["POST"])
 def rasa_api():
@@ -314,12 +363,25 @@ def rasa_api():
 
     elif action == "predict":
         text = body.get("text", "").strip()
+        sender_id = body.get("sender_id", "anonymous")  # NEW: per-user memory key
+
         if not text:
             return _resp(400, {"error": "'text' is required."})
 
         try:
+            # Keep existing behavior: parse with NLU-only model
             result = parse_text_sync(text)
-            return _resp(200, result)
+
+            # NEW: update & return simple per-user slots derived from entities
+            entities = result.get("entities") or []
+            slots = _update_user_slots_from_entities(sender_id, entities)
+
+            # Return original parse result + current user's slot memory
+            return _resp(200, {
+                "nlu": result,
+                "slots": slots,
+                "sender_id": sender_id
+            })
         except Exception as e:
             logger.exception("Prediction failed.")
             return _resp(500, {"error": f"Prediction error: {str(e)}"})
