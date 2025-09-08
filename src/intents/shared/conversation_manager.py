@@ -62,8 +62,27 @@ class SharedConversationManager:
         Returns a dict with enhanced entities (preserving multiple entities) and current slots.
         """
         entities = entities or []
-        logger.info("CM: process start sender=%s intent=%s text=%s", self.sender_id, (intent or "NONE"), (text or "")[:200])
+        current_intent = (intent or "NONE").upper()
+        logger.info("CM: process start sender=%s intent=%s text=%s", self.sender_id, current_intent, (text or "")[:200])
         logger.info("CM: incoming entities=%s", entities)
+
+        # Check if intent changed and clear slots if so
+        session = self.session_client.get_session(self.sender_id) or {}
+        metadata = session.get("metadata", {})
+        last_intent = metadata.get("last_intent")
+        
+        if last_intent and last_intent != current_intent:
+            logger.info("CM: intent changed from %s to %s, clearing slots", last_intent, current_intent)
+            # Clear tracked slots
+            self.session_client.update_session(self.sender_id, {
+                "slots": {},
+                "metadata": {"last_intent": current_intent}
+            })
+        else:
+            # Update metadata with current intent
+            self.session_client.update_session(self.sender_id, {
+                "metadata": {"last_intent": current_intent}
+            })
 
         # Append user message to history (best-effort)
         try:
@@ -88,18 +107,30 @@ class SharedConversationManager:
         
         # Group entities by position/order
         normalized: List[Dict[str, Any]] = []
-        
+
         # If we have individual entities, try to group them
         if individual_entities:
-            # Get the maximum number of items (based on product count)
-            max_items = len(individual_entities.get("product", []))
-            
+            # Use the longest list length among present entity types
+            max_items = max((len(v) for v in individual_entities.values()), default=0)
+
+            # Fallback: if there is no explicit product but there are other entities,
+            # we will still build at least one item and fill product from current slots if available
+            if max_items == 0 and any(len(v) > 0 for v in individual_entities.values()):
+                max_items = 1
+
+            current_slots = self.get_slots() or {}
+
             for i in range(max_items):
                 payload = {}
                 for entity_type in ["product", "quantity", "unit"]:
-                    if entity_type in individual_entities and i < len(individual_entities[entity_type]):
-                        payload[entity_type] = individual_entities[entity_type][i]
-                
+                    values = individual_entities.get(entity_type) or []
+                    if i < len(values):
+                        payload[entity_type] = values[i]
+
+                # If product is missing but we have one in slots, inherit it
+                if payload.get("product") is None and current_slots.get("product") is not None:
+                    payload["product"] = current_slots.get("product")
+
                 if payload:
                     normalized.append(payload)
         else:
@@ -129,6 +160,19 @@ class SharedConversationManager:
                 if e.get(k) is not None:
                     slot_updates[k] = e[k]
         
+        # If nothing was normalized but we did get some individual entities (e.g., only quantity/unit),
+        # update slots directly from those (using the first seen values), and include product from current slots
+        if not slot_updates and individual_entities:
+            current_slots = self.get_slots() or {}
+            first_payload: Dict[str, Any] = {}
+            for key in ("product", "quantity", "unit"):
+                values = individual_entities.get(key) or []
+                if values:
+                    first_payload[key] = values[0]
+            if first_payload.get("product") is None and current_slots.get("product") is not None:
+                first_payload["product"] = current_slots.get("product")
+            slot_updates.update({k: v for k, v in first_payload.items() if v is not None})
+
         slots = self.update_slots(slot_updates)
         logger.info("CM: slot_updates=%s slots_now=%s", slot_updates, slots)
 
