@@ -48,7 +48,10 @@ class SharedConversationManager:
 
     def update_slots(self, updates: Dict[str, Any]) -> Dict[str, Any]:
         current = self.get_slots()
-        current.update({k: v for k, v in (updates or {}).items() if v is not None})
+        # Allow None values to clear slots, but filter out missing keys
+        for k, v in (updates or {}).items():
+            if k in current or v is not None:  # Update if key exists or value is not None
+                current[k] = v
         self.session_client.update_session(self.sender_id, {"slots": current})
         return current
 
@@ -70,8 +73,9 @@ class SharedConversationManager:
         session = self.session_client.get_session(self.sender_id) or {}
         metadata = session.get("metadata", {})
         last_intent = metadata.get("last_intent")
+        intent_changed = last_intent and last_intent != current_intent
         
-        if last_intent and last_intent != current_intent:
+        if intent_changed:
             logger.info("CM: intent changed from %s to %s, clearing slots", last_intent, current_intent)
             # Clear tracked slots
             self.session_client.update_session(self.sender_id, {
@@ -118,6 +122,7 @@ class SharedConversationManager:
             if max_items == 0 and any(len(v) > 0 for v in individual_entities.values()):
                 max_items = 1
 
+            # Get current slots AFTER potential clearing
             current_slots = self.get_slots() or {}
 
             for i in range(max_items):
@@ -127,8 +132,8 @@ class SharedConversationManager:
                     if i < len(values):
                         payload[entity_type] = values[i]
 
-                # If product is missing but we have one in slots, inherit it
-                if payload.get("product") is None and current_slots.get("product") is not None:
+                # If product is missing but we have one in slots, inherit it (only if intent didn't change)
+                if payload.get("product") is None and current_slots.get("product") is not None and not intent_changed:
                     payload["product"] = current_slots.get("product")
 
                 if payload:
@@ -163,13 +168,15 @@ class SharedConversationManager:
         # If nothing was normalized but we did get some individual entities (e.g., only quantity/unit),
         # update slots directly from those (using the first seen values), and include product from current slots
         if not slot_updates and individual_entities:
+            # Get current slots AFTER potential clearing
             current_slots = self.get_slots() or {}
             first_payload: Dict[str, Any] = {}
             for key in ("product", "quantity", "unit"):
                 values = individual_entities.get(key) or []
                 if values:
                     first_payload[key] = values[0]
-            if first_payload.get("product") is None and current_slots.get("product") is not None:
+            # Only inherit product from slots if intent didn't change
+            if first_payload.get("product") is None and current_slots.get("product") is not None and not intent_changed:
                 first_payload["product"] = current_slots.get("product")
             slot_updates.update({k: v for k, v in first_payload.items() if v is not None})
 
@@ -187,7 +194,7 @@ class SharedConversationManager:
         logger.info("CM: enhanced_entities=%s", enhanced_entities)
 
         return {
-            "intent": (intent or "NONE").upper(),
+            "intent": current_intent,
             "entities": enhanced_entities,
             "slots": slots,
         }

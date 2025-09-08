@@ -5,6 +5,7 @@ Always returns a list of intents (single or multiple)
 from flask import Flask, request, jsonify
 from intents.unified_api.orchestrator import classify
 from intents.unified_api.config import PORT, DEBUG
+import requests
 
 app = Flask(__name__)
 
@@ -43,6 +44,58 @@ def classify_route():
                     "entities": []
                 }]
             }
+        }), 500
+
+@app.route("/debug/session/<sender_id>", methods=["GET"])
+def debug_session(sender_id):
+    """Debug endpoint to show session state"""
+    try:
+        # Get session from session service
+        response = requests.post(
+            "http://session:9200/session/get",
+            json={"sender_id": sender_id},
+            timeout=5
+        )
+        response.raise_for_status()
+        session_data = response.json().get("session", {})
+        
+        return jsonify({
+            "success": True,
+            "sender_id": sender_id,
+            "session": session_data
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "sender_id": sender_id
+        }), 500
+
+@app.route("/debug/clear/<sender_id>", methods=["POST"])
+def clear_session(sender_id):
+    """Debug endpoint to clear session state"""
+    try:
+        # Clear session from session service
+        response = requests.post(
+            "http://session:9200/session/clear",
+            json={"sender_id": sender_id},
+            timeout=5
+        )
+        response.raise_for_status()
+        result = response.json()
+        
+        return jsonify({
+            "success": True,
+            "sender_id": sender_id,
+            "cleared": result.get("cleared", True)
+        })
+        
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": str(e),
+            "sender_id": sender_id
         }), 500
 
 @app.route("/health", methods=["GET"])
