@@ -110,6 +110,27 @@ nlu:
     - add [a dozen](quantity) [oranges](product) to my cart
     - put [3](quantity) [kg](unit) [apples](product) into my cart
     - include [1](quantity) [bottle](unit) of [vinegar](product) in cart
+    # Multi-entity examples
+    - add [5](quantity) [kg](unit) [rice](product) and [6](quantity) [kg](unit) [beans](product) to cart
+    - add [2](quantity) [yam](product) and [3](quantity) [plantains](product) to cart
+    - put [1](quantity) [kg](unit) [sugar](product) and [2](quantity) [bottles](unit) of [oil](product) in basket
+    - add [3](quantity) [kg](unit) [fish](product) and [1](quantity) [bag](unit) of [salt](product) to cart
+    - include [2](quantity) [tins](unit) of [tomatoes](product) and [1](quantity) [kg](unit) [onions](product) in cart
+    - add [4](quantity) [kg](unit) [rice](product) and [2](quantity) [kg](unit) [beans](product) to trolley
+    - put [1](quantity) [bunch](unit) of [bananas](product) and [3](quantity) [kg](unit) [yam](product) in basket
+    - add [2](quantity) [crates](unit) of [eggs](product) and [1](quantity) [kg](unit) [pepper](product) to cart
+    - include [3](quantity) [cartons](unit) of [milk](product) and [2](quantity) [kg](unit) [sugar](product) in cart
+    - add [5](quantity) [kg](unit) [rice](product) and [1](quantity) [kg](unit) [onions](product) to my cart
+    - put [2](quantity) [kg](unit) [beans](product) and [3](quantity) [kg](unit) [yam](product) in basket
+    - add [1](quantity) [bottle](unit) of [oil](product) and [2](quantity) [kg](unit) [sugar](product) to cart
+    - include [3](quantity) [kg](unit) [fish](product) and [1](quantity) [bag](unit) of [salt](product) in my trolley
+    - add [2](quantity) [tins](unit) of [tomatoes](product) and [1](quantity) [kg](unit) [onions](product) to basket
+    - put [4](quantity) [kg](unit) [rice](product) and [2](quantity) [kg](unit) [beans](product) in cart
+    - add [1](quantity) [bunch](unit) of [bananas](product) and [3](quantity) [kg](unit) [yam](product) to my basket
+    - include [2](quantity) [crates](unit) of [eggs](product) and [1](quantity) [kg](unit) [pepper](product) in cart
+    - add [3](quantity) [cartons](unit) of [milk](product) and [2](quantity) [kg](unit) [sugar](product) to trolley
+    - put [5](quantity) [kg](unit) [rice](product) and [1](quantity) [kg](unit) [onions](product) in my basket
+    - add [2](quantity) [kg](unit) [beans](product) and [3](quantity) [kg](unit) [yam](product) to cart
 
 - intent: REMOVE_FROM_CART
   examples: |
@@ -138,6 +159,27 @@ nlu:
     - I don’t want [fish](product) anymore, remove it
     - cancel the [bread](product) in my basket
     - I added [pepper](product) by mistake, delete it
+    # Multi-entity examples
+    - remove [5](quantity) [kg](unit) [rice](product) and [6](quantity) [kg](unit) [beans](product) from cart
+    - take out [2](quantity) [yam](product) and [3](quantity) [plantains](product) from basket
+    - delete [1](quantity) [kg](unit) [sugar](product) and [2](quantity) [bottles](unit) of [oil](product) from cart
+    - remove [3](quantity) [kg](unit) [fish](product) and [1](quantity) [bag](unit) of [salt](product) from basket
+    - take out [2](quantity) [tins](unit) of [tomatoes](product) and [1](quantity) [kg](unit) [onions](product) from cart
+    - delete [4](quantity) [kg](unit) [rice](product) and [2](quantity) [kg](unit) [beans](product) from trolley
+    - remove [1](quantity) [bunch](unit) of [bananas](product) and [3](quantity) [kg](unit) [yam](product) from basket
+    - take out [2](quantity) [crates](unit) of [eggs](product) and [1](quantity) [kg](unit) [pepper](product) from cart
+    - delete [3](quantity) [cartons](unit) of [milk](product) and [2](quantity) [kg](unit) [sugar](product) from basket
+    - remove [5](quantity) [kg](unit) [rice](product) and [1](quantity) [kg](unit) [onions](product) from my cart
+    - take out [2](quantity) [kg](unit) [beans](product) and [3](quantity) [kg](unit) [yam](product) from basket
+    - delete [1](quantity) [bottle](unit) of [oil](product) and [2](quantity) [kg](unit) [sugar](product) from cart
+    - remove [3](quantity) [kg](unit) [fish](product) and [1](quantity) [bag](unit) of [salt](product) from my trolley
+    - take out [2](quantity) [tins](unit) of [tomatoes](product) and [1](quantity) [kg](unit) [onions](product) from basket
+    - delete [4](quantity) [kg](unit) [rice](product) and [2](quantity) [kg](unit) [beans](product) from cart
+    - remove [1](quantity) [bunch](unit) of [bananas](product) and [3](quantity) [kg](unit) [yam](product) from my basket
+    - take out [2](quantity) [crates](unit) of [eggs](product) and [1](quantity) [kg](unit) [pepper](product) from cart
+    - delete [3](quantity) [cartons](unit) of [milk](product) and [2](quantity) [kg](unit) [sugar](product) from trolley
+    - remove [5](quantity) [kg](unit) [rice](product) and [1](quantity) [kg](unit) [onions](product) from my basket
+    - take out [2](quantity) [kg](unit) [beans](product) and [3](quantity) [kg](unit) [yam](product) from cart
 
 - intent: UPDATE_CART_QUANTITY
   examples: |
@@ -167,6 +209,27 @@ nlu:
     - cut down [milk](product) to [1](quantity) [carton](unit)
     - switch [onions](product) to [2](quantity) [bags](unit)
     - please update [tomatoes](product) to [4](quantity) [tins](unit)
+    # Multi-entity examples
+    - set [yam](product) to [3](quantity) and [beans](product) to [5](quantity)
+    - change [rice](product) to [4](quantity) [kg](unit) and [fish](product) to [2](quantity) [kg](unit)
+    - update [sugar](product) to [1](quantity) [kg](unit) and [oil](product) to [2](quantity) [bottles](unit)
+    - make [plantains](product) [6](quantity) and [bananas](product) [3](quantity)
+    - increase [yam](product) by [2](quantity) and [beans](product) by [1](quantity)
+    - reduce [rice](product) by [1](quantity) [kg](unit) and [fish](product) by [500g](quantity)
+    - set [onions](product) to [2](quantity) [kg](unit) and [tomatoes](product) to [3](quantity) [tins](unit)
+    - change [eggs](product) to [dozen](quantity) and [milk](product) to [2](quantity) [cartons](unit)
+    - update [oil](product) to [3](quantity) [bottles](unit) and [salt](product) to [1](quantity) [bag](unit)
+    - make [crayfish](product) [1](quantity) [kg](unit) and [pepper](product) [500g](quantity)
+    - increase [sugar](product) by [1](quantity) [kg](unit) and [flour](product) by [2](quantity) [kg](unit)
+    - reduce [milk](product) by [1](quantity) [carton](unit) and [bread](product) by [1](quantity)
+    - set [noodles](product) to [5](quantity) [packets](unit) and [garri](product) to [3](quantity) [kg](unit)
+    - change [bananas](product) to [2](quantity) [bunches](unit) and [oranges](product) to [1](quantity) [dozen](quantity)
+    - update [rice](product) to [10](quantity) [kg](unit) and [beans](product) to [5](quantity) [kg](unit)
+    - make [yam](product) [5](quantity) and [plantains](product) [3](quantity)
+    - increase [fish](product) by [1](quantity) [kg](unit) and [chicken](product) by [2](quantity) [kg](unit)
+    - reduce [sugar](product) by [500g](quantity) and [salt](product) by [1](quantity) [bag](unit)
+    - set [oil](product) to [2](quantity) [bottles](unit) and [vinegar](product) to [1](quantity) [bottle](unit)
+    - change [tomatoes](product) to [4](quantity) [tins](unit) and [onions](product) to [2](quantity) [kg](unit)
 
 - intent: CLEAR_CART
   examples: |

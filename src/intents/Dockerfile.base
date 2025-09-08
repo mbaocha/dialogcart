@@ -1,0 +1,23 @@
+# Base image for intent services (unified_api and llm_service)
+FROM python:3.10-slim
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential curl git \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app/src
+
+WORKDIR /app
+
+# Install Python dependencies first for better caching
+COPY requirements.txt /app/src/intents/requirements.txt
+RUN python -m pip install --upgrade pip \
+    && pip install --no-cache-dir -r /app/src/intents/requirements.txt
+
+# Leave workdir ready for final stage to COPY source
+WORKDIR /app/src
+
+

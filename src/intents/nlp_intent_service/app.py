@@ -20,6 +20,9 @@ from rasa.core.agent import Agent
 import normalization.normalizer  # 👈 Ensures it's registered
 print("✅ normalization.normalizer imported from app.py")
 
+from shared.conversation_manager import SharedConversationManager
+from shared.session_client import SessionClient
+
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -48,37 +51,12 @@ app = Flask(__name__)
 _global_agent = None
 
 # ─────────────────────────────────────────────────────────────
-# Minimal per-user slot memory (thread-safe)
+# Session and conversation management
 # ─────────────────────────────────────────────────────────────
-_user_slots_lock = threading.Lock()
-_user_slots = {}  # { sender_id: { "product": str, "quantity": float/int/str, "unit": str } }
-
-def _update_user_slots_from_entities(sender_id: str, entities: list):
-    """Map recognized entities into our simple per-user slot store."""
-    if not sender_id:
-        sender_id = "anonymous"
-
-    # Normalize keys we care about
-    # NOTE: adjust/add your own entity↔slot mapping if needed.
-    slot_map = {
-        "product": "product",
-        "quantity": "quantity",
-        "unit": "unit",
-    }
-
-    with _user_slots_lock:
-        current = _user_slots.get(sender_id, {}).copy()
-        for ent in entities or []:
-            name = ent.get("entity")
-            value = ent.get("value")
-            if name in slot_map and value is not None:
-                current[slot_map[name]] = value
-        _user_slots[sender_id] = current
-        return current
-
-def _get_user_slots(sender_id: str):
-    with _user_slots_lock:
-        return (_user_slots.get(sender_id) or {}).copy()
+def get_conversation_manager(sender_id: str) -> SharedConversationManager:
+    """Get a conversation manager instance for the given sender."""
+    session_client = SessionClient('http://session:9200')
+    return SharedConversationManager(session_client, sender_id)
 
 # ─────────────────────────────────────────────────────────────
 
@@ -283,19 +261,6 @@ def parse_text_sync(text):
     finally:
         asyncio.set_event_loop(None)
 
-@app.route("/slots/get", methods=["POST"])
-def get_slots():
-    body = request.get_json(force=True)
-    sender_id = body.get("sender_id", "anonymous")
-    return _resp(200, {"sender_id": sender_id, "slots": _get_user_slots(sender_id)})
-
-@app.route("/slots/clear", methods=["POST"])
-def clear_slots():
-    body = request.get_json(force=True)
-    sender_id = body.get("sender_id", "anonymous")
-    with _user_slots_lock:
-        _user_slots.pop(sender_id, None)
-    return _resp(200, {"sender_id": sender_id, "cleared": True})
 
 
 @app.route("/", methods=["POST"])
@@ -363,23 +328,29 @@ def rasa_api():
 
     elif action == "predict":
         text = body.get("text", "").strip()
-        sender_id = body.get("sender_id", "anonymous")  # NEW: per-user memory key
+        sender_id = body.get("sender_id", "anonymous")
 
         if not text:
             return _resp(400, {"error": "'text' is required."})
 
         try:
-            # Keep existing behavior: parse with NLU-only model
+            # Parse with NLU model
             result = parse_text_sync(text)
-
-            # NEW: update & return simple per-user slots derived from entities
+            
+            # Get entities and intent from Rasa result
             entities = result.get("entities") or []
-            slots = _update_user_slots_from_entities(sender_id, entities)
-
-            # Return original parse result + current user's slot memory
+            intent = result.get("intent", {}).get("name") if result.get("intent") else None
+            
+            # Use SharedConversationManager to process the message
+            conv_mgr = get_conversation_manager(sender_id)
+            processed = conv_mgr.process_message(text, entities, intent)
+            
+            # Return enhanced result with conversation manager processing
             return _resp(200, {
                 "nlu": result,
-                "slots": slots,
+                "intent": processed.get("intent"),
+                "entities": processed.get("entities"),
+                "slots": processed.get("slots"),
                 "sender_id": sender_id
             })
         except Exception as e:

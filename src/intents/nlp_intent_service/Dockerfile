@@ -2,6 +2,7 @@ FROM my-rasa-base:3.6.10
 
 # Set Python path so custom components can be discovered
 ENV PYTHONPATH="/app"
+ENV PYTHONIOENCODING="utf-8"
 
 # Build metadata
 ARG BUILD_ID=16
@@ -14,12 +15,13 @@ ENV PYTHONWARNINGS="ignore"
 ENV TF_CPP_MIN_LOG_LEVEL=2
 ENV PYTHONUNBUFFERED=1
 
-# Install runtime dependencies
-RUN pip install --no-cache-dir gunicorn
-RUN pip install --no-cache-dir filelock
 
 # Copy source code into container
-COPY . /app
+COPY ./nlp_intent_service /app
+# Copy shared package for session client
+COPY ./shared /app/shared
+
+
 WORKDIR /app
 
 # Ensure model storage dir exists and is mounted

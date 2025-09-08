@@ -1,0 +1,65 @@
+## version field is obsolete in compose v2; omitted intentionally
+
+services:
+  rasa:
+    build:
+      context: .
+      dockerfile: ./nlp_intent_service/Dockerfile
+    container_name: dialogcart-rasa
+    environment:
+      - SESSION_URL=http://session:9200
+      - PYTHONPATH=/app/src
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./nlp_intent_service/model_storage:/app/model_storage
+    depends_on:
+      - session
+
+  llm:
+    build:
+      context: ../..
+      dockerfile: src/intents/Dockerfile
+    container_name: dialogcart-llm
+    working_dir: /app/src/intents/llm_service
+    command: ["gunicorn", "-w", "2", "-b", "0.0.0.0:9100", "app:app"]
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - SESSION_URL=http://session:9200
+      - PYTHONPATH=/app/src
+    ports:
+      - "9100:9100"
+    depends_on:
+      - rasa
+      - session
+
+  session:
+    build:
+      context: ../..
+      dockerfile: src/intents/Dockerfile
+    container_name: dialogcart-session
+    working_dir: /app/src/intents/session_service
+    command: ["python", "app.py"]
+    environment:
+      - PYTHONPATH=/app/src
+    ports:
+      - "9200:9200"
+
+  unified:
+    build:
+      context: ../..
+      dockerfile: src/intents/Dockerfile
+    container_name: dialogcart-unified
+    environment:
+      - RASA_URL=http://rasa:8000
+      - LLM_URL=http://llm:9100
+      - SESSION_URL=http://session:9200
+      - UNIFIED_API_PORT=9000
+      - PYTHONPATH=/app/src
+    ports:
+      - "9000:9000"
+    depends_on:
+      - rasa
+      - llm
+      - session
+

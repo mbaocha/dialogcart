@@ -1,86 +1,73 @@
-# Intent Service
+# Intent Services
 
-This directory contains all intent classification services for the DialogCart application.
+This directory contains the refactored intent classification services with a unified entry point.
+
+## Structure
+
+```
+src/intents/
+├── llm_service/           # LLM-only REST service
+│   ├── core/             # Refactored LLM logic
+│   ├── app.py            # REST API (port 9100)
+│   └── cli.py            # Interactive CLI
+├── unified_api/          # Unified entry point (Rasa + LLM fallback)
+│   ├── app.py            # REST API (port 9000)
+│   └── cli.py            # Interactive CLI
+├── nlp_intent_service/   # Existing Rasa service (unchanged)
+└── llm.py               # Compatibility wrapper
+```
+
+## Usage
+
+### 1. LLM Service Only
+```bash
+# Interactive CLI (same as original llm.py)
+python src/intents/llm_service/cli.py
+
+# REST API
+python src/intents/llm_service/app.py
+# Test: curl -X POST http://localhost:9100/classify -d '{"text": "add rice"}'
+```
+
+### 2. Unified API (Rasa + LLM Fallback)
+```bash
+# Interactive CLI
+python src/intents/unified_api/cli.py
+
+# REST API
+python src/intents/unified_api/app.py
+# Test: curl -X POST http://localhost:9000/classify -d '{"text": "add rice"}'
+```
+
+### 3. Original Compatibility
+```bash
+# Still works exactly like before
+python src/intents/llm.py
+```
 
 ## Services
 
-### NLP Intent Service
-- **Location**: `nlp-intent-service/`
-- **Technology**: Rasa NLU
-- **Purpose**: Fast, rule-based intent classification
-- **Port**: 8000
+- **Rasa Service**: `http://localhost:8001` (existing)
+- **LLM Service**: `http://localhost:9100` (new)
+- **Unified API**: `http://localhost:9000` (new)
 
-## Directory Structure
+## Configuration
 
-```
-intent-service/
-├── nlp-intent-service/           # Rasa-based intent service
-│   ├── app.py                   # Flask application
-│   ├── Dockerfile               # Docker configuration
-│   ├── initial_training_data.yml # Training data
-│   ├── run.sh                   # Linux/Mac startup script
-│   ├── run.bat                  # Windows startup script
-│   └── ...
-└── README.md                    # This file
-```
+Set environment variables:
+- `RASA_URL`: Rasa service URL (default: http://localhost:8001)
+- `LLM_URL`: LLM service URL (default: http://localhost:9100)
+- `OPENAI_API_KEY`: Required for LLM service
 
-## Quick Start
+## Fallback Logic
 
-### Using the Scripts
+The unified API tries Rasa first, then falls back to LLM if:
+- Rasa confidence is "low"
+- Rasa returns "NONE" intent
+- Rasa service is unavailable
 
-**Linux/Mac:**
-```bash
-cd nlp-intent-service
-chmod +x run.sh
-./run.sh
-```
+## No Breaking Changes
 
-**Windows:**
-```cmd
-cd nlp-intent-service
-run.bat
-```
-
-### Manual Commands
-
-```bash
-cd nlp-intent-service
-docker build -t nlp-intent-service .
-docker run -p 8000:8000 nlp-intent-service
-```
-
-## API Usage
-
-### Predict Intent
-```bash
-curl -X POST http://localhost:8000 \
-  -H "Content-Type: application/json" \
-  -d '{"action": "predict", "text": "hello"}'
-```
-
-### Train New Intent
-```bash
-curl -X POST http://localhost:8000 \
-  -H "Content-Type: application/json" \
-  -d '{
-    "action": "train",
-    "intent": "greet",
-    "examples": ["hello", "hi", "hey"]
-  }'
-```
-
-## Future Services
-
-This directory is designed to accommodate additional intent services:
-
-- `llm-intent-service/` - LLM-based intent classification
-- `hybrid-intent-service/` - Combined NLU + LLM approach
-- `specialized-intent-service/` - Domain-specific intent classification
-
-## Development
-
-Each service should:
-- Follow the same API interface
-- Use different ports (8000, 8001, 8002, etc.)
-- Have its own Dockerfile and requirements
-- Include startup scripts for easy deployment
+- `python src/intents/llm.py` works exactly as before
+- All existing functionality preserved
+- New REST endpoints added
+- Modular structure for easier maintenance

@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 @DefaultV1Recipe.register(
-    component_types=[DefaultV1Recipe.ComponentType.MESSAGE_TRANSFORMER],
+    component_types=[DefaultV1Recipe.ComponentType.ENTITY_EXTRACTOR],
     is_trainable=False,
 )
 class UpdateOpInferrer(GraphComponent):
