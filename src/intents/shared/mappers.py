@@ -4,6 +4,13 @@ from .confidence import score_to_bucket
 import re
 
 
+def _split_multi_intent(intent_name: str) -> List[str]:
+    """Split Rasa multi-intent format (A+B) into individual intents."""
+    if "+" in intent_name:
+        return [intent.strip().upper() for intent in intent_name.split("+")]
+    return [intent_name.upper()]
+
+
 def _group_raw_rasa_entities(raw_entities):
     """Group flat Rasa entities into combined items.
     
@@ -94,6 +101,32 @@ def map_rasa_to_intent_meta(rasa_json) -> IntentMeta:
         confidence_score=conf_score,
         entities=entities,
     )
+
+
+def map_rasa_to_intent_metas(rasa_json) -> List[IntentMeta]:
+    """Map Rasa response to multiple IntentMeta objects for multi-intent support."""
+    single_meta = map_rasa_to_intent_meta(rasa_json)
+    
+    # Check if this is a multi-intent (contains +)
+    intent_name = single_meta.intent
+    if "+" in intent_name:
+        # Split multi-intent into individual intents
+        individual_intents = _split_multi_intent(intent_name)
+        
+        # Create separate IntentMeta for each intent with same entities
+        metas = []
+        for intent in individual_intents:
+            meta = IntentMeta(
+                intent=intent,
+                confidence=single_meta.confidence,
+                confidence_score=single_meta.confidence_score,
+                entities=single_meta.entities.copy()  # Share entities across intents
+            )
+            metas.append(meta)
+        return metas
+    else:
+        # Single intent
+        return [single_meta]
 
 
 def map_llm_to_intent_meta(llm_json) -> IntentMeta:

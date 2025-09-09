@@ -4,7 +4,7 @@ Always returns a list of intents (single or multiple)
 """
 import requests
 from .config import RASA_URL, LLM_URL, FALLBACK_CONF, FALLBACK_THRESHOLD, RASA_CONFIDENCE_THRESHOLD
-from intents.shared.mappers import map_rasa_to_intent_meta, map_llm_to_intent_meta, map_llm_multi_to_intent_metas
+from intents.shared.mappers import map_rasa_to_intent_meta, map_rasa_to_intent_metas, map_llm_to_intent_meta, map_llm_multi_to_intent_metas
 
 def is_sufficient(conf: str) -> bool:
     """Check if confidence is sufficient to avoid fallback"""
@@ -61,8 +61,8 @@ def _classify_rasa_only(text: str, sender_id: str | None = None):
             timeout=5,
         )
         rasa_response.raise_for_status()
-        rasa_meta = map_rasa_to_intent_meta(rasa_response.json())
-        return {"source": "rasa", "sender_id": sender_id, "intents": [rasa_meta.model_dump()]}
+        rasa_metas = map_rasa_to_intent_metas(rasa_response.json())
+        return {"source": "rasa", "sender_id": sender_id, "intents": [meta.model_dump() for meta in rasa_metas]}
     except Exception as e:
         print(f"DEBUG: Rasa-only routing failed: {e}")
         # Return error response instead of falling back
@@ -116,16 +116,19 @@ def _classify_with_fallback(text: str, sender_id: str | None = None):
             timeout=5,
         )
         rasa_response.raise_for_status()
-        rasa_meta = map_rasa_to_intent_meta(rasa_response.json())
+        rasa_metas = map_rasa_to_intent_metas(rasa_response.json())
 
         # Prefer numeric confidence score when available; fallback to bucket
-        score = getattr(rasa_meta, "confidence_score", None)
-        if score is not None:
-            if score >= RASA_CONFIDENCE_THRESHOLD:
-                return {"source": "rasa", "sender_id": sender_id, "intents": [rasa_meta.model_dump()]}
-        else:
-            if is_sufficient(rasa_meta.confidence):
-                return {"source": "rasa", "sender_id": sender_id, "intents": [rasa_meta.model_dump()]}
+        # Use first intent for confidence check (they should all have same confidence)
+        first_meta = rasa_metas[0] if rasa_metas else None
+        if first_meta:
+            score = getattr(first_meta, "confidence_score", None)
+            if score is not None:
+                if score >= RASA_CONFIDENCE_THRESHOLD:
+                    return {"source": "rasa", "sender_id": sender_id, "intents": [meta.model_dump() for meta in rasa_metas]}
+            else:
+                if is_sufficient(first_meta.confidence):
+                    return {"source": "rasa", "sender_id": sender_id, "intents": [meta.model_dump() for meta in rasa_metas]}
 
         # Step 2: Fallback to LLM
         llm_response = requests.post(
