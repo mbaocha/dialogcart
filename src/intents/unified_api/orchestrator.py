@@ -4,7 +4,7 @@ Always returns a list of intents (single or multiple)
 """
 import requests
 from .config import RASA_URL, LLM_URL, FALLBACK_CONF, FALLBACK_THRESHOLD, RASA_CONFIDENCE_THRESHOLD
-from intents.shared.mappers import map_rasa_to_intent_meta, map_rasa_to_intent_metas, map_llm_to_intent_meta, map_llm_multi_to_intent_metas
+from intents.shared.mappers import map_rasa_to_intent_meta, map_rasa_to_intent_metas, map_rasa_to_actions, map_llm_to_intent_meta, map_llm_multi_to_intent_metas, map_llm_to_actions
 
 def is_sufficient(conf: str) -> bool:
     """Check if confidence is sufficient to avoid fallback"""
@@ -21,7 +21,7 @@ def classify(text: str, sender_id: str | None = None, route: str | None = None):
         route: Routing option - "rasa", "llm", or None (fallback)
     
     Returns:
-        Classification result with source and intents
+        Classification result with source and actions/intents
     """
     print(f"DEBUG: classify called with route='{route}', text='{text[:50]}...'")
     try:
@@ -45,10 +45,13 @@ def classify(text: str, sender_id: str | None = None, route: str | None = None):
         return {
             "source": "fallback",
             "sender_id": sender_id,
-            "intents": [{
-                "intent": "NONE",
-                "confidence": "low",
-                "entities": []
+            "actions": [{
+                "action": "unknown",
+                "product": None,
+                "quantity": None,
+                "unit": None,
+                "container": None,
+                "confidence": "low"
             }]
         }
 
@@ -61,18 +64,65 @@ def _classify_rasa_only(text: str, sender_id: str | None = None):
             timeout=5,
         )
         rasa_response.raise_for_status()
-        rasa_metas = map_rasa_to_intent_metas(rasa_response.json())
-        return {"source": "rasa", "sender_id": sender_id, "intents": [meta.model_dump() for meta in rasa_metas]}
+        rasa_json = rasa_response.json()
+        # If Rasa already produced actions (from Rasa app), pass-through
+        if isinstance(rasa_json, dict) and rasa_json.get("actions"):
+            return {
+                "source": "rasa", 
+                "sender_id": sender_id, 
+                "intent": rasa_json.get("intent"),
+                "actions": rasa_json.get("actions", [])
+            }
+        
+        # Check if it's a modify_cart and parse actions
+        actions = map_rasa_to_actions(rasa_json)
+        print(f"DEBUG: unified_api - rasa_json={rasa_json}")
+        print(f"DEBUG: unified_api - parsed actions={actions}")
+        if actions:
+            return {
+                "source": "rasa", 
+                "sender_id": sender_id, 
+                "intent": "modify_cart",
+                "actions": [action.dict() for action in actions]
+            }
+        
+        # Check if this is a modify_cart intent and ensure action-based format
+        nlu = rasa_json.get("nlu") or rasa_json
+        intent_name = (nlu.get("intent") or {}).get("name", "").upper()
+        
+        if intent_name in ("MODIFY_CART", "SHOPPING_COMMAND"):
+            # For modify_cart intents, always return action-based format even if parsing failed
+            return {
+                "source": "rasa", 
+                "sender_id": sender_id, 
+                "intent": "modify_cart",
+                "actions": [{
+                    "action": "unknown",
+                    "product": None,
+                    "quantity": None,
+                    "unit": None,
+                    "confidence": "low",
+                    "confidence_score": 0.0
+                }]
+            }
+        
+        # Fallback to intent-based approach for other intents
+        rasa_metas = map_rasa_to_intent_metas(rasa_json)
+        return {"source": "rasa", "sender_id": sender_id, "intents": [meta.dict() for meta in rasa_metas]}
+        
     except Exception as e:
         print(f"DEBUG: Rasa-only routing failed: {e}")
         # Return error response instead of falling back
         return {
             "source": "rasa_error",
             "sender_id": sender_id,
-            "intents": [{
-                "intent": "NONE",
-                "confidence": "low",
-                "entities": []
+            "actions": [{
+                "action": "unknown",
+                "product": None,
+                "quantity": None,
+                "unit": None,
+                "container": None,
+                "confidence": "low"
             }],
             "error": str(e)
         }
@@ -86,11 +136,42 @@ def _classify_llm_only(text: str, sender_id: str | None = None):
             timeout=20
         )
         llm_response.raise_for_status()
-        llm_metas = map_llm_multi_to_intent_metas(llm_response.json())
+        llm_json = llm_response.json()
+        
+        # Check if LLM returned actions (action-based processing)
+        if "actions" in llm_json.get("result", {}):
+            return llm_json.get("result", {})
+        
+        # Check if this is a modify_cart intent and ensure action-based format
+        result = llm_json.get("result") or llm_json
+        intents = result.get("intents", [])
+        modify_cart_intents = [
+            intent for intent in intents 
+            if intent.get("intent", "").upper() in ("MODIFY_CART", "SHOPPING_COMMAND")
+        ]
+        
+        if modify_cart_intents:
+            # For modify_cart intents, always return action-based format
+            return {
+                "source": "llm", 
+                "sender_id": sender_id,
+                "intent": "modify_cart",
+                "actions": [{
+                    "action": "unknown",
+                    "product": None,
+                    "quantity": None,
+                    "unit": None,
+                    "confidence": "low",
+                    "confidence_score": 0.0
+                }]
+            }
+        
+        # Fallback to traditional intent-based processing for other intents
+        llm_metas = map_llm_multi_to_intent_metas(llm_json)
         return {
             "source": "llm", 
             "sender_id": sender_id,
-            "intents": [meta.model_dump() for meta in llm_metas]
+            "intents": [meta.dict() for meta in llm_metas]
         }
     except Exception as e:
         print(f"DEBUG: LLM-only routing failed: {e}")
@@ -116,8 +197,50 @@ def _classify_with_fallback(text: str, sender_id: str | None = None):
             timeout=5,
         )
         rasa_response.raise_for_status()
-        rasa_metas = map_rasa_to_intent_metas(rasa_response.json())
-
+        rasa_json = rasa_response.json()
+        # If Rasa already produced actions (from Rasa app), pass-through
+        if isinstance(rasa_json, dict) and rasa_json.get("actions"):
+            return {
+                "source": "rasa", 
+                "sender_id": sender_id, 
+                "intent": rasa_json.get("intent"),
+                "actions": rasa_json.get("actions", [])
+            }
+        
+        # Check if it's a modify_cart and parse actions
+        actions = map_rasa_to_actions(rasa_json)
+        if actions:
+            # For actions, we don't need confidence checking - just return them
+            return {
+                "source": "rasa", 
+                "sender_id": sender_id, 
+                "intent": "modify_cart",
+                "actions": [action.dict() for action in actions]
+            }
+        
+        # Check if this is a modify_cart intent and ensure action-based format
+        nlu = rasa_json.get("nlu") or rasa_json
+        intent_name = (nlu.get("intent") or {}).get("name", "").upper()
+        
+        if intent_name in ("MODIFY_CART", "SHOPPING_COMMAND"):
+            # For modify_cart intents, always return action-based format even if parsing failed
+            return {
+                "source": "rasa", 
+                "sender_id": sender_id, 
+                "intent": "modify_cart",
+                "actions": [{
+                    "action": "unknown",
+                    "product": None,
+                    "quantity": None,
+                    "unit": None,
+                    "confidence": "low",
+                    "confidence_score": 0.0
+                }]
+            }
+        
+        # Fallback to intent-based approach for other intents
+        rasa_metas = map_rasa_to_intent_metas(rasa_json)
+        
         # Prefer numeric confidence score when available; fallback to bucket
         # Use first intent for confidence check (they should all have same confidence)
         first_meta = rasa_metas[0] if rasa_metas else None
@@ -125,10 +248,10 @@ def _classify_with_fallback(text: str, sender_id: str | None = None):
             score = getattr(first_meta, "confidence_score", None)
             if score is not None:
                 if score >= RASA_CONFIDENCE_THRESHOLD:
-                    return {"source": "rasa", "sender_id": sender_id, "intents": [meta.model_dump() for meta in rasa_metas]}
+                    return {"source": "rasa", "sender_id": sender_id, "intents": [meta.dict() for meta in rasa_metas]}
             else:
                 if is_sufficient(first_meta.confidence):
-                    return {"source": "rasa", "sender_id": sender_id, "intents": [meta.model_dump() for meta in rasa_metas]}
+                    return {"source": "rasa", "sender_id": sender_id, "intents": [meta.dict() for meta in rasa_metas]}
 
         # Step 2: Fallback to LLM
         llm_response = requests.post(
@@ -137,12 +260,42 @@ def _classify_with_fallback(text: str, sender_id: str | None = None):
             timeout=20
         )
         llm_response.raise_for_status()
-        llm_metas = map_llm_multi_to_intent_metas(llm_response.json())
+        llm_json = llm_response.json()
         
+        # Check if LLM returned actions (action-based processing)
+        if "actions" in llm_json.get("result", {}):
+            return llm_json.get("result", {})
+        
+        # Check if this is a modify_cart intent and ensure action-based format
+        result = llm_json.get("result") or llm_json
+        intents = result.get("intents", [])
+        modify_cart_intents = [
+            intent for intent in intents 
+            if intent.get("intent", "").upper() in ("MODIFY_CART", "SHOPPING_COMMAND")
+        ]
+        
+        if modify_cart_intents:
+            # For modify_cart intents, always return action-based format
+            return {
+                "source": "llm", 
+                "sender_id": sender_id,
+                "intent": "modify_cart",
+                "actions": [{
+                    "action": "unknown",
+                    "product": None,
+                    "quantity": None,
+                    "unit": None,
+                    "confidence": "low",
+                    "confidence_score": 0.0
+                }]
+            }
+        
+        # Fallback to traditional intent-based processing for other intents
+        llm_metas = map_llm_multi_to_intent_metas(llm_json)
         return {
             "source": "llm", 
             "sender_id": sender_id,
-            "intents": [meta.model_dump() for meta in llm_metas]
+            "intents": [meta.dict() for meta in llm_metas]
         }
         
     except Exception as e:
@@ -150,10 +303,13 @@ def _classify_with_fallback(text: str, sender_id: str | None = None):
         return {
             "source": "fallback",
             "sender_id": sender_id,
-            "intents": [{
-                "intent": "NONE",
-                "confidence": "low",
-                "entities": []
+            "actions": [{
+                "action": "unknown",
+                "product": None,
+                "quantity": None,
+                "unit": None,
+                "container": None,
+                "confidence": "low"
             }]
         }
 

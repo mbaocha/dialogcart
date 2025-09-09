@@ -341,18 +341,80 @@ def rasa_api():
             entities = result.get("entities") or []
             intent = result.get("intent", {}).get("name") if result.get("intent") else None
             
-            # Use SharedConversationManager to process the message
-            conv_mgr = get_conversation_manager(sender_id)
-            processed = conv_mgr.process_message(text, entities, intent)
-            
-            # Return enhanced result with conversation manager processing
-            return _resp(200, {
-                "nlu": result,
-                "intent": processed.get("intent"),
-                "entities": processed.get("entities"),
-                "slots": processed.get("slots"),
-                "sender_id": sender_id
-            })
+            # Check if it's a modify_cart and use action-based processing (back-compat: SHOPPING_COMMAND)
+            if intent and intent.upper() in ("MODIFY_CART", "SHOPPING_COMMAND"):
+                logger.info(f"DEBUG: Rasa app - intent={intent}")
+                logger.info(f"DEBUG: Rasa app - entities={entities}")
+                
+                # Import here to avoid circular imports
+                try:
+                    from shared.mappers import map_rasa_to_actions
+                    from shared.conversation_manager import SharedConversationManager
+                    from shared.session_client import SessionClient
+                    from shared.models import Action
+                except ImportError as e:
+                    logger.error(f"Failed to import shared modules: {e}")
+                    # Even on import failure, return action-based format for modify_cart
+                    return _resp(200, {
+                        "nlu": result,
+                        "intent": "modify_cart",
+                        "actions": [{
+                            "action": "unknown",
+                            "product": None,
+                            "quantity": None,
+                            "unit": None,
+                            "confidence": "low",
+                            "confidence_score": 0.0
+                        }],
+                        "slots": {},
+                        "sender_id": sender_id
+                    })
+                
+                # Parse actions from entities
+                actions = map_rasa_to_actions({"nlu": result})
+                logger.info(f"DEBUG: Rasa app - parsed actions={actions}")
+                
+                # Process actions with conversation manager
+                session_client = SessionClient()
+                conv_mgr = SharedConversationManager(session_client, sender_id)
+                processed = conv_mgr.process_actions(text, actions)
+                
+                # Ensure we always return action-based format for modify_cart
+                if not actions:
+                    # If no actions were parsed, create a fallback action
+                    # This handles cases where verb extraction failed
+                    fallback_action = Action(
+                        action="set",  # Default action for follow-up commands
+                        product=None,  # Will be inherited from slots
+                        quantity=None,  # Will be extracted from entities
+                        unit=None,
+                        confidence=confidence,
+                        confidence_score=conf_score
+                    )
+                    actions = [fallback_action]
+                    processed = conv_mgr.process_actions(text, actions)
+                
+                # Return action-based result
+                return _resp(200, {
+                    "nlu": result,
+                    "intent": "modify_cart",
+                    "actions": [action.dict() for action in processed.get("actions", [])],
+                    "slots": processed.get("slots"),
+                    "sender_id": sender_id
+                })
+            else:
+                # Use traditional intent-based processing for other intents
+                conv_mgr = get_conversation_manager(sender_id)
+                processed = conv_mgr.process_message(text, entities, intent)
+                
+                # Return enhanced result with conversation manager processing
+                return _resp(200, {
+                    "nlu": result,
+                    "intent": processed.get("intent"),
+                    "entities": processed.get("entities"),
+                    "slots": processed.get("slots"),
+                    "sender_id": sender_id
+                })
         except Exception as e:
             logger.exception("Prediction failed.")
             return _resp(500, {"error": f"Prediction error: {str(e)}"})

@@ -10,15 +10,20 @@ You are an intent classifier and slot extractor for a grocery shopping assistant
 
 Identify ALL intents present in the user's message (from this list):{intents_list}
 
-For each intent, extract ONLY explicitly mentioned entities: product, quantity, unit.
+For cart modification commands (add, remove, increase, decrease, set), use MODIFY_CART intent.
+For other specific commands, use the appropriate specific intent.
+
+For each intent, extract ONLY explicitly mentioned entities: product, quantity, unit, verb.
 ❌ Do NOT guess or infer missing info from context or prior turns.
 ✅ If a field isn't clearly present, set it to null.
+
+For MODIFY_CART intent, also extract the action verb (add, remove, increase, decrease, set).
 
 Return ONLY valid JSON in this exact shape:
 {{
   "intents": [
     {{
-      "intent": "ADD_TO_CART",
+      "intent": "MODIFY_CART",
       "confidence": "high",
       "reasoning": "...",
       "entities": [
@@ -26,6 +31,7 @@ Return ONLY valid JSON in this exact shape:
           "product": "rice",
           "quantity": 2,
           "unit": "kg",
+          "verb": "add",
           "raw": "2kg rice"
         }}
       ]

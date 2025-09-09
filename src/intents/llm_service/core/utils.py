@@ -1,100 +1,32 @@
-"""
-Utility functions for LLM service - extracted from llm.py
-"""
+from typing import List, Dict, Any, Optional
+from .models import Entity
 import re
-from typing import List, Dict, Any, Tuple, Optional
-from .config import UNIT_NORMALIZATION, REQUIRED_SLOTS
-from .models import Entity, IntentAction
 
-def normalize_unit(u: Optional[str]) -> Optional[str]:
-    if not u or not isinstance(u, str):
-        return None
-    u = u.strip().lower()
-    return UNIT_NORMALIZATION.get(u, u)  # leave untouched if unknown (we'll ask later)
-
-def sanitize_entities(intents: List[IntentAction]) -> List[IntentAction]:
-    """
-    Make sure types are correct; drop/normalize anything suspicious.
-    No 'invented' values added here—only cleaning.
-    """
-    for ib in intents:
-        cleaned = []
-        for e in ib.entities:
-            prod = e.product if isinstance(e.product, str) else None
-            qty = e.quantity if isinstance(e.quantity, (int, float)) else None
-            unit = normalize_unit(e.unit) if isinstance(e.unit, str) else None
-            cleaned.append(Entity(product=prod, quantity=qty, unit=unit, raw=e.raw))
-        ib.entities = cleaned
-    return intents
-
-def compute_missing_per_entity(intent: str, entities: List[Entity], config: Optional[Dict[str, Any]] = None) -> List[str]:
-    """
-    Returns missing slot labels per entity: e.g., ["quantity (rice)", "unit (beans)"].
-    """
-    required = REQUIRED_SLOTS.get(intent, [])
-    # If AUTO_FILL_UNITS is enabled, treat unit as optional for ADD_TO_CART
-    if config and config.get("AUTO_FILL_UNITS", False) and intent == "ADD_TO_CART":
-        required = [s for s in required if s != "unit"]
-    if not required or not entities:
-        return []
-    out: List[str] = []
-    for ent in entities:
-        name = ent.product or "item"
-        for slot in required:
-            if getattr(ent, slot, None) in (None, "", []):
-                out.append(f"{slot} ({name})")
-    return out
-
-def looks_like_followup(msg: str) -> bool:
-    """Heuristic: short, fragmentary answers likely responding to a prompt."""
-    m = msg.strip().lower()
-    if not m:
-        return True
-    if m in {"yes", "no", "same", "it", "the same"}:
-        return True
-    # Pure numeric or "num unit" (e.g., "4", "4kg", "4 kg")
-    if re.fullmatch(r"\d+(\.\d+)?(\s*[a-zA-Z]+)?", m):
-        return True
-    # Short fragments (<= 3 tokens) without obvious action verbs
-    tokens = m.split()
-    if len(tokens) <= 3 and not any(v in m for v in ["add", "remove", "sell", "have", "check", "clear", "update", "cart"]):
-        return True
-    return False
-
-def recent_product_candidates(memory: List[Dict[str, Any]], window: int = 6) -> List[str]:
-    """Most recent distinct product names seen in memory (bounded window)."""
-    seen: List[str] = []
-    for prev in reversed(memory):
-        for ent in prev.get("entities", []):
-            p = getattr(ent, "product", None)
-            if p and p not in seen:
-                seen.append(p)
-            if len(seen) >= window:
-                break
-        if len(seen) >= window:
-            break
-    return seen
-
-def maybe_fill_product_from_memory(
-    entities: List[Entity],
-    memory: List[Dict[str, Any]],
-    user_input: str
-) -> Tuple[List[Entity], bool]:
-    """
-    Only auto-fill 'product' when there's exactly one plausible recent candidate.
-    If user used a pronoun ('it', 'that', 'same') and there are multiple candidates, flag ambiguity.
-    """
-    if not entities:
-        return [], False
-
+def fill_missing_entities(entities: List[Entity], memory: List[Dict[str, Any]]) -> List[Entity]:
+    """Fill missing product entities using conversation memory."""
+    if not entities or not memory:
+        return entities
+    
+    # Extract recent products from memory
+    candidates = []
+    for msg in memory[-3:]:  # Last 3 messages
+        for ent in msg.get("entities", []):
+            if isinstance(ent, dict) and ent.get("product"):
+                candidates.append(ent["product"])
+            elif hasattr(ent, "product") and ent.product:
+                candidates.append(ent.product)
+    
+    if not candidates:
+        return entities
+    
+    # Check if user used pronouns (it, this, that, etc.)
+    pronoun_used = any(word in " ".join([e.raw or "" for e in entities if e.raw]).lower() 
+                      for word in ["it", "this", "that", "them", "those"])
+    
     ambiguous = False
-    candidates = recent_product_candidates(memory)
-    lower = f" {user_input.lower()} "
-    pronoun_used = any(token in lower for token in [" it ", " that ", " same "])
-
     filled = []
     for ent in entities:
-        d = ent.model_dump()
+        d = ent.dict()
         if d.get("product") is None:
             if len(candidates) == 1:
                 d["product"] = candidates[0]  # safe
@@ -103,68 +35,108 @@ def maybe_fill_product_from_memory(
                     ambiguous = True
                 # else leave None; we'll prompt
         filled.append(Entity(**d))
+    
+    if ambiguous:
+        # Could add logic here to ask for clarification
+        pass
+    
+    return filled
 
-    return filled, ambiguous
-
-def maybe_fill_default_unit(
-    entities: List[Entity],
-    config: Dict[str, Any]
-) -> Tuple[List[Entity], List[str]]:
-    """
-    Auto-fill unit per entity if:
-      - AUTO_FILL_UNITS=True
-      - entity.product present
-      - entity.unit missing
-      - product has a configured default unit
-    Returns (updated_entities, notes_to_display)
-    """
-    notes: List[str] = []
-    if not config.get("AUTO_FILL_UNITS", False):
-        return entities, notes
-
-    defaults: Dict[str, str] = config.get("DEFAULT_UNITS", {})
+def fill_missing_units(entities: List[Entity], memory: List[Dict[str, Any]]) -> List[Entity]:
+    """Fill missing unit entities using conversation memory and heuristics."""
+    if not entities:
+        return entities
+    
+    # Extract recent units from memory
+    recent_units = []
+    for msg in memory[-3:]:  # Last 3 messages
+        for ent in msg.get("entities", []):
+            if isinstance(ent, dict) and ent.get("unit"):
+                recent_units.append(ent["unit"])
+            elif hasattr(ent, "unit") and ent.unit:
+                recent_units.append(ent.unit)
+    
+    # Common unit mappings
+    unit_mappings = {
+        "rice": "kg",
+        "yam": "kg", 
+        "beans": "kg",
+        "garri": "kg",
+        "flour": "kg",
+        "sugar": "kg",
+        "salt": "kg",
+        "oil": "bottles",
+        "milk": "bottles",
+        "bread": "loaves",
+        "eggs": "pieces",
+        "tomatoes": "kg",
+        "onions": "kg"
+    }
+    
     filled: List[Entity] = []
     for ent in entities:
-        d = ent.model_dump()
+        d = ent.dict()
         if d.get("product") and not d.get("unit"):
             prod_key = d["product"].lower()
-            default_unit = defaults.get(prod_key)
-            if default_unit:
-                d["unit"] = default_unit
-                notes.append(f"ℹ️  Defaulted unit for {d['product']} → {default_unit}")
+            if prod_key in unit_mappings:
+                d["unit"] = unit_mappings[prod_key]
+            elif recent_units:
+                d["unit"] = recent_units[-1]  # Use most recent unit
         filled.append(Entity(**d))
-    return filled, notes
+    
+    return filled
 
-# NEW: default quantity=0 (and accept default unit regardless of AUTO_FILL_UNITS)
-def maybe_fill_default_qty0_and_unit(
-    entities: List[Entity],
-    config: Dict[str, Any]
-) -> Tuple[List[Entity], List[str]]:
-    """
-    If AUTO_FILL_QUANTITY_ZERO is True:
-      - For any entity with missing quantity, set quantity to 0.0
-      - If unit is missing and DEFAULT_UNITS has a mapping for the product, set that unit
-        (this applies even if AUTO_FILL_UNITS is False)
-    Returns (updated_entities, notes_to_display)
-    """
-    notes: List[str] = []
-    if not config.get("AUTO_FILL_QUANTITY_ZERO", False):
-        return entities, notes
-
-    defaults: Dict[str, str] = config.get("DEFAULT_UNITS", {})
+def fill_missing_quantities(entities: List[Entity], memory: List[Dict[str, Any]]) -> List[Entity]:
+    """Fill missing quantity entities using conversation memory."""
+    if not entities:
+        return entities
+    
+    # Extract recent quantities from memory
+    recent_quantities = []
+    for msg in memory[-3:]:  # Last 3 messages
+        for ent in msg.get("entities", []):
+            if isinstance(ent, dict) and ent.get("quantity"):
+                recent_quantities.append(ent["quantity"])
+            elif hasattr(ent, "quantity") and ent.quantity:
+                recent_quantities.append(ent.quantity)
+    
     filled: List[Entity] = []
     for ent in entities:
-        d = ent.model_dump()
+        d = ent.dict()
         if d.get("product"):
             # If quantity is missing, default to 0.0
             if d.get("quantity") is None:
                 d["quantity"] = 0.0
-                notes.append(f"ℹ️  Defaulted quantity for {d['product']} → 0")
-                # Accept/apply default unit regardless of AUTO_FILL_UNITS
-                if not d.get("unit"):
-                    default_unit = defaults.get(d["product"].lower())
-                    if default_unit:
-                        d["unit"] = default_unit
-                        notes.append(f"ℹ️  Applied default unit for {d['product']} → {default_unit}")
         filled.append(Entity(**d))
-    return filled, notes
+    
+    return filled
+
+def extract_quantities_from_text(text: str) -> List[float]:
+    """Extract numeric quantities from text."""
+    # Pattern to match numbers (including decimals)
+    pattern = r'\b\d+(?:\.\d+)?\b'
+    matches = re.findall(pattern, text)
+    return [float(match) for match in matches]
+
+def extract_units_from_text(text: str) -> List[str]:
+    """Extract unit words from text."""
+    # Common unit patterns
+    unit_patterns = [
+        r'\b(?:kg|kilogram|kilo|kgs)\b',
+        r'\b(?:g|gram|grams)\b', 
+        r'\b(?:lb|lbs|pound|pounds)\b',
+        r'\b(?:oz|ounce|ounces)\b',
+        r'\b(?:piece|pieces|pcs?)\b',
+        r'\b(?:bottle|bottles)\b',
+        r'\b(?:packet|packets|packs?)\b',
+        r'\b(?:loaf|loaves)\b',
+        r'\b(?:dozen|dozens)\b',
+        r'\b(?:carton|cartons|ctn|ctns)\b'
+    ]
+    
+    units = []
+    for pattern in unit_patterns:
+        matches = re.findall(pattern, text, re.IGNORECASE)
+        units.extend(matches)
+    
+    return units

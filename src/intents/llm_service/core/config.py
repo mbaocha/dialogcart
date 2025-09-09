@@ -27,21 +27,17 @@ CONFIG = {
 INTENTS = [
     "SHOW_PRODUCT_LIST",
     "VIEW_CART",
-    "ADD_TO_CART",
-    "REMOVE_FROM_CART",
     "CLEAR_CART",
     "CHECK_PRODUCT_EXISTENCE",
     "RESTORE_CART",
-    "UPDATE_CART_QUANTITY",
+    "MODIFY_CART",
     "NONE"
 ]
 
 # Required slots PER INTENT (per entity)
 REQUIRED_SLOTS: Dict[str, List[str]] = {
-    "ADD_TO_CART": ["product", "quantity", "unit"],
-    "REMOVE_FROM_CART": ["product"],
+    "MODIFY_CART": ["product"],  # Product is required, quantity/unit are optional
     "CHECK_PRODUCT_EXISTENCE": ["product"],
-    "UPDATE_CART_QUANTITY": ["product", "quantity"],
 }
 
 # Optional: whitelist of units for minimal normalization (keep tiny & safe)
