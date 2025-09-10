@@ -58,7 +58,7 @@ Set environment variables:
 - `LLM_URL`: LLM service URL (default: http://localhost:9100)
 - `OPENAI_API_KEY`: Required for LLM service
 
-## Fallback Logic
+## Fallback Logic ok ok
 
 The unified API tries Rasa first, then falls back to LLM if:
 - Rasa confidence is "low"
