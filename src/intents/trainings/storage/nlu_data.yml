@@ -1,0 +1,313 @@
+# Minimal changes:
+# 1) Removed inline comment lines inside the examples blocks (they were being parsed as examples and causing warnings).
+# 2) Adjusted entity annotation from "[switch to](verb)" → "[switch](verb) to" to align with tokenizer boundaries.
+
+version: "3.1"
+nlu:
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔤 SYNONYMS
+# ─────────────────────────────────────────────────────────────────────────────
+- synonym: add
+  examples: |
+    - add
+    - put
+    - include
+    - throw in
+    - throw
+    - insert
+    - pop in
+    - add in
+    - add on
+    - add more
+    - increase
+    - top up
+    - get
+    - buy
+    - more
+    - bump
+    - bump up
+    - increment
+    - inc
+
+- synonym: remove
+  examples: |
+    - remove
+    - rm
+    - delete
+    - take out
+    - drop
+    - cancel
+    - take off
+    - get rid
+    - get rid of
+    - decrease
+    - reduce
+    - lower
+    - less
+    - subtract
+    - minus
+    - knock off
+    - knock down
+    - trim
+    - cut down
+    - dec
+    - take away
+
+- synonym: set
+  examples: |
+    - set
+    - change
+    - modify
+    - adjust
+    - make
+    - make it
+    - switch to
+    - update to
+    - update
+    - fix
+    - override
+
+- synonym: replace
+  examples: |
+    - replace
+    - swap
+    - substitute
+    - switch
+    - switch out
+    - exchange
+    - sub out
+
+- synonym: check
+  examples: |
+    - check
+    - do you have
+    - is it available
+    - is available
+    - in stock
+    - got any
+    - do you carry
+    - confirm availability
+
+- synonym: cart
+  examples: |
+    - cart
+    - basket
+    - my basket
+    - trolley
+    - my trolley
+    - shopping cart
+    - shopping bag
+    - bag
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 📚 LOOKUPS
+# ─────────────────────────────────────────────────────────────────────────────
+- lookup: verb
+  examples: |
+    - add
+    - put
+    - include
+    - throw in
+    - throw
+    - insert
+    - pop in
+    - add in
+    - add on
+    - add more
+    - increase
+    - top up
+    - get
+    - buy
+    - more
+    - inc
+    - "+"
+    - remove
+    - delete
+    - take out
+    - drop
+    - cancel
+    - get rid of
+    - decrease
+    - reduce
+    - subtract
+    - minus
+    - lower
+    - less
+    - knock off
+    - trim
+    - cut down
+    - take off
+    - dec
+    - rm
+    - "-"
+    - set
+    - update
+    - modify
+    - adjust
+    - change
+    - make
+    - make it
+    - switch to
+    - update to
+    - fix
+    - override
+    - replace
+    - swap
+    - switch
+    - switch out
+    - substitute
+    - exchange
+    - check
+    - in stock
+    - confirm availability
+
+- lookup: unit
+  examples: |
+    - kg
+    - g
+    - bottle
+    - bottles
+    - tin
+    - tins
+    - crate
+    - crates
+    - carton
+    - cartons
+    - bag
+    - bags
+    - bunch
+    - bunches
+    - packet
+    - packets
+    - pack
+    - packs
+
+- lookup: container
+  examples: |
+    - cart
+    - basket
+    - my basket
+    - trolley
+    - my trolley
+    - shopping cart
+    - shopping bag
+    - bag
+
+- lookup: product
+  examples: |
+    - kwulikwili
+    - yam
+    - rice
+    - beans
+    - fish
+    - plantains
+    - oil
+    - sugar
+    - salt
+    - crayfish
+    - tomatoes
+    - noodles
+    - garri
+    - milk
+    - flour
+    - bread
+    - butter
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🧠 MODIFY CART (examples)
+# ─────────────────────────────────────────────────────────────────────────────
+- intent: modify_cart
+  examples: |
+    - [add](verb) [2](quantity) [kg](unit) [rice](product) to [cart](container)
+    - [remove](verb) [rice](product) from [cart](container)
+    - [update](verb) [rice](product) to [5](quantity) [kg](unit)
+    - [increase](verb) [rice](product) by [2](quantity) [kg](unit)
+    - [decrease](verb) [rice](product) by [1](quantity) [kg](unit)
+    - [check](verb) [rice](product)
+    - [set](verb) [rice](product) to [2](quantity) [bags](unit)
+    - [get rid of](verb) [rice](product) from my [cart](container)
+    - [take out](verb) [rice](product) from my [cart](container)
+    - [take off](verb) [rice](product) from my [cart](container)
+    - [get](verb) [10](quantity) [crate](unit) of [rice](product) to my [cart](container)
+    - [get](verb) [5](quantity) [bags](unit) of [rice](product) to my [cart](container)
+    - [get rid of](verb) [rice](product) from my [cart](container)
+    - [take out](verb) [rice](product) from my [cart](container)
+    - [drop](verb) [rice](product) from my [cart](container)
+    - [make it](verb) [rice](product) to [5](quantity) [bags](unit)
+    - [make it](verb) [rice](product) to [3](quantity) [packets](unit)
+    - [pop in](verb) [3](quantity) [bags](unit) of [rice](product)
+    - [add more](verb) [10](quantity) [kg](unit) of [rice](product), [delete](verb) [plantains](product), [subtract](verb) [tomatoes](product)
+    - [more](verb) [3](quantity) [tins](unit) of [rice](product) and [change](verb) [fish](product) to [1](quantity) [kg](unit) and [drop](verb) [beans](product)
+    - [increase](verb) [rice](product) and [decrease](verb) [beans](product) and [set](verb) [fish](product) to [1](quantity) [basket](unit)
+    - [throw in](verb) [2](quantity) [kg](unit) [rice](product) and [delete](verb) [yam](product) and [adjust](verb) [crayfish](product) to [3](quantity) [kg](unit)
+    - [buy](verb) [3](quantity) [kg](unit) [rice](product) and [drop](verb) [oil](product) and [set](verb) [garri](product) to [2](quantity) [kg](unit)
+    - [decrease](verb) [rice](product) from my [cart](container); [make](verb) [rice](product) to [5](quantity) [packs](unit); [get rid of](verb) [rice](product) from my [cart](container)
+    - [put](verb) [1](quantity) [bottle](unit) of [rice](product) to my [cart](container), [add in](verb) [5](quantity) [kg](unit) of [rice](product) to my [cart](container), [take out](verb) [rice](product) from my [cart](container)
+    - [buy](verb) [4](quantity) [packets](unit) of [rice](product) to my [cart](container), [subtract](verb) [rice](product) from my [cart](container), [throw in](verb) [3](quantity) [bags](unit) of [rice](product) to my [cart](container)
+    - [add more](verb) [1](quantity) [crates](unit) of [rice](product) to my [cart](container); [lower](verb) [rice](product) from my [cart](container); [buy](verb) [2](quantity) [bottle](unit) of [rice](product) to my [cart](container)
+    - [decrease](verb) [rice](product) from my [cart](container), [put](verb) [4](quantity) [cartons](unit) of [rice](product) to my [cart](container), [subtract](verb) [rice](product) from my [cart](container)
+    - [switch](verb) to [crayfish](product) to [7](quantity) [packets](unit), [lower](verb) [garri](product), [switch](verb) to [yam](product) to [3](quantity) [basket](unit)
+    - [replace](verb) [yam](product) with [3](quantity) [kg](unit) of [rice](product)
+    - [add](verb) some [rice](product) to [cart](container)
+    - [remove](verb) all [rice](product)
+    - [take out](verb) [rice](product) from my [cart](container)
+    - [take off](verb) [rice](product) from my [cart](container)
+    - [get rid of](verb) [rice](product) from my [cart](container)
+    - [minus](verb) [rice](product) from my [cart](container)
+    - [reduce](verb) [rice](product) from my [cart](container)
+    - [throw in](verb) [3](quantity) [bags](unit) [rice](product) and [remove](verb) [beans](product) from my [cart](container)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# OTHER INTENTS
+# ─────────────────────────────────────────────────────────────────────────────
+- intent: show_product_list
+  examples: |
+    - show product list
+    - list products
+    - browse catalog
+    - what products do you have
+    - what's available
+    - product catalog
+
+- intent: view_cart
+  examples: |
+    - show my cart
+    - what's in my cart
+    - view cart
+    - list cart items
+
+- intent: clear_cart
+  examples: |
+    - clear my cart
+    - empty the cart
+    - remove all items from my cart
+
+- intent: restore_cart
+  examples: |
+    - restore my cart
+    - recover my cart
+    - undo empty my cart
+
+- intent: greet
+  examples: |
+    - hi
+    - hello
+    - hey there
+
+- intent: goodbye
+  examples: |
+    - bye
+    - goodbye
+    - see you
+
+- intent: thanks
+  examples: |
+    - thanks
+    - thank you
+
+- intent: out_of_scope
+  examples: |
+    - what’s the weather tomorrow
+    - tell me a joke
+    - book me a flight

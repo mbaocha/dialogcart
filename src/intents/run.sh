@@ -6,15 +6,21 @@ cd "$HERE"
 
 # Parse command line arguments
 CLEAR_MODELS=false
+FORCE_REBUILD=false
 while [[ $# -gt 0 ]]; do
     case $1 in
         --cm|--clear-models)
             CLEAR_MODELS=true
             shift
             ;;
+        --force-rebuild)
+            FORCE_REBUILD=true
+            shift
+            ;;
         -h|--help)
-            echo "Usage: $0 [--cm|--clear-models]"
+            echo "Usage: $0 [--cm|--clear-models] [--force-rebuild]"
             echo "  --cm, --clear-models  Clear model storage volumes to force retraining"
+            echo "  --force-rebuild       Force rebuild app image (ignore cache)"
             exit 0
             ;;
         *)
@@ -34,7 +40,6 @@ else
 fi
 
 echo "🔧 Killing any lingering docker-proxy processes..."
-# Kill docker-proxy processes that might be holding ports
 if command -v pkill >/dev/null 2>&1; then
     sudo pkill -f docker-proxy 2>/dev/null || true
     echo "✅ Killed docker-proxy processes"
@@ -42,30 +47,49 @@ else
     echo "⚠️  pkill not available, skipping docker-proxy cleanup"
 fi
 
-# Wait a moment for processes to fully terminate
 sleep 2
 
-echo "Building images..."
-docker compose -f docker-compose.yml build --no-cache
+echo "Building images efficiently..."
+
+# Base image: build only if missing
+if ! docker image inspect my-rasa-base:3.6.10 >/dev/null 2>&1; then
+    echo "Building base image (not found)..."
+    docker build -f Dockerfile.base -t my-rasa-base:3.6.10 .
+else
+    echo "✅ Base image exists, skipping build"
+fi
+
+# App image: rebuild optionally with no-cache
+echo "Building Intent Classifier image..."
+if [ "$FORCE_REBUILD" = true ]; then
+    echo "🔄 Force rebuild enabled - ignoring cache"
+    docker build --no-cache -f Dockerfile -t dialogcart-intent-classifier .
+else
+    docker build -f Dockerfile -t dialogcart-intent-classifier .
+fi
 
 echo "Starting services in detached mode..."
 docker compose -f docker-compose.yml up -d
 
 echo "✅ Services are up. Endpoints:"
-echo "  Unified API: http://localhost:9000/classify (always returns list of intents)"
-echo "  Rasa:       http://localhost:8000"
-echo "  LLM:        http://localhost:9100/classify (multi-intent)"
-echo "  LLM (single): http://localhost:9100/classify-single (backwards compatibility)"
-echo "  Session:    http://localhost:9200/health (shared session storage)"
+echo "  Intent Classifier: http://localhost:9000/classify (Rasa + LLM validation)"
+echo ""
+echo "📝 Usage Examples:"
+echo "  curl -X POST http://localhost:9000/classify -d '{\"text\": \"add rice\", \"validate\": true}'"
+echo "  curl -X GET http://localhost:9000/health"
 echo ""
 echo "🔧 Configuration:"
-echo "  RASA_CONFIDENCE_THRESHOLD=${RASA_CONFIDENCE_THRESHOLD:-0.7} (set via env var)"
-echo "  Lower values = more Rasa usage, higher values = more LLM fallback"
-echo "  SESSION_URL=http://session:9200 (internal Docker network)"
+echo "  RASA_CONFIDENCE_THRESHOLD=\${RASA_CONFIDENCE_THRESHOLD:-0.85} (set via env var)"
+echo "  Lower values = more Rasa usage, higher values = more LLM validation"
+echo "  OPENAI_API_KEY required for LLM validation"
+echo "  INTENT_CLASSIFIER_PORT=9000 (API port)"
 echo ""
-echo "🧠 Session Management:"
-echo "  - Shared session storage for conversation history"
-echo "  - Accessible by both Rasa and LLM services"
-echo "  - Supports sender_id-based session isolation"
-
-
+echo "🧠 Architecture:"
+echo "  - Rasa handles intent classification and entity extraction"
+echo "  - LLM validator corrects low-confidence Rasa results"
+echo "  - All services embedded in intent classifier container for simplicity"
+echo ""
+echo "💡 Tips:"
+echo "  - Use --force-rebuild to ignore Docker cache and rebuild the app image"
+echo "  - Use --clear-models to force retraining of Rasa models"
+echo "  - Docker automatically uses cache when files haven't changed"

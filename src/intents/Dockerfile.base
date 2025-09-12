@@ -1,23 +1,86 @@
-# Base image for intent services (unified_api and llm_service)
-FROM python:3.10-slim
+# Multi-stage build for faster, smaller images
+# Stage 1: Build dependencies
+FROM python:3.9-slim as builder
 
-# System dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential curl git \
+# Install build dependencies only with BuildKit cache mounts
+RUN --mount=type=cache,target=/var/cache/apt \
+    --mount=type=cache,target=/var/lib/apt \
+    apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    g++ \
+    libffi-dev libssl-dev \
+    zlib1g-dev \
+    libsqlite3-dev \
+    libjpeg-dev \
+    libpng-dev \
+    libfreetype6-dev \
+    libblas-dev \
+    liblapack-dev \
+    gfortran \
     && rm -rf /var/lib/apt/lists/*
 
-ENV PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    PYTHONPATH=/app/src
+COPY requirements.txt /tmp/requirements.txt
 
+# Upgrade pip tooling with compatibility constraints
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --upgrade pip "setuptools>=65.0.0,<70.0.0" wheel
+
+# Install Rasa first (without constraints file that doesn't exist for 3.6.10)
+ARG RASA_VER=3.6.10
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install "rasa==${RASA_VER}" \
+    --prefer-binary
+
+# Install Rasa dependencies separately to ensure compatibility
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install \
+    "tensorflow>=2.8,<2.13" \
+    "transformers>=4.21.0,<4.30.0" \
+    "torch>=1.12.0,<2.0.0" \
+    "numpy>=1.21.0,<1.25.0" \
+    "scipy>=1.7.0,<1.11.0" \
+    "scikit-learn>=1.0.0,<1.4.0" \
+    "matplotlib>=3.5.0,<3.8.0" \
+    --prefer-binary
+
+# Install remaining app deps
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --prefer-binary -r /tmp/requirements.txt
+
+# Fix packaging version compatibility for Rasa 3.6.10 and langchain-openai
+RUN --mount=type=cache,target=/root/.cache/pip \
+    pip install --prefer-binary "packaging>=20.0,<25.0"
+
+# ✅ Install spaCy model for verb detection
+RUN python -m spacy download en_core_web_sm
+
+# Stage 2: Runtime image
+FROM python:3.9-slim
+
+# Add tag for this base image
+LABEL maintainer="dialogcart" \
+      version="1.0" \
+      description="Base image for intent classification services"
+
+# Copy Python packages from builder stage
+COPY --from=builder /usr/local/lib/python3.9/site-packages /usr/local/lib/python3.9/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Set working directory
 WORKDIR /app
 
-# Install Python dependencies first for better caching
-COPY requirements.txt /app/src/intents/requirements.txt
-RUN python -m pip install --upgrade pip \
-    && pip install --no-cache-dir -r /app/src/intents/requirements.txt
+# Environment variables
+ENV PYTHONUNBUFFERED=1 \
+    RASA_VERSION=3.6.10 \
+    MPLCONFIGDIR=/app/tmp \
+    HOME=/app/tmp \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/app/src \
+    PATH=/usr/local/bin:$PATH \
+    SPACY_MODEL=en_core_web_sm
 
-# Leave workdir ready for final stage to COPY source
+# Create directories
+RUN mkdir -p /app/tmp && mkdir -p /app/storage
+
+# Final WORKDIR
 WORKDIR /app/src
-
-
