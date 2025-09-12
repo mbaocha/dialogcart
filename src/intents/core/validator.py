@@ -3,10 +3,41 @@ import spacy
 import requests
 import json
 import yaml
-import subprocess
 import sys
+import logging
+from datetime import datetime
 from typing import Dict, List, Any, Set
 from pathlib import Path
+
+# -------------------------------
+# Logging Setup
+# -------------------------------
+def setup_validator_logging():
+    """Setup file logging for validator pass/fail results."""
+    # Create logs directory if it doesn't exist
+    log_dir = Path("logs")
+    log_dir.mkdir(exist_ok=True)
+    
+    # Create timestamped log file
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_file = log_dir / f"validator_{timestamp}.log"
+    
+    # Configure logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler(log_file),
+            logging.StreamHandler(sys.stdout)  # Also print to console
+        ]
+    )
+    
+    logger = logging.getLogger(__name__)
+    logger.info("Validator logging started - Log file: %s", log_file)
+    return logger, log_file
+
+# Initialize logging
+logger, log_file = setup_validator_logging()
 
 # -------------------------------
 # Ensure spaCy model
@@ -95,12 +126,53 @@ def load_normalization_data():
                 products.add(canonical.lower())
                 for v in variants:
                     product_synonyms[v.lower()] = canonical.lower()
-            print(f"✅ Loaded {len(products)} products and {len(product_synonyms)} synonyms")
-            return products, product_synonyms
-    print("⚠️  Normalization file not found, skipping products")
-    return set(), {}
+            
+            # Load symbols
+            symbol_map = {}
+            for symbol, replacements in data.get("symbols", {}).items():
+                if replacements:
+                    symbol_map[symbol] = replacements[0]  # Use first replacement as canonical
+            
+            print(f"✅ Loaded {len(products)} products, {len(product_synonyms)} synonyms, {len(symbol_map)} symbols")
+            return products, product_synonyms, symbol_map
+    print("⚠️  Normalization file not found, skipping products and symbols")
+    return set(), {}, {}
 
-PRODUCTS, PRODUCT_SYNONYMS = load_normalization_data()
+PRODUCTS, PRODUCT_SYNONYMS, SYMBOL_MAP = load_normalization_data()
+
+# -------------------------------
+# Symbol Normalization
+# -------------------------------
+def normalize_symbols(text: str) -> str:
+    """Normalize symbols in text using the same logic as the normalizer."""
+    if not SYMBOL_MAP:
+        return text
+    
+    normalized = text
+    for symbol, replacement in SYMBOL_MAP.items():
+        # Pattern 1: Symbol at start of word (no space before, word after)
+        pat1 = re.compile(rf"(?<!\w){re.escape(symbol)}(?=\w)")
+        normalized = pat1.sub(f"{replacement} ", normalized)
+        
+        # Pattern 2: Symbol at start with space after (start of string, space after)
+        pat2 = re.compile(rf"^{re.escape(symbol)}(?=\s)")
+        normalized = pat2.sub(replacement, normalized)
+        
+        # Pattern 3: Symbol with space before and after
+        pat3 = re.compile(rf"(?<=\s){re.escape(symbol)}(?=\s)")
+        normalized = pat3.sub(replacement, normalized)
+        
+        # Pattern 4: Symbol at end of word (word before, no word after)
+        pat4 = re.compile(rf"(?<=\w){re.escape(symbol)}(?!\w)")
+        normalized = pat4.sub(f" {replacement}", normalized)
+    
+    # Collapse multiple spaces
+    normalized = re.sub(r"\s+", " ", normalized).strip()
+    
+    if normalized != text:
+        print(f"🔄 Symbol normalization: '{text}' → '{normalized}'")
+    
+    return normalized
 
 # -------------------------------
 # Extraction Helpers
@@ -122,17 +194,17 @@ def normalize_action(word: str) -> str:
 
     return "unknown"
 
-import re
-
 # -------------------------------
 # Verb Extraction
 # -------------------------------
 def extract_verbs(user_text: str) -> List[str]:
-    text_lower = user_text.lower()
+    # First normalize symbols
+    normalized_text = normalize_symbols(user_text)
+    text_lower = normalized_text.lower()
     verbs = []
     skip_spans = []
 
-    print(f"\n📝 Extracting verbs from: '{user_text}'")
+    print(f"\n📝 Extracting verbs from: '{user_text}' (normalized: '{normalized_text}')")
 
     # Regex multiword matches
     for phrase, action in MULTIWORD_ACTIONS.items():
@@ -143,7 +215,7 @@ def extract_verbs(user_text: str) -> List[str]:
             skip_spans.append(match.span())  # record start-end indices to skip tokens
 
     # spaCy verbs
-    doc = nlp(user_text)
+    doc = nlp(normalized_text)  # Use normalized text
     for token in doc:
         # Skip tokens inside multiword action spans
         if any(start <= token.idx < end for (start, end) in skip_spans):
@@ -192,7 +264,9 @@ def extract_products(
     if not products and not product_synonyms:
         return set()
 
-    text_lower = user_text.lower()
+    # Normalize symbols before product extraction
+    normalized_text = normalize_symbols(user_text)
+    text_lower = normalized_text.lower()
     found = set()
 
     # Match canonical products
@@ -208,7 +282,9 @@ def extract_products(
     return found
 
 def extract_quantities(user_text: str) -> List[float]:
-    return [float(num) for num in re.findall(r"\d+\.?\d*", user_text)]
+    # Normalize symbols before quantity extraction
+    normalized_text = normalize_symbols(user_text)
+    return [float(num) for num in re.findall(r"\d+\.?\d*", normalized_text)]
 
 
 # -------------------------------
@@ -251,19 +327,26 @@ def check_product_mismatch(user_text: str, rasa_actions: List[Dict]) -> bool:
 # -------------------------------
 def validate_rasa_response(user_text: str, rasa_response: Dict[str, Any]) -> Dict[str, Any]:
     rasa_actions = rasa_response.get("result", {}).get("actions", [])
-    if check_unknown_verbs(user_text):
+    
+    # Check each validation condition and log the reason
+    validation_checks = [
+        ("unknown_verbs", check_unknown_verbs(user_text)),
+        ("quantity_mismatch", check_quantity_mismatch(user_text, rasa_actions)),
+        ("missing_verbs_in_rasa", check_missing_verbs_in_rasa(user_text, rasa_actions)),
+        ("unexpected_rasa_actions", check_unexpected_rasa_actions(rasa_actions)),
+        ("product_mismatch", check_product_mismatch(user_text, rasa_actions))
+    ]
+    
+    failed_checks = [check_name for check_name, failed in validation_checks if failed]
+    
+    if failed_checks:
         route = "llm"
-    elif check_quantity_mismatch(user_text, rasa_actions):
-        route = "llm"
-    elif check_missing_verbs_in_rasa(user_text, rasa_actions):
-        route = "llm"
-    elif check_unexpected_rasa_actions(rasa_actions):
-        route = "llm"
-    elif check_product_mismatch(user_text, rasa_actions):
-        route = "llm"
+        logger.warning("VALIDATION FAILED - Text: '%s' | Failed checks: %s | Rasa actions: %s", user_text, failed_checks, rasa_actions)
     else:
         route = "trust_rasa"
-    return {"route": route, "rasa_actions": rasa_actions}
+        logger.info("VALIDATION PASSED - Text: '%s' | Rasa actions: %s", user_text, rasa_actions)
+    
+    return {"route": route, "rasa_actions": rasa_actions, "failed_checks": failed_checks}
 
 # -------------------------------
 # Call Rasa API
@@ -275,7 +358,7 @@ def call_rasa_api(text: str, api_url: str = "http://localhost:9000") -> Dict[str
         response = requests.post(url, json=payload, timeout=10)
         response.raise_for_status()
         return response.json()
-    except Exception as e:
+    except (requests.RequestException, json.JSONDecodeError, ValueError) as e:
         print(f"❌ API call failed: {e}")
         return None
 
@@ -315,6 +398,8 @@ def load_test_scenarios():
 
 def main():
     print("=== Validator Test on modify_cart_100_scenarios.jsonl ===")
+    logger.info("=== VALIDATOR TEST SESSION STARTED ===")
+    logger.info("Available actions: %s", list(ACTION_SYNONYMS.keys()))
     print("Available actions:", list(ACTION_SYNONYMS.keys()))
     print()
 
@@ -325,20 +410,25 @@ def main():
     test = call_rasa_api("test connection")
     if not test or not test.get("success"):
         print("❌ API unavailable. Exiting.")
+        logger.error("API unavailable - exiting")
         return
     print("✅ API connection successful!\n")
+    logger.info("API connection successful")
 
     # Load test scenarios
     scenarios = load_test_scenarios()
     if not scenarios:
         print("❌ No test scenarios loaded. Exiting.")
+        logger.error("No test scenarios loaded - exiting")
         return
 
     failures = []
     passed = 0
     failed = 0
+    failed_check_counts = {}
 
     print(f"🧪 Running validation on {len(scenarios)} scenarios...\n")
+    logger.info("Starting validation on %d scenarios", len(scenarios))
 
     for i, scenario in enumerate(scenarios, 1):
         text = scenario.get("text", "")
@@ -346,17 +436,23 @@ def main():
         
         if not text:
             print(f"⚠️  Skipping scenario {i}: empty text")
+            logger.warning("Skipping scenario %d: empty text", i)
             continue
             
         rasa_resp = call_rasa_api(text)
         if not rasa_resp or not rasa_resp.get("success"):
             print(f"❌ API call failed for scenario {i}: {text}")
+            logger.error("API call failed for scenario %d: %s", i, text)
             failed += 1
             continue
             
         result = validate_rasa_response(text, rasa_resp)
         if result["route"] == "llm":
             failed += 1
+            # Track failed check counts
+            for check in result.get("failed_checks", []):
+                failed_check_counts[check] = failed_check_counts.get(check, 0) + 1
+            
             verbs = extract_verbs(text)
             quantities = extract_quantities(text)
             products = extract_products(text, PRODUCTS, PRODUCT_SYNONYMS)
@@ -396,6 +492,29 @@ def main():
     print(f"Failed: {failed}")
     if total > 0:
         print(f"Success rate: {passed/total*100:.1f}%")
+    
+    # Log comprehensive summary
+    logger.info("=== VALIDATION SUMMARY ===")
+    logger.info("Total cases: %d", total)
+    logger.info("Passed: %d", passed)
+    logger.info("Failed: %d", failed)
+    if total > 0:
+        logger.info("Success rate: %.1f%%", passed/total*100)
+    
+    # Log failed check breakdown
+    if failed_check_counts:
+        logger.info("=== FAILED CHECK BREAKDOWN ===")
+        for check, count in sorted(failed_check_counts.items(), key=lambda x: x[1], reverse=True):
+            logger.info("%s: %d failures", check, count)
+    
+    # Log detailed failure analysis
+    if failures:
+        logger.info("=== DETAILED FAILURE ANALYSIS ===")
+        for f in failures:
+            logger.warning("FAILURE Case %d: '%s' | Failed checks: %s | Rasa actions: %s", 
+                          f['case'], f['text'], f['result'].get('failed_checks', []), f['result']['rasa_actions'])
+    
+    logger.info("=== VALIDATION SESSION COMPLETED - Log file: %s ===", log_file)
 
 
 if __name__ == "__main__":

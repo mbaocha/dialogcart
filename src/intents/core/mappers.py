@@ -91,99 +91,103 @@ def _parse_shopping_command(entities: List[dict], confidence: str, confidence_sc
     """Parse modify_cart entities into multiple actions using verb-segmented FIFO queues."""
     if not entities:
         return []
-    
+
     # Debug logging
     print(f"DEBUG: _parse_shopping_command entities: {entities}")
-    
-    # Group entities by position
+
+    # Sort entities by start position
     entities_by_pos = sorted(entities, key=lambda x: x.get("start", 0))
-    print(f"DEBUG: entities_by_pos: {entities_by_pos}")
-    
-    # Build segments split by verb
-    segments = []
-    current = {"verb": None, "products": [], "quantities": [], "units": [], "containers": []}
-    
+
+    # Words that should never be treated as verbs
+    FILLER_WORDS = {"and", "or", "with", "to", "from", "the", "a", "an", 
+                    "please", "cart", "into", "in", "my", "on"}
+
     def finalize_segment(seg, out_actions):
         verb = seg.get("verb")
-        if not verb:
-            return
         products = seg.get("products", [])
         quantities = seg.get("quantities", [])
         units = seg.get("units", [])
         containers = seg.get("containers", [])
-        
-        # Always use "set" for modification operations, determine behavior by entity count
+
+        # Default verb → add
+        if not verb:
+            if products:
+                verb = "add"
+                action_name = "add"
+                print(f"DEBUG: No verb found, defaulting to 'add' for {products}")
+            else:
+                return
+
+        # Map verb to canonical action
         action_name = _map_verb_to_action(verb)
         if action_name in ("set", "replace"):
-            action_name = "set"  # Normalize to "set"
-        
+            action_name = "set"
+
         print(f"DEBUG: verb='{verb}' -> action='{action_name}'")
-        
-        # Handle set operations - determine replace vs update by product count
+
         if action_name == "set":
+            # --- Replace case ---
             if len(products) >= 2:
-                # Replace operation: two products detected
-                action_dict = {
-                    "action": "set",
-                    "product_from": products[0],  # First product = what to replace
-                    "product_to": products[1],    # Second product = what to replace with
-                    "product": products[1]        # Keep product for backward compatibility
-                }
-                # Use first available quantity and unit
-                if quantities:
-                    action_dict["quantity"] = quantities[0]
-                if units:
-                    action_dict["unit"] = units[0]
-                if containers:
-                    action_dict["container"] = containers[-1]
-                out_actions.append(_create_action_from_dict(action_dict, confidence, confidence_score))
-            else:
-                # Update operation: single product detected
-                max_pairs = max(len(products), len(quantities), len(units))
-                for i in range(max_pairs):
-                    if i < len(products):
-                        action_dict = {"action": "set", "product": products[i]}
-                        if i < len(quantities):
-                            action_dict["quantity"] = quantities[i]
-                        # Distribute unit - if only one unit, use it for all actions
-                        if units:
-                            if len(units) == 1:
-                                action_dict["unit"] = units[0]
-                            elif i < len(units):
-                                action_dict["unit"] = units[i]
-                        if containers:
-                            action_dict["container"] = containers[-1]
-                        out_actions.append(_create_action_from_dict(action_dict, confidence, confidence_score))
+                if products[0].lower() == products[1].lower():
+                    # self-replace → treat as update
+                    products = products[:1]
+
+                else:
+                    # Proper replace
+                    action_dict = {
+                        "action": "set",
+                        "product_from": products[0],
+                        "product_to": products[1],
+                        "product": products[1],  # backward compat
+                    }
+                    if quantities:
+                        action_dict["quantity"] = quantities[0]
+                    if units:
+                        action_dict["unit"] = units[0]
+                    if containers:
+                        action_dict["container"] = containers[-1]
+                    out_actions.append(_create_action_from_dict(action_dict, confidence, confidence_score))
+                    return
+
+            # --- Update case ---
+            max_pairs = max(len(products), len(quantities), len(units))
+            for i in range(max_pairs):
+                if i < len(products):
+                    action_dict = {"action": "set", "product": products[i]}
+                    if i < len(quantities):
+                        action_dict["quantity"] = quantities[i]
+                    if units:
+                        action_dict["unit"] = units[0] if len(units) == 1 else units[i]
+                    if containers:
+                        action_dict["container"] = containers[-1]
+                    out_actions.append(_create_action_from_dict(action_dict, confidence, confidence_score))
+
         else:
-            # Original logic for other operations (add, remove, etc.)
+            # --- Add / Remove ---
             max_pairs = max(len(products), len(quantities), len(units))
             for i in range(max_pairs):
                 if i < len(products):
                     action_dict = {"action": action_name, "product": products[i]}
-                    # For remove-like actions, do not carry quantity/unit
-                    if action_name != "remove":
+                    if action_name != "remove":  # remove usually ignores quantity/unit
                         if i < len(quantities):
                             action_dict["quantity"] = quantities[i]
-                        # Distribute unit - if only one unit, use it for all actions
                         if units:
-                            if len(units) == 1:
-                                action_dict["unit"] = units[0]
-                            elif i < len(units):
-                                action_dict["unit"] = units[i]
+                            action_dict["unit"] = units[0] if len(units) == 1 else units[i]
                     if containers:
                         action_dict["container"] = containers[-1]
                     out_actions.append(_create_action_from_dict(action_dict, confidence, confidence_score))
-    
+
+    # --- Segment builder ---
+    segments = []
+    current = {"verb": None, "products": [], "quantities": [], "units": [], "containers": []}
+
     for e in entities_by_pos:
-        et = e.get("entity")
-        ev = e.get("value")
+        et, ev = e.get("entity"), e.get("value")
         if et == "verb":
-            # Skip low-confidence verb entities and common words that aren't actions
-            entity_confidence = e.get("confidence_entity", 0.0)
-            if entity_confidence < 0.5 or ev.lower() in ["and", "or", "with", "to", "from"]:
+            entity_conf = e.get("confidence_entity", 0.0)
+            if entity_conf < 0.3 or (ev and ev.lower() in FILLER_WORDS):
+                print(f"DEBUG: skipping filler verb '{ev}' conf={entity_conf}")
                 continue
-                
-            # finalize previous segment (if any)
             if current["verb"] or current["products"] or current["quantities"] or current["units"] or current["containers"]:
                 segments.append(current)
                 current = {"verb": None, "products": [], "quantities": [], "units": [], "containers": []}
@@ -196,20 +200,42 @@ def _parse_shopping_command(entities: List[dict], confidence: str, confidence_sc
             current["units"].append(ev)
         elif et == "container":
             current["containers"].append(ev)
-    
-    # push last segment
+
     if current["verb"] or current["products"] or current["quantities"] or current["units"] or current["containers"]:
         segments.append(current)
-    
-    print(f"DEBUG: verb segments: {segments}")
-    
-    # Build actions from segments
+
+    print(f"DEBUG: verb segments {segments}")
+
+    # Build final actions
     actions: List[Action] = []
     for seg in segments:
         finalize_segment(seg, actions)
-    
-    print(f"DEBUG: final actions: {[action.dict() for action in actions]}")
-    return actions
+
+    print(f"DEBUG: final actions {[a.dict() for a in actions]}")
+    return _deduplicate_actions(actions)
+
+
+def _deduplicate_actions(actions: List[Action]) -> List[Action]:
+    """Remove duplicate/overlapping actions, keep richer ones (with qty/unit)."""
+    unique: dict[tuple, Action] = {}
+    for act in actions:
+        key = (act.action, act.product)
+
+        if key not in unique:
+            unique[key] = act
+        else:
+            existing = unique[key]
+
+            # Prefer the one with quantity
+            if existing.quantity is None and act.quantity is not None:
+                unique[key] = act
+            # Allow both if quantities differ
+            elif existing.quantity is not None and act.quantity is not None and existing.quantity != act.quantity:
+                key2 = (act.action, act.product, act.quantity)
+                unique[key2] = act
+            # Otherwise, drop duplicate
+
+    return list(unique.values())
 
 
 def _create_action_from_dict(action_dict: dict, confidence: str, confidence_score: float) -> Action:
@@ -360,7 +386,10 @@ def map_rasa_to_actions(rasa_json) -> List[Action]:
     entities = list(raw_entities)
 
     # Parse shopping command into actions
-    return _parse_shopping_command(entities, confidence, conf_score)
+    actions =  _parse_shopping_command(entities, confidence, conf_score)
+    actions = _deduplicate_actions(actions)
+
+    return actions
 
 
 def map_rasa_to_intent_metas(rasa_json) -> List[IntentMeta]:
