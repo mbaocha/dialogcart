@@ -122,34 +122,52 @@ def normalize_action(word: str) -> str:
 
     return "unknown"
 
+import re
+
+# -------------------------------
+# Verb Extraction
+# -------------------------------
 def extract_verbs(user_text: str) -> List[str]:
     text_lower = user_text.lower()
     verbs = []
+    skip_spans = []
 
-    #print(f"\n📝 Extracting verbs from: '{user_text}'")
+    print(f"\n📝 Extracting verbs from: '{user_text}'")
 
-    # Regex multiword phrase match first
+    # Regex multiword matches
     for phrase, action in MULTIWORD_ACTIONS.items():
-        if re.search(rf"\b{re.escape(phrase)}\b", text_lower):
-            #print(f"🔎 Regex multiword match: '{phrase}' → '{action}'")
+        match = re.search(rf"\b{re.escape(phrase)}\b", text_lower)
+        if match:
+            print(f"🔎 Regex multiword match: '{phrase}' → '{action}'")
             verbs.append(action)
+            skip_spans.append(match.span())  # record start-end indices to skip tokens
 
     # spaCy verbs
     doc = nlp(user_text)
     for token in doc:
-        if token.pos_ == "VERB":
-            lemma = token.lemma_.lower()
-            norm = normalize_action(lemma)
-            #print(f"   • token='{token.text}' lemma='{lemma}' → '{norm}'")
-            verbs.append(norm)
+        # Skip tokens inside multiword action spans
+        if any(start <= token.idx < end for (start, end) in skip_spans):
+            continue
 
-    # Fallback: single word synonym search
-    if not verbs:
-        for action, synonyms in ACTION_SYNONYMS.items():
-            for syn in synonyms:
-                if syn.lower() in text_lower:
-                    #print(f"🔎 Fallback match: '{syn}' → '{action}'")
-                    verbs.append(action)
+        if token.pos_ == "VERB":
+            lemma = token.lemma_.lower().strip()
+            norm = normalize_action(lemma)
+            if norm != "unknown":
+                print(f"   • token='{token.text}' lemma='{lemma}' → '{norm}'")
+                verbs.append(norm)
+
+    # Synonym direct matches (excluding 'cart')
+    for action, synonyms in ACTION_SYNONYMS.items():
+        if action == "cart":
+            continue
+        for syn in synonyms:
+            if re.search(rf"\b{re.escape(syn)}\b", text_lower):
+                # Skip if this synonym is part of a multiword phrase already captured
+                if any(re.search(rf"\b{re.escape(phrase)}\b", text_lower) 
+                       for phrase in MULTIWORD_ACTIONS.keys()):
+                    continue
+                print(f"🔎 Synonym match: '{syn}' → '{action}'")
+                verbs.append(action)
 
     # Deduplicate
     unique = []
@@ -159,30 +177,39 @@ def extract_verbs(user_text: str) -> List[str]:
             seen.add(v)
             unique.append(v)
 
-    # If unknown exists alongside a valid action, drop unknown
-    if "unknown" in unique and any(v in CANONICAL_ACTIONS for v in unique):
-        unique = [v for v in unique if v != "unknown"]
-
-    #print(f"✅ Final extracted verbs: {unique}")
+    print(f"✅ Final extracted verbs: {unique}")
     return unique
+
+# -------------------------------
+# Product Extraction
+# -------------------------------
+def extract_products(
+    user_text: str,
+    products: Set[str] = None,
+    product_synonyms: Dict[str, str] = None
+) -> Set[str]:
+    """Match products via regex against canonical list + synonyms."""
+    if not products and not product_synonyms:
+        return set()
+
+    text_lower = user_text.lower()
+    found = set()
+
+    # Match canonical products
+    for p in products:
+        if re.search(rf"\b{re.escape(p)}\b", text_lower):
+            found.add(p)
+
+    # Match synonyms → map to canonical
+    for syn, canonical in product_synonyms.items():
+        if re.search(rf"\b{re.escape(syn)}\b", text_lower):
+            found.add(canonical)
+
+    return found
 
 def extract_quantities(user_text: str) -> List[float]:
     return [float(num) for num in re.findall(r"\d+\.?\d*", user_text)]
 
-def extract_products(user_text: str,
-                     products: Set[str] = None,
-                     product_synonyms: Dict[str, str] = None) -> Set[str]:
-    if not products and not product_synonyms:
-        return set()
-    words = set(user_text.lower().split())
-    found = set()
-    if products:
-        found |= {p for p in products if p in words}
-    if product_synonyms:
-        for syn, canonical in product_synonyms.items():
-            if syn in words:
-                found.add(canonical)
-    return found
 
 # -------------------------------
 # Validation Rules
@@ -255,10 +282,41 @@ def call_rasa_api(text: str, api_url: str = "http://localhost:9000") -> Dict[str
 # -------------------------------
 # Interactive Main
 # -------------------------------
+def load_test_scenarios():
+    """Load test scenarios from modify_cart_200_scenarios.jsonl"""
+    possible_paths = [
+        "tests/modify_cart_200_scenarios.jsonl",
+        "../tests/modify_cart_200_scenarios.jsonl", 
+        "src/intents/tests/modify_cart_200_scenarios.jsonl",
+    ]
+    
+    scenarios_path = next((p for p in possible_paths if Path(p).exists()), None)
+    if not scenarios_path:
+        print("❌ Test scenarios file not found in any of:")
+        for p in possible_paths:
+            print("   -", p)
+        return []
+    
+    scenarios = []
+    with open(scenarios_path, "r", encoding="utf-8") as f:
+        for line_num, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                scenario = json.loads(line)
+                scenarios.append(scenario)
+            except json.JSONDecodeError as e:
+                print(f"⚠️  Invalid JSON on line {line_num}: {e}")
+                continue
+    
+    print(f"✅ Loaded {len(scenarios)} test scenarios from {scenarios_path}")
+    return scenarios
+
 def main():
-    print("=== Validator Interactive Test ===")
+    print("=== Validator Test on modify_cart_100_scenarios.jsonl ===")
     print("Available actions:", list(ACTION_SYNONYMS.keys()))
-    print("Type 'quit' to exit\n")
+    print()
 
     for action, synonyms in ACTION_SYNONYMS.items():
         print(f"  {action}: {synonyms[:5]}...")
@@ -270,41 +328,49 @@ def main():
         return
     print("✅ API connection successful!\n")
 
-    sample_cases = [
-        "add 2 rice and 1 beans",
-        "remove 3 yam and set oil to 5",
-        "add some rice",
-        "put 4 plantains in cart",
-        "delete 2 fish",
-        "buy 3 kg of garri",
-        "throw in 2 kg rice",
-        "get rid of beans",
-        "make it 5 kg rice",
-    ]
+    # Load test scenarios
+    scenarios = load_test_scenarios()
+    if not scenarios:
+        print("❌ No test scenarios loaded. Exiting.")
+        return
 
     failures = []
     passed = 0
     failed = 0
 
-    for i, text in enumerate(sample_cases, 1):
+    print(f"🧪 Running validation on {len(scenarios)} scenarios...\n")
+
+    for i, scenario in enumerate(scenarios, 1):
+        text = scenario.get("text", "")
+        expected_actions = scenario.get("expected_actions", [])
+        
+        if not text:
+            print(f"⚠️  Skipping scenario {i}: empty text")
+            continue
+            
         rasa_resp = call_rasa_api(text)
-        if rasa_resp and rasa_resp.get("success"):
-            result = validate_rasa_response(text, rasa_resp)
-            if result["route"] == "llm":
-                failed += 1
-                verbs = extract_verbs(text)
-                quantities = extract_quantities(text)
-                products = extract_products(text, PRODUCTS, PRODUCT_SYNONYMS)
-                failures.append({
-                    "case": i,
-                    "text": text,
-                    "result": result,
-                    "verbs": verbs,
-                    "quantities": quantities,
-                    "products": products
-                })
-            else:
-                passed += 1
+        if not rasa_resp or not rasa_resp.get("success"):
+            print(f"❌ API call failed for scenario {i}: {text}")
+            failed += 1
+            continue
+            
+        result = validate_rasa_response(text, rasa_resp)
+        if result["route"] == "llm":
+            failed += 1
+            verbs = extract_verbs(text)
+            quantities = extract_quantities(text)
+            products = extract_products(text, PRODUCTS, PRODUCT_SYNONYMS)
+            failures.append({
+                "case": i,
+                "text": text,
+                "expected_actions": expected_actions,
+                "result": result,
+                "verbs": verbs,
+                "quantities": quantities,
+                "products": products
+            })
+        else:
+            passed += 1
 
     # Print failures
     print("\n=== FAILURES ===")
@@ -314,6 +380,7 @@ def main():
         for f in failures:
             print(f"\n--- Test Case {f['case']} ---")
             print(f"User text: '{f['text']}'")
+            print(f"Expected actions: {f['expected_actions']}")
             print("⚠️  Route decision: llm")
             print(f"Rasa actions: {f['result']['rasa_actions']}")
             print("Extracted:")
@@ -327,6 +394,8 @@ def main():
     print(f"Total cases: {total}")
     print(f"Passed: {passed}")
     print(f"Failed: {failed}")
+    if total > 0:
+        print(f"Success rate: {passed/total*100:.1f}%")
 
 
 if __name__ == "__main__":

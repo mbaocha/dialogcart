@@ -13,10 +13,10 @@ class Entity(BaseModel):
 
 
 class Action(BaseModel):
-    action: str  # "add", "remove", "increase", "decrease", "set", "check", "replace"
+    action: str  # "add", "remove", "set", "check" (increase→add, decrease→remove, replace→set with product_from/product_to)
     product: Optional[str] = None
-    product_from: Optional[str] = None  # For replace operations: what to replace
-    product_to: Optional[str] = None    # For replace operations: what to replace with
+    product_from: Optional[str] = None  # For set operations with 2 products: what to replace
+    product_to: Optional[str] = None    # For set operations with 2 products: what to replace with
     quantity: Optional[float] = None
     unit: Optional[str] = None
     container: Optional[str] = None
@@ -54,7 +54,7 @@ class MultiClassifyResponse(BaseModel):
 
 # Validator models
 class ValidatedAction(BaseModel):
-    action: Literal["add", "remove", "increase", "decrease", "set", "check", "unknown"]
+    action: Literal["add", "remove", "set", "check", "unknown"]
     product: Optional[str] = None
     quantity: Optional[float] = None
     unit: Optional[str] = None

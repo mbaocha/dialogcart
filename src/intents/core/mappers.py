@@ -72,43 +72,8 @@ def _load_verb_map_from_training() -> dict[str, str]:
 # Load verb mapping once at module import
 _VERB_TO_ACTION = _load_verb_map_from_training()
 
-# Load replace synonyms for detection
-_REPLACE_SYNONYMS = set()
-def _load_replace_synonyms():
-    """Load replace synonyms from training data for detection."""
-    possible_paths = [
-        pathlib.Path("../trainings/initial_training_data.yml"),
-        pathlib.Path("trainings/initial_training_data.yml"),
-        pathlib.Path("initial_training_data.yml"),
-        pathlib.Path("/app/src/intents/trainings/initial_training_data.yml"),
-    ]
-    
-    training_path = None
-    for path in possible_paths:
-        if path.exists():
-            training_path = path
-            break
-    
-    if training_path:
-        try:
-            data = yaml.safe_load(training_path.read_text(encoding="utf-8")) or {}
-            for item in data.get("nlu", []):
-                if item.get("synonym") == "replace":
-                    examples = item.get("examples") or ""
-                    for line in examples.splitlines():
-                        ex = line.strip()
-                        if ex.startswith("- "):
-                            ex = ex[2:].strip()
-                        if ex:
-                            _REPLACE_SYNONYMS.add(ex.lower())
-        except Exception:
-            pass
-
-_load_replace_synonyms()
-
-def _is_replace_verb(verb: str) -> bool:
-    """Check if verb is a replace synonym."""
-    return verb.lower() in _REPLACE_SYNONYMS
+# Note: Replace synonyms are now merged into "set" synonym group
+# Operation type is determined by entity count (2 products = replace, 1 product = update)
 
 def _split_multi_intent(intent_name: str) -> List[str]:
     """Split Rasa multi-intent format (A+B) into individual intents."""
@@ -146,28 +111,51 @@ def _parse_shopping_command(entities: List[dict], confidence: str, confidence_sc
         quantities = seg.get("quantities", [])
         units = seg.get("units", [])
         containers = seg.get("containers", [])
+        
+        # Always use "set" for modification operations, determine behavior by entity count
         action_name = _map_verb_to_action(verb)
+        if action_name in ("set", "replace"):
+            action_name = "set"  # Normalize to "set"
+        
         print(f"DEBUG: verb='{verb}' -> action='{action_name}'")
         
-        # Handle replace operations with two products
-        if action_name == "replace" and _is_replace_verb(verb) and len(products) >= 2:
-            # Single replace action with product_from and product_to
-            action_dict = {
-                "action": action_name,
-                "product_from": products[0],  # First product = what to replace
-                "product_to": products[1],    # Second product = what to replace with
-                "product": products[1]        # Keep product for backward compatibility
-            }
-            # Use first available quantity and unit
-            if quantities:
-                action_dict["quantity"] = quantities[0]
-            if units:
-                action_dict["unit"] = units[0]
-            if containers:
-                action_dict["container"] = containers[-1]
-            out_actions.append(_create_action_from_dict(action_dict, confidence, confidence_score))
+        # Handle set operations - determine replace vs update by product count
+        if action_name == "set":
+            if len(products) >= 2:
+                # Replace operation: two products detected
+                action_dict = {
+                    "action": "set",
+                    "product_from": products[0],  # First product = what to replace
+                    "product_to": products[1],    # Second product = what to replace with
+                    "product": products[1]        # Keep product for backward compatibility
+                }
+                # Use first available quantity and unit
+                if quantities:
+                    action_dict["quantity"] = quantities[0]
+                if units:
+                    action_dict["unit"] = units[0]
+                if containers:
+                    action_dict["container"] = containers[-1]
+                out_actions.append(_create_action_from_dict(action_dict, confidence, confidence_score))
+            else:
+                # Update operation: single product detected
+                max_pairs = max(len(products), len(quantities), len(units))
+                for i in range(max_pairs):
+                    if i < len(products):
+                        action_dict = {"action": "set", "product": products[i]}
+                        if i < len(quantities):
+                            action_dict["quantity"] = quantities[i]
+                        # Distribute unit - if only one unit, use it for all actions
+                        if units:
+                            if len(units) == 1:
+                                action_dict["unit"] = units[0]
+                            elif i < len(units):
+                                action_dict["unit"] = units[i]
+                        if containers:
+                            action_dict["container"] = containers[-1]
+                        out_actions.append(_create_action_from_dict(action_dict, confidence, confidence_score))
         else:
-            # Original logic for other operations
+            # Original logic for other operations (add, remove, etc.)
             max_pairs = max(len(products), len(quantities), len(units))
             for i in range(max_pairs):
                 if i < len(products):
