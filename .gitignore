@@ -1,1 +1,4 @@
 venv/
+
+# Log files
+src/intents/core/logs/
