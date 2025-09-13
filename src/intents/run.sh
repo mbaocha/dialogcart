@@ -35,6 +35,15 @@ echo "Stopping compose services (if any)..."
 if [ "$CLEAR_MODELS" = true ]; then
     echo "🗑️  Clearing model storage volumes..."
     docker compose -f docker-compose.yml down --remove-orphans --volumes
+    
+    # Also clear the bind-mounted storage directory
+    echo "🗑️  Clearing model files from storage directory..."
+    if [ -d "trainings/storage" ]; then
+        rm -rf trainings/storage/*
+        echo "✅ Cleared all files from trainings/storage/"
+    else
+        echo "⚠️  trainings/storage directory not found"
+    fi
 else
     docker compose -f docker-compose.yml down --remove-orphans
 fi

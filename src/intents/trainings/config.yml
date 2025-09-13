@@ -40,6 +40,10 @@ pipeline:
   intent_tokenization_flag: true
   intent_split_symbol: "+"
 - name: RegexFeaturizer
+- name: RegexEntityExtractor     # 👈 Add this
+  use_lookup_tables: true
+  use_regexes: true
+  use_word_boundaries: true
 - name: LexicalSyntacticFeaturizer
 - name: CountVectorsFeaturizer
 - name: DIETClassifier
@@ -47,4 +51,5 @@ pipeline:
 - name: EntitySynonymMapper
 - name: ResponseSelector
   epochs: 100
-assistant_id: 20250911-125243-moderato-sphere
+
+assistant_id: 20250912-093611-natural-dado

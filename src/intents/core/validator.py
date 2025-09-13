@@ -90,6 +90,12 @@ def load_action_synonyms():
     for item in data.get("nlu", []):
         if item.get("synonym"):
             synonym_name = item["synonym"]
+            
+            # 🚫 EXCLUDE CART AND ALL ITS SYNONYMS
+            if synonym_name.lower() == "cart":
+                print(f"⚠️  Skipping synonym: {synonym_name} (cart-related)")
+                continue
+                
             examples = item.get("examples", "")
             if isinstance(examples, str):
                 synonym_list = [
@@ -212,10 +218,10 @@ def extract_verbs(user_text: str) -> List[str]:
         if match:
             print(f"🔎 Regex multiword match: '{phrase}' → '{action}'")
             verbs.append(action)
-            skip_spans.append(match.span())  # record start-end indices to skip tokens
+            skip_spans.append(match.span())
 
     # spaCy verbs
-    doc = nlp(normalized_text)  # Use normalized text
+    doc = nlp(normalized_text)
     for token in doc:
         # Skip tokens inside multiword action spans
         if any(start <= token.idx < end for (start, end) in skip_spans):
@@ -228,9 +234,10 @@ def extract_verbs(user_text: str) -> List[str]:
                 print(f"   • token='{token.text}' lemma='{lemma}' → '{norm}'")
                 verbs.append(norm)
 
-    # Synonym direct matches (excluding 'cart')
+    # Synonym direct matches (excluding cart action)
     for action, synonyms in ACTION_SYNONYMS.items():
-        if action == "cart":
+        # 🚫 EXCLUDE CART ACTION
+        if action.lower() == "cart":
             continue
         for syn in synonyms:
             if re.search(rf"\b{re.escape(syn)}\b", text_lower):

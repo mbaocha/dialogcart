@@ -19,6 +19,16 @@ logger = logging.getLogger(__name__)
 
 NUMERIC = r"(?P<num>\d+(?:[.,]\d+)?)"
 
+# Word to number mapping
+NUMBER_WORDS = {
+    "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+    "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+    "eleven": "11", "twelve": "12", "thirteen": "13", "fourteen": "14", "fifteen": "15",
+    "sixteen": "16", "seventeen": "17", "eighteen": "18", "nineteen": "19", "twenty": "20",
+    "thirty": "30", "forty": "40", "fifty": "50", "sixty": "60", "seventy": "70",
+    "eighty": "80", "ninety": "90", "hundred": "100"
+}
+
 
 @DefaultV1Recipe.register(
     component_types=[DefaultV1Recipe.ComponentType.MESSAGE_FEATURIZER],
@@ -35,6 +45,7 @@ class SimpleTextNormalizer(GraphComponent):
             "product_map": {},
             "unit_map": {},
             "synonym_map": {},
+            "symbol_map": {},
             "max_replacements_per_text": 50,
             "collapse_whitespace": True,
         }
@@ -46,13 +57,15 @@ class SimpleTextNormalizer(GraphComponent):
             config.get("product_map") or {},
             config.get("unit_map") or {},
             config.get("synonym_map") or {},
+            config.get("symbol_map") or {},
         )
         self.product_map: Dict[str, List[str]] = maps["products"]
         self.unit_map: Dict[str, List[str]] = maps["units"]
         self.synonym_map: Dict[str, List[str]] = maps["synonyms"]
+        self.symbol_map: Dict[str, List[str]] = maps["symbols"]
 
         self._replacements: List[Tuple[re.Pattern, str]] = self._compile_replacements(
-            self.product_map, self.unit_map, self.synonym_map
+            self.product_map, self.unit_map, self.synonym_map, self.symbol_map
         )
         self._unit_group_pattern: re.Pattern | None = self._build_unit_group_pattern(
             self.unit_map
@@ -60,10 +73,11 @@ class SimpleTextNormalizer(GraphComponent):
 
         logger.info(
             "✅ SimpleTextNormalizer initialized "
-            "(products=%d, units=%d, synonyms=%d)",
+            "(products=%d, units=%d, synonyms=%d, symbols=%d)",
             len(self.product_map),
             len(self.unit_map),
             len(self.synonym_map),
+            len(self.symbol_map),
         )
 
     @classmethod
@@ -104,10 +118,12 @@ class SimpleTextNormalizer(GraphComponent):
         product_map_fallback: Dict[str, List[str]],
         unit_map_fallback: Dict[str, List[str]],
         synonym_map_fallback: Dict[str, List[str]],
+        symbol_map_fallback: Dict[str, List[str]],
     ) -> Dict[str, Dict[str, List[str]]]:
         products = product_map_fallback or {}
         units = unit_map_fallback or {}
         synonyms = synonym_map_fallback or {}
+        symbols = symbol_map_fallback or {}
 
         if config_file:
             config_path = Path(config_file)
@@ -127,6 +143,7 @@ class SimpleTextNormalizer(GraphComponent):
             products = data.get("products", products) or products
             units = data.get("units", units) or units
             synonyms = data.get("synonyms", synonyms) or synonyms
+            symbols = data.get("symbols", symbols) or symbols
             logger.info("📄 Loaded normalization maps from %s", config_path)
         else:
             logger.info("📦 Using inline normalization maps (no config_file).")
@@ -147,6 +164,7 @@ class SimpleTextNormalizer(GraphComponent):
             "products": _sanitize(products),
             "units": _sanitize(units),
             "synonyms": _sanitize(synonyms),
+            "symbols": _sanitize(symbols),
         }
 
     def _compile_replacements(
@@ -154,6 +172,7 @@ class SimpleTextNormalizer(GraphComponent):
         product_map: Dict[str, List[str]],
         unit_map: Dict[str, List[str]],
         synonym_map: Dict[str, List[str]],
+        symbol_map: Dict[str, List[str]],
     ) -> List[Tuple[re.Pattern, str]]:
         reps: List[Tuple[re.Pattern, str]] = []
 
@@ -169,6 +188,33 @@ class SimpleTextNormalizer(GraphComponent):
             add_pairs(tgt, vars_)
         for tgt, vars_ in synonym_map.items():
             add_pairs(tgt, vars_)
+        
+        # Handle symbols - they need special regex patterns since they're not word-boundary based
+        for symbol, replacements in symbol_map.items():
+            if replacements:
+                # Use the first replacement as the canonical form
+                canonical = replacements[0]
+                # Create patterns for different symbol contexts:
+                # 1. Symbol at start of word: "-rice" -> "remove rice"
+                # 2. Symbol at start with space: "+ yam" -> "add yam"
+                # 3. Symbol with space: "- rice" -> "remove rice"  
+                # 4. Symbol at end of word: "rice-" -> "rice remove"
+                
+                # Pattern 1: Symbol at start of word (no space before, word after)
+                pat1 = re.compile(rf"(?<!\w){re.escape(symbol)}(?=\w)")
+                reps.append((pat1, f"{canonical} "))
+                
+                # Pattern 2: Symbol at start with space after (start of string, space after)
+                pat2 = re.compile(rf"^{re.escape(symbol)}(?=\s)")
+                reps.append((pat2, f"{canonical}"))
+                
+                # Pattern 3: Symbol with space before and after
+                pat3 = re.compile(rf"(?<=\s){re.escape(symbol)}(?=\s)")
+                reps.append((pat3, f"{canonical}"))
+                
+                # Pattern 4: Symbol at end of word (word before, no word after)
+                pat4 = re.compile(rf"(?<=\w){re.escape(symbol)}(?!\w)")
+                reps.append((pat4, f" {canonical}"))
 
         return reps
 
@@ -203,6 +249,23 @@ class SimpleTextNormalizer(GraphComponent):
 
         return self._unit_group_pattern.sub(repl, text)
 
+    def _normalize_word_numbers(self, text: str) -> str:
+        """Convert word numbers to digits."""
+        # First, split concatenated number+unit patterns
+        number_units = ['bunch', 'packet', 'bottle', 'kg', 'bag', 'crate', 'carton', 'tin', 'pack']
+        for word, digit in NUMBER_WORDS.items():
+            for unit in number_units:
+                # Handle patterns like "fivebunch", "threekg", "twopacket"
+                pattern = rf'\b{re.escape(word)}{re.escape(unit)}\b'
+                text = re.sub(pattern, f'{digit} {unit}', text, flags=re.IGNORECASE)
+        
+        # Then convert remaining word numbers
+        for word, digit in NUMBER_WORDS.items():
+            # Use word boundaries to avoid partial matches
+            pattern = rf'\b{re.escape(word)}\b'
+            text = re.sub(pattern, digit, text, flags=re.IGNORECASE)
+        return text
+
     def _apply_replacements(self, text: str) -> str:
         replaced = 0
         for pat, tgt in self._replacements:
@@ -219,8 +282,11 @@ class SimpleTextNormalizer(GraphComponent):
         if self.config.get("lowercase", True):
             text = text.lower()
 
+        text = self._normalize_word_numbers(text)
         text = self._normalize_number_unit_glue(text)
         text = self._apply_replacements(text)
+
+
 
         if self.config.get("collapse_whitespace", True):
             text = re.sub(r"\s+", " ", text).strip()

@@ -29,6 +29,7 @@ nlu:
     - bump up
     - increment
     - inc
+    - +
 
 - synonym: remove
   examples: |
@@ -45,6 +46,7 @@ nlu:
     - reduce
     - lower
     - less
+    - -
     - subtract
     - minus
     - knock off
@@ -67,9 +69,6 @@ nlu:
     - update
     - fix
     - override
-
-- synonym: replace
-  examples: |
     - replace
     - swap
     - substitute
@@ -98,7 +97,7 @@ nlu:
     - my trolley
     - shopping cart
     - shopping bag
-    - bag
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 📚 LOOKUPS
@@ -167,32 +166,19 @@ nlu:
     - kg
     - g
     - bottle
-    - bottles
     - tin
-    - tins
     - crate
-    - crates
     - carton
-    - cartons
     - bag
-    - bags
     - bunch
-    - bunches
     - packet
-    - packets
     - pack
-    - packs
 
 - lookup: container
   examples: |
     - cart
     - basket
-    - my basket
     - trolley
-    - my trolley
-    - shopping cart
-    - shopping bag
-    - bag
 
 - lookup: product
   examples: |
@@ -201,7 +187,7 @@ nlu:
     - rice
     - beans
     - fish
-    - plantains
+    - plantain
     - oil
     - sugar
     - salt
@@ -209,6 +195,7 @@ nlu:
     - tomatoes
     - noodles
     - garri
+    - semovita
     - milk
     - flour
     - bread
@@ -219,35 +206,38 @@ nlu:
 # ─────────────────────────────────────────────────────────────────────────────
 - intent: modify_cart
   examples: |
+
     - [add](verb) [2](quantity) [kg](unit) [rice](product) to [cart](container)
     - [remove](verb) [rice](product) from [cart](container)
+    - [remove](verb) [rice](product)
+    - [add](verb) [rice](product)
     - [update](verb) [rice](product) to [5](quantity) [kg](unit)
     - [increase](verb) [rice](product) by [2](quantity) [kg](unit)
     - [decrease](verb) [rice](product) by [1](quantity) [kg](unit)
     - [check](verb) [rice](product)
-    - [set](verb) [rice](product) to [2](quantity) [bags](unit)
+    - [set](verb) [rice](product) to [2](quantity) [bag](unit)
     - [get rid of](verb) [rice](product) from my [cart](container)
     - [take out](verb) [rice](product) from my [cart](container)
     - [take off](verb) [rice](product) from my [cart](container)
     - [get](verb) [10](quantity) [crate](unit) of [rice](product) to my [cart](container)
-    - [get](verb) [5](quantity) [bags](unit) of [rice](product) to my [cart](container)
+    - [get](verb) [5](quantity) [bag](unit) of [rice](product) to my [cart](container)
     - [get rid of](verb) [rice](product) from my [cart](container)
     - [take out](verb) [rice](product) from my [cart](container)
     - [drop](verb) [rice](product) from my [cart](container)
-    - [make it](verb) [rice](product) to [5](quantity) [bags](unit)
-    - [make it](verb) [rice](product) to [3](quantity) [packets](unit)
-    - [pop in](verb) [3](quantity) [bags](unit) of [rice](product)
-    - [add more](verb) [10](quantity) [kg](unit) of [rice](product), [delete](verb) [plantains](product), [subtract](verb) [tomatoes](product)
-    - [more](verb) [3](quantity) [tins](unit) of [rice](product) and [change](verb) [fish](product) to [1](quantity) [kg](unit) and [drop](verb) [beans](product)
+    - [make it](verb) [rice](product) to [5](quantity) [bag](unit)
+    - [make it](verb) [rice](product) to [3](quantity) [packet](unit)
+    - [pop in](verb) [3](quantity) [bag](unit) of [rice](product)
+    - [add more](verb) [10](quantity) [kg](unit) of [rice](product), [delete](verb) [plantain](product), [subtract](verb) [tomatoes](product)
+    - [more](verb) [3](quantity) [tin](unit) of [rice](product) and [change](verb) [fish](product) to [1](quantity) [kg](unit) and [drop](verb) [beans](product)
     - [increase](verb) [rice](product) and [decrease](verb) [beans](product) and [set](verb) [fish](product) to [1](quantity) [basket](unit)
     - [throw in](verb) [2](quantity) [kg](unit) [rice](product) and [delete](verb) [yam](product) and [adjust](verb) [crayfish](product) to [3](quantity) [kg](unit)
     - [buy](verb) [3](quantity) [kg](unit) [rice](product) and [drop](verb) [oil](product) and [set](verb) [garri](product) to [2](quantity) [kg](unit)
-    - [decrease](verb) [rice](product) from my [cart](container); [make](verb) [rice](product) to [5](quantity) [packs](unit); [get rid of](verb) [rice](product) from my [cart](container)
+    - [decrease](verb) [rice](product) from my [cart](container); [make](verb) [rice](product) to [5](quantity) [pack](unit); [get rid of](verb) [rice](product) from my [cart](container)
     - [put](verb) [1](quantity) [bottle](unit) of [rice](product) to my [cart](container), [add in](verb) [5](quantity) [kg](unit) of [rice](product) to my [cart](container), [take out](verb) [rice](product) from my [cart](container)
-    - [buy](verb) [4](quantity) [packets](unit) of [rice](product) to my [cart](container), [subtract](verb) [rice](product) from my [cart](container), [throw in](verb) [3](quantity) [bags](unit) of [rice](product) to my [cart](container)
-    - [add more](verb) [1](quantity) [crates](unit) of [rice](product) to my [cart](container); [lower](verb) [rice](product) from my [cart](container); [buy](verb) [2](quantity) [bottle](unit) of [rice](product) to my [cart](container)
-    - [decrease](verb) [rice](product) from my [cart](container), [put](verb) [4](quantity) [cartons](unit) of [rice](product) to my [cart](container), [subtract](verb) [rice](product) from my [cart](container)
-    - [switch](verb) to [crayfish](product) to [7](quantity) [packets](unit), [lower](verb) [garri](product), [switch](verb) to [yam](product) to [3](quantity) [basket](unit)
+    - [buy](verb) [4](quantity) [packet](unit) of [rice](product) to my [cart](container), [subtract](verb) [rice](product) from my [cart](container), [throw in](verb) [3](quantity) [bag](unit) of [rice](product) to my [cart](container)
+    - [add more](verb) [1](quantity) [crate](unit) of [rice](product) to my [cart](container); [lower](verb) [rice](product) from my [cart](container); [buy](verb) [2](quantity) [bottle](unit) of [rice](product) to my [cart](container)
+    - [decrease](verb) [rice](product) from my [cart](container), [put](verb) [4](quantity) [carton](unit) of [rice](product) to my [cart](container), [subtract](verb) [rice](product) from my [cart](container)
+    - [switch](verb) to [crayfish](product) to [7](quantity) [packet](unit), [lower](verb) [garri](product), [switch](verb) to [yam](product) to [3](quantity) [basket](unit)
     - [replace](verb) [yam](product) with [3](quantity) [kg](unit) of [rice](product)
     - [add](verb) some [rice](product) to [cart](container)
     - [remove](verb) all [rice](product)
@@ -256,7 +246,60 @@ nlu:
     - [get rid of](verb) [rice](product) from my [cart](container)
     - [minus](verb) [rice](product) from my [cart](container)
     - [reduce](verb) [rice](product) from my [cart](container)
-    - [throw in](verb) [3](quantity) [bags](unit) [rice](product) and [remove](verb) [beans](product) from my [cart](container)
+    - [throw in](verb) [3](quantity) [bag](unit) [rice](product) and [remove](verb) [beans](product) from my [cart](container)
+    - [add on](verb) [7](quantity) [bunch](unit) of [oil](product) to my [cart](container), [change](verb) [plantain](product) to [5](quantity) [bottle](unit), [get](verb) [10](quantity) [crate](unit) of [flour](product) to my [cart](container)
+    - [increase](verb) [2](quantity) [crate](unit) of [salt](product) to my [cart](container), [set](verb) [yam](product) to [10](quantity) [carton](unit), [add](verb) [5](quantity) [packet](unit) of [beans](product) to my [cart](container)
+    - [get rid of](verb) [beans](product) from my [cart](container), [less](verb) [butter](product) from my [cart](container), [add](verb) [7](quantity) [packet](unit) of [crayfish](product) to my [cart](container)
+
+
+    - [add](verb) [3](quantity) [bottle](unit) [garri](product) to [cart](container)
+    - [add](verb) [5](quantity) [packet](unit) [beans](product) in [cart](container)
+    - [10](quantity) [kg](unit) [rice](product)
+    - [2](quantity) [crate](unit) [milk](product)
+    - [rm](verb) [crayfish](product); [7](quantity)[bag](unit) [yam](product) to cart
+    - [delete](verb) [fish](product), [2](quantity)[pack](unit) [beans](product) to cart
+    - [take out](verb) [salt](product), [5](quantity) [bottle](unit) [sugar](product) in my cart
+    - [2](quantity)[kg](unit) [rice](product) to cart, [remove](verb) [beans](product)
+    - [3](quantity) [carton](unit) [milk](product) in my trolley; [drop](verb) [plantain](product)
+    - [remove](verb) [2](quantity) [bottle](unit) [beans](product)
+    - [delete](verb) [3](quantity) [pack](unit) [noodles](product)
+    - [take out](verb) [5](quantity) [kg](unit) [yam](product)
+    - [drop](verb) [7](quantity) [bunch](unit) [plantain](product)
+    - [cancel](verb) [4](quantity) [carton](unit) [milk](product)
+    - [decrease](verb) [6](quantity) [packet](unit) [sugar](product)
+    - [reduce](verb) [8](quantity) [crate](unit) [tomatoes](product)
+    - [remove](verb) [10](quantity) [tin](unit) [oil](product)
+    - [take off](verb) [9](quantity) [bag](unit) [rice](product)
+    - [get rid of](verb) [12](quantity) [pack](unit) [salt](product)
+    
+
+
+
+
+
+
+    - [crayfish](product) then [add](verb) [beans](product) [12](quantity) [g](unit)
+    - [rice](product) and [add](verb) [flour](product) [5](quantity) [kg](unit)
+    - [milk](product) then [remove](verb) [bread](product)
+    - [tomatoes](product) and [set](verb) [salt](product) to [3](quantity) [packet](unit)
+    - [-](verb) [crayfish](product) then [add](verb) [beans](product) [12](quantity) [g](unit)
+    - [-](verb) [rice](product) and [add](verb) [flour](product) [5](quantity) [kg](unit)
+    - [-](verb) [milk](product) then [remove](verb) [bread](product)
+    - [-](verb) [tomatoes](product) and [set](verb) [salt](product) to [3](quantity) [packet](unit)
+    - [update](verb) [flour](product) to [5](quantity) [packet](unit), and [bump](verb) [flour](product) [3](quantity) [packet](unit)
+    - [set](verb) [rice](product) to [2](quantity) [kg](unit) and [bump](verb) [rice](product) [1](quantity) [kg](unit)
+    - [bump](verb) [milk](product) [2](quantity) [bottle](unit) and [add](verb) [bread](product) [1](quantity) [loaf](unit)
+
+    - [make](verb) [rice](product) exactly [2](quantity) [kg](unit)
+    - [update](verb) [rice](product) to [5](quantity) [kg](unit) & [more](verb) [oil](product)
+    - [update](verb) [beans](product) to [3](quantity) [packet](unit) & [more](verb) [flour](product)
+    - [update](verb) [fish](product) to [2](quantity) [bottle](unit) & [more](verb) [salt](product)
+    - [take out](verb) [crayfish](product) from my [basket](container) & [add](verb) [fivebunch](quantity) of [tomatoes](product) to [cart](container)
+    - [add](verb) [threekg](quantity) [rice](product) to [cart](container)
+    - [set](verb) [oil](product) to [twopacket](quantity)
+    - [remove](verb) [beans](product) & [add](verb) [4](quantity) [bottle](unit) [milk](product)
+
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # OTHER INTENTS
