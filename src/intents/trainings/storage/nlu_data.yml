@@ -360,10 +360,23 @@ nlu:
     - what does [yam](product) [cost](action)?
     - [price](action) of [beans](product)
     - tell me the [cost](action) of [milk](product)
-    - what’s the [price](action) for [plantain](product)?
+    - what's the [price](action) for [plantain](product)?
     - give me the [rate](action) for [sugar](product)
     - [how much](action) do you [sell](action) [oil](product)?
     - what is the [going price](action) for [garri](product)?
+    - i want to know [how much](action) you [sell](action) [yam](product)
+    - i want to know [how much](action) you [sell](action) [rice](product)
+    - i want to know [how much](action) you [sell](action) [beans](product)
+    - i want to know [how much](action) you [sell](action) [milk](product)
+    - i want to know [how much](action) you [sell](action) [plantain](product)
+    - i want to know [how much](action) you [sell](action) [sugar](product)
+    - i want to know [how much](action) you [sell](action) [oil](product)
+    - i want to know [how much](action) you [sell](action) [garri](product)
+    - may i know [how much](action) you [sell](action) [yam](product)?
+    - can i know [how much](action) you [sell](action) [yam](product)?
+    - could you tell me [how much](action) you [sell](action) [garri](product)?
+    - please tell me [how much](action) you [sell](action) [yam](product)
+
 
     # Catalog requests
     - [show](action) product list
