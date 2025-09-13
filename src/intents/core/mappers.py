@@ -84,7 +84,33 @@ def _split_multi_intent(intent_name: str) -> List[str]:
 def _map_verb_to_action(verb: str) -> str:
     """Map verb to canonical action using training data synonyms."""
     v = (verb or "").strip().lower()
-    return _VERB_TO_ACTION.get(v, v)
+    
+    # First try exact match
+    if v in _VERB_TO_ACTION:
+        return _VERB_TO_ACTION[v]
+    
+    # Try substring matching - check if any known verb is contained in the input
+    for known_verb, action in _VERB_TO_ACTION.items():
+        if known_verb in v:
+            print(f"DEBUG: Found substring match '{known_verb}' in '{v}' -> '{action}'")
+            return action
+    
+    # Try reverse substring matching - check if input is contained in any known verb
+    for known_verb, action in _VERB_TO_ACTION.items():
+        if v in known_verb:
+            print(f"DEBUG: Found reverse substring match '{v}' in '{known_verb}' -> '{action}'")
+            return action
+    
+    # If no match found, try to extract common verb patterns
+    # Handle cases like "add ancarton" -> "add"
+    for known_verb, action in _VERB_TO_ACTION.items():
+        if v.startswith(known_verb + " "):
+            print(f"DEBUG: Found prefix match '{known_verb}' in '{v}' -> '{action}'")
+            return action
+    
+    # Last resort: return the original verb (this preserves existing behavior for truly unknown verbs)
+    print(f"DEBUG: No verb mapping found for '{v}', returning as-is")
+    return v
 
 
 def _parse_shopping_command(entities: List[dict], confidence: str, confidence_score: float) -> List[Action]:
@@ -168,11 +194,10 @@ def _parse_shopping_command(entities: List[dict], confidence: str, confidence_sc
             for i in range(max_pairs):
                 if i < len(products):
                     action_dict = {"action": action_name, "product": products[i]}
-                    if action_name != "remove":  # remove usually ignores quantity/unit
-                        if i < len(quantities):
-                            action_dict["quantity"] = quantities[i]
-                        if units:
-                            action_dict["unit"] = units[0] if len(units) == 1 else units[i]
+                    if i < len(quantities):
+                        action_dict["quantity"] = quantities[i]
+                    if units:
+                        action_dict["unit"] = units[0] if len(units) == 1 else units[i]
                     if containers:
                         action_dict["container"] = containers[-1]
                     out_actions.append(_create_action_from_dict(action_dict, confidence, confidence_score))

@@ -54,16 +54,9 @@ def ensure_spacy_model():
 nlp = ensure_spacy_model()
 
 # -------------------------------
-# Multiword Action Map
+# Multiword Action Map - REMOVED
+# Priority is now handled by sorting synonyms by length (longest first)
 # -------------------------------
-MULTIWORD_ACTIONS = {
-    "get rid of": "remove",
-    "throw in": "add",
-    "switch out": "replace",
-    "make it": "set",
-    "take out": "remove",
-    "knock off": "remove",
-}
 
 # -------------------------------
 # Load Action Synonyms
@@ -212,21 +205,9 @@ def extract_verbs(user_text: str) -> List[str]:
 
     print(f"\n📝 Extracting verbs from: '{user_text}' (normalized: '{normalized_text}')")
 
-    # Regex multiword matches
-    for phrase, action in MULTIWORD_ACTIONS.items():
-        match = re.search(rf"\b{re.escape(phrase)}\b", text_lower)
-        if match:
-            print(f"🔎 Regex multiword match: '{phrase}' → '{action}'")
-            verbs.append(action)
-            skip_spans.append(match.span())
-
     # spaCy verbs
     doc = nlp(normalized_text)
     for token in doc:
-        # Skip tokens inside multiword action spans
-        if any(start <= token.idx < end for (start, end) in skip_spans):
-            continue
-
         if token.pos_ == "VERB":
             lemma = token.lemma_.lower().strip()
             norm = normalize_action(lemma)
@@ -234,19 +215,31 @@ def extract_verbs(user_text: str) -> List[str]:
                 print(f"   • token='{token.text}' lemma='{lemma}' → '{norm}'")
                 verbs.append(norm)
 
-    # Synonym direct matches (excluding cart action)
+    # Collect all synonyms with their actions, sorted by length (longest first)
+    all_synonyms = []
     for action, synonyms in ACTION_SYNONYMS.items():
         # 🚫 EXCLUDE CART ACTION
         if action.lower() == "cart":
             continue
         for syn in synonyms:
-            if re.search(rf"\b{re.escape(syn)}\b", text_lower):
-                # Skip if this synonym is part of a multiword phrase already captured
-                if any(re.search(rf"\b{re.escape(phrase)}\b", text_lower) 
-                       for phrase in MULTIWORD_ACTIONS.keys()):
-                    continue
+            all_synonyms.append((syn, action))
+    
+    # Sort by length (longest first) for proper priority
+    all_synonyms.sort(key=lambda x: len(x[0]), reverse=True)
+    
+    # Process synonyms in priority order
+    for syn, action in all_synonyms:
+        # Check if this synonym overlaps with any already matched spans
+        match = re.search(rf"\b{re.escape(syn)}\b", text_lower)
+        if match:
+            start, end = match.span()
+            # Check if this match overlaps with any skip span
+            overlaps = any(start < skip_end and end > skip_start for skip_start, skip_end in skip_spans)
+            
+            if not overlaps:
                 print(f"🔎 Synonym match: '{syn}' → '{action}'")
                 verbs.append(action)
+                skip_spans.append((start, end))
 
     # Deduplicate
     unique = []
@@ -291,7 +284,28 @@ def extract_products(
 def extract_quantities(user_text: str) -> List[float]:
     # Normalize symbols before quantity extraction
     normalized_text = normalize_symbols(user_text)
-    return [float(num) for num in re.findall(r"\d+\.?\d*", normalized_text)]
+    
+    # Written number to digit mapping
+    written_numbers = {
+        'zero': 0, 'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+        'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10,
+        'eleven': 11, 'twelve': 12, 'thirteen': 13, 'fourteen': 14, 'fifteen': 15,
+        'sixteen': 16, 'seventeen': 17, 'eighteen': 18, 'nineteen': 19, 'twenty': 20
+    }
+    
+    quantities = []
+    text_lower = normalized_text.lower()
+    
+    # Extract numeric quantities
+    for num in re.findall(r"\d+\.?\d*", normalized_text):
+        quantities.append(float(num))
+    
+    # Extract written quantities
+    for word, value in written_numbers.items():
+        if re.search(rf"\b{word}\b", text_lower):
+            quantities.append(float(value))
+    
+    return quantities
 
 
 # -------------------------------
@@ -316,11 +330,44 @@ def check_quantity_mismatch(user_text: str, rasa_actions: List[Dict]) -> bool:
 
 def check_missing_verbs_in_rasa(user_text: str, rasa_actions: List[Dict]) -> bool:
     text_verbs = extract_verbs(user_text)
-    rasa_verbs = {a.get("action") for a in rasa_actions}
+    rasa_verbs = {normalize_rasa_action(a.get("action", "")) for a in rasa_actions}
     return any(v in CANONICAL_ACTIONS and v not in rasa_verbs for v in text_verbs)
 
 def check_unexpected_rasa_actions(rasa_actions: List[Dict]) -> bool:
-    return any(a.get("action") not in CANONICAL_ACTIONS for a in rasa_actions)
+    """Check if Rasa actions contain non-canonical actions after normalization."""
+    for action_dict in rasa_actions:
+        action = action_dict.get("action", "")
+        if not action:
+            continue
+            
+        # Normalize the action by checking if it contains any canonical action
+        normalized_action = normalize_rasa_action(action)
+        if normalized_action not in CANONICAL_ACTIONS:
+            return True
+    return False
+
+def normalize_rasa_action(rasa_action: str) -> str:
+    """Normalize Rasa action to canonical form and flag pollution."""
+    action_lower = rasa_action.lower().strip()
+
+    # Direct exact match to canonical
+    if action_lower in CANONICAL_ACTIONS:
+        return action_lower
+
+    # Exact match to synonym
+    for canonical, synonyms in ACTION_SYNONYMS.items():
+        if action_lower in [s.lower().strip() for s in synonyms]:
+            return canonical
+
+    # ✅ New: check if the action *contains* a canonical verb but has extra tokens
+    for canonical in CANONICAL_ACTIONS:
+        if canonical in action_lower.split():
+            # Flag pollution explicitly
+            return f"polluted::{canonical}"
+
+    # No match at all
+    return "unknown"
+
 
 def check_product_mismatch(user_text: str, rasa_actions: List[Dict]) -> bool:
     if not PRODUCTS and not PRODUCT_SYNONYMS:
@@ -345,6 +392,7 @@ def validate_rasa_response(user_text: str, rasa_response: Dict[str, Any]) -> Dic
     ]
     
     failed_checks = [check_name for check_name, failed in validation_checks if failed]
+    validation_passed = len(failed_checks) == 0
     
     if failed_checks:
         route = "llm"
@@ -353,7 +401,12 @@ def validate_rasa_response(user_text: str, rasa_response: Dict[str, Any]) -> Dic
         route = "trust_rasa"
         logger.info("VALIDATION PASSED - Text: '%s' | Rasa actions: %s", user_text, rasa_actions)
     
-    return {"route": route, "rasa_actions": rasa_actions, "failed_checks": failed_checks}
+    return {
+        "route": route, 
+        "rasa_actions": rasa_actions, 
+        "failed_checks": failed_checks,
+        "validation_passed": validation_passed
+    }
 
 # -------------------------------
 # Call Rasa API
@@ -433,6 +486,7 @@ def main():
     passed = 0
     failed = 0
     failed_check_counts = {}
+    all_test_results = []  # Store all test results for logging
 
     print(f"🧪 Running validation on {len(scenarios)} scenarios...\n")
     logger.info("Starting validation on %d scenarios", len(scenarios))
@@ -444,6 +498,17 @@ def main():
         if not text:
             print(f"⚠️  Skipping scenario {i}: empty text")
             logger.warning("Skipping scenario %d: empty text", i)
+            all_test_results.append({
+                "case": i,
+                "text": text,
+                "expected_actions": expected_actions,
+                "status": "skipped",
+                "reason": "empty text",
+                "result": None,
+                "verbs": [],
+                "quantities": [],
+                "products": set()
+            })
             continue
             
         rasa_resp = call_rasa_api(text)
@@ -451,29 +516,50 @@ def main():
             print(f"❌ API call failed for scenario {i}: {text}")
             logger.error("API call failed for scenario %d: %s", i, text)
             failed += 1
+            all_test_results.append({
+                "case": i,
+                "text": text,
+                "expected_actions": expected_actions,
+                "status": "api_failed",
+                "reason": "API call failed",
+                "result": None,
+                "verbs": [],
+                "quantities": [],
+                "products": set()
+            })
             continue
             
         result = validate_rasa_response(text, rasa_resp)
+        verbs = extract_verbs(text)
+        quantities = extract_quantities(text)
+        products = extract_products(text, PRODUCTS, PRODUCT_SYNONYMS)
+        
+        test_result = {
+            "case": i,
+            "text": text,
+            "expected_actions": expected_actions,
+            "result": result,
+            "verbs": verbs,
+            "quantities": quantities,
+            "products": products
+        }
+        
         if result["route"] == "llm":
             failed += 1
+            test_result["status"] = "failed"
+            test_result["reason"] = f"Failed checks: {result.get('failed_checks', [])}"
+            
             # Track failed check counts
             for check in result.get("failed_checks", []):
                 failed_check_counts[check] = failed_check_counts.get(check, 0) + 1
             
-            verbs = extract_verbs(text)
-            quantities = extract_quantities(text)
-            products = extract_products(text, PRODUCTS, PRODUCT_SYNONYMS)
-            failures.append({
-                "case": i,
-                "text": text,
-                "expected_actions": expected_actions,
-                "result": result,
-                "verbs": verbs,
-                "quantities": quantities,
-                "products": products
-            })
+            failures.append(test_result)
         else:
             passed += 1
+            test_result["status"] = "passed"
+            test_result["reason"] = "All validation checks passed"
+        
+        all_test_results.append(test_result)
 
     # Print failures
     print("\n=== FAILURES ===")
@@ -521,7 +607,54 @@ def main():
             logger.warning("FAILURE Case %d: '%s' | Failed checks: %s | Rasa actions: %s", 
                           f['case'], f['text'], f['result'].get('failed_checks', []), f['result']['rasa_actions'])
     
+    # Log comprehensive test results to file
+    logger.info("=== COMPREHENSIVE TEST RESULTS ===")
+    for test in all_test_results:
+        if test['status'] == 'passed':
+            logger.info("PASSED Case %d: '%s' | Rasa actions: %s | Extracted: verbs=%s, quantities=%s, products=%s", 
+                       test['case'], test['text'], 
+                       test['result']['rasa_actions'] if test['result'] else 'N/A',
+                       test['verbs'], test['quantities'], test['products'])
+        elif test['status'] == 'failed':
+            logger.warning("FAILED Case %d: '%s' | %s | Rasa actions: %s | Extracted: verbs=%s, quantities=%s, products=%s", 
+                          test['case'], test['text'], test['reason'],
+                          test['result']['rasa_actions'] if test['result'] else 'N/A',
+                          test['verbs'], test['quantities'], test['products'])
+        elif test['status'] == 'skipped':
+            logger.warning("SKIPPED Case %d: '%s' | %s", test['case'], test['text'], test['reason'])
+        elif test['status'] == 'api_failed':
+            logger.error("API_FAILED Case %d: '%s' | %s", test['case'], test['text'], test['reason'])
+    
+    # Write detailed results to a separate JSON file
+    write_detailed_results_file(all_test_results, log_file)
+    
     logger.info("=== VALIDATION SESSION COMPLETED - Log file: %s ===", log_file)
+
+
+def write_detailed_results_file(all_test_results: List[Dict], log_file: Path) -> None:
+    """Write detailed test results to a JSON file for analysis."""
+    import json
+    from datetime import datetime
+    
+    # Create results file path based on log file
+    results_file = log_file.parent / f"validation_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    
+    # Convert sets to lists for JSON serialization
+    serializable_results = []
+    for test in all_test_results:
+        serializable_test = test.copy()
+        if 'products' in serializable_test and isinstance(serializable_test['products'], set):
+            serializable_test['products'] = list(serializable_test['products'])
+        serializable_results.append(serializable_test)
+    
+    try:
+        with open(results_file, 'w', encoding='utf-8') as f:
+            json.dump(serializable_results, f, indent=2, ensure_ascii=False)
+        print(f"📄 Detailed results written to: {results_file}")
+        logger.info("Detailed results written to: %s", results_file)
+    except Exception as e:
+        print(f"❌ Failed to write results file: {e}")
+        logger.error("Failed to write results file: %s", e)
 
 
 if __name__ == "__main__":
