@@ -48,6 +48,25 @@ nlu:
     - lower
     - less
     - "-"
+
+- synonym: set
+  examples: |
+    - set
+    - update
+    - modify
+    - change
+    - make it
+    - change it
+    - change it to
+    - update it
+    - update it to
+    - modify it
+    - modify it to
+    - set it
+    - set it to
+    - adjust
+    - switch to
+    - update to
     - subtract
     - minus
     - knock off
@@ -107,6 +126,14 @@ nlu:
     - change
     - make
     - make it
+    - change it
+    - change it to
+    - update it
+    - update it to
+    - modify it
+    - modify it to
+    - set it
+    - set it to
     - switch to
     - update to
     - fix
@@ -338,6 +365,23 @@ nlu:
     - [get rid of](verb) [salt](product), [12](quantity) [crate](unit) [noodles](product) to cart
     - [rm](verb) [garri](product), [5](quantity) [carton](unit) [beans](product) in my cart
     - [remove](verb) [rice](product); [9](quantity) [packet](unit) [tomatoes](product) to cart
+
+    # ─── CONTEXTUAL UPDATES (referring to previous product) ──────────────────────
+    - [make it](verb) [8](quantity) [kg](unit)
+    - [change it to](verb) [8](quantity) [kg](unit)
+    - [update it to](verb) [8](quantity) [kg](unit)
+    - [modify it to](verb) [8](quantity) [kg](unit)
+    - [set it to](verb) [8](quantity) [kg](unit)
+    - [make it](verb) [5](quantity) [packet](unit)
+    - [change to](verb) [3](quantity) [bag](unit)
+    - [update to](verb) [2](quantity) [bottle](unit)
+    - [make it](verb) [10](quantity) [kg](unit)
+    - [change it](verb) [6](quantity) [packet](unit)
+    - [make it](verb) [12](quantity) [kg](unit)
+    - [update it](verb) [4](quantity) [bag](unit)
+    - [set it](verb) [7](quantity) [bottle](unit)
+    - [modify it](verb) [9](quantity) [kg](unit)
+    - [change it to](verb) [15](quantity) [packet](unit)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

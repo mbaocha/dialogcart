@@ -113,13 +113,32 @@ def _map_verb_to_action(verb: str) -> str:
     return v
 
 
-def _parse_shopping_command(entities: List[dict], confidence: str, confidence_score: float) -> List[Action]:
+def _parse_shopping_command(entities: List[dict], confidence: str, confidence_score: float, slots: dict = None) -> List[Action]:
     """Parse modify_cart entities into multiple actions using verb-segmented FIFO queues."""
     if not entities:
         return []
 
     # Debug logging
     print(f"DEBUG: _parse_shopping_command entities: {entities}")
+    print(f"DEBUG: _parse_shopping_command slots: {slots}")
+    
+    # Check if we need to add missing product from slot memory
+    has_product_entity = any(e.get("entity") == "product" for e in entities)
+    if not has_product_entity and slots:
+        # Try to get product from slot memory
+        product_from_slots = slots.get("last_mentioned_product") or slots.get("last_product_added")
+        if product_from_slots:
+            # Find the earliest position of other entities to group with them
+            earliest_start = min([e.get("start", 0) for e in entities if e.get("start", 0) >= 0], default=0)
+            # Add a virtual product entity from slot memory at the same position as other entities
+            entities.append({
+                "entity": "product",
+                "value": product_from_slots,
+                "start": earliest_start,  # Group with existing entities
+                "end": earliest_start,
+                "confidence": 0.8  # Lower confidence for slot-based entity
+            })
+            print(f"DEBUG: Added product from slot memory: {product_from_slots} at position {earliest_start}")
 
     # Sort entities by start position
     entities_by_pos = sorted(entities, key=lambda x: x.get("start", 0))
@@ -190,16 +209,21 @@ def _parse_shopping_command(entities: List[dict], confidence: str, confidence_sc
 
         else:
             # --- Add / Remove ---
+            print(f"DEBUG: finalize_segment - products: {products}, quantities: {quantities}, units: {units}")
             max_pairs = max(len(products), len(quantities), len(units))
+            print(f"DEBUG: max_pairs: {max_pairs}")
             for i in range(max_pairs):
                 if i < len(products):
                     action_dict = {"action": action_name, "product": products[i]}
                     if i < len(quantities):
                         action_dict["quantity"] = quantities[i]
+                        print(f"DEBUG: Added quantity {quantities[i]} to action")
                     if units:
                         action_dict["unit"] = units[0] if len(units) == 1 else units[i]
+                        print(f"DEBUG: Added unit {units[0] if len(units) == 1 else units[i]} to action")
                     if containers:
                         action_dict["container"] = containers[-1]
+                    print(f"DEBUG: Final action_dict: {action_dict}")
                     out_actions.append(_create_action_from_dict(action_dict, confidence, confidence_score))
 
     # --- Segment builder ---
@@ -410,8 +434,9 @@ def map_rasa_to_actions(rasa_json) -> List[Action]:
     raw_entities = nlu.get("entities") or []
     entities = list(raw_entities)
 
-    # Parse shopping command into actions
-    actions =  _parse_shopping_command(entities, confidence, conf_score)
+    # Parse shopping command into actions (with slot memory support)
+    slots = rasa_json.get("slots", {})
+    actions =  _parse_shopping_command(entities, confidence, conf_score, slots)
     actions = _deduplicate_actions(actions)
 
     return actions

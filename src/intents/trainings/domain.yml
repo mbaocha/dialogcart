@@ -1,3 +1,206 @@
 version: "3.1"
+
 intents:
   - greet
+  - modify_cart
+  - inquire_product
+  - cart_action
+  - goodbye
+
+entities:
+  - product
+  - quantity
+  - unit
+  - verb
+  - action
+  - container
+  - person
+  - location
+
+slots:
+  # User information slots
+  user_name:
+    type: text
+    mappings:
+    - type: from_entity
+      entity: person
+    - type: from_text
+      intent: greet
+      not_intent: goodbye
+  user_preference:
+    type: categorical
+    values:
+    - vegetarian
+    - vegan
+    - omnivore
+    - gluten_free
+    - dairy_free
+    mappings:
+    - type: from_text
+      intent: modify_cart
+    - type: from_text
+      intent: inquire_product
+    - type: from_text
+      intent: checkout
+
+  # Universal product memory - works across ALL intents
+  last_product_added:
+    type: text
+    mappings:
+    - type: from_entity
+      entity: product
+      intent: modify_cart
+    - type: from_entity
+      entity: product
+      intent: inquire_product
+  last_mentioned_product:
+    type: text
+    mappings:
+    - type: from_entity
+      entity: product
+      # No intent restriction - works across all intents
+  shopping_list:
+    type: list
+    mappings:
+    - type: from_entity
+      entity: product
+      intent: modify_cart
+    - type: from_entity
+      entity: product
+      intent: inquire_product
+
+  # Quantity and unit memory (primarily for modify_cart but can be used elsewhere)
+  last_quantity:
+    type: float
+    mappings:
+    - type: from_entity
+      entity: quantity
+      intent: modify_cart
+    - type: from_entity
+      entity: quantity
+      intent: inquire_product
+  last_unit:
+    type: text
+    mappings:
+    - type: from_entity
+      entity: unit
+      intent: modify_cart
+    - type: from_entity
+      entity: unit
+      intent: inquire_product
+
+  # Cart management slots
+  total_cart_items:
+    type: float
+    initial_value: 0.0
+    mappings:
+    - type: custom
+  cart_state:
+    type: categorical
+    values:
+    - empty
+    - has_items
+    - processing
+    mappings:
+    - type: custom
+
+  # Inquire product specific slots
+  last_inquired_product:
+    type: text
+    mappings:
+    - type: from_entity
+      entity: product
+      intent: inquire_product
+  last_inquiry_type:
+    type: text
+    mappings:
+    - type: from_entity
+      entity: action
+      intent: inquire_product
+
+  # Cart action specific slots
+  last_cart_action:
+    type: text
+    mappings:
+    - type: from_entity
+      entity: action
+      intent: cart_action
+  last_container:
+    type: text
+    mappings:
+    - type: from_entity
+      entity: container
+      intent: cart_action
+
+  # Checkout and order slots
+  payment_method:
+    type: categorical
+    values:
+    - credit_card
+    - debit_card
+    - cash
+    - mobile_money
+    - bank_transfer
+    mappings:
+    - type: from_text
+      intent: checkout
+  delivery_address:
+    type: text
+    mappings:
+    - type: from_text
+      intent: checkout
+  last_order_id:
+    type: text
+    mappings:
+    - type: from_text
+      intent: track_order
+  tracking_status:
+    type: categorical
+    values:
+    - pending
+    - processing
+    - shipped
+    - delivered
+    - cancelled
+    mappings:
+    - type: custom
+
+  # Universal conversation state slots
+  conversation_turn:
+    type: float
+    initial_value: 0.0
+    mappings:
+    - type: custom
+  last_intent:
+    type: text
+    mappings:
+    - type: from_intent
+  session_start_time:
+    type: text
+    initial_value: ""
+    mappings:
+    - type: custom
+  conversation_context:
+    type: text
+    mappings:
+    - type: custom
+
+responses:
+  utter_greet:
+  - text: "Hello! How can I help you today?"
+  utter_goodbye:
+  - text: "Goodbye! Have a great day!"
+  utter_default:
+  - text: "I'm not sure I understand. Can you please rephrase?"
+
+actions:
+  - action_update_cart_count
+  - action_reset_cart
+  - action_remember_product
+  - action_update_cart_state
+  - action_track_inquiry
+  - action_update_order_status
+
+session_config:
+  session_expiration_time: 60
+  carry_over_slots_to_new_session: true

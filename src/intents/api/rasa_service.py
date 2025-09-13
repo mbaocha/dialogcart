@@ -361,7 +361,7 @@ class RasaService:
             return {"error": f"Training failed: {str(e)}"}
 
     def predict(self, text, sender_id="anonymous"):
-        """Predict intent and entities for given text."""
+        """Predict intent and entities for given text with slot support."""
         try:
             # Parse with local NLU model
             nlu = self.parse_text_sync(text)
@@ -370,13 +370,203 @@ class RasaService:
             entities = nlu.get("entities") or []
             intent = nlu.get("intent", {}).get("name") if nlu.get("intent") else None
             
+            # Use simple slot memory for immediate functionality
+            import sys
+            import os
+            sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+            from simple_slot_memory import slot_memory
+            updated_slots = slot_memory.update_slots(sender_id, intent, entities, text)
+            
             return {
                 "nlu": nlu,
                 "intent": intent,
                 "entities": entities,
-                "slots": {},
+                "slots": updated_slots,
                 "sender_id": sender_id
             }
         except Exception as e:
             logger.exception("Prediction failed.")
             return {"error": f"Prediction error: {str(e)}"}
+
+    def get_tracker(self, sender_id):
+        """Get or create tracker for sender"""
+        if self.agent is None:
+            self.load_agent()
+        
+        if self.agent is None:
+            logger.warning("No agent available for tracker creation")
+            return None
+        
+        try:
+            # Create a simple in-memory tracker store if not exists
+            if not hasattr(self, 'tracker_store'):
+                from rasa.core.tracker_store import InMemoryTrackerStore
+                from rasa.core.domain import Domain
+                self.tracker_store = InMemoryTrackerStore(domain=Domain.empty())
+            
+            return self.tracker_store.get_or_create_tracker(sender_id)
+        except Exception as e:
+            logger.warning(f"Failed to get tracker for {sender_id}: {e}")
+            return None
+
+    def update_slots_from_message(self, tracker, intent, entities, text):
+        """Update slots based on message content with cross-intent memory"""
+        try:
+            # Update last intent
+            if intent:
+                tracker.update_slot("last_intent", intent)
+            
+            # Update conversation turn
+            current_turn = tracker.get_slot("conversation_turn") or 0
+            tracker.update_slot("conversation_turn", current_turn + 1)
+            
+            # Universal product memory - works across all intents
+            products = [e.get("value") for e in entities if e.get("entity") == "product"]
+            if products:
+                # Always update universal product memory
+                tracker.update_slot("last_mentioned_product", products[0])
+                
+                # Intent-specific product memory
+                if intent == "modify_cart":
+                    tracker.update_slot("last_product_added", products[0])
+                    
+                    # Update shopping list for cart modifications
+                    current_list = tracker.get_slot("shopping_list") or []
+                    for product in products:
+                        if product not in current_list:
+                            current_list.append(product)
+                    tracker.update_slot("shopping_list", current_list)
+                
+                elif intent == "inquire_product":
+                    tracker.update_slot("last_inquired_product", products[0])
+            
+            # Update quantity and unit (works across modify_cart and inquire_product)
+            quantities = [e.get("value") for e in entities if e.get("entity") == "quantity"]
+            units = [e.get("value") for e in entities if e.get("entity") == "unit"]
+            
+            if quantities and intent in ["modify_cart", "inquire_product"]:
+                try:
+                    # Extract numeric value from quantity string
+                    qty_str = quantities[0]
+                    import re
+                    match = re.search(r'[-+]?\d*\.?\d+', qty_str)
+                    if match:
+                        tracker.update_slot("last_quantity", float(match.group()))
+                except (ValueError, TypeError):
+                    pass
+            
+            if units and intent in ["modify_cart", "inquire_product"]:
+                tracker.update_slot("last_unit", units[0])
+            
+            # Intent-specific slot updates
+            if intent == "inquire_product":
+                actions = [e.get("value") for e in entities if e.get("entity") == "action"]
+                if actions:
+                    tracker.update_slot("last_inquiry_type", actions[0])
+            
+            elif intent == "cart_action":
+                actions = [e.get("value") for e in entities if e.get("entity") == "action"]
+                containers = [e.get("value") for e in entities if e.get("entity") == "container"]
+                
+                if actions:
+                    tracker.update_slot("last_cart_action", actions[0])
+                    
+                    # Update cart state based on action
+                    action = actions[0].lower()
+                    if action in ["clear", "empty", "remove all", "wipe"]:
+                        tracker.update_slot("cart_state", "empty")
+                    elif action in ["show", "view", "display", "check", "list"]:
+                        tracker.update_slot("cart_state", "has_items")
+                
+                if containers:
+                    tracker.update_slot("last_container", containers[0])
+            
+            elif intent == "checkout":
+                # Extract payment method and delivery address from text
+                text_lower = text.lower()
+                
+                # Payment method detection
+                payment_methods = ["credit card", "debit card", "cash", "mobile money", "bank transfer"]
+                for method in payment_methods:
+                    if method in text_lower:
+                        tracker.update_slot("payment_method", method.replace(" ", "_"))
+                        break
+                
+                # Simple address detection (would need more sophisticated parsing)
+                address_keywords = ["address", "deliver to", "send to", "ship to"]
+                for keyword in address_keywords:
+                    if keyword in text_lower:
+                        # Extract text after keyword as address
+                        parts = text_lower.split(keyword, 1)
+                        if len(parts) > 1:
+                            address = parts[1].strip()
+                            if address:
+                                tracker.update_slot("delivery_address", address)
+                        break
+            
+            elif intent == "track_order":
+                # Extract order ID from text
+                import re
+                order_patterns = [
+                    r'order\s*#?(\w+)',
+                    r'track\s*(\w+)',
+                    r'status\s*of\s*(\w+)'
+                ]
+                
+                for pattern in order_patterns:
+                    match = re.search(pattern, text.lower())
+                    if match:
+                        tracker.update_slot("last_order_id", match.group(1))
+                        break
+            
+            # Save tracker state
+            if hasattr(self, 'tracker_store'):
+                self.tracker_store.save(tracker)
+                
+        except Exception as e:
+            logger.warning(f"Failed to update slots: {e}")
+
+    def is_contextual_update(self, text, entities):
+        """Check if this is a contextual update (like 'make it 8kg')"""
+        contextual_verbs = ["make it", "change it", "update it", "modify it", "set it"]
+        text_lower = text.lower()
+        return any(verb in text_lower for verb in contextual_verbs)
+
+    def handle_contextual_update(self, tracker, entities, text):
+        """Handle contextual updates by using previous product context"""
+        try:
+            # Get the last product from slots
+            last_product = tracker.get_slot("last_product_added")
+            
+            # Extract new quantity and unit from current entities
+            new_quantity = None
+            new_unit = None
+            
+            for entity in entities:
+                if entity.get("entity") == "quantity":
+                    try:
+                        # Extract numeric value from quantity string
+                        import re
+                        match = re.search(r'[-+]?\d*\.?\d+', entity.get("value", ""))
+                        if match:
+                            new_quantity = float(match.group())
+                    except (ValueError, TypeError):
+                        pass
+                elif entity.get("entity") == "unit":
+                    new_unit = entity.get("value")
+            
+            # Update slots with new values
+            if new_quantity is not None:
+                tracker.update_slot("last_quantity", new_quantity)
+            if new_unit:
+                tracker.update_slot("last_unit", new_unit)
+            
+            # Save tracker state
+            if hasattr(self, 'tracker_store'):
+                self.tracker_store.save(tracker)
+            
+            return tracker.current_slot_values()
+            
+        except Exception as e:
+            logger.warning(f"Failed to handle contextual update: {e}")
+            return tracker.current_slot_values() if tracker else {}
