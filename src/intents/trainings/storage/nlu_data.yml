@@ -8,6 +8,7 @@ nlu:
 # ─────────────────────────────────────────────────────────────────────────────
 # 🔤 SYNONYMS
 # ─────────────────────────────────────────────────────────────────────────────
+# ── FIX 1: Quote symbols in synonyms
 - synonym: add
   examples: |
     - add
@@ -29,7 +30,7 @@ nlu:
     - bump up
     - increment
     - inc
-    - +
+    - "+"
 
 - synonym: remove
   examples: |
@@ -46,7 +47,7 @@ nlu:
     - reduce
     - lower
     - less
-    - -
+    - "-"
     - subtract
     - minus
     - knock off
@@ -56,47 +57,6 @@ nlu:
     - dec
     - take away
 
-- synonym: set
-  examples: |
-    - set
-    - change
-    - modify
-    - adjust
-    - make
-    - make it
-    - switch to
-    - update to
-    - update
-    - fix
-    - override
-    - replace
-    - swap
-    - substitute
-    - switch
-    - switch out
-    - exchange
-    - sub out
-
-- synonym: check
-  examples: |
-    - check
-    - do you have
-    - is it available
-    - is available
-    - in stock
-    - got any
-    - do you carry
-    - confirm availability
-
-- synonym: cart
-  examples: |
-    - cart
-    - basket
-    - my basket
-    - trolley
-    - my trolley
-    - shopping cart
-    - shopping bag
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -201,6 +161,72 @@ nlu:
     - bread
     - butter
 
+- synonym: view
+  examples: |
+    - show
+    - see
+    - list
+    - review
+    - display
+    - check
+    - open
+
+- synonym: clear
+  examples: |
+    - clear
+    - empty
+    - wipe
+    - remove all
+    - reset
+    - start over
+    - drop everything
+    - delete all
+
+- synonym: restore
+  examples: |
+    - restore
+    - recover
+    - reload
+    - bring back
+    - undo
+    - put back
+    - return
+
+- synonym: availability
+  examples: |
+    - sell
+    - selling
+    - available
+    - in stock
+    - carry
+    - have
+    - stock
+    - on your list
+    - got
+
+- synonym: price
+  examples: |
+    - price
+    - cost
+    - rate
+    - how much
+    - what does it cost
+    - going price
+    - sell for
+
+
+- synonym: catalog
+  examples: |
+    - show
+    - list
+    - browse
+    - catalog
+    - menu
+    - selection
+    - product list
+    - available products
+    - what do you sell
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 🧠 MODIFY CART (examples)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -217,12 +243,12 @@ nlu:
     - [throw in](verb) [2](quantity) [kg](unit) [rice](product)
     - [buy](verb) [3](quantity) [kg](unit) [rice](product)
     - [include](verb) [5](quantity) [crate](unit) [noodles](product)
+    
+    - [add](verb) [2](quantity) [kg](unit) [rice](product)
     - please [add](verb) [5](quantity) [packet](unit) [yam](product)
-    - kindly [add](verb) [2](quantity) [crate](unit) [milk](product)
-    - could you [add](verb) [3](quantity) [bag](unit) [beans](product)
-    - please [put](verb) [4](quantity) [tin](unit) [sugar](product) in my cart
-    - kindly [include](verb) [1](quantity) [carton](unit) [bread](product) to cart
-    - please [throw in](verb) [2](quantity) [bottle](unit) [oil](product)
+    - [add](verb) [3](quantity) [bag](unit) [beans](product), kindly
+    - could you [add](verb) [2](quantity) [crate](unit) [milk](product)
+
 
 
     # ─── REMOVE ACTIONS ───────────────────────────
@@ -317,33 +343,118 @@ nlu:
 # ─────────────────────────────────────────────────────────────────────────────
 # OTHER INTENTS
 # ─────────────────────────────────────────────────────────────────────────────
-- intent: show_product_list
+- intent: inquire_product
   examples: |
-    - show product list
-    - list products
-    - browse catalog
-    - what products do you have
-    - what's available
-    - product catalog
+    # Availability checks
+    - do you [sell](action) [rice](product)?
+    - is [yam](product) [available](action)?
+    - can I [get](action) [beans](product) from you?
+    - do you [carry](action) [milk](product)?
+    - have you [got](action) [plantain](product) in stock?
+    - do you [stock](action) [sugar](product)?
+    - is [oil](product) on your [list](action)?
+    - are you [selling](action) [garri](product) right now?
 
-- intent: view_cart
-  examples: |
-    - show my cart
-    - what's in my cart
-    - view cart
-    - list cart items
+    # Price inquiries
+    - [how much](action) is [rice](product)?
+    - what does [yam](product) [cost](action)?
+    - [price](action) of [beans](product)
+    - tell me the [cost](action) of [milk](product)
+    - what’s the [price](action) for [plantain](product)?
+    - give me the [rate](action) for [sugar](product)
+    - [how much](action) do you [sell](action) [oil](product)?
+    - what is the [going price](action) for [garri](product)?
 
-- intent: clear_cart
-  examples: |
-    - clear my cart
-    - empty the cart
-    - remove all items from my cart
+    # Catalog requests
+    - [show](action) product list
+    - [list](action) products
+    - [browse](action) catalog
+    - what products do you [have](action)
+    - what’s [available](action)
+    - [product list](action)
+    - let me [see](action) your items
+    - what do you [sell](action)
+    - [display](action) the catalog
+    - I want to [check](action) your product list
+    - can I [see](action) what you offer
+    - please [show](action) me the available products
+    - what’s on your [list](action)
+    - give me a [list](action) of products
+    - I’d like to [browse](action) what you have
+    - [show](action) me your groceries
+    - what can I [buy](action) from you
+    - let me [look](action) at your catalog
+    - do you have a [catalog](action)
+    - can you [list](action) what’s in stock
 
-- intent: restore_cart
+
+
+- intent: cart_action
   examples: |
-    - restore my cart
-    - recover my cart
-    - undo empty my cart
+    # View
+    - [show](action) my [cart](container)
+    - what's in my [cart](container)
+    - [view](action) [cart](container)
+    - [list](action) [cart](container) items
+    - [open](action) my [basket](container)
+    - let me [see](action) my [trolley](container)
+    - [display](action) the [shopping cart](container)
+    - can I [check](action) my [cart](container)?
+    - what have I added so far in my [cart](container)
+    - [review](action) my [basket](container)
+
+    # Clear
+    - [clear](action) my [cart](container)
+    - [empty](action) the [cart](container)
+    - [remove all](action) items from my [cart](container)
+    - [wipe](action) my [basket](container) clean
+    - [clear](action) everything in the [trolley](container)
+    - [delete all](action) from [cart](container)
+    - [start over](action) my [cart](container)
+    - [reset](action) my [shopping cart](container)
+    - [drop everything](action) in my [basket](container)
+    - [clear](action) out the [cart](container)
+
+    # Restore
+    - [restore](action) my [cart](container)
+    - [recover](action) my [cart](container)
+    - [undo](action) empty my [cart](container)
+    - [bring back](action) my [basket](container)
+    - [reload](action) my [shopping cart](container)
+    - can you [restore](action) my [cart](container)?
+    - [put back](action) what was in my [trolley](container)
+    - [undo](action) clear [cart](container)
+    - [recover](action) the items I removed from my [cart](container)
+    - [return](action) my [basket](container) to how it was
+
+
+
+- intent: checkout
+  examples: |
+    - I’m ready to checkout
+    - place my order now
+    - I want to complete this purchase
+    - go ahead and process the order
+    - I’d like to confirm my order
+    - finish the checkout for me
+    - let’s complete the order
+    - proceed with payment
+
+- intent: track_order
+  examples: |
+    - where is my order?
+    - track my delivery
+    - has my package been shipped?
+    - what’s the status of my order?
+    - is my order on the way?
+    - when will my items arrive?
+    - check my order progress
+    - tell me the delivery update
+
+
+
+
+
 
 - intent: greet
   examples: |
