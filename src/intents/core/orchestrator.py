@@ -99,7 +99,7 @@ class IntentOrchestrator:
 
             # Handle modify_cart with mapper (now with slot memory available)
             if intent and intent.upper() in ("MODIFY_CART", "SHOPPING_COMMAND"):
-                from .mappers import map_rasa_to_actions
+                from .post_nlu_processor import map_rasa_to_actions
                 mapped = map_rasa_to_actions({"nlu": nlu, "slots": updated_slots})
                 actions = [a.dict() if isinstance(a, Action) else a for a in mapped]
 
@@ -169,19 +169,10 @@ class IntentOrchestrator:
                         "container": container
                     })
 
-            # Validation logic (only for modify_cart)
-            validation_performed = False
-            source = "rasa"
-
-            if intent and intent.upper() == "MODIFY_CART":
-                if validate == "force":
-                    actions = self._validate_actions_with_llm(text, actions)
-                    validation_performed = True
-                    source = "rasa_force_validated"
-                elif validate is True:
-                    original_actions = actions.copy()
-                    actions = self._maybe_validate_actions(text, actions, True, nlu)
-                    validation_performed = (actions != original_actions)
+            # Determine if we should route to LLM and handle routing/validation
+            actions, source, validation_performed = self._handle_routing_and_validation(
+                text, intent, confidence_score, actions, validate, nlu
+            )
 
             
             return {
@@ -338,3 +329,87 @@ class IntentOrchestrator:
         contextual_phrases = ["add it", "make it", "change it", "update it", "modify it", "set it"]
         text_lower = text.lower()
         return any(phrase in text_lower for phrase in contextual_phrases)
+    
+    def _handle_routing_and_validation(self, text: str, intent: str, confidence_score: float, 
+                                     actions: List[dict], validate: bool, nlu: dict) -> tuple:
+        """
+        Handle routing to LLM based on criteria and perform validation.
+        
+        Returns:
+            tuple: (updated_actions, source, validation_performed)
+        """
+        # Check if we should route to LLM
+        route_result = self._should_route_to_llm(text, intent, confidence_score, actions)
+        
+        if route_result["should_route"]:
+            print(f"DEBUG: Routing to LLM - Reason: {route_result['reason']}")
+            updated_actions = self._validate_actions_with_llm(text, actions)
+            source = f"llm_routed_{route_result['reason']}"
+            validation_performed = True
+            return updated_actions, source, validation_performed
+        else:
+            # Original validation logic (only for modify_cart when not routed)
+            validation_performed = False
+            source = "rasa"
+
+            if intent and intent.upper() == "MODIFY_CART":
+                if validate == "force":
+                    updated_actions = self._validate_actions_with_llm(text, actions)
+                    validation_performed = True
+                    source = "rasa_force_validated"
+                elif validate is True:
+                    original_actions = actions.copy()
+                    updated_actions = self._maybe_validate_actions(text, actions, True, nlu)
+                    validation_performed = (updated_actions != original_actions)
+                else:
+                    updated_actions = actions
+            else:
+                updated_actions = actions
+
+            return updated_actions, source, validation_performed
+    
+    def _should_route_to_llm(self, text: str, intent: str, confidence_score: float, actions: List[dict]) -> dict:
+        """
+        Determine if we should route to LLM based on routing criteria.
+        
+        Returns:
+            dict: {"should_route": bool, "reason": str}
+        """
+        # Check confidence threshold
+        from .confidence import should_route_to_llm_by_confidence
+        if should_route_to_llm_by_confidence(confidence_score):
+            return {
+                "should_route": True,
+                "reason": f"confidence_too_low_{confidence_score}"
+            }
+        
+        # Check for None intent
+        if intent is None or intent.upper() == "NONE":
+            return {
+                "should_route": True,
+                "reason": "intent_none"
+            }
+        
+        # Check modify_cart validation failure
+        if intent and intent.upper() == "MODIFY_CART":
+            # Create a temporary response structure for validation
+            temp_response = {
+                "result": {
+                    "actions": actions,
+                    "intent": intent,
+                    "confidence_score": confidence_score
+                }
+            }
+            from .validator import validate_rasa_response
+            validation_result = validate_rasa_response(text, temp_response)
+            if not validation_result.get("validation_passed", True):
+                return {
+                    "should_route": True,
+                    "reason": f"modify_cart_validation_failed_{validation_result.get('failed_checks', [])}"
+                }
+        
+        # No routing needed
+        return {
+            "should_route": False,
+            "reason": "no_routing_criteria_met"
+        }

@@ -40,7 +40,7 @@ NLU_DATA_FILE = BASE_DIR / "nlu_data.yml"
 _TRAININGS_DIR = Path(__file__).resolve().parent.parent / "trainings"
 
 # Default paths (will be resolved to existing ones below)
-INITIAL_TRAINING_DATA = str(_TRAININGS_DIR / "initial_training_data.yml")
+INITIAL_TRAINING_DATA = str(_TRAININGS_DIR / "initial_training_data.yml")  # Will be overridden by centralized loader
 CONFIG_FILE = str(_TRAININGS_DIR / "config.yml")
 
 # Resolve to first existing candidate for robustness across run contexts
@@ -53,7 +53,10 @@ def _resolve_first_existing(candidates: list[str]) -> str:
             continue
     return candidates[0]
 
-# Candidate locations for trainings files
+# Use centralized training data loader for path resolution
+from ..core.training_data_loader import training_data_loader
+
+# Candidate locations for trainings files (fallback for config)
 _init_candidates = [
     str(_TRAININGS_DIR / "initial_training_data.yml"),
     "/app/src/intents/trainings/initial_training_data.yml",
@@ -67,7 +70,8 @@ _config_candidates = [
     str((Path.cwd() / "config.yml").resolve()),
 ]
 
-INITIAL_TRAINING_DATA = _resolve_first_existing(_init_candidates)
+# Use centralized training data loader for the path
+INITIAL_TRAINING_DATA = training_data_loader.get_training_data_path()
 CONFIG_FILE = _resolve_first_existing(_config_candidates)
 
 MODEL_DIR.mkdir(parents=True, exist_ok=True)
