@@ -1,54 +1,48 @@
-# version: "3.1"
-
-# language: en  # ✅ Required field
-
-# recipe: default.v1  # Specify recipe to avoid FutureWarning
-
-# pipeline:
-# - name: "normalization.normalizer.SimpleTextNormalizer"
-#   config_file: "/app/src/intents/trainings/normalization/normalization.yml"
-#   lowercase: true
-#   max_replacements_per_text: 50
-# - name: WhitespaceTokenizer
-#   intent_tokenization_flag: true
-#   intent_split_symbol: "+"
-# - name: RegexFeaturizer
-# - name: LexicalSyntacticFeaturizer
-# - name: CountVectorsFeaturizer
-# - name: DIETClassifier
-#   epochs: 20
-#   constrain_similarities: true
-# - name: EntitySynonymMapper
-
-# assistant_id: 20250911-112047-tomato-pineapple
-
-
-
-
-
-
 version: "3.1"
 
-language: en  # ✅ Required field
+language: en
 
 pipeline:
 - name: "normalization.normalizer.SimpleTextNormalizer"
   config_file: "/app/src/intents/trainings/normalization/normalization.yml"
   lowercase: true
   max_replacements_per_text: 50
+
 - name: WhitespaceTokenizer
   intent_tokenization_flag: true
   intent_split_symbol: "+"
+
 - name: RegexFeaturizer
-- name: RegexEntityExtractor     # 👈 Add this
+
+# Keep RegexEntityExtractor, but don’t depend on it alone for products
+- name: RegexEntityExtractor
   use_lookup_tables: true
   use_regexes: true
   use_word_boundaries: true
+  case_sensitive: false
+
 - name: LexicalSyntacticFeaturizer
+
+# Word-level features for intents/entities
 - name: CountVectorsFeaturizer
+  analyzer: word
+  min_ngram: 1
+  max_ngram: 2
+
+# ✅ Add character n-gram features so DIET can handle OOV entities like "patari"
+- name: CountVectorsFeaturizer
+  analyzer: char_wb
+  min_ngram: 3
+  max_ngram: 5
+
+# DIET now has richer features to generalize product entities
 - name: DIETClassifier
   epochs: 100
+  entity_recognition: true
+  BILOU_flag: true
+
 - name: EntitySynonymMapper
+
 - name: ResponseSelector
   epochs: 100
 

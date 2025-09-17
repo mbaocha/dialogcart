@@ -10,7 +10,7 @@ MAX_OPTIONS = 10  # keep UI sane
 def _product_display(products: Dict[str, str], pid: str) -> str:
     """
     Returns a human-friendly name for a product id.
-    The products dict maps product_id -> product_name.
+    The products dict maps catalog_id -> name.
     """
     product_name = (products or {}).get(pid, pid)
     return product_name
@@ -35,19 +35,19 @@ def ask_disambiguation_node(state: AgentState) -> AgentState:
     numbered = [f"{i+1}. {_product_display(products, pid)}  —  id: {pid}" for i, pid in enumerate(options)]
 
     # Build the question text
-    if reason == "ambiguous_product":
+    if reason == "ambiguous_catalog_item":
         header = "I found multiple matches for that product. Which one did you mean?"
-    elif reason == "product_not_found":
+    elif reason in {"catalog_item_not_found"}:
         header = "I couldn’t find an exact match. Did you mean one of these?"
-    elif reason == "missing_product_name":
-        header = "Which product would you like?"
+    elif reason in {"missing_catalog_name"}:
+        header = "Which item would you like?"
     else:
-        header = "Could you clarify which product you meant?"
+        header = "Could you clarify which item you meant?"
 
     question = header
     if numbered:
         question += "\n\n" + "\n".join(numbered)
-        question += "\n\nReply with the **number**, the **product id**, or the **name**."
+        question += "\n\nReply with the **number**, the **catalog id**, or the **name**."
 
     # Persist disambiguation context so the next user message can resolve it
     disamb_id = str(uuid4())

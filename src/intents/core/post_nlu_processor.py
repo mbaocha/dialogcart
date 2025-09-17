@@ -5,12 +5,10 @@ This module processes the output from Rasa NLU (entities, intents, confidence)
 and converts it into structured actions with business logic applied.
 """
 from typing import List
-from .models import IntentMeta, Entity, Action
+from .models import Action
 from .confidence import score_to_bucket
+from .entity_processor import process_entities
 import re
-import pathlib
-import yaml
-import sys
 
 
 def _load_verb_map_from_training() -> dict[str, str]:
@@ -56,32 +54,44 @@ def _map_verb_to_action(verb: str) -> str:
     return v
 
 
-def _parse_shopping_command(entities: List[dict], confidence: str, confidence_score: float, slots: dict = None) -> List[Action]:
-    """Parse modify_cart entities into multiple actions using verb-segmented FIFO queues."""
-    if not entities:
-        return []
 
+def _parse_shopping_command(entities: List[dict], confidence: str, confidence_score: float, slots: dict = None, source_text: str = "") -> List[Action]:
+    """Parse modify_cart entities into multiple actions using verb-segmented FIFO queues."""
     # Debug logging
     print(f"DEBUG: _parse_shopping_command entities: {entities}")
     print(f"DEBUG: _parse_shopping_command slots: {slots}")
-    
-    # Check if we need to add missing product from slot memory
+
+    # Only use slot memory to fill product when the user used a pronoun
+    text_lower = (source_text or "").lower()
+    pronouns = {"it", "this", "that", "them", "these", "those"}
+    is_pronoun_ref = any(p in text_lower for p in pronouns)
+
+    # Check if we need to add missing product from slot memory (pronoun-only)
     has_product_entity = any(e.get("entity") == "product" for e in entities)
-    if not has_product_entity and slots:
-        # Try to get product from slot memory
+    if not has_product_entity and slots and is_pronoun_ref:
         product_from_slots = slots.get("last_mentioned_product") or slots.get("last_product_added")
         if product_from_slots:
-            # Find the earliest position of other entities to group with them
             earliest_start = min([e.get("start", 0) for e in entities if e.get("start", 0) >= 0], default=0)
-            # Add a virtual product entity from slot memory at the same position as other entities
             entities.append({
                 "entity": "product",
                 "value": product_from_slots,
-                "start": earliest_start,  # Group with existing entities
+                "start": earliest_start,
                 "end": earliest_start,
-                "confidence": 0.8  # Lower confidence for slot-based entity
+                "confidence": 0.8
             })
             print(f"DEBUG: Added product from slot memory: {product_from_slots} at position {earliest_start}")
+
+    # Check for ambiguous product references and set to null if no context
+    ambiguous_products = {"it", "this", "that", "them", "these", "those"}
+    for entity in entities:
+        if entity.get("entity") == "product" and str(entity.get("value", "")).lower() in ambiguous_products:
+            has_context = slots and (slots.get("last_mentioned_product") or slots.get("last_product_added"))
+            if not has_context:
+                entity["value"] = None
+                print("DEBUG: Set ambiguous product to null (no context)")
+
+    # Process entities: deduplicate and expand single-token products
+    entities = process_entities(entities, source_text)
 
     # Sort entities by start position
     entities_by_pos = sorted(entities, key=lambda x: x.get("start", 0))
@@ -96,6 +106,13 @@ def _parse_shopping_command(entities: List[dict], confidence: str, confidence_sc
         quantities = seg.get("quantities", [])
         units = seg.get("units", [])
         containers = seg.get("containers", [])
+        variants = seg.get("variants", [])
+        sizes = seg.get("sizes", [])
+        colors = seg.get("colors", [])
+        fits = seg.get("fits", [])
+        flavors = seg.get("flavors", [])
+        diets = seg.get("diets", [])
+        roasts = seg.get("roasts", [])
 
         # Default verb → add
         if not verb:
@@ -114,64 +131,61 @@ def _parse_shopping_command(entities: List[dict], confidence: str, confidence_sc
         print(f"DEBUG: verb='{verb}' -> action='{action_name}'")
 
         if action_name == "set":
-            # --- Replace case ---
-            if len(products) >= 2:
-                if products[0].lower() == products[1].lower():
-                    # self-replace → treat as update
-                    products = products[:1]
-
-                else:
-                    # Proper replace
-                    action_dict = {
-                        "action": "set",
-                        "product_from": products[0],
-                        "product_to": products[1],
-                        "product": products[1],  # backward compat
-                    }
-                    if quantities:
-                        action_dict["quantity"] = quantities[0]
-                    if units:
-                        action_dict["unit"] = units[0]
-                    if containers:
-                        action_dict["container"] = containers[-1]
-                    out_actions.append(_create_action_from_dict(action_dict, confidence, confidence_score))
-                    return
-
-            # --- Update case ---
-            max_pairs = max(len(products), len(quantities), len(units))
-            for i in range(max_pairs):
-                if i < len(products):
-                    action_dict = {"action": "set", "product": products[i]}
-                    if i < len(quantities):
-                        action_dict["quantity"] = quantities[i]
-                    if units:
-                        action_dict["unit"] = units[0] if len(units) == 1 else units[i]
-                    if containers:
-                        action_dict["container"] = containers[-1]
-                    out_actions.append(_create_action_from_dict(action_dict, confidence, confidence_score))
-
+            ...
         else:
             # --- Add / Remove ---
             print(f"DEBUG: finalize_segment - products: {products}, quantities: {quantities}, units: {units}")
-            max_pairs = max(len(products), len(quantities), len(units))
+            max_pairs = max(
+                len(products), len(quantities), len(units), len(variants),
+                len(sizes), len(colors), len(fits), len(flavors), len(diets), len(roasts)
+            )
             print(f"DEBUG: max_pairs: {max_pairs}")
+
+            if max_pairs == 0:
+                # No explicit product → emit action with product=None (e.g. 'add to cart')
+                action_dict = {"action": action_name}
+                if containers:
+                    action_dict["container"] = containers[-1]
+                print(f"DEBUG: Final action_dict (no product): {action_dict}")
+                out_actions.append(_create_action_from_dict(action_dict, confidence, confidence_score))
+                return
+
             for i in range(max_pairs):
                 if i < len(products):
                     action_dict = {"action": action_name, "product": products[i]}
                     if i < len(quantities):
                         action_dict["quantity"] = quantities[i]
-                        print(f"DEBUG: Added quantity {quantities[i]} to action")
                     if units:
                         action_dict["unit"] = units[0] if len(units) == 1 else units[i]
-                        print(f"DEBUG: Added unit {units[0] if len(units) == 1 else units[i]} to action")
+                    # Build attributes map from optional lists
+                    attrs: dict[str, str] = {}
+                    def pick(lst):
+                        return lst[0] if len(lst) == 1 else lst[i]
+                    if variants:
+                        attrs["variant"] = pick(variants)
+                    if sizes:
+                        attrs["size"] = pick(sizes)
+                    if colors:
+                        attrs["color"] = pick(colors)
+                    if fits:
+                        attrs["fit"] = pick(fits)
+                    if flavors:
+                        attrs["flavor"] = pick(flavors)
+                    if diets:
+                        attrs["diet"] = pick(diets)
+                    if roasts:
+                        attrs["roast"] = pick(roasts)
+                    if attrs:
+                        action_dict["attributes"] = attrs
                     if containers:
                         action_dict["container"] = containers[-1]
+                    # Attributes already attached above
                     print(f"DEBUG: Final action_dict: {action_dict}")
                     out_actions.append(_create_action_from_dict(action_dict, confidence, confidence_score))
-
     # --- Segment builder ---
     segments = []
-    current = {"verb": None, "products": [], "quantities": [], "units": [], "containers": []}
+    current = {"verb": None, "products": [], "quantities": [], "units": [], "containers": [], "variants": [],
+               "sizes": [], "colors": [], "fits": [], "flavors": [], "diets": [], "roasts": []}
 
     for e in entities_by_pos:
         et, ev = e.get("entity"), e.get("value")
@@ -192,6 +206,20 @@ def _parse_shopping_command(entities: List[dict], confidence: str, confidence_sc
             current["units"].append(ev)
         elif et == "container":
             current["containers"].append(ev)
+        elif et == "variant":
+            current["variants"].append(ev)
+        elif et == "size":
+            current["sizes"].append(ev)
+        elif et == "color":
+            current["colors"].append(ev)
+        elif et == "fit":
+            current["fits"].append(ev)
+        elif et == "flavor":
+            current["flavors"].append(ev)
+        elif et == "diet":
+            current["diets"].append(ev)
+        elif et == "roast":
+            current["roasts"].append(ev)
 
     if current["verb"] or current["products"] or current["quantities"] or current["units"] or current["containers"]:
         segments.append(current)
@@ -289,10 +317,8 @@ def map_rasa_to_actions(rasa_json) -> List[Action]:
 
     # Parse shopping command into actions (with slot memory support)
     slots = rasa_json.get("slots", {})
-    actions =  _parse_shopping_command(entities, confidence, conf_score, slots)
+    actions =  _parse_shopping_command(entities, confidence, conf_score, slots, source_text)
     actions = _deduplicate_actions(actions)
 
     return actions
-
-
 

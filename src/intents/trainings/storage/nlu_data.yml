@@ -75,6 +75,12 @@ nlu:
     - cut down
     - dec
     - take away
+    - replace
+    - swap
+    - switch
+    - switch out
+    - substitute
+    - exchange
 
 
 
@@ -160,6 +166,26 @@ nlu:
     - bunch
     - packet
     - pack
+    - pair
+    - set
+    - piece
+    - pcs
+    - bundle
+    - box
+    - jar
+    - tube
+    - palette
+    - compact
+    - kit
+    - sheet
+    - ml
+    - l
+    - oz
+    - fl oz
+    - spray
+    - can
+    - roll
+    - strip
 
 - lookup: container
   examples: |
@@ -169,24 +195,227 @@ nlu:
 
 - lookup: product
   examples: |
-    - kwulikwili
-    - yam
     - rice
     - beans
-    - fish
-    - plantain
     - oil
-    - sugar
-    - salt
-    - crayfish
-    - tomatoes
-    - noodles
-    - garri
-    - semovita
-    - milk
-    - flour
+    - fish
     - bread
-    - butter
+    - milk
+    - yam
+    - red oil
+    - brown beans
+    - cow skin
+    - bush meat
+    - frozen chicken
+    - dry fish
+    - long grain rice
+    - tin tomatoes paste
+    - smoked turkey wings
+    - sweet potato flour
+    - brown dried cat fish
+    - red italian perfume
+    - fresh organic honey jar
+    # Beauty - fragrances (multi-word)
+    - bleu de chanel
+    - dior sauvage
+    - ysl libre
+    - gucci bloom
+    - armani si
+    - tom ford black orchid
+    - jo malone english pear and freesia
+    - versace dylan blue
+    - lancome la vie est belle
+    - miss dior blooming bouquet
+    - carolina herrera good girl
+    - jean paul gaultier le male
+    - chanel chance eau tendre
+    - giorgio armani acqua di gio
+    - paco rabanne 1 million
+    - creed aventus
+    - narciso rodriguez for her
+    - victoria's secret bombshell
+    - ck one
+    - hugo boss bottled
+    # Fashion - brand models
+    - nike air force 1
+    - adidas ultraboost 22
+    - converse chuck taylor all star
+    - new balance 990 v5
+    - vans old skool
+    - levis 511 slim fit jeans
+    - ralph lauren polo shirt
+    - uniqlo ultra light down jacket
+    - zara midi summer dress
+    - dr martens 1460 boots
+    - clarks desert boots
+    - north face puffer jacket
+    - patagonia nano puff jacket
+    - ray ban wayfarer sunglasses
+    - casio g shock watch
+    # Beauty - sizes and shades
+    - liquid foundation shade 220
+    - liquid foundation shade 240
+    - concealer shade 3n
+    - concealer shade 2w
+    - lipstick shade ruby woo
+    - lipstick shade velvet teddy
+    - sunscreen spf 50 200 ml
+    - sunscreen spf 50 100 ml
+    - vitamin c serum 30 ml
+    - hyaluronic acid serum 50 ml
+    - makeup remover wipes sensitive skin
+    - matte liquid lipstick cherry red
+    # Fashion
+    - t-shirt
+    - crew neck t-shirt
+    - men's polo shirt
+    - women's blouse
+    - slim fit jeans
+    - denim jacket
+    - black hoodie
+    - yoga leggings
+    - cargo shorts
+    - chinos
+    - formal shirt
+    - leather belt
+    - cotton socks
+    - wool scarf
+    - baseball cap
+    - beanie hat
+    - raincoat
+    - summer dress
+    - evening gown
+    - ankle boots
+    - high heels
+    - running shoes
+    - white sneakers
+    - sunglasses
+    - wrist watch
+    - bow tie
+    # Beauty
+    - face moisturizer
+    - hydrating face cream
+    - vitamin c serum
+    - hyaluronic acid serum
+    - retinol night cream
+    - sunscreen spf 50
+    - mineral sunscreen
+    - gentle face wash
+    - micellar cleansing water
+    - shampoo
+    - conditioner
+    - hair mask
+    - argan oil hair serum
+    - lip balm
+    - matte liquid lipstick
+    - nude lipstick
+    - eyeliner pencil
+    - waterproof mascara
+    - eyeshadow palette
+    - compact powder
+    - liquid foundation
+    - makeup remover wipes
+    - hand cream
+    - body lotion
+    - body butter
+    - bath salts
+    - beard oil
+    - after shave balm
+    - nail polish remover
+    - gel nail polish
+
+- lookup: variant
+  examples: |
+    - eau de parfum
+    - eau de toilette
+    - eau de cologne
+    - edp
+    - edt
+    - cologne
+    - perfume
+    - parfum
+    - fragrance
+    - pour homme
+    - pour femme
+    - intense
+    - elixir
+
+- lookup: size
+  examples: |
+    - xs
+    - s
+    - m
+    - l
+    - xl
+    - xxl
+    - 28
+    - 30
+    - 32
+    - 34
+    - 36
+    - 38
+    - 40
+    - 42
+    - 44
+    - 46
+    - 32w
+    - 34w
+    - 36w
+    - 38w
+    - 40w
+
+- lookup: color
+  examples: |
+    - black
+    - white
+    - navy
+    - blue
+    - red
+    - green
+    - beige
+    - brown
+    - grey
+    - gray
+    - pink
+    - purple
+
+- lookup: fit
+  examples: |
+    - slim fit
+    - regular fit
+    - relaxed fit
+    - skinny
+    - straight
+    - tapered
+
+- lookup: flavor
+  examples: |
+    - vanilla
+    - chocolate
+    - strawberry
+    - mango
+    - lemon
+    - bbq
+    - spicy
+    - garlic
+    - tomato basil
+
+- lookup: diet
+  examples: |
+    - sugar free
+    - gluten free
+    - dairy free
+    - vegan
+    - keto
+    - low sodium
+    - organic
+
+- lookup: roast
+  examples: |
+    - light roast
+    - medium roast
+    - dark roast
+
 
 - synonym: view
   examples: |
@@ -270,11 +499,41 @@ nlu:
     - [throw in](verb) [2](quantity) [kg](unit) [rice](product)
     - [buy](verb) [3](quantity) [kg](unit) [rice](product)
     - [include](verb) [5](quantity) [crate](unit) [noodles](product)
+    # Multi-word product examples to help DIET generalize
+    - [add](verb) [red beans](product) to [cart](container)
+    - [add](verb) [green groundnut](product) to [cart](container)
+    - [add](verb) [red oil](product) to [cart](container)
+    - [add](verb) [brown beans](product) to [cart](container)
+    - [add](verb) [groundnut cooking oil](product) to [cart](container)
     
     - [add](verb) [2](quantity) [kg](unit) [rice](product)
     - please [add](verb) [5](quantity) [packet](unit) [yam](product)
     - [add](verb) [3](quantity) [bag](unit) [beans](product), kindly
     - could you [add](verb) [2](quantity) [crate](unit) [milk](product)
+    # Fashion add
+    - [add](verb) [1](quantity) [pair](unit) [white sneakers](product) to [cart](container)
+    - [put](verb) [2](quantity) [piece](unit) [cotton socks](product) in my [cart](container)
+    - [include](verb) [1](quantity) [set](unit) [leather belt](product) and [wool scarf](product) in [cart](container)
+    - [throw in](verb) [1](quantity) [piece](unit) [black hoodie](product)
+    - [buy](verb) [1](quantity) [piece](unit) [denim jacket](product)
+    - [add](verb) [1](quantity) [piece](unit) [slim fit jeans](product) [32W](size) [black](color)
+    - [add](verb) [1](quantity) [piece](unit) [crew neck t-shirt](product) [M](size) [white](color) [regular fit](fit)
+    # Beauty add
+    - [add](verb) [1](quantity) [jar](unit) [face moisturizer](product) to [cart](container)
+    - [add](verb) [2](quantity) [bottle](unit) [vitamin c serum](product)
+    - [put](verb) [1](quantity) [tube](unit) [retinol night cream](product) in [cart](container)
+    - [include](verb) [1](quantity) [palette](unit) [eyeshadow palette](product)
+    - [buy](verb) [1](quantity) [spray](unit) [sunscreen spf 50](product)
+    - [add](verb) [1](quantity) [bottle](unit) [gucci bloom](product) [eau de parfum](variant) to [cart](container)
+    - [add](verb) [1](quantity) [bottle](unit) [dior sauvage](product) [eau de toilette](variant)
+    # Extra groceries add to maintain 50% share
+    - [add](verb) [2](quantity) [kg](unit) [long grain rice](product)
+    - [add](verb) [1](quantity) [bottle](unit) [red oil](product) to [cart](container)
+    - [put](verb) [3](quantity) [packet](unit) [brown beans](product) into [cart](container)
+    - [include](verb) [2](quantity) [tin](unit) [tomato paste](product) [garlic](flavor)
+    - [buy](verb) [1](quantity) [crate](unit) [eggs](product)
+    - [add](verb) [1](quantity) [bag](unit) [coffee beans](product) [medium roast](roast)
+    - [add](verb) [2](quantity) [pack](unit) [cookies](product) [chocolate](flavor) [gluten free](diet)
 
 
 
@@ -298,6 +557,22 @@ nlu:
     - [take off](verb) [9](quantity) [bag](unit) [rice](product)
     - [get rid of](verb) [12](quantity) [pack](unit) [salt](product)
     - [subtract](verb) [4](quantity) [packet](unit) [salt](product)
+    # Fashion remove
+    - [remove](verb) [white sneakers](product) from [cart](container)
+    - [take off](verb) [2](quantity) [piece](unit) [cotton socks](product)
+    - [drop](verb) [leather belt](product) from my [cart](container)
+    - [remove](verb) [crew neck t-shirt](product) [M](size) [white](color)
+    # Beauty remove
+    - [delete](verb) [lip balm](product)
+    - [take out](verb) [1](quantity) [bottle](unit) [vitamin c serum](product)
+    - [remove](verb) [eyeliner pencil](product) from [cart](container)
+    # Extra groceries remove to maintain 50% share
+    - [remove](verb) [long grain rice](product) from [cart](container)
+    - [drop](verb) [groundnut cooking oil](product) from my [cart](container)
+    - [take out](verb) [fresh tomatoes](product) from [cart](container)
+    - [delete](verb) [1](quantity) [tin](unit) [tomato paste](product) [garlic](flavor)
+    - [reduce](verb) [2](quantity) [packet](unit) [noodles](product)
+    - [remove](verb) [coffee beans](product) [dark roast](roast)
 
     # ─── SET / UPDATE ACTIONS ─────────────────────
     - [set](verb) [rice](product) to [2](quantity) [bag](unit)
@@ -312,6 +587,28 @@ nlu:
     - [set](verb) [rice](product) to [2](quantity) [kg](unit) and [bump](verb) [rice](product) [1](quantity) [kg](unit)
     - [make](verb) [rice](product) exactly [2](quantity) [kg](unit)
     - [update](verb) [beans](product) to [3](quantity) [packet](unit) & [more](verb) [flour](product)
+    # Fashion set/update
+    - [set](verb) [white sneakers](product) to [1](quantity) [pair](unit)
+    - [update](verb) [cotton socks](product) to [3](quantity) [pair](unit)
+    - [make it](verb) [black hoodie](product) [2](quantity) [piece](unit)
+    - [switch](verb) to [slim fit jeans](product) to [1](quantity) [piece](unit)
+    - [replace](verb) [cargo shorts](product) with [1](quantity) [piece](unit) of [chinos](product)
+    - [set](verb) [crew neck t-shirt](product) to [L](size) [navy](color) [regular fit](fit)
+    - [update](verb) [slim fit jeans](product) to [32W](size) [black](color)
+    # Beauty set/update
+    - [set](verb) [face moisturizer](product) to [2](quantity) [jar](unit)
+    - [update](verb) [vitamin c serum](product) to [2](quantity) [bottle](unit)
+    - [increase](verb) [sunscreen spf 50](product) by [1](quantity) [spray](unit)
+    - [decrease](verb) [lip balm](product) by [1](quantity) [piece](unit)
+    - [replace](verb) [eyeliner pencil](product) with [1](quantity) [piece](unit) of [waterproof mascara](product)
+    # Extra groceries set/update to maintain 50% share
+    - [set](verb) [long grain rice](product) to [5](quantity) [kg](unit)
+    - [update](verb) [groundnut cooking oil](product) to [2](quantity) [bottle](unit)
+    - [make](verb) [fresh tomatoes](product) exactly [4](quantity) [kg](unit)
+    - [increase](verb) [noodles](product) by [2](quantity) [packet](unit)
+    - [decrease](verb) [brown beans](product) by [1](quantity) [packet](unit)
+    - [update](verb) [coffee beans](product) to [medium roast](roast)
+    - [set](verb) [cookies](product) to [vanilla](flavor) [gluten free](diet)
 
     # ─── MIXED MULTI-ACTIONS ──────────────────────
     - [add more](verb) [10](quantity) [kg](unit) of [rice](product), [delete](verb) [plantain](product), [subtract](verb) [tomatoes](product)
@@ -329,6 +626,15 @@ nlu:
     - [update](verb) [bread](product) to [2](quantity) [packet](unit), then [bump](verb) [bread](product) [2](quantity) [packet](unit)
     - [make](verb) [tomatoes](product) exactly [5](quantity) [kg](unit), and [increase](verb) [tomatoes](product) [1](quantity) [kg](unit)
     - [switch](verb) [beans](product) to [4](quantity) [pack](unit), then [add more](verb) [2](quantity) [pack](unit) [beans](product)
+    # Fashion mixed
+    - [add](verb) [1](quantity) [pair](unit) [white sneakers](product) and [drop](verb) [leather belt](product), [set](verb) [cotton socks](product) to [3](quantity) [pair](unit)
+    - [buy](verb) [1](quantity) [piece](unit) [denim jacket](product) and [remove](verb) [yoga leggings](product) from my [cart](container)
+    # Beauty mixed
+    - [include](verb) [1](quantity) [jar](unit) [face moisturizer](product) and [delete](verb) [lip balm](product), [make](verb) [sunscreen spf 50](product) [2](quantity) [spray](unit)
+    - [add on](verb) [1](quantity) [palette](unit) [eyeshadow palette](product), [change](verb) [liquid foundation](product) to [2](quantity) [compact](unit)
+    # Extra groceries mixed to maintain 50% share
+    - [throw in](verb) [1](quantity) [crate](unit) [eggs](product) and [drop](verb) [fresh tomatoes](product), [set](verb) [long grain rice](product) to [10](quantity) [kg](unit)
+    - [buy](verb) [2](quantity) [tin](unit) [tomato paste](product) and [remove](verb) [brown beans](product), [update](verb) [groundnut cooking oil](product) to [2](quantity) [bottle](unit)
 
 
     - [remove](verb) [crayfish](product); [7](quantity) [bag](unit) [yam](product) to cart
@@ -353,9 +659,17 @@ nlu:
     - [cancel](verb) [6](quantity) [bottle](unit) [sugar](product)
     - [rm](verb) [8](quantity) [pack](unit) [tomatoes](product)
     - [get rid of](verb) [9](quantity) [kg](unit) [rice](product)
+    # Fashion targeted
+    - [remove](verb) [1](quantity) [pair](unit) [white sneakers](product)
+    - [subtract](verb) [2](quantity) [piece](unit) [cotton socks](product)
+    # Beauty targeted
+    - [take out](verb) [1](quantity) [jar](unit) [face moisturizer](product)
+    - [reduce](verb) [1](quantity) [bottle](unit) [vitamin c serum](product)
+    # Extra groceries targeted to maintain 50% share
+    - [subtract](verb) [2](quantity) [packet](unit) [noodles](product)
+    - [cancel](verb) [1](quantity) [kg](unit) [fresh tomatoes](product)
 
     # ─── TARGETED FIXES (REMOVE + ADD MIXED) ──────
-    - [remove](verb) [crayfish](product); [7](quantity) [bag](unit) [yam](product) to cart
     - [delete](verb) [bread](product); [2](quantity) [crate](unit) [milk](product) to cart
     - [take out](verb) [salt](product), [5](quantity) [packet](unit) [sugar](product) to cart
     - [remove](verb) [plantain](product) from my [cart](container), [3](quantity) [kg](unit) [rice](product) to cart
@@ -365,6 +679,15 @@ nlu:
     - [get rid of](verb) [salt](product), [12](quantity) [crate](unit) [noodles](product) to cart
     - [rm](verb) [garri](product), [5](quantity) [carton](unit) [beans](product) in my cart
     - [remove](verb) [rice](product); [9](quantity) [packet](unit) [tomatoes](product) to cart
+    # Fashion targeted mixed
+    - [drop](verb) [leather belt](product); [2](quantity) [pair](unit) [cotton socks](product) to cart
+    - [remove](verb) [yoga leggings](product); [1](quantity) [piece](unit) [black hoodie](product) into cart
+    # Beauty targeted mixed
+    - [delete](verb) [lip balm](product); [1](quantity) [jar](unit) [face moisturizer](product) to cart
+    - [take out](verb) [eyeliner pencil](product); [1](quantity) [bottle](unit) [vitamin c serum](product) to cart
+    # Extra groceries targeted mixed to maintain 50% share
+    - [remove](verb) [fresh tomatoes](product); [2](quantity) [tin](unit) [tomato paste](product) to cart
+    - [drop](verb) [brown beans](product); [1](quantity) [bottle](unit) [groundnut cooking oil](product) into cart
 
     # ─── CONTEXTUAL UPDATES (referring to previous product) ──────────────────────
     - [make it](verb) [8](quantity) [kg](unit)
@@ -382,6 +705,47 @@ nlu:
     - [set it](verb) [7](quantity) [bottle](unit)
     - [modify it](verb) [9](quantity) [kg](unit)
     - [change it to](verb) [15](quantity) [packet](unit)
+    - [add](verb) [it](product) to [cart](container)
+    - [add](verb) [it](product)
+    - [put](verb) [it](product) in [cart](container)
+    - [remove](verb) [it](product) from [cart](container)
+    - [change](verb) [it](product) to [2](quantity) [kg](unit)
+    - [set](verb) [it](product) to [3](quantity) [bottle](unit)
+    - [update](verb) [it](product)
+    - [modify](verb) [it](product)
+    - [add](verb) [this](product) to [cart](container)
+    - [add](verb) [that](product) to [cart](container)
+    - [add](verb) [them](product) to [cart](container)
+    - [add](verb) [these](product) to [cart](container)
+    - [add](verb) [those](product) to [cart](container)
+    - [add](verb) to [cart](container)
+    - [add](verb)
+
+    # OOV product modify cart examples
+    - [add](verb) [patari](product) to [cart](container)
+    - [add](verb) [2](quantity) [kg](unit) [uchicha](product)
+    - [remove](verb) [bambara beans](product) from [cart](container)
+    - [put](verb) [kulikoko](product) in [cart](container)
+    - [buy](verb) [okpa](product)
+    - [get](verb) [fonio](product)
+    - [include](verb) [zobo leaves](product)
+    - [add](verb) [dried cat fish](product) to [cart](container)
+    - [remove](verb) [palm kernel oil](product) from [cart](container)
+    - [put](verb) [groundnut cooking oil](product) in [cart](container)
+    - [buy](verb) [african bush mango](product)
+    - [include](verb) [smoked turkey wings](product)
+    - [remove](verb) [yellow garri](product) from [cart](container)
+    - [buy](verb) [white yam](product)
+    - [include](verb) [brown beans](product)
+    - [add](verb) [fresh tomatoes](product) to [cart](container)
+    - [remove](verb) [dried cat fish](product) from [cart](container)
+    - [buy](verb) [ripe plantain](product)
+
+
+
+
+
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -398,6 +762,50 @@ nlu:
     - do you [stock](action) [sugar](product)?
     - is [oil](product) on your [list](action)?
     - are you [selling](action) [garri](product) right now?
+    # Fashion availability
+    - do you [sell](action) [white sneakers](product)?
+    - is [denim jacket](product) [available](action)?
+    - can I [get](action) [slim fit jeans](product)?
+    - do you [carry](action) [black hoodie](product)?
+    - have you [got](action) [cotton socks](product) in stock?
+    - do you [stock](action) [summer dress](product)?
+    - are you [selling](action) [ankle boots](product) right now?
+    - do you [sell](action) [crew neck t-shirt](product) [M](size) [white](color) [regular fit](fit)?
+    # Beauty availability
+    - do you [sell](action) [face moisturizer](product)?
+    - is [vitamin c serum](product) [available](action)?
+    - can I [get](action) [sunscreen spf 50](product) from you?
+    - do you [carry](action) [eyeshadow palette](product)?
+    - have you [got](action) [retinol night cream](product) in stock?
+    - do you [stock](action) [waterproof mascara](product)?
+    - are you [selling](action) [liquid foundation](product) right now?
+    # Extra groceries availability to maintain 50% share
+    - do you [sell](action) [long grain rice](product)?
+    - is [groundnut cooking oil](product) [available](action)?
+    - can I [get](action) [fresh tomatoes](product)?
+    - do you [carry](action) [brown beans](product)?
+    - have you [got](action) [tomato paste](product) in stock?
+    - do you [stock](action) [cookies](product) [gluten free](diet) [chocolate](flavor)?
+    - is [coffee beans](product) [medium roast](roast) [available](action)?
+    # Fragrance availability
+    - do you [sell](action) [dior sauvage](product) [eau de toilette](variant)?
+    - is [bleu de chanel](product) [eau de parfum](variant) [available](action)?
+    - can I [get](action) [tom ford black orchid](product)?
+    - do you [carry](action) [creed aventus](product)?
+    - have you [got](action) [armani si](product) [intense](variant) in stock?
+    - do you [stock](action) [jo malone english pear and freesia](product) [cologne](variant)?
+
+    # OOV product availability checks
+    - do you [sell](action) [dried cat fish](product)?
+    - is [uchicha](product) [available](action)?
+    - do you [sell](action) [green groundnut](product)?
+    - is [fresh tomatoes](product) [available](action)?
+    - can I [get](action) [ripe plantain](product) from you?
+    - do you [carry](action) [white yam](product)?
+    - have you [got](action) [yellow garri](product) in stock?
+    - do you [stock](action) [dried cat fish](product)?
+    - is [local rice](product) on your [list](action)?
+    - are you [selling](action) [brown beans](product) right now?
 
     # Price inquiries
     - [how much](action) is [rice](product)?
@@ -413,6 +821,59 @@ nlu:
     - can i know [how much](action) you [sell](action) [yam](product)?
     - could you tell me [how much](action) you [sell](action) [garri](product)?
     - please tell me [how much](action) you [sell](action) [yam](product)
+    # Fashion price
+    - [how much](action) are [white sneakers](product)?
+    - what does [denim jacket](product) [cost](action)?
+    - [price](action) of [slim fit jeans](product)
+    - tell me the [cost](action) of [black hoodie](product)
+    - what's the [price](action) for [cotton socks](product)?
+    - give me the [rate](action) for [summer dress](product)
+    - [how much](action) is [crew neck t-shirt](product) [M](size) [white](color) [regular fit](fit)?
+    # Beauty price
+    - [how much](action) is [face moisturizer](product)?
+    - what does [vitamin c serum](product) [cost](action)?
+    - [price](action) of [sunscreen spf 50](product)
+    - tell me the [cost](action) of [eyeshadow palette](product)
+    - what's the [price](action) for [waterproof mascara](product)?
+    - give me the [rate](action) for [liquid foundation](product)
+    # Extra groceries price to maintain 50% share
+    - [how much](action) is [long grain rice](product)?
+    - what does [groundnut cooking oil](product) [cost](action)?
+    - [price](action) of [fresh tomatoes](product)
+    - tell me the [cost](action) of [tomato paste](product)
+    - what's the [price](action) for [brown beans](product)?
+    - [price](action) of [cookies](product) [gluten free](diet) [chocolate](flavor)
+    - what does [coffee beans](product) [medium roast](roast) [cost](action)?
+    # Fragrance price
+    - [how much](action) is [dior sauvage](product) [eau de toilette](variant)?
+    - what does [bleu de chanel](product) [eau de parfum](variant) [cost](action)?
+    - [price](action) of [tom ford black orchid](product)
+    - tell me the [cost](action) of [creed aventus](product) [parfum](variant)
+    - what's the [price](action) for [armani si](product) [intense](variant)?
+    - give me the [rate](action) for [jo malone english pear and freesia](product)
+
+    # OOV product availability checks
+    - [how much](action) is [palm kernel oil](product)?
+    - what does [uchicha](product) [cost](action)?
+    - [price](action) of [red oil](product)
+    - tell me the [cost](action) of [cassava flour powder](product)
+    - what's the [price](action) for [zobo leaves](product)?
+    - [how much](action) is [dried cat fish](product)?
+    - what does [palm kernel oil](product) [cost](action)?
+    - [price](action) of [smoked turkey wings](product)
+    - tell me the [cost](action) of [african bush mango](product)
+    - what's the [price](action) for [groundnut cooking oil](product)?
+    - give me the [rate](action) for [red beans](product)
+    - [how much](action) do you [sell](action) [white yam](product)?
+    - [how much](action) is [green groundnut](product)?
+    - what does [fresh tomatoes](product) [cost](action)?
+    - [price](action) of [ripe plantain](product)
+    - tell me the [cost](action) of [white yam](product)
+    - what's the [price](action) for [yellow garri](product)?
+    - give me the [rate](action) for [dried cat fish](product)
+    - [how much](action) do you [sell](action) [local rice](product)?
+    - what is the [going price](action) for [brown beans](product)?
+
 
 
     # Catalog requests
@@ -436,6 +897,10 @@ nlu:
     - let me [look](action) at your catalog
     - do you have a [catalog](action)
     - can you [list](action) what’s in stock
+    - [display](action) the [fashion catalog](product)
+    - [show](action) your [beauty products](product)
+    - let me [see](action) your [makeup collection](product)
+    - can you [list](action) [clothing and shoes](product)
 
 
 

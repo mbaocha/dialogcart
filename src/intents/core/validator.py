@@ -462,6 +462,10 @@ def normalize_rasa_action_with_synonyms(rasa_action: str, filtered_synonyms: Dic
     # No match at all
     return "unknown"
 
+def check_missing_products(user_text: str, rasa_actions: List[Dict]) -> bool:
+    return any(a.get("product") in [None, ""] for a in rasa_actions)
+
+
 
 def check_product_mismatch(user_text: str, rasa_actions: List[Dict]) -> bool:
     _ensure_normalization_data_loaded()
@@ -470,6 +474,18 @@ def check_product_mismatch(user_text: str, rasa_actions: List[Dict]) -> bool:
     text_products = extract_products(user_text, PRODUCTS, PRODUCT_SYNONYMS)
     rasa_products = {a.get("product") for a in rasa_actions if a.get("product")}
     return not text_products.issubset(rasa_products)
+
+def has_invalid_actions_with_synonyms(rasa_actions: List[Dict], filtered_synonyms: Dict[str, List[str]]) -> bool:
+    """Fail if any action is not an exact canonical verb or its synonym."""
+    for a in rasa_actions:
+        raw = (a.get("action") or "").strip()
+        if not raw:
+            return True
+        norm = normalize_rasa_action_with_synonyms(raw, filtered_synonyms)
+        # Reject any action that’s not a clean canonical verb
+        if not norm or norm == "unknown" or norm.startswith("polluted::"):
+            return True
+    return False
 
 # -------------------------------
 # Intent-Specific Validator
@@ -508,7 +524,8 @@ def validate_by_intent(
         ("quantity_mismatch", check_quantity_mismatch(user_text, rasa_actions)),
         ("missing_verbs_in_rasa", check_missing_verbs_in_rasa_with_synonyms(user_text, rasa_actions, filtered_synonyms)),
         ("unexpected_rasa_actions", check_unexpected_rasa_actions_with_synonyms(rasa_actions, filtered_synonyms)),
-        ("product_mismatch", check_product_mismatch(user_text, rasa_actions))
+        ("product_mismatch", check_product_mismatch(user_text, rasa_actions)),
+        ("invalid_actions", has_invalid_actions_with_synonyms(rasa_actions, filtered_synonyms)),
     ]
     
     failed_checks = [check_name for check_name, failed in validation_checks if failed]
@@ -546,6 +563,33 @@ def validate_modify_cart(user_text: str, rasa_response: Dict[str, Any]) -> Dict[
     modify_cart_synonyms = ["add", "remove", "set"]
     return validate_by_intent(user_text, rasa_response, "modify_cart", modify_cart_synonyms)
 
+def check_partial_product(user_text: str, rasa_actions: List[Dict]) -> bool:
+    """
+    Detect if Rasa extracted only a subset of the full noun phrase product.
+    Works for multi-word products like 'red beans' or 'brown dried cat fish'.
+    """
+    if not rasa_actions:
+        return False
+
+    user_text_lower = user_text.lower()
+    rasa_products = [a.get("product", "").lower() for a in rasa_actions if a.get("product")]
+
+    # Use spaCy to extract noun chunks (likely product candidates)
+    doc = nlp(user_text_lower)
+    noun_phrases = [chunk.text.strip().lower() for chunk in doc.noun_chunks]
+
+    for prod in rasa_products:
+        if not prod:
+            continue
+        for np in noun_phrases:
+            if prod in np and prod != np:
+                # Example: prod="meat", np="bush meat" → partial
+                # Example: prod="fish", np="brown dried cat fish" → partial
+                return True
+    return False
+
+
+
 # -------------------------------
 # Validator (Legacy - for backward compatibility)
 # -------------------------------
@@ -559,7 +603,9 @@ def validate_rasa_response(user_text: str, rasa_response: Dict[str, Any]) -> Dic
         ("quantity_mismatch", check_quantity_mismatch(user_text, rasa_actions)),
         ("missing_verbs_in_rasa", check_missing_verbs_in_rasa(user_text, rasa_actions)),
         ("unexpected_rasa_actions", check_unexpected_rasa_actions(rasa_actions)),
-        ("product_mismatch", check_product_mismatch(user_text, rasa_actions))
+        ("product_mismatch", check_product_mismatch(user_text, rasa_actions)),
+        ("missing_products", check_missing_products(user_text, rasa_actions)),
+        ("partial_product", check_partial_product(user_text, rasa_actions))
     ]
     
     failed_checks = [check_name for check_name, failed in validation_checks if failed]

@@ -15,9 +15,11 @@ class CartService:
     def __init__(self, repo: Optional[CartRepo] = None, presenter: Optional[CartPresenter] = None):
         self.repo = repo or CartRepo()
         self.presenter = presenter or CartPresenter()
-        # We'll need a product repo for product lookups
-        from features.product.repo import ProductRepo
-        self.product_repo = ProductRepo()
+        # Catalog lookups
+        from features.catalog.service import CatalogService
+        from features.catalog.repo import CatalogRepo
+        self.catalog_service = CatalogService()
+        self.catalog_repo = CatalogRepo()
     
     def _as_float(self, x) -> float:
         if isinstance(x, Decimal):
@@ -35,11 +37,13 @@ class CartService:
     def add_item_to_cart(
         self,
         user_id: str,
-        product_id: str,
+        catalog_id: str,
         quantity: Optional[float] = None,
+        *,
+        tenant_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Add to cart using product_id.
+        Add to cart using catalog_id.
         Returns:
           - success True with {added_item, cart_contents}
           - success False with error in {"below_minimum","invalid_quantity","insufficient_stock","product_not_found_or_unavailable","missing_*"}
@@ -50,21 +54,38 @@ class CartService:
             quantity = 1
 
         # --- Resolve product ---
-        if not product_id:
-            return standard_response(False, error="product_id_required")
-            
-        product = self.product_repo.get(product_id)
-        if not product or not self._enabled_in_stock(product):
+        if not catalog_id:
+            return standard_response(False, error="catalog_id_required")
+        
+        if not tenant_id:
+            # As a fallback, try default tenant
+            from features.customer import _default_tenant_id
+            tenant_id = _default_tenant_id()
+        
+        # Prefer in-stock variant for the product
+        try:
+            variants, _ = self.catalog_repo.list_variants_for_catalog_item(tenant_id, catalog_id, limit=50)
+        except Exception as e:
+            variants = []
+        chosen = None
+        for v in variants:
+            in_stock = v.get("in_stock")
+            available_qty = v.get("available_qty") or v.get("available_quantity") or 0
+            if in_stock or self._as_float(available_qty) > 0:
+                chosen = v
+                break
+        if not chosen and variants:
+            chosen = variants[0]
+        if not chosen:
             return standard_response(False, error="product_not_found_or_unavailable")
 
-        
         # --- Quantity / stock / allowed checks ---
         qty = self._as_float(quantity)
         if qty <= 0:
             return standard_response(False, error="invalid_quantity")
 
         # Check minimum quantity and adjust if needed
-        aq = product.get("allowed_quantities")
+        aq = (chosen.get("rules") or {}).get("allowed_quantities") or chosen.get("allowed_quantities")
 
         print(f"[DEBUG] add_item_to_cart -> aq: {aq}")
         if isinstance(aq, dict) and "min" in aq:
@@ -81,19 +102,35 @@ class CartService:
                 qty = min_val
 
         # --- Perform add ---
-        item = self.repo.add_item(user_id=user_id, product_id=product_id, quantity=qty)
+        variant_id = chosen.get("variant_id")
+        title = chosen.get("title") or chosen.get("variant_title") or ""
+        price_num = chosen.get("price_num")
+        unit_price = self._as_float(price_num)
 
-        cart_contents = self.repo.get_cart(user_id)
+        item = self.repo.add_item(
+            tenant_id=tenant_id,
+            customer_id=user_id,
+            variant_id=variant_id,
+            catalog_id=catalog_id,
+            title=title,
+            qty=int(qty),
+            unit_price=unit_price,
+        )
+
+        cart_contents = self.repo.get_cart(tenant_id, user_id)
 
         return standard_response(True, data={"added_item": item, "cart_contents": cart_contents})
 
-    def get_cart(self, user_id: str) -> Dict[str, Any]:
+    def get_cart(self, user_id: str, *, tenant_id: Optional[str] = None) -> Dict[str, Any]:
         """Get all items in a user's cart."""
         if not user_id:
             return standard_response(False, error="user_id is required")
         
         try:
-            items = self.repo.get_cart(user_id)
+            if not tenant_id:
+                from features.customer import _default_tenant_id
+                tenant_id = _default_tenant_id()
+            items = self.repo.get_cart(tenant_id, user_id)
             
             # Calculate cart total from line totals
             cart_total = sum(item.get("line_total", 0) for item in items)
@@ -105,13 +142,16 @@ class CartService:
         except Exception as e:
             return standard_response(False, error=str(e))
 
-    def get_cart_formatted(self, user_id: str) -> Dict[str, Any]:
+    def get_cart_formatted(self, user_id: str, *, tenant_id: Optional[str] = None) -> Dict[str, Any]:
         """Get cart items formatted in a bullet-point style similar to product listings."""
         if not user_id:
             return standard_response(False, error="user_id is required")
         
         try:
-            items = self.repo.get_cart(user_id)
+            if not tenant_id:
+                from features.customer import _default_tenant_id
+                tenant_id = _default_tenant_id()
+            items = self.repo.get_cart(tenant_id, user_id)
             
             if not items:
                 return standard_response(True, data={
@@ -183,45 +223,92 @@ class CartService:
         except Exception as e:
             return standard_response(False, error=str(e))
     
-    def remove_item(self, user_id: str, product_id: str) -> Dict[str, Any]:
-        """Remove a specific product from a user's shopping cart."""
-        if not user_id or not product_id:
-            return standard_response(False, error="user_id and product_id are required")
-        
-        try:
-            success = self.repo.remove_item(user_id, product_id)
-            return standard_response(success, data={"removed": success} if success else None)
-        except Exception as e:
-            return standard_response(False, error=str(e))
-    
-    def update_cart_quantity(self, user_id: str, product_id: str, quantity: float, update_op: str = "set") -> Dict[str, Any]:
-        """
-        Update the quantity of a specific product in a user's shopping cart.
+    def remove_item(self, user_id: str, catalog_id: str, *, tenant_id: Optional[str] = None, quantity: Optional[int] = None) -> Dict[str, Any]:
+        """Remove a specific catalog item from a user's shopping cart.
+        Resolves the variant_id from the user's cart for the given catalog_id.
         
         Args:
             user_id: The user's ID
-            product_id: The product ID to update
+            catalog_id: The catalog ID to remove
+            tenant_id: Optional tenant ID
+            quantity: Optional quantity to reduce by. If None, removes the entire item.
+        """
+        if not user_id or not catalog_id:
+            return standard_response(False, error="user_id and catalog_id are required")
+
+        try:
+            if not tenant_id:
+                from features.customer import _default_tenant_id
+                tenant_id = _default_tenant_id()
+
+            # Find the matching variant in the user's cart for this catalog_id
+            items = self.repo.get_cart(tenant_id, user_id)
+            match_variant_id: Optional[str] = None
+            current_quantity: Optional[int] = None
+            for it in items:
+                if it.get("catalog_id") == catalog_id or it.get("product_id") == catalog_id:
+                    match_variant_id = it.get("variant_id")
+                    current_quantity = it.get("qty", 0)
+                    break
+
+            if not match_variant_id:
+                return standard_response(False, error="catalog_item_not_found_in_cart")
+
+            if quantity is None:
+                # Remove the entire item
+                success = self.repo.remove_item(tenant_id, user_id, match_variant_id)
+                return standard_response(success, data={"removed": success, "action": "removed_entirely"} if success else None)
+            else:
+                # Reduce quantity by the specified amount
+                if quantity <= 0:
+                    return standard_response(False, error="quantity_must_be_positive")
+                
+                if quantity >= current_quantity:
+                    # If reducing by >= current quantity, remove the entire item
+                    success = self.repo.remove_item(tenant_id, user_id, match_variant_id)
+                    return standard_response(success, data={"removed": success, "action": "removed_entirely", "reduced_by": quantity} if success else None)
+                else:
+                    # Reduce the quantity
+                    success = self.repo.reduce_quantity(tenant_id, user_id, match_variant_id, quantity)
+                    return standard_response(success, data={"reduced": success, "action": "reduced_quantity", "reduced_by": quantity, "remaining": current_quantity - quantity} if success else None)
+        except Exception as e:
+            return standard_response(False, error=str(e))
+    
+    def update_cart_quantity(self, user_id: str, catalog_id: str, quantity: float, update_op: str = "set", *, tenant_id: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Update the quantity of a specific catalog item in a user's shopping cart.
+        
+        Args:
+            user_id: The user's ID
+            catalog_id: The catalog ID to update
             quantity: The quantity value (absolute for 'set', relative for 'increase'/'decrease')
             update_op: Operation type - 'set' (default), 'increase', or 'decrease'
         
         Returns:
             Standard response with success status and data
         """
-        if not user_id or not product_id or quantity is None:
-            return standard_response(False, error="user_id, product_id, and quantity are required")
+        if not user_id or not catalog_id or quantity is None:
+            return standard_response(False, error="user_id, catalog_id, and quantity are required")
         
         if update_op not in ["set", "increase", "decrease"]:
             return standard_response(False, error="update_op must be 'set', 'increase', or 'decrease'")
         
         try:
-            # Get current cart to find existing quantity
-            current_cart = self.repo.get_cart(user_id)
+            # Ensure tenant id
+            if not tenant_id:
+                from features.customer import _default_tenant_id
+                tenant_id = _default_tenant_id()
+
+            # Get current cart to find existing quantity and variant
+            current_cart = self.repo.get_cart(tenant_id, user_id)
             current_item = None
+            variant_id: Optional[str] = None
             
             # Find the specific product in the cart
             for item in current_cart:
-                if item.get("product_id") == product_id:
+                if item.get("catalog_id") == catalog_id or item.get("product_id") == catalog_id:
                     current_item = item
+                    variant_id = item.get("variant_id")
                     break
             
             if not current_item:
@@ -239,8 +326,10 @@ class CartService:
             
             # Validate final quantity
             if final_quantity <= 0:
-                # If quantity becomes 0 or negative, remove the item
-                success = self.repo.remove_item(user_id, product_id)
+                # If quantity becomes 0 or negative, remove the item by variant
+                if not variant_id:
+                    return standard_response(False, error="variant_not_found_for_item")
+                success = self.repo.remove_item(tenant_id, user_id, variant_id)
                 if success:
                     return standard_response(True, data={
                         "updated": True,
@@ -254,7 +343,9 @@ class CartService:
                     return standard_response(False, error="Failed to remove item when quantity became 0")
             
             # Update with the calculated quantity
-            success = self.repo.update_quantity(user_id, product_id, final_quantity)
+            if not variant_id:
+                return standard_response(False, error="variant_not_found_for_item")
+            success = self.repo.update_quantity(tenant_id, user_id, variant_id, int(final_quantity))
             
             if success:
                 return standard_response(True, data={

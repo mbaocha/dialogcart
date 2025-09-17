@@ -119,8 +119,9 @@ def repair_broken_tool_calls(messages):
 # --- AgentState definition ---
 
 class AgentState(BaseModel):
-    user_id: str  # DynamoDB PK
+    customer_id: str  # DynamoDB PK
     phone_number: str
+    tenant_id: str = ""
     messages: Sequence[Any] = Field(default_factory=list)
     all_time_history: Sequence[Any] = Field(default_factory=list)
     chat_summaries: List[str] = Field(default_factory=list)
@@ -159,17 +160,24 @@ class AgentState(BaseModel):
 
     @classmethod
     def from_state_data(cls, state_data: dict) -> "AgentState":
-        if "user_id" not in state_data or "phone_number" not in state_data:
-            raise ValueError("user_id and phone_number must be present in state_data")
+        if "customer_id" not in state_data or "phone_number" not in state_data:
+            raise ValueError("customer_id and phone_number must be present in state_data")
         data = dict(state_data)
+        # Ensure tenant_id is present (for legacy records)
+        if not data.get("tenant_id"):
+            try:
+                from features.customer import _default_tenant_id
+                data["tenant_id"] = _default_tenant_id()
+            except Exception:
+                data["tenant_id"] = "demo-tenant-001"
         # convert to objects
         data["messages"] = [dict_to_message(m) for m in data.get("messages", [])]
         data["all_time_history"] = [dict_to_message(m) for m in data.get("all_time_history", [])]
         return cls(**data)
 
     def save(self):
-        if not self.user_id:
-            raise ValueError("user_id required to save state!")
+        if not self.customer_id:
+            raise ValueError("customer_id required to save state!")
         
         # Create a temporary LLMHistoryManager to trim messages
         from agents.llm_history import LLMHistoryManager
@@ -187,34 +195,39 @@ class AgentState(BaseModel):
         state_data["messages"] = [message_to_dict(m) for m in trimmed_messages]
         state_data["all_time_history"] = [message_to_dict(m) for m in self.all_time_history]
         
-        from features.user import save_state_data
-        result = save_state_data(state_data)
+        from features.customer import save_state_data_scoped, _default_tenant_id
+        tenant_id = state_data.get("tenant_id") or _default_tenant_id()
+        customer_id = state_data.get("customer_id") or state_data.get("user_id")
+        result = save_state_data_scoped(tenant_id, customer_id, state_data)
         if result.get("success"):
-            print(f"[DEBUG] State saved for user {self.user_id}")
+            print(f"[DEBUG] State saved for customer {self.customer_id}")
         else:
-            print(f"[DEBUG] Failed to save state for user {self.user_id}: {result.get('error')}")
+            print(f"[DEBUG] Failed to save state for customer {self.customer_id}: {result.get('error')}")
 
     class Config:
         arbitrary_types_allowed = True
 
 # --- State loader ---
 
-def init_user_and_agent_state(phone_number: str) -> AgentState:
-    from features.user import lookup_user_by_phone, register_user
+def init_customer_and_agent_state(phone_number: str) -> AgentState:
+    from features.customer import lookup_customer_by_phone, register_customer, _default_tenant_id
 
-    result = lookup_user_by_phone(phone_number)
+    tenant_id = _default_tenant_id()
+
+    result = lookup_customer_by_phone(tenant_id, phone_number)
     if not result.get("success"):
-        result = register_user(phone_number=phone_number, user_profile={}, status="inprogress")
+        result = register_customer(tenant_id, phone_number, customer_profile={}, status="inprogress")
         if not result.get("success"):
-            raise Exception("User registration failed")
+            raise Exception("Customer registration failed")
     data = result["data"]
 
     if 'state_data' not in data:
         return AgentState(
-            user_id=data["user_id"],
-            phone_number=phone_number
+            customer_id=data["customer_id"],
+            phone_number=phone_number,
+            tenant_id=data.get("tenant_id") or tenant_id
         )
-    data["user_id"] = data["user_id"]
+    data["customer_id"] = data["customer_id"]
     data["phone_number"] = phone_number
 
     # Extract user profile
@@ -227,8 +240,9 @@ def init_user_and_agent_state(phone_number: str) -> AgentState:
 
     state_data = data.get("state_data", {})
     agent_state_data = {
-        "user_id": data["user_id"],
+        "customer_id": data["customer_id"],
         "phone_number": data["phone_number"],
+        "tenant_id": data.get("tenant_id") or tenant_id,
         "user_profile": data["user_profile"],
         "is_registered": data.get("status") == "active",
         "just_registered": False,

@@ -1,41 +1,67 @@
 """
-DynamoDB Table: user_addresses
+DynamoDB Table: customer_addresses (multi-tenant)
 
-Partition key: address_id (string)
-Sort key: (none)
+Primary Key (composite):
+    - PK (string) → TENANT#{tenant_id}
+    - SK (string) → ADDRESS#{address_id}
 
 Attributes:
-    - address_id (string, PK)
-    - user_id (string, FK to users)
-    - label (string)          # "Home", "Office", etc.
+    - entity (string)             → "ADDRESS"
+    - tenant_id (string)
+    - address_id (string, UUID)
+    - customer_id (string, FK to customers table)
+
+    - label (string)              → "Home", "Office"
+    - recipient_name (string)
+    - phone (string, optional)
+
     - address_line1 (string)
     - address_line2 (string, optional)
     - city (string)
     - state (string)
     - country (string)
-    - postal_code (string)
+    - postal_code (string, optional)
+
     - lat (float, optional)
     - lon (float, optional)
-    - is_default (bool, optional)
-    - created_at (string, ISO8601)
-    - updated_at (string, ISO8601)
+
+    - is_default (bool)
+    - created_at (ISO8601)
+    - updated_at (ISO8601)
+
+GSIs:
+    - GSI1_CustomerAddresses → list all addresses for a customer
+        PK: GSI1PK = TENANT#{tenant_id}#CUSTOMER#{customer_id}
+        SK: GSI1SK = ADDRESS#{address_id}
 """
 
 import boto3
 import uuid
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
+from boto3.dynamodb.conditions import Key
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
-class AddressDB:
-    def __init__(self, table_name="user_addresses"):
-        self.table = boto3.resource('dynamodb').Table(table_name)
+def pk_tenant(tenant_id: str) -> str:
+    return f"TENANT#{tenant_id}"
 
+def sk_address(address_id: str) -> str:
+    return f"ADDRESS#{address_id}"
+
+def gsi_customer_pk(tenant_id: str, customer_id: str) -> str:
+    return f"TENANT#{tenant_id}#CUSTOMER#{customer_id}"
+
+class CustomerAddressDB:
+    def __init__(self, table_name="customer_addresses"):
+        self.table = boto3.resource("dynamodb").Table(table_name)
+
+    # ---------------- Create ----------------
     def create_address(
         self,
-        user_id: str,
+        tenant_id: str,
+        customer_id: str,
         label: str,
         address_line1: str,
         city: str,
@@ -43,15 +69,23 @@ class AddressDB:
         country: str,
         postal_code: Optional[str] = None,
         address_line2: Optional[str] = None,
+        recipient_name: Optional[str] = None,
+        phone: Optional[str] = None,
         lat: Optional[float] = None,
         lon: Optional[float] = None,
-        is_default: Optional[bool] = False,
+        is_default: bool = False,
     ) -> Dict[str, Any]:
+        """Create a new address for a customer."""
         address_id = str(uuid.uuid4())
         timestamp = now_iso()
+
         item = {
+            "PK": pk_tenant(tenant_id),
+            "SK": sk_address(address_id),
+            "entity": "ADDRESS",
+            "tenant_id": tenant_id,
             "address_id": address_id,
-            "user_id": user_id,
+            "customer_id": customer_id,
             "label": label,
             "address_line1": address_line1,
             "city": city,
@@ -60,11 +94,17 @@ class AddressDB:
             "created_at": timestamp,
             "updated_at": timestamp,
             "is_default": bool(is_default),
+            "GSI1PK": gsi_customer_pk(tenant_id, customer_id),
+            "GSI1SK": sk_address(address_id),
         }
         if address_line2:
             item["address_line2"] = address_line2
         if postal_code:
             item["postal_code"] = postal_code
+        if recipient_name:
+            item["recipient_name"] = recipient_name
+        if phone:
+            item["phone"] = phone
         if lat is not None:
             item["lat"] = float(lat)
         if lon is not None:
@@ -73,78 +113,60 @@ class AddressDB:
         self.table.put_item(Item=item)
         return item
 
-    def get_address(self, address_id: str) -> Optional[Dict[str, Any]]:
-        response = self.table.get_item(Key={"address_id": address_id})
-        return response.get("Item")
+    # ---------------- Read ----------------
+    def get_address(self, tenant_id: str, address_id: str) -> Optional[Dict[str, Any]]:
+        resp = self.table.get_item(Key={"PK": pk_tenant(tenant_id), "SK": sk_address(address_id)})
+        return resp.get("Item")
 
-    def list_addresses(self, user_id: str) -> List[Dict[str, Any]]:
-        # DynamoDB scan for all addresses belonging to a user (if no GSI on user_id)
-        response = self.table.scan(
-            FilterExpression="user_id = :uid",
-            ExpressionAttributeValues={":uid": user_id}
+    def list_addresses(self, tenant_id: str, customer_id: str) -> List[Dict[str, Any]]:
+        """List all addresses for a customer using GSI1."""
+        resp = self.table.query(
+            IndexName="GSI1_CustomerAddresses",
+            KeyConditionExpression=Key("GSI1PK").eq(gsi_customer_pk(tenant_id, customer_id))
         )
-        return response.get("Items", [])
+        return resp.get("Items", [])
 
-    def update_address(
-        self,
-        address_id: str,
-        **kwargs,
-    ) -> bool:
-        """
-        Update any address fields (address_line1, label, city, etc).
-        """
+    def get_default_address(self, tenant_id: str, customer_id: str) -> Optional[Dict[str, Any]]:
+        addresses = self.list_addresses(tenant_id, customer_id)
+        for addr in addresses:
+            if addr.get("is_default"):
+                return addr
+        return None
+
+    # ---------------- Update ----------------
+    def update_address(self, tenant_id: str, address_id: str, **kwargs) -> bool:
+        """Update address fields."""
         update_fields = []
         values = {}
         for k, v in kwargs.items():
             if v is not None:
                 update_fields.append(f"{k} = :{k}")
                 values[f":{k}"] = v
+
+        if not update_fields:
+            return False
+
         values[":updated_at"] = now_iso()
         update_fields.append("updated_at = :updated_at")
 
-        if not update_fields:
-            return False  # nothing to update
+        update_expr = "SET " + ", ".join(update_fields)
+        resp = self.table.update_item(
+            Key={"PK": pk_tenant(tenant_id), "SK": sk_address(address_id)},
+            UpdateExpression=update_expr,
+            ExpressionAttributeValues=values,
+            ReturnValues="UPDATED_NEW"
+        )
+        return "Attributes" in resp
 
-        try:
-            response = self.table.update_item(
-                Key={"address_id": address_id},
-                UpdateExpression="set " + ", ".join(update_fields),
-                ExpressionAttributeValues=values,
-                ReturnValues="UPDATED_NEW"
-            )
-            return "Attributes" in response
-        except Exception:
-            return False
-
-    def delete_address(self, address_id: str) -> bool:
-        response = self.table.delete_item(Key={"address_id": address_id})
-        return response.get("ResponseMetadata", {}).get("HTTPStatusCode") == 200
-
-    def set_default_address(self, user_id: str, address_id: str) -> bool:
-        """
-        Sets the specified address as default for the user, unsetting others.
-        """
-        # 1. Unset all others
-        addresses = self.list_addresses(user_id)
+    def set_default_address(self, tenant_id: str, customer_id: str, address_id: str) -> bool:
+        """Set an address as default, unset all others."""
+        addresses = self.list_addresses(tenant_id, customer_id)
         for addr in addresses:
             if addr["address_id"] != address_id and addr.get("is_default"):
-                self.update_address(addr["address_id"], is_default=False)
-        # 2. Set this one
-        return self.update_address(address_id, is_default=True)
+                self.update_address(tenant_id, addr["address_id"], is_default=False)
+        return self.update_address(tenant_id, address_id, is_default=True)
 
-    def set_default(self, user_id: str, address_id: str) -> bool:
-        """
-        Alias for set_default_address for backward compatibility.
-        """
-        return self.set_default_address(user_id, address_id)
-
-    def get_default_address(self, user_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Gets the default address for a user.
-        Returns the first address with is_default=True, or None if no default exists.
-        """
-        addresses = self.list_addresses(user_id)
-        for addr in addresses:
-            if addr.get("is_default"):
-                return addr
-        return None
+    # ---------------- Delete ----------------
+    def delete_address(self, tenant_id: str, address_id: str) -> bool:
+        resp = self.table.delete_item(Key={"PK": pk_tenant(tenant_id), "SK": sk_address(address_id)})
+        return resp.get("ResponseMetadata", {}).get("HTTPStatusCode") == 200

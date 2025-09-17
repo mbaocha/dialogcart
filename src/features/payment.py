@@ -13,16 +13,18 @@ stripe.api_key = os.getenv("STRIPE_SECRET_KEY")  # Load securely from env
 payment_db = PaymentDB()
 
 def create_stripe_checkout_session(
+    tenant_id: str,
     order_id: str,
-    user_id: str,               # Add user_id param to create payment record
-    amount_pence: int,          # amount in smallest currency unit
+    customer_id: str,
+    amount_pence: int,
     currency: str = "GBP",
 ) -> Dict[str, Any]:
     try:
         # Create payment record with status "pending"
         payment_db.create_payment(
+            tenant_id=tenant_id,
             order_id=order_id,
-            user_id=user_id,
+            user_id=customer_id,  # map customer to legacy user_id field in DB
             amount=amount_pence / 100,  # convert pence to pounds for your DB
             currency=currency,
             method="card",
@@ -48,7 +50,8 @@ def create_stripe_checkout_session(
             cancel_url=f"https://yourdomain.com/payment-cancelled?session_id={{CHECKOUT_SESSION_ID}}",
             metadata={
                 "order_id": order_id,
-                "user_id": user_id,   # Pass user_id so webhook can use it
+                "customer_id": customer_id,
+                "tenant_id": tenant_id,
             },
         )
         return standard_response(True, data={"checkout_url": session.url})
@@ -56,8 +59,9 @@ def create_stripe_checkout_session(
         return standard_response(False, error=str(e))
 
 def create_payment(
+    tenant_id: str,
     order_id: str,
-    user_id: str,
+    customer_id: str,
     amount: float,
     currency: str = "GBP",
     method: str = "card",
@@ -69,8 +73,9 @@ def create_payment(
 ) -> Dict[str, Any]:
     try:
         payment = payment_db.create_payment(
+            tenant_id=tenant_id,
             order_id=order_id,
-            user_id=user_id,
+            user_id=customer_id,  # map customer to legacy user_id field in DB
             amount=amount,
             currency=currency,
             method=method,
@@ -84,16 +89,21 @@ def create_payment(
     except Exception as e:
         return standard_response(False, error=str(e))
 
-def get_payment(payment_id: str) -> Dict[str, Any]:
-    payment = payment_db.get_payment(payment_id)
+def get_payment(tenant_id: str, payment_id: str) -> Dict[str, Any]:
+    payment = payment_db.get_payment(tenant_id, payment_id)
     if payment:
         return standard_response(True, data=payment)
     else:
         return standard_response(False, error="Payment not found")
 
-def list_payments(user_id: Optional[str] = None, limit: int = 100) -> Dict[str, Any]:
-    payments = payment_db.list_payments(user_id=user_id, limit=limit)
-    return standard_response(True, data=payments)
+def list_payments(tenant_id: str, order_id: Optional[str] = None, status: Optional[str] = None, limit: int = 100) -> Dict[str, Any]:
+    if order_id:
+        payments = payment_db.list_payments_by_order(tenant_id, order_id, limit=limit)
+        return standard_response(True, data=payments)
+    if status:
+        payments = payment_db.list_payments_by_status(tenant_id, status, limit=limit)
+        return standard_response(True, data=payments)
+    return standard_response(True, data=[])
 
 # ---- LangChain Tools ----
 

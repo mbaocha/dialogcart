@@ -1,56 +1,55 @@
 """
-DynamoDB Table: b_orders
+DynamoDB Table: orders (multi-tenant SaaS)
 
-Partition key: order_id (string)
+Primary Key (composite):
+    - PK = TENANT#{tenant_id}
+    - SK = ORDER#{order_id}
 
 Attributes:
-    - order_id (string, PK)
-    - user_id (string)
-    - items (list of maps)         # [{product_id, name, quantity, unit_price, total_price}, ...]
-    - total_amount (number)
-    - status (string)
-        # Common statuses: 'pending', 'paid', 'failed', 'processing', 'shipped', 'delivered', 'cancelled', 'refunded'
-        # 'pending' means order exists but payment not yet confirmed.
-    - created_at (string, ISO8601)
-    - updated_at (string, ISO8601)
-    - address_id (string, optional)
-    - address (map, optional)      # Snapshot of delivery address at order time
-    - delivery_method (string, optional)
-    - tracking_info (map, optional)
-    - notes (string, optional)
-    - payment_status (string, optional)  # e.g., 'pending', 'paid', 'failed' (summary only)
-    - last_payment_id (string, optional) # Reference to latest payment record if needed
+    - order_id, tenant_id, user_id
+    - items (snapshot of order items)
+    - total_amount, status, payment_status, last_payment_id
+    - address (snapshot), delivery_method, tracking_info, notes
+    - created_at, updated_at
+
+GSIs:
+    - GSI1_UserOrders:
+        PK = TENANT#{tenant_id}#USER#{user_id}
+        SK = CREATED_AT#{created_at}#ORDER#{order_id}
+
+    - GSI2_StatusOrders:
+        PK = TENANT#{tenant_id}#STATUS#{status}
+        SK = CREATED_AT#{created_at}#ORDER#{order_id}
 """
 
 import boto3
 import uuid
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from decimal import Decimal
 from datetime import datetime, timezone
+from boto3.dynamodb.conditions import Key
 
-try:
-    from db.address import AddressDB
-    address_db = AddressDB()
-except ImportError:
-    address_db = None
 
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
+
 class OrderDB:
-    def __init__(self, table_name="b_orders"):
-        self.table = boto3.resource('dynamodb').Table(table_name)
+    def __init__(self, table_name="orders", region_name="eu-west-2"):
+        self.table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
+
+    # -------------------- Create --------------------
 
     def create_order(
         self,
+        tenant_id: str,
         user_id: str,
         items: List[Dict[str, Any]],
         total_amount: float,
         status: str = "pending",
-        address_id: Optional[str] = None,
-        address: Optional[Any] = None,
-        payment_status: Optional[str] = None,     # summary payment status only
-        last_payment_id: Optional[str] = None,    # reference to payment record
+        address: Optional[Dict[str, Any]] = None,
+        payment_status: Optional[str] = None,
+        last_payment_id: Optional[str] = None,
         notes: Optional[str] = None,
         delivery_method: Optional[str] = None,
         tracking_info: Optional[Dict[str, Any]] = None,
@@ -58,34 +57,38 @@ class OrderDB:
         order_id = str(uuid.uuid4())
         timestamp = now_iso()
 
+        # Convert prices to Decimal
         for item in items:
             if "unit_price" in item:
                 item["unit_price"] = Decimal(str(item["unit_price"]))
             if "total_price" in item:
                 item["total_price"] = Decimal(str(item["total_price"]))
 
-        order_address = None
-        if address_id:
-            if not address_db:
-                raise Exception("AddressDB not available. Install or import db.address.AddressDB")
-            addr = address_db.get_address(address_id)
-            if not addr:
-                raise ValueError("Address not found")
-            order_address = {k: v for k, v in addr.items() if k not in ("user_id", "address_id")}
-        elif address:
-            order_address = address
-
         order = {
+            "PK": f"TENANT#{tenant_id}",
+            "SK": f"ORDER#{order_id}",
+
+            "entity": "ORDER",
             "order_id": order_id,
+            "tenant_id": tenant_id,
             "user_id": user_id,
             "items": items,
             "total_amount": Decimal(str(total_amount)),
             "status": status,
             "created_at": timestamp,
             "updated_at": timestamp,
+
+            # GSI1: User orders
+            "GSI1PK": f"TENANT#{tenant_id}#USER#{user_id}",
+            "GSI1SK": f"CREATED_AT#{timestamp}#ORDER#{order_id}",
+
+            # GSI2: Orders by status
+            "GSI2PK": f"TENANT#{tenant_id}#STATUS#{status}",
+            "GSI2SK": f"CREATED_AT#{timestamp}#ORDER#{order_id}",
         }
-        if order_address is not None:
-            order["address"] = order_address
+
+        if address is not None:
+            order["address"] = address
         if payment_status is not None:
             order["payment_status"] = payment_status
         if last_payment_id is not None:
@@ -100,55 +103,77 @@ class OrderDB:
         self.table.put_item(Item=order)
         return order
 
-    def get_order(self, order_id: str) -> Optional[Dict[str, Any]]:
-        response = self.table.get_item(Key={"order_id": order_id})
-        return response.get("Item")
+    # -------------------- Get --------------------
 
-    def update_status(self, order_id: str, status: str) -> bool:
-        try:
-            response = self.table.update_item(
-                Key={"order_id": order_id},
-                UpdateExpression="set status = :s, updated_at = :u",
-                ExpressionAttributeValues={
-                    ":s": status,
-                    ":u": now_iso(),
-                },
-                ReturnValues="UPDATED_NEW"
-            )
-            return "Attributes" in response
-        except Exception:
-            return False
+    def get_order(self, tenant_id: str, order_id: str) -> Optional[Dict[str, Any]]:
+        resp = self.table.get_item(
+            Key={"PK": f"TENANT#{tenant_id}", "SK": f"ORDER#{order_id}"}
+        )
+        return resp.get("Item")
+
+    # -------------------- Update --------------------
+
+    def update_status(self, tenant_id: str, order_id: str, new_status: str) -> bool:
+        timestamp = now_iso()
+        resp = self.table.update_item(
+            Key={"PK": f"TENANT#{tenant_id}", "SK": f"ORDER#{order_id}"},
+            UpdateExpression="SET #s = :s, updated_at = :u, "
+                             "GSI2PK = :g2pk, GSI2SK = :g2sk",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":s": new_status,
+                ":u": timestamp,
+                ":g2pk": f"TENANT#{tenant_id}#STATUS#{new_status}",
+                ":g2sk": f"CREATED_AT#{timestamp}#ORDER#{order_id}",
+            },
+            ReturnValues="UPDATED_NEW",
+        )
+        return "Attributes" in resp
 
     def update_payment_summary(
         self,
+        tenant_id: str,
         order_id: str,
         payment_status: str,
         last_payment_id: Optional[str] = None,
     ) -> bool:
-        update_expr = "set payment_status = :ps, updated_at = :u"
-        expr_attr_vals = {
-            ":ps": payment_status,
-            ":u": now_iso(),
-        }
+        update_expr = "SET payment_status = :ps, updated_at = :u"
+        expr_vals = {":ps": payment_status, ":u": now_iso()}
+
         if last_payment_id:
             update_expr += ", last_payment_id = :lp"
-            expr_attr_vals[":lp"] = last_payment_id
+            expr_vals[":lp"] = last_payment_id
 
-        response = self.table.update_item(
-            Key={"order_id": order_id},
+        resp = self.table.update_item(
+            Key={"PK": f"TENANT#{tenant_id}", "SK": f"ORDER#{order_id}"},
             UpdateExpression=update_expr,
-            ExpressionAttributeValues=expr_attr_vals,
-            ReturnValues="UPDATED_NEW"
+            ExpressionAttributeValues=expr_vals,
+            ReturnValues="UPDATED_NEW",
         )
-        return "Attributes" in response
+        return "Attributes" in resp
 
-    def list_orders(self, user_id: Optional[str] = None, limit: int = 100) -> List[Dict[str, Any]]:
-        if user_id:
-            response = self.table.scan(
-                FilterExpression="user_id = :uid",
-                ExpressionAttributeValues={":uid": user_id},
-                Limit=limit
-            )
-        else:
-            response = self.table.scan(Limit=limit)
-        return response.get("Items", [])
+    # -------------------- Queries --------------------
+
+    def list_orders_for_user(
+        self, tenant_id: str, user_id: str, limit: int = 50, last_key: Optional[Dict[str, Any]] = None
+    ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        resp = self.table.query(
+            IndexName="GSI1_UserOrders",
+            KeyConditionExpression=Key("GSI1PK").eq(f"TENANT#{tenant_id}#USER#{user_id}"),
+            Limit=limit,
+            ScanIndexForward=False,  # latest first
+            ExclusiveStartKey=last_key if last_key else None,
+        )
+        return resp.get("Items", []), resp.get("LastEvaluatedKey")
+
+    def list_orders_by_status(
+        self, tenant_id: str, status: str, limit: int = 50, last_key: Optional[Dict[str, Any]] = None
+    ) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
+        resp = self.table.query(
+            IndexName="GSI2_StatusOrders",
+            KeyConditionExpression=Key("GSI2PK").eq(f"TENANT#{tenant_id}#STATUS#{status}"),
+            Limit=limit,
+            ScanIndexForward=False,
+            ExclusiveStartKey=last_key if last_key else None,
+        )
+        return resp.get("Items", []), resp.get("LastEvaluatedKey")

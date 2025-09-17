@@ -2,8 +2,11 @@
 Bulkpot Agent - Main entry point for interactive testing.
 """
 
+import argparse
+import os
+import sys
 from langchain_core.messages import AIMessage, HumanMessage
-from agents.state import init_user_and_agent_state, AgentState
+from agents.state import init_customer_and_agent_state, AgentState
 from agents.graph import app
 
 
@@ -55,15 +58,54 @@ def _assistant_message_count(state: AgentState) -> int:
     return cnt
 
 
-def main():
+def _configure_debug_output(show_debug: bool) -> None:
+    """Wrap stdout/stderr to hide [DEBUG] lines unless show_debug is True."""
+    if show_debug:
+        return
+
+    class _DebugFilter:
+        def __init__(self, underlying):
+            self._u = underlying
+            self._buf = ""
+
+        def write(self, s):
+            # Buffer until newline so we filter full lines
+            self._buf += s
+            while "\n" in self._buf:
+                line, self._buf = self._buf.split("\n", 1)
+                if not line.startswith("[DEBUG]"):
+                    self._u.write(line + "\n")
+
+        def flush(self):
+            if self._buf and not self._buf.startswith("[DEBUG]"):
+                self._u.write(self._buf)
+            self._buf = ""
+            try:
+                self._u.flush()
+            except Exception:
+                pass
+
+        # Pass-through common stream attributes
+        def __getattr__(self, item):
+            return getattr(self._u, item)
+
+    sys.stdout = _DebugFilter(sys.stdout)  # type: ignore
+    sys.stderr = _DebugFilter(sys.stderr)  # type: ignore
+
+
+def main(show_debug: bool = False):
     """Main interactive test mode."""
+    # Configure debug output filtering early
+    # Also allow env var AGENT_DEBUG=1 to force-enable
+    env_debug = os.getenv("AGENT_DEBUG") in {"1", "true", "True", "YES", "yes"}
+    _configure_debug_output(show_debug or env_debug)
     print("🤖 Bulkpot Agent - Interactive Test Mode")
     print("=" * 50)
     print("Type 'quit' to exit\n")
 
     try:
-        # Load or create state for a given user (by phone number here)
-        state = init_user_and_agent_state("+447399368793")
+        # Load or create state for a given customer (by phone number here)
+        state = init_customer_and_agent_state("+447399368793")
     except ValueError as e:
         print(f"❌ Error initializing agent: {e}")
         print("Please ensure phone_number is provided and valid.")
@@ -143,4 +185,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Bulkpot Agent interactive runner")
+    parser.add_argument("--debug", action="store_true", help="Show [DEBUG] logs")
+    args = parser.parse_args()
+    main(show_debug=args.debug)

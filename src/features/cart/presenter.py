@@ -16,7 +16,7 @@ class CartPresenter:
         return {
             'id': item.get('id'),
             'user_id': item.get('user_id'),
-            'product_id': item.get('product_id'),
+            'catalog_id': item.get('catalog_id') or item.get('product_id'),
             'quantity': item.get('quantity'),
             'price': item.get('price'),
             'created_at': item.get('created_at'),

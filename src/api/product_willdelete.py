@@ -2,7 +2,7 @@ from typing import List, Optional, Union, Dict, Any
 from decimal import Decimal
 from fastapi import FastAPI, APIRouter, HTTPException
 from langchain.tools import tool
-from db.product import ProductDB
+from db.catalog import ProductDB
 from utils.response import standard_response
 from utils.coreutil import get_number_emoji
 

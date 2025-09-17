@@ -1,12 +1,13 @@
 from typing import Dict, Any
 from langchain.tools import tool
-from db.address import AddressDB
+from db.address import CustomerAddressDB
 from utils.response import standard_response
 
-db = AddressDB()
+db = CustomerAddressDB()
 
 def create_address(
-    user_id: str,
+    tenant_id: str,
+    customer_id: str,
     label: str,
     address_line1: str,
     city: str,
@@ -18,17 +19,16 @@ def create_address(
     lon: float = None,
     is_default: bool = False,
 ) -> Dict[str, Any]:
-    """Create a new address record for a user with label, address details, and optional coordinates.
-       Use if the user wants to: add a new address, save delivery address, create shipping address,
-       or similar address creation operations. User does not need to provide user ID."""
-    
-    if not user_id or not label or not address_line1 or not city or not state or not country:
-        return standard_response(False, error="user_id, label, address_line1, city, state, and country are required")
-    
+    """Create a new address record for a customer with label, address details, and optional coordinates."""
+
+    if not tenant_id or not customer_id or not label or not address_line1 or not city or not state or not country:
+        return standard_response(False, error="tenant_id, customer_id, label, address_line1, city, state, and country are required")
+
     try:
-        print(f"[DEBUG] create_address called with user_id={user_id}, label={label}, city={city}, state={state}")
+        print(f"[DEBUG] create_address called with tenant_id={tenant_id}, customer_id={customer_id}, label={label}, city={city}, state={state}")
         item = db.create_address(
-            user_id=user_id,
+            tenant_id=tenant_id,
+            customer_id=customer_id,
             label=label,
             address_line1=address_line1,
             city=city,
@@ -45,17 +45,15 @@ def create_address(
         return standard_response(False, error=str(e))
 
 @tool
-def get_address(address_id: str) -> Dict[str, Any]:
-    """Retrieve address details by address ID.
-       Use if the user wants to: view address details, get address information,
-       or similar address retrieval operations."""
+def get_address(tenant_id: str, address_id: str) -> Dict[str, Any]:
+    """Retrieve address details by address ID (tenant-scoped)."""
 
-    if not address_id:
-        return standard_response(False, error="address_id is required")
+    if not tenant_id or not address_id:
+        return standard_response(False, error="tenant_id and address_id are required")
 
     try:
-        print(f"[DEBUG] get_address called with address_id={address_id}")
-        item = db.get_address(address_id)
+        print(f"[DEBUG] get_address called with tenant_id={tenant_id}, address_id={address_id}")
+        item = db.get_address(tenant_id, address_id)
         if item:
             return standard_response(True, data=item)
         else:
@@ -64,33 +62,29 @@ def get_address(address_id: str) -> Dict[str, Any]:
         return standard_response(False, error=str(e))
 
 @tool
-def list_addresses(user_id: str) -> Dict[str, Any]:
-    """List all addresses for a specific user.
-       Use if the user wants to: view all addresses, see saved addresses,
-       or similar address listing operations. User does not need to provide user ID."""
+def list_addresses(tenant_id: str, customer_id: str) -> Dict[str, Any]:
+    """List all addresses for a specific customer (tenant-scoped)."""
 
-    if not user_id:
-        return standard_response(False, error="user_id is required")
+    if not tenant_id or not customer_id:
+        return standard_response(False, error="tenant_id and customer_id are required")
 
     try:
-        print(f"[DEBUG] list_addresses called with user_id={user_id}")
-        items = db.list_addresses(user_id)
+        print(f"[DEBUG] list_addresses called with tenant_id={tenant_id}, customer_id={customer_id}")
+        items = db.list_addresses(tenant_id, customer_id)
         return standard_response(True, data=items)
     except Exception as e:
         return standard_response(False, error=str(e))
 
 @tool
-def update_address(address_id: str, **kwargs) -> Dict[str, Any]:
-    """Update an existing address record with new information.
-       Use if the user wants to: edit address, modify address details,
-       or similar address update operations."""
+def update_address(tenant_id: str, address_id: str, **kwargs) -> Dict[str, Any]:
+    """Update an existing address record (tenant-scoped)."""
 
-    if not address_id:
-        return standard_response(False, error="address_id is required")
+    if not tenant_id or not address_id:
+        return standard_response(False, error="tenant_id and address_id are required")
 
     try:
-        print(f"[DEBUG] update_address called with address_id={address_id}, kwargs={kwargs}")
-        success = db.update_address(address_id, **kwargs)
+        print(f"[DEBUG] update_address called with tenant_id={tenant_id}, address_id={address_id}, kwargs={kwargs}")
+        success = db.update_address(tenant_id, address_id, **kwargs)
         if success:
             return standard_response(True)
         else:
@@ -99,17 +93,15 @@ def update_address(address_id: str, **kwargs) -> Dict[str, Any]:
         return standard_response(False, error=str(e))
 
 @tool
-def delete_address(address_id: str) -> Dict[str, Any]:
-    """Delete an address record by address ID.
-       Use if the user wants to: remove address, delete saved address,
-       or similar address deletion operations."""
-    
-    if not address_id:
-        return standard_response(False, error="address_id is required")
-    
+def delete_address(tenant_id: str, address_id: str) -> Dict[str, Any]:
+    """Delete an address record by address ID (tenant-scoped)."""
+
+    if not tenant_id or not address_id:
+        return standard_response(False, error="tenant_id and address_id are required")
+
     try:
-        print(f"[DEBUG] delete_address called with address_id={address_id}")
-        success = db.delete_address(address_id)
+        print(f"[DEBUG] delete_address called with tenant_id={tenant_id}, address_id={address_id}")
+        success = db.delete_address(tenant_id, address_id)
         if success:
             return standard_response(True)
         else:
@@ -118,17 +110,15 @@ def delete_address(address_id: str) -> Dict[str, Any]:
         return standard_response(False, error=str(e))
 
 @tool
-def set_default_address(user_id: str, address_id: str) -> Dict[str, Any]:
-    """Set a specific address as the default address for a user.
-       Use if the user wants to: set default address, make address primary,
-       or similar default address operations. User does not need to provide user ID."""
+def set_default_address(tenant_id: str, customer_id: str, address_id: str) -> Dict[str, Any]:
+    """Set a specific address as default for a customer (tenant-scoped)."""
 
-    if not user_id or not address_id:
-        return standard_response(False, error="user_id and address_id are required")
+    if not tenant_id or not customer_id or not address_id:
+        return standard_response(False, error="tenant_id, customer_id and address_id are required")
 
     try:
-        print(f"[DEBUG] set_default_address called with user_id={user_id}, address_id={address_id}")
-        success = db.set_default(user_id, address_id)
+        print(f"[DEBUG] set_default_address called with tenant_id={tenant_id}, customer_id={customer_id}, address_id={address_id}")
+        success = db.set_default_address(tenant_id, customer_id, address_id)
         if success:
             return standard_response(True)
         else:
@@ -137,22 +127,17 @@ def set_default_address(user_id: str, address_id: str) -> Dict[str, Any]:
         return standard_response(False, error=str(e))
 
 @tool
-def get_default_address(user_id: str) -> Dict[str, Any]:
-    """Get the default address for a specific user.
-       Use if the user wants to: get default address, view primary address,
-       or similar default address retrieval operations. User does not need to provide user ID."""
+def get_default_address(tenant_id: str, customer_id: str) -> Dict[str, Any]:
+    """Get the default address for a specific customer (tenant-scoped)."""
 
-    if not user_id:
-        return standard_response(False, error="user_id is required")
+    if not tenant_id or not customer_id:
+        return standard_response(False, error="tenant_id and customer_id are required")
 
     try:
-        print(f"[DEBUG] get_default_address called with user_id={user_id}")
-        addresses = db.list_addresses(user_id)
-        if not addresses:
-            return standard_response(False, error="No address found for user")
-        for addr in addresses:
-            if addr.get("is_default"):
-                return standard_response(True, data=addr)
+        print(f"[DEBUG] get_default_address called with tenant_id={tenant_id}, customer_id={customer_id}")
+        addr = db.get_default_address(tenant_id, customer_id)
+        if addr:
+            return standard_response(True, data=addr)
         return standard_response(False, error="No default address set")
     except Exception as e:
         return standard_response(False, error=str(e))

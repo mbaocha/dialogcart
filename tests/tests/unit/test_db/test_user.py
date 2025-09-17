@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
-from db.user import UserDB
+from db.customers import UserDB
 
 @pytest.fixture
 def mock_table():

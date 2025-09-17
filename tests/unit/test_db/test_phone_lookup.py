@@ -7,7 +7,7 @@ import sys
 import os
 sys.path.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..", "src"))
 
-from db.user import UserDB
+from db.customers import UserDB
 from features.user import get_user, get_user_by_phone, is_user_registered, save_user
 
 def test_phone_lookup_and_save():

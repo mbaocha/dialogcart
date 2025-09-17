@@ -4,7 +4,7 @@ from typing import Any, Dict
 
 from agents.state import AgentState
 from agents.utils import enforce_agent_state
-from features.validators import VALIDATOR_REGISTRY, ensure_products
+from features.validators import VALIDATOR_REGISTRY, ensure_catalog_items
 
 
 # ----------------------------
@@ -33,14 +33,14 @@ def tool_args_validator(state: AgentState) -> AgentState:
     tool_name = state.tool_name
     cleaned_args: Dict[str, Any] = dict(getattr(state, "tool_args", {}) or {})
 
-    products = ensure_products(state)
-    print("[DEBUG] tool_args_validator -> products: ", products)
+    catalog_items = ensure_catalog_items(state)
+    print("[DEBUG] tool_args_validator -> catalog_items: ", catalog_items)
 
     # Pick specific validator or fall back to default
     validator = VALIDATOR_REGISTRY.get(tool_name, _default_validator)
 
-    # Add products to cleaned_args for validators to access
-    cleaned_args['products'] = products
+    # Add catalog_items to cleaned_args for validators to access
+    cleaned_args['catalog_items'] = catalog_items
 
     # Run validation with single argument
     meta = validator(cleaned_args)

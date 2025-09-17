@@ -13,7 +13,7 @@ import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from utils.coreutil import split_name
-from features.user import update_user
+from features.customer import update_customer, _default_tenant_id
 
 
 def extract_name_email(text: str) -> tuple[Optional[str], Optional[str]]:
@@ -123,12 +123,18 @@ def onboarding_node(state: AgentState) -> AgentState:
                 "user_input": ""
             })
             agent_state_dict = candidate_state.model_dump()
-
-            user_result = update_user(agent_state_dict=agent_state_dict)
+            # Ensure required identifiers are present for update_customer
+            tenant_id = agent_state_dict.get("tenant_id") or _default_tenant_id()
+            customer_id = agent_state_dict.get("customer_id") or getattr(candidate_state, "customer_id", None)
+            user_result = update_customer(agent_state_dict={
+                **agent_state_dict,
+                "tenant_id": tenant_id,
+                "customer_id": customer_id,
+            })
 
             # Step 2: Decide next state/message
             if user_result.get("success"):
-                print(f"[DEBUG] User registered successfully: {user_result['data']['user_id']}")
+                print(f"[DEBUG] Customer registered successfully: {user_result['data'].get('customer_id')}")
                 new_state = candidate_state.model_copy(update={
                     "messages": [AIMessage(content="🎉 Registration complete! Welcome to Bulkpot!")]
                 })

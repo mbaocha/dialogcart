@@ -21,6 +21,43 @@ class IntentOrchestrator:
         # Simple in-memory slot storage
         self._slot_memory = {}
 
+    def _update_slots_with_actions(self, slots: dict, intent: str, actions: List[dict]) -> dict:
+        """Reconcile slot memory using finalized actions (post parsing/validation).
+
+        Prefer longest explicit product from actions to avoid partial tokens like "red".
+        """
+        try:
+            if not actions:
+                return slots
+
+            # Collect candidate products from actions
+            candidate_products: List[str] = []
+            for a in actions:
+                for key in ("product", "product_to", "product_from"):
+                    val = a.get(key)
+                    if isinstance(val, str) and val.strip():
+                        candidate_products.append(val.strip())
+
+            if not candidate_products:
+                return slots
+
+            # Choose the longest product string
+            longest_product = max(candidate_products, key=lambda p: len(p))
+
+            new_slots = slots.copy() if isinstance(slots, dict) else {}
+            new_slots["last_mentioned_product"] = longest_product
+            if intent and intent.lower() == "modify_cart":
+                new_slots["last_product_added"] = longest_product
+
+            # Update shopping list with the chosen product
+            shopping_list = list(new_slots.get("shopping_list", []))
+            if longest_product not in shopping_list:
+                shopping_list.append(longest_product)
+            new_slots["shopping_list"] = shopping_list
+            return new_slots
+        except Exception:
+            return slots
+
     def _get_confidence_score(self, nlu: dict) -> float:
         """Get confidence score from NLU result"""
         try:
@@ -29,7 +66,7 @@ class IntentOrchestrator:
         except Exception:
             return 0.0
 
-    def _maybe_validate_actions(self, text: str, actions: list, validate: bool, nlu: dict) -> list:
+    def _maybe_validate_actions(self, text: str, actions: list, validate: bool, nlu: dict, slots: dict) -> list:
         """Optionally validate actions with LLM if confidence below threshold."""
         if not validate:
             return actions
@@ -37,11 +74,22 @@ class IntentOrchestrator:
         if score >= RASA_CONFIDENCE_THRESHOLD:
             return actions
         try:
+            # Infer domain and allowed attributes for guidance
+            entities = (nlu or {}).get("entities", []) or []
+            domain, allowed_attrs = self._infer_domain_and_allowed_attributes(entities, actions)
             messages = [
                 {"role": "system", "content": validator_prompt()},
                 {
                     "role": "user",
-                    "content": f'User said: "{text}"\nRasa extracted: {actions}\nIs this mapping correct? If not, return corrected actions.'
+                    "content": (
+                        f'User said: "{text}"\n'
+                        f'Rasa extracted: {actions}\n'
+                        f'Slots: {slots}\n'
+                        f'Domain: {domain}\n'
+                        f'Allowed attributes for this domain: {allowed_attrs}\n'
+                        'If a candidate attribute is not in the allowed list, omit it.\n'
+                        'Is this mapping correct? If not, return corrected actions.'
+                    )
                 },
             ]
             result = self.llm.invoke(messages)
@@ -50,14 +98,24 @@ class IntentOrchestrator:
             # Fail-open: keep original actions
             return actions
 
-    def _validate_actions_with_llm(self, text: str, actions: list) -> list:
+    def _validate_actions_with_llm(self, text: str, actions: list, slots: dict) -> list:
         """Validate actions with LLM (always performs validation)."""
         try:
+            # Attempt to infer domain from actions (with attributes) when available
+            domain, allowed_attrs = self._infer_domain_and_allowed_attributes([], actions)
             messages = [
                 {"role": "system", "content": validator_prompt()},
                 {
                     "role": "user",
-                    "content": f'User said: "{text}"\nRasa extracted: {actions}\nIs this mapping correct? If not, return corrected actions.'
+                    "content": (
+                        f'User said: "{text}"\n'
+                        f'Rasa extracted: {actions}\n'
+                        f'Slots: {slots}\n'
+                        f'Domain: {domain}\n'
+                        f'Allowed attributes for this domain: {allowed_attrs}\n'
+                        'If a candidate attribute is not in the allowed list, omit it.\n'
+                        'Is this mapping correct? If not, return corrected actions.'
+                    )
                 },
             ]
             result = self.llm.invoke(messages)
@@ -100,13 +158,20 @@ class IntentOrchestrator:
             # Handle modify_cart with mapper (now with slot memory available)
             if intent and intent.upper() in ("MODIFY_CART", "SHOPPING_COMMAND"):
                 from .post_nlu_processor import map_rasa_to_actions
-                mapped = map_rasa_to_actions({"nlu": nlu, "slots": updated_slots})
+                mapped = map_rasa_to_actions({"nlu": nlu, "slots": updated_slots, "text": text})
                 actions = [a.dict() if isinstance(a, Action) else a for a in mapped]
 
             # Handle inquire_product (action + product)
             elif intent and intent.upper() == "INQUIRE_PRODUCT":
                 entities = rasa_result.get("entities", [])
                 products = [e for e in entities if e.get("entity") == "product"]
+                variants = [e for e in entities if e.get("entity") == "variant"]
+                sizes = [e for e in entities if e.get("entity") == "size"]
+                colors = [e for e in entities if e.get("entity") == "color"]
+                fits = [e for e in entities if e.get("entity") == "fit"]
+                flavors = [e for e in entities if e.get("entity") == "flavor"]
+                diets = [e for e in entities if e.get("entity") == "diet"]
+                roasts = [e for e in entities if e.get("entity") == "roast"]
                 actions_ents = [e for e in entities if e.get("entity") == "action"]
 
                 # Deduplicate actions by action value
@@ -121,15 +186,32 @@ class IntentOrchestrator:
                         continue
                     seen_actions.add(action_val)
                     
-                    # match with next product if available
+                    # match with next product if available; attach a variant if present
                     if products:
                         product = products.pop(0).get("value")
+                        variant = variants.pop(0).get("value") if variants else None
+                        size = sizes.pop(0).get("value") if sizes else None
+                        color = colors.pop(0).get("value") if colors else None
+                        fit = fits.pop(0).get("value") if fits else None
+                        flavor = flavors.pop(0).get("value") if flavors else None
+                        diet = diets.pop(0).get("value") if diets else None
+                        roast = roasts.pop(0).get("value") if roasts else None
                         action = {
                             "action": action_val,
                             "confidence": "high",
                             "confidence_score": confidence_score,
                             "product": product
                         }
+                        # Build attributes map only
+                        attributes: dict[str, str] = {}
+                        for k, v in (
+                            ("variant", variant), ("size", size), ("color", color), ("fit", fit),
+                            ("flavor", flavor), ("diet", diet), ("roast", roast)
+                        ):
+                            if isinstance(v, str) and v.strip():
+                                attributes[k] = v
+                        if attributes:
+                            action["attributes"] = attributes
                         actions.append(action)
                     else:
                         # If no explicit product, try to get from slot memory
@@ -171,8 +253,11 @@ class IntentOrchestrator:
 
             # Determine if we should route to LLM and handle routing/validation
             actions, source, validation_performed = self._handle_routing_and_validation(
-                text, intent, confidence_score, actions, validate, nlu
+                text, intent, confidence_score, actions, validate, nlu, updated_slots
             )
+
+            # Reconcile slot memory using finalized actions so we don't store partials like "red"
+            updated_slots = self._update_slots_with_actions(updated_slots, intent or "", actions)
 
             
             return {
@@ -183,7 +268,7 @@ class IntentOrchestrator:
                     "intent": intent,
                     "confidence_score": confidence_score,
                     "actions": actions,
-                    "slots": updated_slots,  # Use updated slots from simple memory
+                    "slots": updated_slots,  # Use reconciled slots from final actions
                     "validation_performed": validation_performed,
                     "validation_mode": validate
                 }
@@ -331,19 +416,19 @@ class IntentOrchestrator:
         return any(phrase in text_lower for phrase in contextual_phrases)
     
     def _handle_routing_and_validation(self, text: str, intent: str, confidence_score: float, 
-                                     actions: List[dict], validate: bool, nlu: dict) -> tuple:
+                                     actions: List[dict], validate: bool, nlu: dict, slots: dict) -> tuple:
         """
         Handle routing to LLM based on criteria and perform validation.
         
         Returns:
             tuple: (updated_actions, source, validation_performed)
         """
-        # Check if we should route to LLM
-        route_result = self._should_route_to_llm(text, intent, confidence_score, actions)
+        # Check if we should route to LLM (pass validate parameter)
+        route_result = self._should_route_to_llm(text, intent, confidence_score, actions, validate)
         
         if route_result["should_route"]:
             print(f"DEBUG: Routing to LLM - Reason: {route_result['reason']}")
-            updated_actions = self._validate_actions_with_llm(text, actions)
+            updated_actions = self._validate_actions_with_llm(text, actions, slots)
             source = f"llm_routed_{route_result['reason']}"
             validation_performed = True
             return updated_actions, source, validation_performed
@@ -354,12 +439,12 @@ class IntentOrchestrator:
 
             if intent and intent.upper() == "MODIFY_CART":
                 if validate == "force":
-                    updated_actions = self._validate_actions_with_llm(text, actions)
+                    updated_actions = self._validate_actions_with_llm(text, actions, slots)
                     validation_performed = True
                     source = "rasa_force_validated"
                 elif validate is True:
                     original_actions = actions.copy()
-                    updated_actions = self._maybe_validate_actions(text, actions, True, nlu)
+                    updated_actions = self._maybe_validate_actions(text, actions, True, nlu, slots)
                     validation_performed = (updated_actions != original_actions)
                 else:
                     updated_actions = actions
@@ -368,13 +453,20 @@ class IntentOrchestrator:
 
             return updated_actions, source, validation_performed
     
-    def _should_route_to_llm(self, text: str, intent: str, confidence_score: float, actions: List[dict]) -> dict:
+    def _should_route_to_llm(self, text: str, intent: str, confidence_score: float, actions: List[dict], validate: bool = False) -> dict:
         """
         Determine if we should route to LLM based on routing criteria.
         
         Returns:
             dict: {"should_route": bool, "reason": str}
         """
+        # If validation is explicitly disabled, don't route to LLM
+        if validate is False:
+            return {
+                "should_route": False,
+                "reason": "validation_disabled"
+            }
+        
         # Check confidence threshold
         from .confidence import should_route_to_llm_by_confidence
         if should_route_to_llm_by_confidence(confidence_score):
@@ -390,8 +482,8 @@ class IntentOrchestrator:
                 "reason": "intent_none"
             }
         
-        # Check modify_cart validation failure
-        if intent and intent.upper() == "MODIFY_CART":
+        # Check modify_cart validation failure (only if validation is enabled)
+        if intent and intent.upper() == "MODIFY_CART" and validate is not False:
             # Create a temporary response structure for validation
             temp_response = {
                 "result": {
@@ -413,3 +505,48 @@ class IntentOrchestrator:
             "should_route": False,
             "reason": "no_routing_criteria_met"
         }
+
+    def _infer_domain_and_allowed_attributes(self, entities: list, actions: list) -> tuple:
+        """Infer domain from entities/actions and return (domain, allowed_attributes_list).
+
+        Heuristic:
+        - beauty if any 'variant' present
+        - fashion if any of 'size', 'color', 'fit' present
+        - african_groceries if any of 'flavor', 'diet', 'roast' present
+        - default 'unknown'
+        """
+        def any_attr_in(container, keys: list) -> bool:
+            try:
+                for item in container:
+                    if isinstance(item, dict):
+                        ent = item.get("entity") or ""
+                        if ent in keys:
+                            return True
+            except Exception:
+                pass
+            return False
+
+        def any_action_attr(actions_list, keys: list) -> bool:
+            try:
+                for a in actions_list:
+                    attrs = a.get("attributes") if isinstance(a, dict) else getattr(a, "attributes", None)
+                    if isinstance(attrs, dict):
+                        for k in keys:
+                            if k in attrs:
+                                return True
+            except Exception:
+                pass
+            return False
+
+        beauty_keys = ["variant"]
+        fashion_keys = ["size", "color", "fit"]
+        grocery_keys = ["flavor", "diet", "roast"]
+
+        if any_attr_in(entities, beauty_keys) or any_action_attr(actions, beauty_keys):
+            return "beauty", beauty_keys
+        if any_attr_in(entities, fashion_keys) or any_action_attr(actions, fashion_keys):
+            return "fashion", fashion_keys
+        if any_attr_in(entities, grocery_keys) or any_action_attr(actions, grocery_keys):
+            return "african_groceries", grocery_keys
+        # default
+        return "unknown", beauty_keys + fashion_keys + grocery_keys

@@ -4,7 +4,7 @@ from typing import Any, Dict, Optional
 
 from agents.state import AgentState
 from agents.utils import enforce_agent_state
-from features.product.service import ProductService
+from features.catalog.service import CatalogService
 from agents.tools import INTENT_TO_TOOL
 
 # keys we allow straight through from entities
@@ -22,26 +22,25 @@ def _first_entity(entities: Any) -> Dict[str, Any]:
         return dict(entities[0])
     return {}
 
-def _light_normalize(args: Dict[str, Any], intent: str) -> None:
-    # rename product -> product_name for tools
-    if "product" in args and "product_name" not in args:
-        args["product_name"] = args.pop("product")
+def _light_normalize(args: Dict[str, Any]) -> None:
+    # rename product -> catalog_name for tools
+    if "product" in args and "catalog_name" not in args:
+        args["catalog_name"] = args.pop("product")
 
 
 def _build_tool_args(state: AgentState) -> Dict[str, Any]:
     im = getattr(state, "intent_meta", {}) or {}
-    intent = (im.get("intent") or "NONE").upper()
     entities = _first_entity(im.get("entities"))
 
-    # start with user_id always
-    args: Dict[str, Any] = {"user_id": state.user_id}
+    # start with customer_id and tenant_id always
+    args: Dict[str, Any] = {"customer_id": state.customer_id, "tenant_id": getattr(state, "tenant_id", None)}
 
     # pass through only safe keys from entities (validator will enforce correctness)
     for k, v in entities.items():
         if k in _PASSTHROUGH and v is not None and v != "":
             args[k] = v
 
-    _light_normalize(args, intent)
+    _light_normalize(args)
     return args
 
 @enforce_agent_state
@@ -58,8 +57,9 @@ def tool_args_builder(state: AgentState) -> AgentState:
 
     print(f"[DEBUG] tool_args_builder -> tool_name: {tool_name}, tool_args: {tool_args}")
 
-    # ensure products cached for validator/tools
-    products = state.products or ProductService().list_products_flat()
+    # ensure products cached for validator/tools (id -> name)
+    tenant_id = getattr(state, "tenant_id", None)
+    products = state.products or (CatalogService().list_catalog_flat(tenant_id) if tenant_id else {})
 
     return state.model_copy(update={
         "tool_name": tool_name,

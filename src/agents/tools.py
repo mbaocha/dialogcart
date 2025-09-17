@@ -19,12 +19,12 @@ INTENT_NAMES = {
 
 # Intent to Tool Mappings
 INTENT_TO_TOOL = {
-    "SHOW_PRODUCT_LIST": "list_products_by_categories_formatted",
+    "SHOW_PRODUCT_LIST": "list_catalog_by_categories_formatted",
     "VIEW_CART": "get_cart_formatted",
     "ADD_TO_CART": "add_item_to_cart",
     "REMOVE_FROM_CART": "remove_item_from_cart",
     "CLEAR_CART": "clear_cart",
-    "CHECK_PRODUCT_EXISTENCE": "search_products",
+    "CHECK_PRODUCT_EXISTENCE": "search_catalog",
     "RESTORE_CART": "restore_cart",
     "UPDATE_CART_QUANTITY": "update_cart_quantity"
 }
@@ -69,7 +69,7 @@ import inspect
 from typing import List, Dict, Any, Tuple, Optional
 
 
-DEFAULT_API_MODULES = ["features.product", "features.cart"]
+DEFAULT_API_MODULES = ["features.catalog", "features.cart"]
 
 
 def discover_tools(api_modules: Optional[List[str]] = None) -> List[Dict[str, Any]]:

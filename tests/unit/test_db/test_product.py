@@ -2,7 +2,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from decimal import Decimal
 
-from db.product import ProductDB
+from db.catalog import ProductDB
 from db.enums import ProductUnit
 
 @pytest.fixture

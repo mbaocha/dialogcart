@@ -3,6 +3,7 @@ Configuration for the Bulkpot agent.
 """
 
 from langchain_core.messages import SystemMessage
+import os
 
 # System message configuration
 SYSTEM_MESSAGE = SystemMessage(content=(
@@ -33,3 +34,9 @@ AMBIGUITY_SYSTEM_MESSAGE = SystemMessage(content=(
 # LLM Configuration
 DEFAULT_MODEL = "gpt-4o-mini"
 FALLBACK_MODEL = "gpt-3.5-turbo" 
+
+# Intents API configuration
+# Preferred: set INTENTS_API_URL here (config file). If empty/None, fallback to env AGENT_INTENTS_URL
+INTENTS_API_URL: str | None = None
+# Example:
+INTENTS_API_URL = "http://localhost:9000/classify"

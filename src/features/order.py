@@ -2,22 +2,23 @@ from typing import List, Optional, Dict, Any
 from langchain.tools import tool
 from fastapi import FastAPI, APIRouter, HTTPException
 from db.order import OrderDB
-from db.address import AddressDB
+from db.address import CustomerAddressDB
 from utils.response import standard_response
 
 # ---- Business Logic Functions ----
 order_db = OrderDB()
-address_db = AddressDB()
+address_db = CustomerAddressDB()
 
 def create_order(
-    user_id: str,
+    tenant_id: str,
+    customer_id: str,
     items: List[Dict[str, Any]],
     total_amount: float,
     status: str = "pending",
     address_id: Optional[str] = None,
     address: Optional[Any] = None,
-    payment_status: Optional[str] = None,   # <-- changed
-    last_payment_id: Optional[str] = None,  # <-- changed
+    payment_status: Optional[str] = None,
+    last_payment_id: Optional[str] = None,
     notes: Optional[str] = None,
     delivery_method: Optional[str] = None,
     tracking_info: Optional[Dict[str, Any]] = None,
@@ -31,21 +32,22 @@ def create_order(
     try:
         order_address = None
         if address_id:
-            addr = address_db.get_address(address_id)
+            addr = address_db.get_address(tenant_id, address_id)
             if not addr:
                 return standard_response(False, error="Address not found")
-            order_address = {k: v for k, v in addr.items() if k not in ("address_id", "user_id")}
+            order_address = {k: v for k, v in addr.items() if k not in ("address_id", "customer_id")}
         elif address:
             order_address = address
 
         order = order_db.create_order(
-            user_id=user_id,
+            tenant_id=tenant_id,
+            user_id=customer_id,  # map customer to legacy user_id field in DB
             items=items,
             total_amount=total_amount,
             status=status,
             address=order_address,
-            payment_status=payment_status,        # <-- changed
-            last_payment_id=last_payment_id,      # <-- changed
+            payment_status=payment_status,
+            last_payment_id=last_payment_id,
             notes=notes,
             delivery_method=delivery_method,
             tracking_info=tracking_info,
@@ -54,20 +56,22 @@ def create_order(
     except Exception as e:
         return standard_response(False, error=str(e))
 
-def get_order(order_id: str) -> Dict[str, Any]:
-    item = order_db.get_order(order_id)
+def get_order(tenant_id: str, order_id: str) -> Dict[str, Any]:
+    item = order_db.get_order(tenant_id, order_id)
     if item:
         return standard_response(True, data=item)
     else:
         return standard_response(False, error="Order not found")
 
-def list_orders(user_id: Optional[str] = None, limit: int = 100) -> Dict[str, Any]:
-    items = order_db.list_orders(user_id=user_id, limit=limit)
-    return standard_response(True, data=items)
+def list_orders(tenant_id: str, customer_id: Optional[str] = None, limit: int = 100) -> Dict[str, Any]:
+    if customer_id:
+        items, _ = order_db.list_orders_for_user(tenant_id, customer_id, limit=limit)
+        return standard_response(True, data=items)
+    return standard_response(True, data=[])
 
-def update_order_status(order_id: str, status: str) -> Dict[str, Any]:
+def update_order_status(tenant_id: str, order_id: str, status: str) -> Dict[str, Any]:
     try:
-        success = order_db.update_status(order_id, status)
+        success = order_db.update_status(tenant_id, order_id, status)
         if success:
             return standard_response(True, data={"order_id": order_id, "status": status})
         else:
@@ -89,7 +93,7 @@ def get_order_tool(**kwargs):
 
 @tool
 def list_orders_tool(**kwargs):
-    """List orders optionally filtered by user ID with pagination support."""
+    """List orders optionally filtered by customer ID with pagination support."""
     return list_orders(**kwargs)
 
 # ---- FastAPI Endpoint ----
@@ -98,8 +102,8 @@ app = FastAPI()
 router = APIRouter()
 
 @router.post("/orders/{order_id}/status")
-def update_order_status_endpoint(order_id: str, status: str):
-    result = update_order_status(order_id, status)
+def update_order_status_endpoint(tenant_id: str, order_id: str, status: str):
+    result = update_order_status(tenant_id, order_id, status)
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error"))
     return result

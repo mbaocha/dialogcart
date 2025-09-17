@@ -1,7 +1,7 @@
 """
 Core data models for intent classification and validation
 """
-from typing import List, Optional, Literal
+from typing import List, Optional, Literal, Dict
 from pydantic import BaseModel
 
 
@@ -19,6 +19,7 @@ class Action(BaseModel):
     product_to: Optional[str] = None    # For set operations with 2 products: what to replace with
     quantity: Optional[float] = None
     unit: Optional[str] = None
+    attributes: Dict[str, str] = {}
     container: Optional[str] = None
     confidence: str = "medium"
     confidence_score: Optional[float] = None
@@ -58,6 +59,7 @@ class ValidatedAction(BaseModel):
     product: Optional[str] = None
     quantity: Optional[float] = None
     unit: Optional[str] = None
+    attributes: Dict[str, str] = {}
 
 
 class ValidationResult(BaseModel):
