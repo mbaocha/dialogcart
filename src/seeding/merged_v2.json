@@ -1,0 +1,7339 @@
+[
+  {
+    "pk": "product#ruby woo",
+    "sk": "product",
+    "type": "product",
+    "canonical": "ruby woo",
+    "synonyms": [
+      "rubywoo"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#velvet teddy",
+    "sk": "product",
+    "type": "product",
+    "canonical": "velvet teddy",
+    "synonyms": [],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#revitalift",
+    "sk": "product",
+    "type": "product",
+    "canonical": "revitalift",
+    "synonyms": [
+      "revita lift"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#regenerist",
+    "sk": "product",
+    "type": "product",
+    "canonical": "regenerist",
+    "synonyms": [
+      "regen erist"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#hydro boost",
+    "sk": "product",
+    "type": "product",
+    "canonical": "hydro boost",
+    "synonyms": [
+      "hydroboost"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#timewise",
+    "sk": "product",
+    "type": "product",
+    "canonical": "timewise",
+    "synonyms": [
+      "time wise"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#fair & lovely",
+    "sk": "product",
+    "type": "product",
+    "canonical": "fair & lovely",
+    "synonyms": [
+      "fair   lovely",
+      "fair  lovely",
+      "fair and lovely"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#pond's cold cream",
+    "sk": "product",
+    "type": "product",
+    "canonical": "pond's cold cream",
+    "synonyms": [
+      "pond s cold cream",
+      "ponds cold cream"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#fit me",
+    "sk": "product",
+    "type": "product",
+    "canonical": "fit me",
+    "synonyms": [
+      "fitme"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#double wear",
+    "sk": "product",
+    "type": "product",
+    "canonical": "double wear",
+    "synonyms": [
+      "doublewear"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#studio fix",
+    "sk": "product",
+    "type": "product",
+    "canonical": "studio fix",
+    "synonyms": [
+      "studiofix"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#gloss bomb",
+    "sk": "product",
+    "type": "product",
+    "canonical": "gloss bomb",
+    "synonyms": [
+      "glossbomb"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#superstay",
+    "sk": "product",
+    "type": "product",
+    "canonical": "superstay",
+    "synonyms": [
+      "super stay"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#nestlé",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "nestlé",
+    "synonyms": [
+      "nestle"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#dangote",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "dangote",
+    "synonyms": [
+      "dangote group"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#indomie",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "indomie",
+    "synonyms": [
+      "indo"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#peak",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "peak",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#three crowns",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "three crowns",
+    "synonyms": [
+      "3 crowns"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#cowbell",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "cowbell",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#honeywell",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "honeywell",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#golden penny",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "golden penny",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#omo",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "omo",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#ariel",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "ariel",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#lipton",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "lipton",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#knorr",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "knorr",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#blue band",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "blue band",
+    "synonyms": [
+      "blueband"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#coca-cola",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "coca-cola",
+    "synonyms": [
+      "coca cola",
+      "cocacola",
+      "coke"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#pepsi",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "pepsi",
+    "synonyms": [
+      "pepsi cola"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#fanta",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "fanta",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#sprite",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "sprite",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#7up",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "7up",
+    "synonyms": [
+      "seven up"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#biggi",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "bigi",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#la casera",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "la casera",
+    "synonyms": [
+      "lacassera"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#chi",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "chi",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#heinz",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "heinz",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#quaker",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "quaker",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#kellogg's",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "kellogg's",
+    "synonyms": [
+      "kellogg s",
+      "kelloggs"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#nike",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "nike",
+    "synonyms": [
+      "air max"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#adidas",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "adidas",
+    "synonyms": [
+      "three stripes"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#puma",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "puma",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#reebok",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "reebok",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#converse",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "converse",
+    "synonyms": [
+      "all star",
+      "chuck taylor"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#vans",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "vans",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#levi's",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "levi's",
+    "synonyms": [
+      "levi s",
+      "levis"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#zara",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "zara",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#h&m",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "h&m",
+    "synonyms": [
+      "h m",
+      "handm",
+      "hm"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#uniqlo",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "uniqlo",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#gucci",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "gucci",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#prada",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "prada",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#versace",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "versace",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#louis vuitton",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "louis vuitton",
+    "synonyms": [
+      "lv"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#chanel",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "chanel",
+    "synonyms": [
+      "coco chanel"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#dior",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "dior",
+    "synonyms": [
+      "christian dior"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#mac",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "mac",
+    "synonyms": [
+      "m.a.c",
+      "mac cosmetics",
+      "mac makeup"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#revlon",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "revlon",
+    "synonyms": [
+      "revlon makeup"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#fenty beauty",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "fenty beauty",
+    "synonyms": [
+      "fenty",
+      "rihanna fenty"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#maybelline",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "maybelline",
+    "synonyms": [
+      "maybelline new york"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#house of tara",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "house of tara",
+    "synonyms": [
+      "tara cosmetics",
+      "tara makeup"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#zaron",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "zaron",
+    "synonyms": [
+      "zaron cosmetics"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#nuban beauty",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "nuban beauty",
+    "synonyms": [
+      "nuban"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#dark & lovely",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "dark & lovely",
+    "synonyms": [
+      "dark   lovely",
+      "dark  lovely",
+      "dark and lovely",
+      "softsheen carson",
+      "softsheen-carson",
+      "softsheencarson"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#cantu",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "cantu",
+    "synonyms": [],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#cadbury",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "cadbury",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#milo",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "milo",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#nescafé",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "nescafé",
+    "synonyms": [
+      "nescafe"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#maggi",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "maggi",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#golden morn",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "golden morn",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#lucozade",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "lucozade",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#maltina",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "maltina",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#amstel malta",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "amstel malta",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#balenciaga",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "balenciaga",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#hermès",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "hermès",
+    "synonyms": [
+      "hermes"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#burberry",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "burberry",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#givenchy",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "givenchy",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#dolce & gabbana",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "dolce & gabbana",
+    "synonyms": [
+      "d g",
+      "d&g",
+      "dandg",
+      "dg",
+      "dolce   gabbana",
+      "dolce  gabbana",
+      "dolce and gabbana"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#tommy hilfiger",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "tommy hilfiger",
+    "synonyms": [
+      "tommy"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#calvin klein",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "calvin klein",
+    "synonyms": [
+      "ck"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#ralph lauren",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "ralph lauren",
+    "synonyms": [
+      "polo",
+      "polo ralph lauren"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#under armour",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "under armour",
+    "synonyms": [
+      "ua"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#clinique",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "clinique",
+    "synonyms": [],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#estée lauder",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "estée lauder",
+    "synonyms": [
+      "estee",
+      "estee lauder"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#sephora",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "sephora",
+    "synonyms": [],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#black opal",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "black opal",
+    "synonyms": [],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#sheamoisture",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "sheamoisture",
+    "synonyms": [
+      "shea moisture"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#nivea",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "nivea",
+    "synonyms": [],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#dove",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "dove",
+    "synonyms": [],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#tomtom",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "tomtom",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#hollandia",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "hollandia",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#chivita",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "chivita",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#nutri-milk",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "nutri-milk",
+    "synonyms": [
+      "nutri milk",
+      "nutrimilk"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#ribena",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "ribena",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#capri-sun",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "capri-sun",
+    "synonyms": [
+      "capri sun",
+      "caprisun"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#unilever",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "unilever",
+    "synonyms": [
+      "unilever group",
+      "unilever plc"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#pepsico",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "pepsico",
+    "synonyms": [
+      "pepsi co"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#suntory",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "suntory",
+    "synonyms": [
+      "suntory beverages"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#mondelez",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "mondelez",
+    "synonyms": [
+      "mondelez international"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#vaseline",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "vaseline",
+    "synonyms": [],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#garnier",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "garnier",
+    "synonyms": [],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#olay",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "olay",
+    "synonyms": [],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#palmers",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "palmers",
+    "synonyms": [
+      "palmer s",
+      "palmer's"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#neutrogena",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "neutrogena",
+    "synonyms": [],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#yves saint laurent",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "yves saint laurent",
+    "synonyms": [
+      "ysl"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#giorgio armani",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "giorgio armani",
+    "synonyms": [
+      "armani"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#hugo boss",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "hugo boss",
+    "synonyms": [
+      "boss"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#lancôme",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "lancôme",
+    "synonyms": [
+      "lancome"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#covergirl",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "covergirl",
+    "synonyms": [],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#nyx",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "nyx",
+    "synonyms": [
+      "nyx cosmetics"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#benefit",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "benefit",
+    "synonyms": [
+      "benefit cosmetics"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#urban decay",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "urban decay",
+    "synonyms": [
+      "ud"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#too faced",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "too faced",
+    "synonyms": [],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#shein",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "shein",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#boohoo",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "boohoo",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#forever 21",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "forever 21",
+    "synonyms": [
+      "f21"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#fashion nova",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "fashion nova",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#asos",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "asos",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#primark",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "primark",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#lululemon",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "lululemon",
+    "synonyms": [
+      "lululemon athletica"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#new balance",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "new balance",
+    "synonyms": [
+      "nb"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#asics",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "asics",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#heineken",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "heineken",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#guinness",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "guinness",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#star lager",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "star lager",
+    "synonyms": [
+      "star beer"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#malta guinness",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "malta guinness",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#schweppes",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "schweppes",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#mountain dew",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "mountain dew",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#gap",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "gap",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#old navy",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "old navy",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#banana republic",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "banana republic",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#american eagle",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "american eagle",
+    "synonyms": [
+      "ae"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#abercrombie & fitch",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "abercrombie & fitch",
+    "synonyms": [
+      "a f",
+      "a&f",
+      "aandf",
+      "abercrombie",
+      "abercrombie   fitch",
+      "abercrombie  fitch",
+      "abercrombie and fitch",
+      "af"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#hollister",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "hollister",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#j.crew",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "j.crew",
+    "synonyms": [
+      "jcrew"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#coach",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "coach",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#michael kors",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "michael kors",
+    "synonyms": [
+      "kors",
+      "mk"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#kate spade",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "kate spade",
+    "synonyms": [
+      "ks"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#e.l.f.",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "e.l.f.",
+    "synonyms": [
+      "elf",
+      "elf cosmetics"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#tarte",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "tarte",
+    "synonyms": [
+      "tarte cosmetics"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#morphe",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "morphe",
+    "synonyms": [
+      "morphe brushes"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#glossier",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "glossier",
+    "synonyms": [],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#bath & body works",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "bath & body works",
+    "synonyms": [
+      "bath   body works",
+      "bath  body works",
+      "bath and body works",
+      "bbw"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#marks & spencer",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "marks & spencer",
+    "synonyms": [
+      "m s",
+      "m&s",
+      "mands",
+      "marks   spencer",
+      "marks  spencer",
+      "marks and spencer",
+      "ms"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#next",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "next",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#river island",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "river island",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#topshop",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "topshop",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#jd sports",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "jd sports",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#superdry",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "superdry",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#allsaints",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "allsaints",
+    "synonyms": [],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#burton",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "burton",
+    "synonyms": [
+      "burton menswear"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "brand#no7",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "no7",
+    "synonyms": [
+      "no 7"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#rimmel",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "rimmel",
+    "synonyms": [
+      "rimmel london"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#the body shop",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "the body shop",
+    "synonyms": [],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#soap & glory",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "soap & glory",
+    "synonyms": [
+      "soap   glory",
+      "soap  glory",
+      "soap and glory"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "brand#charlotte tilbury",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "charlotte tilbury",
+    "synonyms": [
+      "ct"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#lipstick",
+    "sk": "product",
+    "type": "product",
+    "canonical": "lipstick",
+    "synonyms": [
+      "lipsticks"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#lip gloss",
+    "sk": "product",
+    "type": "product",
+    "canonical": "lip gloss",
+    "synonyms": [
+      "lip glosses"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#lip balm",
+    "sk": "product",
+    "type": "product",
+    "canonical": "lip balm",
+    "synonyms": [
+      "lip balms"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#foundation",
+    "sk": "product",
+    "type": "product",
+    "canonical": "foundation",
+    "synonyms": [
+      "foundations"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#concealer",
+    "sk": "product",
+    "type": "product",
+    "canonical": "concealer",
+    "synonyms": [
+      "concealers"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#powder",
+    "sk": "product",
+    "type": "product",
+    "canonical": "powder",
+    "synonyms": [
+      "face powder",
+      "face powders",
+      "powders"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#blush",
+    "sk": "product",
+    "type": "product",
+    "canonical": "blush",
+    "synonyms": [
+      "blushes"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#bronzer",
+    "sk": "product",
+    "type": "product",
+    "canonical": "bronzer",
+    "synonyms": [
+      "bronzers"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#highlighter",
+    "sk": "product",
+    "type": "product",
+    "canonical": "highlighter",
+    "synonyms": [
+      "highlighters"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#eyeshadow",
+    "sk": "product",
+    "type": "product",
+    "canonical": "eyeshadow",
+    "synonyms": [
+      "eyeshadows"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#eyeliner",
+    "sk": "product",
+    "type": "product",
+    "canonical": "eyeliner",
+    "synonyms": [
+      "eyeliners"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#mascara",
+    "sk": "product",
+    "type": "product",
+    "canonical": "mascara",
+    "synonyms": [
+      "mascaras"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#lotion",
+    "sk": "product",
+    "type": "product",
+    "canonical": "lotion",
+    "synonyms": [
+      "lotions"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#cream",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cream",
+    "synonyms": [
+      "creams"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#face cream",
+    "sk": "product",
+    "type": "product",
+    "canonical": "face cream",
+    "synonyms": [
+      "face creams"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#face wash",
+    "sk": "product",
+    "type": "product",
+    "canonical": "face wash",
+    "synonyms": [
+      "face washes"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#cleanser",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cleanser",
+    "synonyms": [
+      "cleansers"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#toner",
+    "sk": "product",
+    "type": "product",
+    "canonical": "toner",
+    "synonyms": [
+      "toners"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#serum",
+    "sk": "product",
+    "type": "product",
+    "canonical": "serum",
+    "synonyms": [
+      "sera",
+      "serums"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#sunscreen",
+    "sk": "product",
+    "type": "product",
+    "canonical": "sunscreen",
+    "synonyms": [
+      "sunblock",
+      "sunscreens"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#moisturizer",
+    "sk": "product",
+    "type": "product",
+    "canonical": "moisturizer",
+    "synonyms": [
+      "moisturizers"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#body butter",
+    "sk": "product",
+    "type": "product",
+    "canonical": "body butter",
+    "synonyms": [
+      "body butters"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#scrub",
+    "sk": "product",
+    "type": "product",
+    "canonical": "scrub",
+    "synonyms": [
+      "scrubs"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#face mask",
+    "sk": "product",
+    "type": "product",
+    "canonical": "face mask",
+    "synonyms": [
+      "face mask",
+      "face masks"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+    {
+    "pk": "product#hair mask",
+    "sk": "product",
+    "type": "product",
+    "canonical": "hair mask",
+    "synonyms": [
+      "hair mask",
+      "hair masks"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#shampoo",
+    "sk": "product",
+    "type": "product",
+    "canonical": "shampoo",
+    "synonyms": [
+      "shampoos"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#conditioner",
+    "sk": "product",
+    "type": "product",
+    "canonical": "conditioner",
+    "synonyms": [
+      "conditioners"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#hair oil",
+    "sk": "product",
+    "type": "product",
+    "canonical": "hair oil",
+    "synonyms": [
+      "hair oils"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#hair cream",
+    "sk": "product",
+    "type": "product",
+    "canonical": "hair cream",
+    "synonyms": [
+      "hair creams"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#hair gel",
+    "sk": "product",
+    "type": "product",
+    "canonical": "hair gel",
+    "synonyms": [
+      "hair gels"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#hair spray",
+    "sk": "product",
+    "type": "product",
+    "canonical": "hair spray",
+    "synonyms": [
+      "hair sprays"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#hair dye",
+    "sk": "product",
+    "type": "product",
+    "canonical": "hair dye",
+    "synonyms": [
+      "hair color",
+      "hair colours",
+      "hair dyes"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#wig",
+    "sk": "product",
+    "type": "product",
+    "canonical": "wig",
+    "synonyms": [
+      "wigs"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#weave",
+    "sk": "product",
+    "type": "product",
+    "canonical": "weave",
+    "synonyms": [
+      "weaves"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#attachment",
+    "sk": "product",
+    "type": "product",
+    "canonical": "attachment",
+    "synonyms": [
+      "attachments",
+      "braid extension",
+      "braid extensions"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#soap",
+    "sk": "product",
+    "type": "product",
+    "canonical": "soap",
+    "synonyms": [
+      "soaps"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#hand wash",
+    "sk": "product",
+    "type": "product",
+    "canonical": "hand wash",
+    "synonyms": [
+      "hand washes"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#body wash",
+    "sk": "product",
+    "type": "product",
+    "canonical": "body wash",
+    "synonyms": [
+      "body washes"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#deodorant",
+    "sk": "product",
+    "type": "product",
+    "canonical": "deodorant",
+    "synonyms": [
+      "deodorants"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#perfume",
+    "sk": "product",
+    "type": "product",
+    "canonical": "perfume",
+    "synonyms": [
+      "fragrance",
+      "fragrances",
+      "perfumes"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#cologne",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cologne",
+    "synonyms": [
+      "colognes"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#toothpaste",
+    "sk": "product",
+    "type": "product",
+    "canonical": "toothpaste",
+    "synonyms": [
+      "toothpastes"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#toothbrush",
+    "sk": "product",
+    "type": "product",
+    "canonical": "toothbrush",
+    "synonyms": [
+      "toothbrushes"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#mouthwash",
+    "sk": "product",
+    "type": "product",
+    "canonical": "mouthwash",
+    "synonyms": [
+      "mouthwashes"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#shaving cream",
+    "sk": "product",
+    "type": "product",
+    "canonical": "shaving cream",
+    "synonyms": [
+      "shaving creams"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#razor",
+    "sk": "product",
+    "type": "product",
+    "canonical": "razor",
+    "synonyms": [
+      "razors"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#makeup brush",
+    "sk": "product",
+    "type": "product",
+    "canonical": "makeup brush",
+    "synonyms": [
+      "makeup brushes"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#makeup sponge",
+    "sk": "product",
+    "type": "product",
+    "canonical": "makeup sponge",
+    "synonyms": [
+      "makeup sponges"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#mirror",
+    "sk": "product",
+    "type": "product",
+    "canonical": "mirror",
+    "synonyms": [
+      "mirrors"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#comb",
+    "sk": "product",
+    "type": "product",
+    "canonical": "comb",
+    "synonyms": [
+      "combs"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#hairbrush",
+    "sk": "product",
+    "type": "product",
+    "canonical": "hairbrush",
+    "synonyms": [
+      "hairbrushes"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#nail file",
+    "sk": "product",
+    "type": "product",
+    "canonical": "nail file",
+    "synonyms": [
+      "nail files"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#nail clipper",
+    "sk": "product",
+    "type": "product",
+    "canonical": "nail clipper",
+    "synonyms": [
+      "nail clippers"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#shirt",
+    "sk": "product",
+    "type": "product",
+    "canonical": "shirt",
+    "synonyms": [
+      "shirts"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#t-shirt",
+    "sk": "product",
+    "type": "product",
+    "canonical": "t-shirt",
+    "synonyms": [
+      "t shirt",
+      "t shirts",
+      "t-shirts",
+      "tee",
+      "tees",
+      "tshirt",
+      "tshirts"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#polo shirt",
+    "sk": "product",
+    "type": "product",
+    "canonical": "polo shirt",
+    "synonyms": [
+      "polo shirts"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#blouse",
+    "sk": "product",
+    "type": "product",
+    "canonical": "blouse",
+    "synonyms": [
+      "blouses"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#dress",
+    "sk": "product",
+    "type": "product",
+    "canonical": "dress",
+    "synonyms": [
+      "dresses",
+      "frock",
+      "gown"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#skirt",
+    "sk": "product",
+    "type": "product",
+    "canonical": "skirt",
+    "synonyms": [
+      "skirts"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#trouser",
+    "sk": "product",
+    "type": "product",
+    "canonical": "trouser",
+    "synonyms": [
+      "pants",
+      "trousers"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#jeans",
+    "sk": "product",
+    "type": "product",
+    "canonical": "jeans",
+    "synonyms": [
+      "denim",
+      "denims"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#shorts",
+    "sk": "product",
+    "type": "product",
+    "canonical": "shorts",
+    "synonyms": [
+      "short"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#hoodie",
+    "sk": "product",
+    "type": "product",
+    "canonical": "hoodie",
+    "synonyms": [
+      "hoodies"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#sweater",
+    "sk": "product",
+    "type": "product",
+    "canonical": "sweater",
+    "synonyms": [
+      "jumper",
+      "jumpers",
+      "sweaters"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#jacket",
+    "sk": "product",
+    "type": "product",
+    "canonical": "jacket",
+    "synonyms": [
+      "jackets"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#coat",
+    "sk": "product",
+    "type": "product",
+    "canonical": "coat",
+    "synonyms": [
+      "coats",
+      "overcoat",
+      "overcoats"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#suit",
+    "sk": "product",
+    "type": "product",
+    "canonical": "suit",
+    "synonyms": [
+      "suits"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#tracksuit",
+    "sk": "product",
+    "type": "product",
+    "canonical": "tracksuit",
+    "synonyms": [
+      "tracksuits"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#shoe",
+    "sk": "product",
+    "type": "product",
+    "canonical": "shoe",
+    "synonyms": [
+      "footwear",
+      "shoes"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#sneaker",
+    "sk": "product",
+    "type": "product",
+    "canonical": "sneaker",
+    "synonyms": [
+      "canvas",
+      "sneakers",
+      "trainer",
+      "trainers"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#sandal",
+    "sk": "product",
+    "type": "product",
+    "canonical": "sandal",
+    "synonyms": [
+      "sandals"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#slipper",
+    "sk": "product",
+    "type": "product",
+    "canonical": "slipper",
+    "synonyms": [
+      "slippers"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#boot",
+    "sk": "product",
+    "type": "product",
+    "canonical": "boot",
+    "synonyms": [
+      "boots"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#heel",
+    "sk": "product",
+    "type": "product",
+    "canonical": "heel",
+    "synonyms": [
+      "heels",
+      "high heel",
+      "high heels"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#flip-flop",
+    "sk": "product",
+    "type": "product",
+    "canonical": "flip-flop",
+    "synonyms": [
+      "flip flop",
+      "flip flops",
+      "flip-flops",
+      "flipflop",
+      "flipflops"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#loafer",
+    "sk": "product",
+    "type": "product",
+    "canonical": "loafer",
+    "synonyms": [
+      "loafers"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#moccasin",
+    "sk": "product",
+    "type": "product",
+    "canonical": "moccasin",
+    "synonyms": [
+      "moccasins"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#cap",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cap",
+    "synonyms": [
+      "baseball cap",
+      "baseball caps",
+      "caps"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#hat",
+    "sk": "product",
+    "type": "product",
+    "canonical": "hat",
+    "synonyms": [
+      "hats"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#beanie",
+    "sk": "product",
+    "type": "product",
+    "canonical": "beanie",
+    "synonyms": [
+      "beanies"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#scarf",
+    "sk": "product",
+    "type": "product",
+    "canonical": "scarf",
+    "synonyms": [
+      "scarves"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#beret",
+    "sk": "product",
+    "type": "product",
+    "canonical": "beret",
+    "synonyms": [
+      "berets"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#gele",
+    "sk": "product",
+    "type": "product",
+    "canonical": "gele",
+    "synonyms": [
+      "headties"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#turban",
+    "sk": "product",
+    "type": "product",
+    "canonical": "turban",
+    "synonyms": [
+      "turbans"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#hijab",
+    "sk": "product",
+    "type": "product",
+    "canonical": "hijab",
+    "synonyms": [
+      "hijabs"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#head tie",
+    "sk": "product",
+    "type": "product",
+    "canonical": "head tie",
+    "synonyms": [
+      "duku",
+      "head ties"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#wrapper",
+    "sk": "product",
+    "type": "product",
+    "canonical": "wrapper",
+    "synonyms": [
+      "iro",
+      "wrappers"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#buba",
+    "sk": "product",
+    "type": "product",
+    "canonical": "buba",
+    "synonyms": [
+      "bubas"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#kaftan",
+    "sk": "product",
+    "type": "product",
+    "canonical": "kaftan",
+    "synonyms": [
+      "kaftans"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#agbada",
+    "sk": "product",
+    "type": "product",
+    "canonical": "agbada",
+    "synonyms": [
+      "agbadas"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#abaya",
+    "sk": "product",
+    "type": "product",
+    "canonical": "abaya",
+    "synonyms": [
+      "abayas"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#kimono",
+    "sk": "product",
+    "type": "product",
+    "canonical": "kimono",
+    "synonyms": [
+      "kimonos"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#sari",
+    "sk": "product",
+    "type": "product",
+    "canonical": "sari",
+    "synonyms": [
+      "saris"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#bag",
+    "sk": "product",
+    "type": "product",
+    "canonical": "bag",
+    "synonyms": [
+      "bags",
+      "handbag",
+      "handbags"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#belt",
+    "sk": "product",
+    "type": "product",
+    "canonical": "belt",
+    "synonyms": [
+      "belts"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#tie",
+    "sk": "product",
+    "type": "product",
+    "canonical": "tie",
+    "synonyms": [
+      "necktie",
+      "neckties",
+      "ties"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#bow tie",
+    "sk": "product",
+    "type": "product",
+    "canonical": "bow tie",
+    "synonyms": [
+      "bow ties"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#glove",
+    "sk": "product",
+    "type": "product",
+    "canonical": "glove",
+    "synonyms": [
+      "gloves"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#sock",
+    "sk": "product",
+    "type": "product",
+    "canonical": "sock",
+    "synonyms": [
+      "socks"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#watch",
+    "sk": "product",
+    "type": "product",
+    "canonical": "watch",
+    "synonyms": [
+      "watches"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#necklace",
+    "sk": "product",
+    "type": "product",
+    "canonical": "necklace",
+    "synonyms": [
+      "necklaces"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#bracelet",
+    "sk": "product",
+    "type": "product",
+    "canonical": "bracelet",
+    "synonyms": [
+      "bracelets"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#earring",
+    "sk": "product",
+    "type": "product",
+    "canonical": "earring",
+    "synonyms": [
+      "earrings"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#ring",
+    "sk": "product",
+    "type": "product",
+    "canonical": "ring",
+    "synonyms": [
+      "rings"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#sunglasses",
+    "sk": "product",
+    "type": "product",
+    "canonical": "sunglasses",
+    "synonyms": [
+      "shades"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#underwear",
+    "sk": "product",
+    "type": "product",
+    "canonical": "underwear",
+    "synonyms": [
+      "underclothes",
+      "undergarments"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#bra",
+    "sk": "product",
+    "type": "product",
+    "canonical": "bra",
+    "synonyms": [
+      "bras"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#panty",
+    "sk": "product",
+    "type": "product",
+    "canonical": "panty",
+    "synonyms": [
+      "knickers",
+      "panties"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#boxer",
+    "sk": "product",
+    "type": "product",
+    "canonical": "boxer",
+    "synonyms": [
+      "boxers"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#pajamas",
+    "sk": "product",
+    "type": "product",
+    "canonical": "pajamas",
+    "synonyms": [
+      "pyjamas"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#nightgown",
+    "sk": "product",
+    "type": "product",
+    "canonical": "nightgown",
+    "synonyms": [
+      "nightdress",
+      "nightdresses",
+      "nightgowns"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yam",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yam",
+    "synonyms": [
+      "isu",
+      "ji",
+      "tuber of yam",
+      "tubers of yam",
+      "yams"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#cocoyam",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cocoyam",
+    "synonyms": [
+      "cocoyams",
+      "ede"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#sweet potato",
+    "sk": "product",
+    "type": "product",
+    "canonical": "sweet potato",
+    "synonyms": [
+      "sweet potatoes"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#cassava",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cassava",
+    "synonyms": [
+      "cassavas",
+      "manioc"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+   {
+    "pk": "product#flour",
+    "sk": "product",
+    "type": "product",
+    "canonical": "flour",
+    "synonyms": [
+      "flour"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  
+  {
+    "pk": "product#spaghetti",
+    "sk": "product",
+    "type": "product",
+    "canonical": "spaghetti",
+    "synonyms": [
+      "spaghetti", "spagetti", "spagheti"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#cassava flour",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cassava flour",
+    "synonyms": [
+      "lafun",
+      "tapioca flour"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#garri",
+    "sk": "product",
+    "type": "product",
+    "canonical": "garri",
+    "synonyms": [
+      "cassava flakes",
+      "eba",
+      "gari"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#fufu",
+    "sk": "product",
+    "type": "product",
+    "canonical": "fufu",
+    "synonyms": [
+      "akpu",
+      "foofoo",
+      "swallow"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#yam flour",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yam flour",
+    "synonyms": [
+      "instant pounded yam",
+      "iyan",
+      "pounded yam flour",
+      "poundo"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#plantain",
+    "sk": "product",
+    "type": "product",
+    "canonical": "plantain",
+    "synonyms": [
+      "boli",
+      "dodo",
+      "plantains"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#plantain flour",
+    "sk": "product",
+    "type": "product",
+    "canonical": "plantain flour",
+    "synonyms": [
+      "plantain flours"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#maize",
+    "sk": "product",
+    "type": "product",
+    "canonical": "maize",
+    "synonyms": [
+      "corn",
+      "maizes"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#maize flour",
+    "sk": "product",
+    "type": "product",
+    "canonical": "maize flour",
+    "synonyms": [
+      "corn flour"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#millet",
+    "sk": "product",
+    "type": "product",
+    "canonical": "millet",
+    "synonyms": [
+      "millets"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#sorghum",
+    "sk": "product",
+    "type": "product",
+    "canonical": "sorghum",
+    "synonyms": [
+      "guinea corn",
+      "sorghums"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#rice",
+    "sk": "product",
+    "type": "product",
+    "canonical": "rice",
+    "synonyms": [
+      "rices"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#beans",
+    "sk": "product",
+    "type": "product",
+    "canonical": "beans",
+    "synonyms": [
+      "bean",
+      "ewa",
+      "honey beans",
+      "oloyin beans"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#bambara nut",
+    "sk": "product",
+    "type": "product",
+    "canonical": "bambara nut",
+    "synonyms": [
+      "bambara nuts",
+      "okpa"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#groundnut",
+    "sk": "product",
+    "type": "product",
+    "canonical": "groundnut",
+    "synonyms": [
+      "groundnuts",
+      "peanut",
+      "peanuts"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#palm oil",
+    "sk": "product",
+    "type": "product",
+    "canonical": "palm oil",
+    "synonyms": [
+      "red oil"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#groundnut oil",
+    "sk": "product",
+    "type": "product",
+    "canonical": "groundnut oil",
+    "synonyms": [
+      "peanut oil",
+      "vegetable oil"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#soy oil",
+    "sk": "product",
+    "type": "product",
+    "canonical": "soy oil",
+    "synonyms": [
+      "soya oil",
+      "soybean oil"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#shea butter",
+    "sk": "product",
+    "type": "product",
+    "canonical": "shea butter",
+    "synonyms": [
+      "ori"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#coconut oil",
+    "sk": "product",
+    "type": "product",
+    "canonical": "coconut oil",
+    "synonyms": [
+      "cocos oil"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#goat meat",
+    "sk": "product",
+    "type": "product",
+    "canonical": "goat meat",
+    "synonyms": [
+      "chevon",
+      "goat meats"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#goat head",
+    "sk": "product",
+    "type": "product",
+    "canonical": "goat head",
+    "synonyms": [
+      "goat heads",
+      "isi ewu"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#cow skin",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cow skin",
+    "synonyms": [
+      "cow skins",
+      "kpomo",
+      "ponmo"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#snail",
+    "sk": "product",
+    "type": "product",
+    "canonical": "snail",
+    "synonyms": [
+      "snails"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#chicken",
+    "sk": "product",
+    "type": "product",
+    "canonical": "chicken",
+    "synonyms": [
+      "chickens"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#turkey",
+    "sk": "product",
+    "type": "product",
+    "canonical": "turkey",
+    "synonyms": [
+      "turkeys"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#crayfish",
+    "sk": "product",
+    "type": "product",
+    "canonical": "crayfish",
+    "synonyms": [
+      "crawfish",
+      "crayfishes",
+      "dried crayfish"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#stockfish",
+    "sk": "product",
+    "type": "product",
+    "canonical": "stockfish",
+    "synonyms": [
+      "dried codfish",
+      "okporoko",
+      "stockfishes"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#dried fish",
+    "sk": "product",
+    "type": "product",
+    "canonical": "dried fish",
+    "synonyms": [
+      "dried fishes",
+      "panla",
+      "smoked fish"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#catfish",
+    "sk": "product",
+    "type": "product",
+    "canonical": "catfish",
+    "synonyms": [
+      "catfishes"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#tilapia",
+    "sk": "product",
+    "type": "product",
+    "canonical": "tilapia",
+    "synonyms": [
+      "tilapias"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#ugu",
+    "sk": "product",
+    "type": "product",
+    "canonical": "ugu",
+    "synonyms": [
+      "pumpkin leaf",
+      "ugu leaves"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#bitterleaf",
+    "sk": "product",
+    "type": "product",
+    "canonical": "bitterleaf",
+    "synonyms": [
+      "bitter leaves",
+      "onugbu"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#waterleaf",
+    "sk": "product",
+    "type": "product",
+    "canonical": "waterleaf",
+    "synonyms": [
+      "water leaves"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#scent leaf",
+    "sk": "product",
+    "type": "product",
+    "canonical": "scent leaf",
+    "synonyms": [
+      "efirin",
+      "nchuanwu",
+      "scent leaves"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#uziza leaf",
+    "sk": "product",
+    "type": "product",
+    "canonical": "uziza leaf",
+    "synonyms": [
+      "uziza leaves"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#oha leaf",
+    "sk": "product",
+    "type": "product",
+    "canonical": "oha leaf",
+    "synonyms": [
+      "oha leaves",
+      "ora leaf"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#afang leaf",
+    "sk": "product",
+    "type": "product",
+    "canonical": "afang leaf",
+    "synonyms": [
+      "afang leaves",
+      "okazi leaf"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#okra",
+    "sk": "product",
+    "type": "product",
+    "canonical": "okra",
+    "synonyms": [
+      "ladyfinger",
+      "okras"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#pepper",
+    "sk": "product",
+    "type": "product",
+    "canonical": "pepper",
+    "synonyms": [
+      "ata rodo",
+      "peppers",
+      "scotch bonnet"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#tomato",
+    "sk": "product",
+    "type": "product",
+    "canonical": "tomato",
+    "synonyms": [
+      "tomatoes"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#onion",
+    "sk": "product",
+    "type": "product",
+    "canonical": "onion",
+    "synonyms": [
+      "onions"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#iru",
+    "sk": "product",
+    "type": "product",
+    "canonical": "iru",
+    "synonyms": [
+      "iru seeds",
+      "locust beans"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#ogiri",
+    "sk": "product",
+    "type": "product",
+    "canonical": "ogiri",
+    "synonyms": [
+      "ogiris"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#suya spice",
+    "sk": "product",
+    "type": "product",
+    "canonical": "suya spice",
+    "synonyms": [
+      "yaji"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#dry pepper",
+    "sk": "product",
+    "type": "product",
+    "canonical": "dry pepper",
+    "synonyms": [
+      "ground pepper"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#dates",
+    "sk": "product",
+    "type": "product",
+    "canonical": "dates",
+    "synonyms": [
+      "dabino",
+      "date"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#sugar",
+    "sk": "product",
+    "type": "product",
+    "canonical": "sugar",
+    "synonyms": [
+      "sugars"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#salt",
+    "sk": "product",
+    "type": "product",
+    "canonical": "salt",
+    "synonyms": [
+      "salts"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#honey",
+    "sk": "product",
+    "type": "product",
+    "canonical": "honey",
+    "synonyms": [
+      "honeys"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#milk",
+    "sk": "product",
+    "type": "product",
+    "canonical": "milk",
+    "synonyms": [
+      "milks",
+      "powdered milk",
+      "tinned milk"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#noodles",
+    "sk": "product",
+    "type": "product",
+    "canonical": "noodles",
+    "synonyms": [],
+    "category": [
+      "groceries"
+    ]
+  },
+    {
+    "pk": "product#chicken noodles",
+    "sk": "product",
+    "type": "product",
+    "canonical": "chicken noodles",
+    "synonyms": ["chicken noodle", "instant chicken noodles"],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#bread",
+    "sk": "product",
+    "type": "product",
+    "canonical": "bread",
+    "synonyms": [
+      "breads"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#butter",
+    "sk": "product",
+    "type": "product",
+    "canonical": "butter",
+    "synonyms": [
+      "butters"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#fonio",
+    "sk": "product",
+    "type": "product",
+    "canonical": "fonio",
+    "synonyms": [
+      "acha"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#sorghum flour",
+    "sk": "product",
+    "type": "product",
+    "canonical": "sorghum flour",
+    "synonyms": [
+      "sorghum flours"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#wheat flour",
+    "sk": "product",
+    "type": "product",
+    "canonical": "wheat flour",
+    "synonyms": [
+      "atta",
+      "mandazi flour",
+	  "semolina",
+	  "wheat swallow",
+	  "semovita",
+	  "semovita swallow"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#periwinkle",
+    "sk": "product",
+    "type": "product",
+    "canonical": "periwinkle",
+    "synonyms": [
+      "isam",
+      "periwinkles"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#crab",
+    "sk": "product",
+    "type": "product",
+    "canonical": "crab",
+    "synonyms": [
+      "crabs"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#shrimp",
+    "sk": "product",
+    "type": "product",
+    "canonical": "shrimp",
+    "synonyms": [
+      "shrimps"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#dry prawn",
+    "sk": "product",
+    "type": "product",
+    "canonical": "dry prawn",
+    "synonyms": [
+      "dry prawns"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#cow leg",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cow leg",
+    "synonyms": [
+      "bokoto",
+      "cow legs"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#cow tail",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cow tail",
+    "synonyms": [
+      "cow tails"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#cow tripe",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cow tripe",
+    "synonyms": [
+      "cow tripes",
+      "shaki"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#beef",
+    "sk": "product",
+    "type": "product",
+    "canonical": "beef",
+    "synonyms": [
+      "beefs"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#lamb",
+    "sk": "product",
+    "type": "product",
+    "canonical": "lamb",
+    "synonyms": [
+      "lambs",
+      "mutton"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#ewedu",
+    "sk": "product",
+    "type": "product",
+    "canonical": "ewedu",
+    "synonyms": [
+      "jute leaf",
+      "jute leaves"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#kale",
+    "sk": "product",
+    "type": "product",
+    "canonical": "kale",
+    "synonyms": [
+      "kales",
+      "sukuma wiki"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#spinach",
+    "sk": "product",
+    "type": "product",
+    "canonical": "spinach",
+    "synonyms": [
+      "green spinach",
+      "spinaches"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#ntongo",
+    "sk": "product",
+    "type": "product",
+    "canonical": "ntongo",
+    "synonyms": [
+      "ntongos"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#garden egg leaf",
+    "sk": "product",
+    "type": "product",
+    "canonical": "garden egg leaf",
+    "synonyms": [
+      "akwukwo anara",
+      "garden egg leaves"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#curry leaf",
+    "sk": "product",
+    "type": "product",
+    "canonical": "curry leaf",
+    "synonyms": [
+      "curry leaves",
+      "efinrin"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#thyme",
+    "sk": "product",
+    "type": "product",
+    "canonical": "thyme",
+    "synonyms": [
+      "thymes"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#alligator pepper",
+    "sk": "product",
+    "type": "product",
+    "canonical": "alligator pepper",
+    "synonyms": [
+      "atare"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#guinea pepper",
+    "sk": "product",
+    "type": "product",
+    "canonical": "guinea pepper",
+    "synonyms": [
+      "uziza seed",
+      "uziza seeds"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#ehuru",
+    "sk": "product",
+    "type": "product",
+    "canonical": "ehuru",
+    "synonyms": [
+      "calabash nutmeg"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#dawadawa",
+    "sk": "product",
+    "type": "product",
+    "canonical": "dawadawa",
+    "synonyms": [
+      "fermented locust beans"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#kuli kuli",
+    "sk": "product",
+    "type": "product",
+    "canonical": "kuli kuli",
+    "synonyms": [
+      "kulikuli"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#pap",
+    "sk": "product",
+    "type": "product",
+    "canonical": "pap",
+    "synonyms": [
+      "akamu",
+      "ogi"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#cocoa powder",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cocoa powder",
+    "synonyms": [
+      "cocoas powder"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#coffee",
+    "sk": "product",
+    "type": "product",
+    "canonical": "coffee",
+    "synonyms": [
+      "coffees"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#tea",
+    "sk": "product",
+    "type": "product",
+    "canonical": "tea",
+    "synonyms": [
+      "chai",
+      "teas"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#wheat",
+    "sk": "product",
+    "type": "product",
+    "canonical": "wheat",
+    "synonyms": [
+      "wheats"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#barley",
+    "sk": "product",
+    "type": "product",
+    "canonical": "barley",
+    "synonyms": [
+      "barleys"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#oats",
+    "sk": "product",
+    "type": "product",
+    "canonical": "oats",
+    "synonyms": [
+      "oat"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#pasta",
+    "sk": "product",
+    "type": "product",
+    "canonical": "pasta",
+    "synonyms": [
+      "pastas"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#lentil",
+    "sk": "product",
+    "type": "product",
+    "canonical": "lentil",
+    "synonyms": [
+      "lentils"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#chickpea",
+    "sk": "product",
+    "type": "product",
+    "canonical": "chickpea",
+    "synonyms": [
+      "chickpeas",
+      "garbanzo bean",
+      "garbanzo beans"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#green pea",
+    "sk": "product",
+    "type": "product",
+    "canonical": "green pea",
+    "synonyms": [
+      "green peas",
+      "peas"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#cheese",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cheese",
+    "synonyms": [
+      "cheeses"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#yogurt",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yogurt",
+    "synonyms": [
+      "yogurts"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#egg",
+    "sk": "product",
+    "type": "product",
+    "canonical": "egg",
+    "synonyms": [
+      "eggs"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#pork",
+    "sk": "product",
+    "type": "product",
+    "canonical": "pork",
+    "synonyms": [
+      "porks"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#bacon",
+    "sk": "product",
+    "type": "product",
+    "canonical": "bacon",
+    "synonyms": [
+      "bacons"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#ham",
+    "sk": "product",
+    "type": "product",
+    "canonical": "ham",
+    "synonyms": [
+      "hams"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#sausage",
+    "sk": "product",
+    "type": "product",
+    "canonical": "sausage",
+    "synonyms": [
+      "sausages"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#fish",
+    "sk": "product",
+    "type": "product",
+    "canonical": "fish",
+    "synonyms": [
+      "fishes"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#potato",
+    "sk": "product",
+    "type": "product",
+    "canonical": "potato",
+    "synonyms": [
+      "potatoes"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#carrot",
+    "sk": "product",
+    "type": "product",
+    "canonical": "carrot",
+    "synonyms": [
+      "carrots"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#cabbage",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cabbage",
+    "synonyms": [
+      "cabbages"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#lettuce",
+    "sk": "product",
+    "type": "product",
+    "canonical": "lettuce",
+    "synonyms": [
+      "lettuces"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#broccoli",
+    "sk": "product",
+    "type": "product",
+    "canonical": "broccoli",
+    "synonyms": [
+      "broccolis"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#cauliflower",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cauliflower",
+    "synonyms": [
+      "cauliflowers"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#cucumber",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cucumber",
+    "synonyms": [
+      "cucumbers"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#green bean",
+    "sk": "product",
+    "type": "product",
+    "canonical": "green bean",
+    "synonyms": [
+      "green beans"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#apple",
+    "sk": "product",
+    "type": "product",
+    "canonical": "apple",
+    "synonyms": [
+      "apples"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#banana",
+    "sk": "product",
+    "type": "product",
+    "canonical": "banana",
+    "synonyms": [
+      "bananas"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#orange",
+    "sk": "product",
+    "type": "product",
+    "canonical": "orange",
+    "synonyms": [
+      "oranges"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#lemon",
+    "sk": "product",
+    "type": "product",
+    "canonical": "lemon",
+    "synonyms": [
+      "lemons"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#grape",
+    "sk": "product",
+    "type": "product",
+    "canonical": "grape",
+    "synonyms": [
+      "grapes"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#strawberry",
+    "sk": "product",
+    "type": "product",
+    "canonical": "strawberry",
+    "synonyms": [
+      "strawberries"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#pineapple",
+    "sk": "product",
+    "type": "product",
+    "canonical": "pineapple",
+    "synonyms": [
+      "pineapples"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#all-purpose flour",
+    "sk": "product",
+    "type": "product",
+    "canonical": "all-purpose flour",
+    "synonyms": [
+      "all purpose flour",
+      "allpurpose flour",
+      "plain flour"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#baking powder",
+    "sk": "product",
+    "type": "product",
+    "canonical": "baking powder",
+    "synonyms": [
+      "baking powders"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#yeast",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeast",
+    "synonyms": [
+      "yeasts"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#ketchup",
+    "sk": "product",
+    "type": "product",
+    "canonical": "ketchup",
+    "synonyms": [
+      "tomato ketchup"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#mayonnaise",
+    "sk": "product",
+    "type": "product",
+    "canonical": "mayonnaise",
+    "synonyms": [
+      "mayo",
+      "mayonnaises"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#mustard",
+    "sk": "product",
+    "type": "product",
+    "canonical": "mustard",
+    "synonyms": [
+      "mustards"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#vinegar",
+    "sk": "product",
+    "type": "product",
+    "canonical": "vinegar",
+    "synonyms": [
+      "vinegars"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#juice",
+    "sk": "product",
+    "type": "product",
+    "canonical": "juice",
+    "synonyms": [
+      "juices"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#biscuit",
+    "sk": "product",
+    "type": "product",
+    "canonical": "biscuit",
+    "synonyms": [
+      "biscuits",
+      "cookie",
+      "cookies"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#cereal",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cereal",
+    "synonyms": [
+      "cereals"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#african breadfruit",
+    "sk": "product",
+    "type": "product",
+    "canonical": "african breadfruit",
+    "synonyms": [
+      "african breadfruits",
+      "ukwa"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#african pear",
+    "sk": "product",
+    "type": "product",
+    "canonical": "african pear",
+    "synonyms": [
+      "african pears",
+      "safou",
+      "ube"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#baobab",
+    "sk": "product",
+    "type": "product",
+    "canonical": "baobab",
+    "synonyms": [
+      "baobab fruit",
+      "baobab fruits",
+      "baobabs",
+      "bouye"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#tiger nut",
+    "sk": "product",
+    "type": "product",
+    "canonical": "tiger nut",
+    "synonyms": [
+      "aya",
+      "ofio",
+      "tiger nuts"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#african star apple",
+    "sk": "product",
+    "type": "product",
+    "canonical": "african star apple",
+    "synonyms": [
+      "african star apples",
+      "agbalumo",
+      "udara"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#locust fruit",
+    "sk": "product",
+    "type": "product",
+    "canonical": "locust fruit",
+    "synonyms": [
+      "icheku",
+      "locust fruits",
+      "tamarind"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#african walnut",
+    "sk": "product",
+    "type": "product",
+    "canonical": "african walnut",
+    "synonyms": [
+      "african walnuts",
+      "asala"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#african garden egg",
+    "sk": "product",
+    "type": "product",
+    "canonical": "african garden egg",
+    "synonyms": [
+      "african garden eggs",
+      "anara",
+      "eggplant"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#morogo",
+    "sk": "product",
+    "type": "product",
+    "canonical": "morogo",
+    "synonyms": [
+      "african spinach",
+      "wild spinach"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#african oil bean",
+    "sk": "product",
+    "type": "product",
+    "canonical": "african oil bean",
+    "synonyms": [
+      "african oil beans",
+      "ugba"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#primer",
+    "sk": "product",
+    "type": "product",
+    "canonical": "primer",
+    "synonyms": [
+      "makeup primer",
+      "primers"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#setting spray",
+    "sk": "product",
+    "type": "product",
+    "canonical": "setting spray",
+    "synonyms": [
+      "makeup fixer",
+      "setting sprays"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#nail polish",
+    "sk": "product",
+    "type": "product",
+    "canonical": "nail polish",
+    "synonyms": [
+      "nail polishes",
+      "nail varnish"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#nail polish remover",
+    "sk": "product",
+    "type": "product",
+    "canonical": "nail polish remover",
+    "synonyms": [
+      "acetone",
+      "nail removers"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#false eyelash",
+    "sk": "product",
+    "type": "product",
+    "canonical": "false eyelash",
+    "synonyms": [
+      "eyelash extension",
+      "false eyelashes",
+      "lashes"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#makeup remover",
+    "sk": "product",
+    "type": "product",
+    "canonical": "makeup remover",
+    "synonyms": [
+      "cleansing wipes",
+      "face wipes"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#cotton wool",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cotton wool",
+    "synonyms": [
+      "cotton pad",
+      "cotton pads",
+      "cotton wools"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#cuticle oil",
+    "sk": "product",
+    "type": "product",
+    "canonical": "cuticle oil",
+    "synonyms": [
+      "nail oil",
+      "nail treatment oil"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#durag",
+    "sk": "product",
+    "type": "product",
+    "canonical": "durag",
+    "synonyms": [
+      "bandana",
+      "durags",
+      "wave cap"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#corset",
+    "sk": "product",
+    "type": "product",
+    "canonical": "corset",
+    "synonyms": [
+      "bustier",
+      "corsets"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#leggings",
+    "sk": "product",
+    "type": "product",
+    "canonical": "leggings",
+    "synonyms": [
+      "pantyhose",
+      "tights"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#overalls",
+    "sk": "product",
+    "type": "product",
+    "canonical": "overalls",
+    "synonyms": [
+      "dungarees"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#swimsuit",
+    "sk": "product",
+    "type": "product",
+    "canonical": "swimsuit",
+    "synonyms": [
+      "bikini",
+      "swimsuits",
+      "swimwear"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#uniform",
+    "sk": "product",
+    "type": "product",
+    "canonical": "uniform",
+    "synonyms": [
+      "school uniform",
+      "uniforms",
+      "work uniform"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#apron",
+    "sk": "product",
+    "type": "product",
+    "canonical": "apron",
+    "synonyms": [
+      "aprons"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#ankara fabric",
+    "sk": "product",
+    "type": "product",
+    "canonical": "ankara fabric",
+    "synonyms": [
+      "african print",
+      "ankara",
+      "kitenge"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#jersey",
+    "sk": "product",
+    "type": "product",
+    "canonical": "jersey",
+    "synonyms": [
+      "football jersey",
+      "jerseys",
+      "soccer jersey"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#kufi",
+    "sk": "product",
+    "type": "product",
+    "canonical": "kufi",
+    "synonyms": [
+      "fez",
+      "kofia"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#soda",
+    "sk": "product",
+    "type": "product",
+    "canonical": "soda",
+    "synonyms": [
+      "carbonated drink",
+      "carbonated drinks",
+      "fizzy drink",
+      "fizzy drinks",
+      "pop",
+      "soft drink",
+      "soft drinks"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "product#sparkling water",
+    "sk": "product",
+    "type": "product",
+    "canonical": "sparkling water",
+    "synonyms": [
+      "carbonated water",
+      "fizzy water",
+      "seltzer"
+    ],
+    "category": [
+      "groceries"
+    ]
+  },
+  {
+    "pk": "brand#l'oréal",
+    "sk": "brand",
+    "type": "brand",
+    "canonical": "l'oréal",
+    "synonyms": [
+      "l oreal",
+      "l oreal paris",
+      "l oréal",
+      "l oréal paris",
+      "l'oreal",
+      "l'oreal paris",
+      "l'oréal paris",
+      "loreal",
+      "loreal paris",
+      "loréal",
+      "loréal paris",
+      "l’oréal",
+      "l’oréal paris"
+    ],
+    "category": [
+      "beauty"
+    ]
+  },
+  {
+    "pk": "product#air max 1",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air max 1",
+    "synonyms": [
+      "air max ones",
+      "airmax 1",
+      "am1"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air max 90",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air max 90",
+    "synonyms": [
+      "air max 90s",
+      "airmax 90",
+      "am90"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air max 95",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air max 95",
+    "synonyms": [
+      "air max 95s",
+      "airmax 95",
+      "am95"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air max 97",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air max 97",
+    "synonyms": [
+      "air max 97s",
+      "airmax 97",
+      "am97"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air max 98",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air max 98",
+    "synonyms": [
+      "air max 98s",
+      "airmax 98",
+      "am98"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air max 270",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air max 270",
+    "synonyms": [
+      "air max 270s",
+      "airmax 270",
+      "am270"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air max 720",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air max 720",
+    "synonyms": [
+      "air max 720s",
+      "airmax 720",
+      "am720"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air force 1",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air force 1",
+    "synonyms": [
+      "af1",
+      "air force ones"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air force 2",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air force 2",
+    "synonyms": [
+      "af2",
+      "air force twos"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 1",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 1",
+    "synonyms": [
+      "aj1",
+      "jordan 1",
+      "jordan ones"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 3",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 3",
+    "synonyms": [
+      "aj3",
+      "jordan 3"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 4",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 4",
+    "synonyms": [
+      "aj4",
+      "jordan 4"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 5",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 5",
+    "synonyms": [
+      "aj5",
+      "jordan 5"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 6",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 6",
+    "synonyms": [
+      "aj6",
+      "jordan 6"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 11",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 11",
+    "synonyms": [
+      "aj11",
+      "jordan 11"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 12",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 12",
+    "synonyms": [
+      "aj12",
+      "jordan 12"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 13",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 13",
+    "synonyms": [
+      "aj13",
+      "jordan 13"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#ultraboost",
+    "sk": "product",
+    "type": "product",
+    "canonical": "ultraboost",
+    "synonyms": [
+      "ub",
+      "ultraboosts"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#ultraboost 21",
+    "sk": "product",
+    "type": "product",
+    "canonical": "ultraboost 21",
+    "synonyms": [
+      "ub21"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#ultraboost dna",
+    "sk": "product",
+    "type": "product",
+    "canonical": "ultraboost dna",
+    "synonyms": [
+      "dna ultraboost",
+      "ub dna"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#samba",
+    "sk": "product",
+    "type": "product",
+    "canonical": "samba",
+    "synonyms": [
+      "sambas"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#gazelle",
+    "sk": "product",
+    "type": "product",
+    "canonical": "gazelle",
+    "synonyms": [
+      "gazelles"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#superstar",
+    "sk": "product",
+    "type": "product",
+    "canonical": "superstar",
+    "synonyms": [
+      "superstars"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#stan smith",
+    "sk": "product",
+    "type": "product",
+    "canonical": "stan smith",
+    "synonyms": [
+      "stan smiths",
+      "stans"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#campus 80s",
+    "sk": "product",
+    "type": "product",
+    "canonical": "campus 80s",
+    "synonyms": [
+      "campus",
+      "campus eighties"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#forum low",
+    "sk": "product",
+    "type": "product",
+    "canonical": "forum low",
+    "synonyms": [
+      "forum lows"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#forum high",
+    "sk": "product",
+    "type": "product",
+    "canonical": "forum high",
+    "synonyms": [
+      "forum highs"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#nmd",
+    "sk": "product",
+    "type": "product",
+    "canonical": "nmd",
+    "synonyms": [
+      "nmds"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yeezy boost 350",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeezy boost 350",
+    "synonyms": [
+      "350s",
+      "boost 350",
+      "yeezy 350"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yeezy boost 380",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeezy boost 380",
+    "synonyms": [
+      "boost 380",
+      "yeezy 380"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yeezy boost 500",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeezy boost 500",
+    "synonyms": [
+      "boost 500",
+      "yeezy 500"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yeezy boost 700",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeezy boost 700",
+    "synonyms": [
+      "boost 700",
+      "yeezy 700"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yeezy foam runner",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeezy foam runner",
+    "synonyms": [
+      "foam runner",
+      "yeezy foam"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yeezy slide",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeezy slide",
+    "synonyms": [
+      "slides",
+      "yeezy slides"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#chuck taylor all star",
+    "sk": "product",
+    "type": "product",
+    "canonical": "chuck taylor all star",
+    "synonyms": [
+      "all stars",
+      "chuck taylors",
+      "chucks"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#one star",
+    "sk": "product",
+    "type": "product",
+    "canonical": "one star",
+    "synonyms": [
+      "one stars"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#pro leather",
+    "sk": "product",
+    "type": "product",
+    "canonical": "pro leather",
+    "synonyms": [
+      "pro leathers"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#old skool",
+    "sk": "product",
+    "type": "product",
+    "canonical": "old skool",
+    "synonyms": [
+      "old skools"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#classic slip-on",
+    "sk": "product",
+    "type": "product",
+    "canonical": "classic slip-on",
+    "synonyms": [
+      "classic slip on",
+      "classic slipon",
+      "slip ons",
+      "slip-ons",
+      "slipons"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#sk8-hi",
+    "sk": "product",
+    "type": "product",
+    "canonical": "sk8-hi",
+    "synonyms": [
+      "sk8 hi",
+      "sk8hi",
+      "skate high"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#era",
+    "sk": "product",
+    "type": "product",
+    "canonical": "era",
+    "synonyms": [
+      "eras"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#authentic",
+    "sk": "product",
+    "type": "product",
+    "canonical": "authentic",
+    "synonyms": [
+      "vans authentic"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#club c 85",
+    "sk": "product",
+    "type": "product",
+    "canonical": "club c 85",
+    "synonyms": [
+      "club c",
+      "club c85"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#classic leather",
+    "sk": "product",
+    "type": "product",
+    "canonical": "classic leather",
+    "synonyms": [
+      "reebok classics"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#instapump fury",
+    "sk": "product",
+    "type": "product",
+    "canonical": "instapump fury",
+    "synonyms": [
+      "instapumps",
+      "pump fury"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#workout plus",
+    "sk": "product",
+    "type": "product",
+    "canonical": "workout plus",
+    "synonyms": [
+      "workout+"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#nano",
+    "sk": "product",
+    "type": "product",
+    "canonical": "nano",
+    "synonyms": [
+      "reebok nano"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#suede classic",
+    "sk": "product",
+    "type": "product",
+    "canonical": "suede classic",
+    "synonyms": [
+      "puma suede",
+      "suede classics"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#clyde",
+    "sk": "product",
+    "type": "product",
+    "canonical": "clyde",
+    "synonyms": [
+      "puma clyde"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#rs-x",
+    "sk": "product",
+    "type": "product",
+    "canonical": "rs-x",
+    "synonyms": [
+      "rs x",
+      "rs xs",
+      "rs-xs",
+      "rsx",
+      "rsxs"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#future rider",
+    "sk": "product",
+    "type": "product",
+    "canonical": "future rider",
+    "synonyms": [
+      "future riders",
+      "riders"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#574",
+    "sk": "product",
+    "type": "product",
+    "canonical": "574",
+    "synonyms": [
+      "574s",
+      "nb 574"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#990",
+    "sk": "product",
+    "type": "product",
+    "canonical": "990",
+    "synonyms": [
+      "990s",
+      "nb 990"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#991",
+    "sk": "product",
+    "type": "product",
+    "canonical": "991",
+    "synonyms": [
+      "991s",
+      "nb 991"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#992",
+    "sk": "product",
+    "type": "product",
+    "canonical": "992",
+    "synonyms": [
+      "992s",
+      "nb 992"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#993",
+    "sk": "product",
+    "type": "product",
+    "canonical": "993",
+    "synonyms": [
+      "993s",
+      "nb 993"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#2002r",
+    "sk": "product",
+    "type": "product",
+    "canonical": "2002r",
+    "synonyms": [
+      "2002rs",
+      "nb 2002r"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#550",
+    "sk": "product",
+    "type": "product",
+    "canonical": "550",
+    "synonyms": [
+      "550s",
+      "nb 550"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#gel-lyte iii",
+    "sk": "product",
+    "type": "product",
+    "canonical": "gel-lyte iii",
+    "synonyms": [
+      "gel lyte 3",
+      "gel lyte iii",
+      "gellyte iii"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#gel-lyte v",
+    "sk": "product",
+    "type": "product",
+    "canonical": "gel-lyte v",
+    "synonyms": [
+      "gel lyte 5",
+      "gel lyte v",
+      "gellyte v"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#gel-kayano",
+    "sk": "product",
+    "type": "product",
+    "canonical": "gel-kayano",
+    "synonyms": [
+      "gel kayano",
+      "gelkayano",
+      "kayano"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#gel-nimbus",
+    "sk": "product",
+    "type": "product",
+    "canonical": "gel-nimbus",
+    "synonyms": [
+      "gel nimbus",
+      "gelnimbus",
+      "nimbus"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#gel-quantum",
+    "sk": "product",
+    "type": "product",
+    "canonical": "gel-quantum",
+    "synonyms": [
+      "gel quantum",
+      "gelquantum",
+      "quantum"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#2976 chelsea",
+    "sk": "product",
+    "type": "product",
+    "canonical": "2976 chelsea",
+    "synonyms": [
+      "docs 2976"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#wallabee",
+    "sk": "product",
+    "type": "product",
+    "canonical": "wallabee",
+    "synonyms": [
+      "wallabees"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#weaver",
+    "sk": "product",
+    "type": "product",
+    "canonical": "weaver",
+    "synonyms": [
+      "clarks weaver"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#triple s",
+    "sk": "product",
+    "type": "product",
+    "canonical": "triple s",
+    "synonyms": [
+      "balenciaga triple s"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#gucci ace",
+    "sk": "product",
+    "type": "product",
+    "canonical": "gucci ace",
+    "synonyms": [
+      "ace sneakers"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#gucci rhyton",
+    "sk": "product",
+    "type": "product",
+    "canonical": "gucci rhyton",
+    "synonyms": [
+      "rhytons"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#prada cloudbust",
+    "sk": "product",
+    "type": "product",
+    "canonical": "prada cloudbust",
+    "synonyms": [
+      "cloudbusts"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#prada america's cup",
+    "sk": "product",
+    "type": "product",
+    "canonical": "prada america's cup",
+    "synonyms": [
+      "americas cup",
+      "prada america s cup",
+      "prada americas cup"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#common projects achilles",
+    "sk": "product",
+    "type": "product",
+    "canonical": "common projects achilles",
+    "synonyms": [
+      "achilles",
+      "achilles low"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#alexander mcqueen oversized",
+    "sk": "product",
+    "type": "product",
+    "canonical": "alexander mcqueen oversized",
+    "synonyms": [
+      "mcqueen oversized",
+      "oversized sneaker"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#dior b23",
+    "sk": "product",
+    "type": "product",
+    "canonical": "dior b23",
+    "synonyms": [
+      "b23s",
+      "dior b23s"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#dior b27",
+    "sk": "product",
+    "type": "product",
+    "canonical": "dior b27",
+    "synonyms": [
+      "b27s",
+      "dior b27s"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#off-white out of office",
+    "sk": "product",
+    "type": "product",
+    "canonical": "off-white out of office",
+    "synonyms": [
+      "off white out of office",
+      "offwhite out of office",
+      "ooo",
+      "out of office"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#off-white vulcanized",
+    "sk": "product",
+    "type": "product",
+    "canonical": "off-white vulcanized",
+    "synonyms": [
+      "off white vulcanized",
+      "offwhite vulcanized",
+      "vulcanized"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#saint laurent court classic",
+    "sk": "product",
+    "type": "product",
+    "canonical": "saint laurent court classic",
+    "synonyms": [
+      "court classic"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#versace chain reaction",
+    "sk": "product",
+    "type": "product",
+    "canonical": "versace chain reaction",
+    "synonyms": [
+      "chain reactions"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#fendi flow",
+    "sk": "product",
+    "type": "product",
+    "canonical": "fendi flow",
+    "synonyms": [
+      "flow sneakers"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#lanvin curb",
+    "sk": "product",
+    "type": "product",
+    "canonical": "lanvin curb",
+    "synonyms": [
+      "curb sneakers"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 2",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 2",
+    "synonyms": [
+      "aj2",
+      "jordan 2"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 7",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 7",
+    "synonyms": [
+      "aj7",
+      "jordan 7"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 8",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 8",
+    "synonyms": [
+      "aj8",
+      "jordan 8"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 9",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 9",
+    "synonyms": [
+      "aj9",
+      "jordan 9"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 10",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 10",
+    "synonyms": [
+      "aj10",
+      "jordan 10"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 14",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 14",
+    "synonyms": [
+      "aj14",
+      "jordan 14"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 15",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 15",
+    "synonyms": [
+      "aj15",
+      "jordan 15"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 16",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 16",
+    "synonyms": [
+      "aj16",
+      "jordan 16"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yeezy 450",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeezy 450",
+    "synonyms": [
+      "yeezy four fifty"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yeezy knit runner",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeezy knit runner",
+    "synonyms": [
+      "knit runner"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yeezy quantum",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeezy quantum",
+    "synonyms": [
+      "yeezy qntm"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#half cab",
+    "sk": "product",
+    "type": "product",
+    "canonical": "half cab",
+    "synonyms": [
+      "vans half cab"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#rowley",
+    "sk": "product",
+    "type": "product",
+    "canonical": "rowley",
+    "synonyms": [
+      "vans rowley"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#zig kinetica",
+    "sk": "product",
+    "type": "product",
+    "canonical": "zig kinetica",
+    "synonyms": [
+      "kinetica",
+      "zig"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#shaqnosis",
+    "sk": "product",
+    "type": "product",
+    "canonical": "shaqnosis",
+    "synonyms": [
+      "shaq nosis"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#basket classic",
+    "sk": "product",
+    "type": "product",
+    "canonical": "basket classic",
+    "synonyms": [
+      "basket classics"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#blaze of glory",
+    "sk": "product",
+    "type": "product",
+    "canonical": "blaze of glory",
+    "synonyms": [
+      "blaze"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#327",
+    "sk": "product",
+    "type": "product",
+    "canonical": "327",
+    "synonyms": [
+      "327s",
+      "nb 327"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#530",
+    "sk": "product",
+    "type": "product",
+    "canonical": "530",
+    "synonyms": [
+      "530s",
+      "nb 530"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#650",
+    "sk": "product",
+    "type": "product",
+    "canonical": "650",
+    "synonyms": [
+      "650s",
+      "nb 650"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#1500",
+    "sk": "product",
+    "type": "product",
+    "canonical": "1500",
+    "synonyms": [
+      "1500s",
+      "nb 1500"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#gel-saga",
+    "sk": "product",
+    "type": "product",
+    "canonical": "gel-saga",
+    "synonyms": [
+      "gel saga",
+      "gelsaga",
+      "saga"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#trek",
+    "sk": "product",
+    "type": "product",
+    "canonical": "trek",
+    "synonyms": [
+      "clarks trek"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#balmain b-court",
+    "sk": "product",
+    "type": "product",
+    "canonical": "balmain b-court",
+    "synonyms": [
+      "b court",
+      "balmain b court",
+      "balmain bcourt"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#givenchy wing",
+    "sk": "product",
+    "type": "product",
+    "canonical": "givenchy wing",
+    "synonyms": [
+      "wing sneaker"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#amiri skel top",
+    "sk": "product",
+    "type": "product",
+    "canonical": "amiri skel top",
+    "synonyms": [
+      "skel top"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#maison margiela replica",
+    "sk": "product",
+    "type": "product",
+    "canonical": "maison margiela replica",
+    "synonyms": [
+      "replica sneaker"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#rick owens geobasket",
+    "sk": "product",
+    "type": "product",
+    "canonical": "rick owens geobasket",
+    "synonyms": [
+      "geobasket"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#rick owens ramones",
+    "sk": "product",
+    "type": "product",
+    "canonical": "rick owens ramones",
+    "synonyms": [
+      "ramones"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#valentino rockrunner",
+    "sk": "product",
+    "type": "product",
+    "canonical": "valentino rockrunner",
+    "synonyms": [
+      "rockrunners"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#valentino bounce",
+    "sk": "product",
+    "type": "product",
+    "canonical": "valentino bounce",
+    "synonyms": [
+      "bounce sneakers"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#loewe flow runner",
+    "sk": "product",
+    "type": "product",
+    "canonical": "loewe flow runner",
+    "synonyms": [
+      "flow runner"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#fear of god essentials",
+    "sk": "product",
+    "type": "product",
+    "canonical": "fear of god essentials",
+    "synonyms": [
+      "essentials sneaker"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#palm angels vulcanized",
+    "sk": "product",
+    "type": "product",
+    "canonical": "palm angels vulcanized",
+    "synonyms": [
+      "palm vulcanized"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#a bathing ape bape sta",
+    "sk": "product",
+    "type": "product",
+    "canonical": "a bathing ape bape sta",
+    "synonyms": [
+      "bape sta",
+      "bapestas"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#a bathing ape sk8 sta",
+    "sk": "product",
+    "type": "product",
+    "canonical": "a bathing ape sk8 sta",
+    "synonyms": [
+      "sk8 sta"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#kiko kostadinov gel-burz",
+    "sk": "product",
+    "type": "product",
+    "canonical": "kiko kostadinov gel-burz",
+    "synonyms": [
+      "gel burz",
+      "kiko kostadinov gel burz",
+      "kiko kostadinov gelburz"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 17",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 17",
+    "synonyms": [
+      "aj17",
+      "jordan 17"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 18",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 18",
+    "synonyms": [
+      "aj18",
+      "jordan 18"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 19",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 19",
+    "synonyms": [
+      "aj19",
+      "jordan 19"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 20",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 20",
+    "synonyms": [
+      "aj20",
+      "jordan 20"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 21",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 21",
+    "synonyms": [
+      "aj21",
+      "jordan 21"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 22",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 22",
+    "synonyms": [
+      "aj22",
+      "jordan 22"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#air jordan 23",
+    "sk": "product",
+    "type": "product",
+    "canonical": "air jordan 23",
+    "synonyms": [
+      "aj23",
+      "jordan 23"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yeezy 700 v2",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeezy 700 v2",
+    "synonyms": [
+      "700 v2",
+      "yeezy 700v2"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yeezy 700 v3",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeezy 700 v3",
+    "synonyms": [
+      "700 v3",
+      "yeezy 700v3"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yeezy powerphase",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeezy powerphase",
+    "synonyms": [
+      "powerphase"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#vans bold ni",
+    "sk": "product",
+    "type": "product",
+    "canonical": "vans bold ni",
+    "synonyms": [
+      "bold ni"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#vans lampin",
+    "sk": "product",
+    "type": "product",
+    "canonical": "vans lampin",
+    "synonyms": [
+      "lampin"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#reebok question",
+    "sk": "product",
+    "type": "product",
+    "canonical": "reebok question",
+    "synonyms": [
+      "question"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#reebok answer",
+    "sk": "product",
+    "type": "product",
+    "canonical": "reebok answer",
+    "synonyms": [
+      "answer"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#puma disc blaze",
+    "sk": "product",
+    "type": "product",
+    "canonical": "puma disc blaze",
+    "synonyms": [
+      "disc blaze"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#puma thunder spectra",
+    "sk": "product",
+    "type": "product",
+    "canonical": "puma thunder spectra",
+    "synonyms": [
+      "thunder spectra"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#new balance 1080",
+    "sk": "product",
+    "type": "product",
+    "canonical": "new balance 1080",
+    "synonyms": [
+      "1080s",
+      "nb 1080"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#new balance 860",
+    "sk": "product",
+    "type": "product",
+    "canonical": "new balance 860",
+    "synonyms": [
+      "860s",
+      "nb 860"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#new balance 3270",
+    "sk": "product",
+    "type": "product",
+    "canonical": "new balance 3270",
+    "synonyms": [
+      "nb 3270"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#asics gel-kinsei",
+    "sk": "product",
+    "type": "product",
+    "canonical": "asics gel-kinsei",
+    "synonyms": [
+      "asics gel kinsei",
+      "asics gelkinsei",
+      "gel kinsei"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#asics gel-respector",
+    "sk": "product",
+    "type": "product",
+    "canonical": "asics gel-respector",
+    "synonyms": [
+      "asics gel respector",
+      "asics gelrespector",
+      "gel respector"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#dr. martens sinclair",
+    "sk": "product",
+    "type": "product",
+    "canonical": "dr. martens sinclair",
+    "synonyms": [
+      "sinclair boots"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#clarks natalie",
+    "sk": "product",
+    "type": "product",
+    "canonical": "clarks natalie",
+    "synonyms": [
+      "natalie"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#balenciaga runner",
+    "sk": "product",
+    "type": "product",
+    "canonical": "balenciaga runner",
+    "synonyms": [
+      "runner"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#balenciaga defender",
+    "sk": "product",
+    "type": "product",
+    "canonical": "balenciaga defender",
+    "synonyms": [
+      "defender"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#gucci screener",
+    "sk": "product",
+    "type": "product",
+    "canonical": "gucci screener",
+    "synonyms": [
+      "screener"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#prada monolith",
+    "sk": "product",
+    "type": "product",
+    "canonical": "prada monolith",
+    "synonyms": [
+      "monolith"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#maison margiela fusion",
+    "sk": "product",
+    "type": "product",
+    "canonical": "maison margiela fusion",
+    "synonyms": [
+      "fusion"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#rick owens tecuatl",
+    "sk": "product",
+    "type": "product",
+    "canonical": "rick owens tecuatl",
+    "synonyms": [
+      "tecuatl"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#valentino one stud",
+    "sk": "product",
+    "type": "product",
+    "canonical": "valentino one stud",
+    "synonyms": [
+      "one stud"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#fear of god vintage runner",
+    "sk": "product",
+    "type": "product",
+    "canonical": "fear of god vintage runner",
+    "synonyms": [
+      "vintage runner"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#bape road sta",
+    "sk": "product",
+    "type": "product",
+    "canonical": "bape road sta",
+    "synonyms": [
+      "road sta"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#amiri bone runner",
+    "sk": "product",
+    "type": "product",
+    "canonical": "amiri bone runner",
+    "synonyms": [
+      "bone runner"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#travis scott air jordan 1",
+    "sk": "product",
+    "type": "product",
+    "canonical": "travis scott air jordan 1",
+    "synonyms": [
+      "cactus jack aj1",
+      "travis 1"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#dior air jordan 1",
+    "sk": "product",
+    "type": "product",
+    "canonical": "dior air jordan 1",
+    "synonyms": [
+      "dior jordan",
+      "jordan dior"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#off-white air jordan 4",
+    "sk": "product",
+    "type": "product",
+    "canonical": "off-white air jordan 4",
+    "synonyms": [
+      "off white air jordan 4",
+      "off white jordan 4",
+      "offwhite air jordan 4",
+      "ow aj4"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#union air jordan 1",
+    "sk": "product",
+    "type": "product",
+    "canonical": "union air jordan 1",
+    "synonyms": [
+      "union aj1",
+      "union jordan"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#fragment air jordan 1",
+    "sk": "product",
+    "type": "product",
+    "canonical": "fragment air jordan 1",
+    "synonyms": [
+      "aj1 fragment",
+      "fragment jordan 1"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#sacai ld waffle",
+    "sk": "product",
+    "type": "product",
+    "canonical": "sacai ld waffle",
+    "synonyms": [
+      "ldwaffle",
+      "sacai waffle"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#tom sachs mars yard",
+    "sk": "product",
+    "type": "product",
+    "canonical": "tom sachs mars yard",
+    "synonyms": [
+      "mars yard"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#nike dunk low panda",
+    "sk": "product",
+    "type": "product",
+    "canonical": "nike dunk low panda",
+    "synonyms": [
+      "dunk panda",
+      "panda dunk"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#nike dunk sb chunky dunky",
+    "sk": "product",
+    "type": "product",
+    "canonical": "nike dunk sb chunky dunky",
+    "synonyms": [
+      "chunky dunky",
+      "sb dunk ben   jerry’s",
+      "sb dunk ben  jerry’s",
+      "sb dunk ben & jerry s",
+      "sb dunk ben & jerry's",
+      "sb dunk ben & jerrys",
+      "sb dunk ben & jerry’s",
+      "sb dunk ben and jerry’s"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yeezy red october",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeezy red october",
+    "synonyms": [
+      "red october",
+      "yeezy october"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yeezy 950",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeezy 950",
+    "synonyms": [
+      "950 boot"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#yeezy quantum barium",
+    "sk": "product",
+    "type": "product",
+    "canonical": "yeezy quantum barium",
+    "synonyms": [
+      "quantum barium"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#human race nmd",
+    "sk": "product",
+    "type": "product",
+    "canonical": "human race nmd",
+    "synonyms": [
+      "hu nmd",
+      "pharrell nmd"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#new balance 9060",
+    "sk": "product",
+    "type": "product",
+    "canonical": "new balance 9060",
+    "synonyms": [
+      "9060s",
+      "nb 9060"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#new balance 1906r",
+    "sk": "product",
+    "type": "product",
+    "canonical": "new balance 1906r",
+    "synonyms": [
+      "1906r",
+      "nb 1906r"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#new balance 327 casablanca",
+    "sk": "product",
+    "type": "product",
+    "canonical": "new balance 327 casablanca",
+    "synonyms": [
+      "casablanca 327",
+      "nb 327 casablanca"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#lv trainer",
+    "sk": "product",
+    "type": "product",
+    "canonical": "lv trainer",
+    "synonyms": [
+      "louis vuitton trainer",
+      "vuitton trainer"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#dior b30",
+    "sk": "product",
+    "type": "product",
+    "canonical": "dior b30",
+    "synonyms": [
+      "b30"
+    ],
+    "category": [
+      "fashion"
+    ]
+  },
+  {
+    "pk": "product#fear of god basketball",
+    "sk": "product",
+    "type": "product",
+    "canonical": "fear of god basketball",
+    "synonyms": [
+      "fog basketball"
+    ],
+    "category": [
+      "fashion"
+    ]
+  }
+]

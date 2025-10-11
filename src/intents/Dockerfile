@@ -1,5 +1,5 @@
 # Intent classifier build; runs intent classifier API
-FROM ibase:3.6.10
+FROM ibase:3.6.11
 
 ENV INTENT_CLASSIFIER_PORT=9000
 # Ensure our source takes precedence over any site-packages `intents`

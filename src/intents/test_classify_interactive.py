@@ -10,7 +10,7 @@ import sys
 API_URL = "http://localhost:9000/classify"
 HEADERS = {"Content-Type": "application/json"}
 
-def test_classify(text, sender_id="test_user0", validate=False):
+def test_classify(text, sender_id="test_user1", validate=False):
     """Test the classify endpoint with given parameters
     
     Args:
@@ -77,7 +77,7 @@ def interactive_mode():
     print("=" * 50)
     
     validate = False
-    sender_id = "test_user0"
+    sender_id = "test_user1"
     validation_modes = [False, True, "force"]
     current_mode_index = 0
     
@@ -156,7 +156,7 @@ def main():
         
         # Parse arguments for validation mode
         validate = False
-        sender_id = "test_user0"
+        sender_id = "test_user1"
         text_args = []
         
         i = 0

@@ -22,3 +22,33 @@ services:
           memory: 8g
         reservations:
           memory: 2g
+
+  meilisearch:
+    image: getmeili/meilisearch:v1.21.0
+    container_name: dialogcart-meilisearch
+    ports:
+      - "7700:7700"
+    environment:
+      - MEILI_ENV=development
+      - MEILI_NO_ANALYTICS=true
+    volumes:
+      - meilisearch_data:/meili_data
+    restart: unless-stopped
+
+  rasa_nlu:
+    image: rasa/rasa:3.6.20-full
+    container_name: dialogcart-rasa-nlu
+    command: ["run", "--enable-api", "--port", "5005", "--cors", "*"]
+    environment:
+      - RASA_TELEMETRY_ENABLED=false
+      - TF_CPP_MIN_LOG_LEVEL=2
+    ports:
+      - "5005:5005"
+    volumes:
+      - ./intents/semantics/rasa:/app
+      - ./intents/semantics/rasa/models:/app/models
+    working_dir: /app
+    restart: unless-stopped
+
+volumes:
+  meilisearch_data:

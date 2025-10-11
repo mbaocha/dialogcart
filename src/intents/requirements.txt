@@ -39,3 +39,6 @@ packaging>=20.0,<25.0
 setuptools>=65.0.0,<70.0.0
 
 # Note: rasa==3.6.10 is installed separately with constraints in Dockerfile
+ 
+# Tokenization for T5/FLAN models
+sentencepiece>=0.1.99

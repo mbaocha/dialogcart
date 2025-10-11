@@ -313,6 +313,9 @@ def map_rasa_to_actions(rasa_json) -> List[Action]:
     
     # Get entities: always use raw Rasa entities to retain 'verb' for action parsing
     raw_entities = nlu.get("entities") or []
+
+    print("DEBUG RAW RASA ENTITIES:", raw_entities)
+    print("DEBUG RAW TEXT:", source_text)
     entities = list(raw_entities)
 
     # Parse shopping command into actions (with slot memory support)
