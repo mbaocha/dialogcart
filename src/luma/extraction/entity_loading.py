@@ -292,3 +292,4 @@ def init_nlp_with_entities(entity_file: Optional[str] = None) -> Tuple[Any, List
     
     return nlp, entities
 
+

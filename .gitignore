@@ -2,3 +2,44 @@ venv/
 
 # Log files
 src/intents/core/logs/
+src/intents/entity_extraction/spacy_model
+
+
+# Trained models and checkpoints
+store/
+bert-ner-*/
+minilm-ner-*/
+logs/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Training artifacts
+*.tar.gz
+*.pt
+*.bin
+checkpoint-*/
+
+# Temporary files
+*.tmp
+*.bak
+review_output.txt
+
+src/intents/entity_extraction/spacy_model/

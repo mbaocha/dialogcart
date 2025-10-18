@@ -17,7 +17,7 @@ print("=" * 60)
 # Test 1: Import all components
 print("\n[Test 1] Importing all components...")
 try:
-    from luma import (
+    from luma import (  # type: ignore
         NERModel,
         EntityMatcher,
         simple_group_entities,
