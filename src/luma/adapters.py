@@ -135,6 +135,7 @@ def to_legacy_result(result: ExtractionResult) -> Dict[str, Any]:
             "quantities": group.quantities,
             "units": group.units,
             "variants": group.variants,
+            "ordinal_ref": group.ordinal_ref,  # ✅ Include ordinal reference
         })
     
     # Convert NLP extraction if present
@@ -163,6 +164,7 @@ def to_legacy_result(result: ExtractionResult) -> Dict[str, Any]:
         "grouped_entities": {
             "status": result.grouping_result.status if result.grouping_result else "ok",
             "reason": result.grouping_result.reason if result.grouping_result else None,
+            "route": result.grouping_result.route if result.grouping_result else None,  # ✅ Include route
             "groups": groups_dict
         },
         "nlp_entities": nlp_entities,

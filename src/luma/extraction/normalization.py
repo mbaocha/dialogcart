@@ -4,7 +4,6 @@ Text normalization utilities for entity extraction.
 Handles pre-processing, post-processing, and text cleaning operations
 before and after entity extraction.
 """
-import os
 import re
 import unicodedata
 from typing import Dict
@@ -16,15 +15,8 @@ try:
 except ImportError:
     SPACY_AVAILABLE = False
 
-
-# ===== LOGGING CONFIGURATION =====
-DEBUG_ENABLED = os.environ.get("DEBUG_NLP", "0") == "1"
-
-
-def debug_print(*args, **kwargs):
-    """Print debug message only if DEBUG_ENABLED is True."""
-    if DEBUG_ENABLED:
-        print(*args, **kwargs)
+# ===== CONFIGURATION =====
+from luma.config import config, debug_print
 
 
 def normalize_hyphens(text: str) -> str:

@@ -6,23 +6,18 @@ Ported from semantics/entity_grouping.py with 100% compatibility.
 Groups entities by action and aligns quantities/units/variants to products.
 """
 import json
-import os
 import re
 from typing import List, Dict, Any, Optional, Tuple
 
+# ===== CONFIGURATION =====
+from luma.config import config, debug_print
 
-# ===== LOGGING CONFIGURATION =====
-# Set DEBUG_NLP=1 in environment to enable debug logs
-DEBUG_ENABLED = os.environ.get("DEBUG_NLP", "0") == "1"
-
-
-def debug_print(*args, **kwargs):
-    """Print debug message only if DEBUG_ENABLED is True."""
-    if DEBUG_ENABLED:
-        print(*args, **kwargs)
-
-
-DEBUG = DEBUG_ENABLED  # use environment variable
+# Intent mapper initialization
+if config.ENABLE_INTENT_MAPPER:
+    from luma.grouping.intent_mapper import IntentMapper
+    intent_mapper = IntentMapper()  # initialize once globally
+else:
+    intent_mapper = None
 
 
 def log_debug(msg: str, data: Optional[Any] = None):
@@ -31,7 +26,7 @@ def log_debug(msg: str, data: Optional[Any] = None):
     
     NOTE: Matches semantics/entity_grouping.py lines 37-46 exactly
     """
-    if not DEBUG:
+    if not config.DEBUG_ENABLED:
         return
     debug_print(f"[DEBUG] {msg}")
     if data is not None:
@@ -63,11 +58,27 @@ def route_intent(status: str, groups: List[Dict], tokens: Optional[List] = None,
         route = "llm"
         route_reason = status
     
-    elif not groups or (len(groups) == 1 and not groups[0].get("products")):
+    elif not groups:
         route = "llm"
-        route_reason = "no_product_in_group"
+        route_reason = "no_groups_extracted"
+    
+    # 2️⃣ Referential requests (pronouns) → Memory
+    # Check if products contain pronouns like "it", "that", "them", "one"
+    elif any(
+        t and t.lower() in {"it", "that", "them", "one"}
+        for g in groups
+        for t in g.get("products", [])
+    ):
+        route = "memory"
+        route_reason = "referential_request"
+    
+    elif len(groups) == 1 and not groups[0].get("products") and not groups[0].get("ordinal_ref"):
+        # No products AND no ordinal → LLM
+        route = "llm"
+        route_reason = "no_product_or_ordinal_in_group"
     
     else:
+        # Has products OR has ordinal_ref → RULE
         route = "rule"
         route_reason = None
     
@@ -76,7 +87,10 @@ def route_intent(status: str, groups: List[Dict], tokens: Optional[List] = None,
 
 def check_group_token_order(grouped_result: Dict, tokens: Optional[List] = None, labels: Optional[List] = None) -> Dict:
     """
-    Check if groups have structural token-level issues (no checks for now, just pass-through).
+    Trigger LLM routing if structural issues are detected:
+      - BRAND appears *immediately* after PRODUCT (no gap)
+      - consecutive BRAND tokens
+      - VARIANT appears *immediately* after PRODUCT
     
     Args:
         grouped_result: Grouping result dict
@@ -84,11 +98,43 @@ def check_group_token_order(grouped_result: Dict, tokens: Optional[List] = None,
         labels: Optional label list
         
     Returns:
-        Grouped result (unchanged)
+        Grouped result with updated status if issues detected
         
     NOTE: Matches semantics/entity_grouping.py lines 125-163 exactly
     """
-    debug_print("[DEBUG] check_group_token_order: no structural issues detected")
+    issues = []
+    
+    if not tokens or not labels:
+        debug_print("[DEBUG] check_group_token_order: missing tokens or labels")
+        return grouped_result
+    
+    # Build positional index map of labeled entities
+    entity_positions = [
+        (i, labels[i].upper()) 
+        for i in range(len(labels)) 
+        if any(k in labels[i].upper() for k in ["PRODUCT", "BRAND", "VARIANT", "TOKEN"])
+    ]
+    
+    for j in range(len(entity_positions) - 1):
+        idx, curr_label = entity_positions[j]
+        next_idx, next_label = entity_positions[j + 1]
+        
+        # ✅ Only trigger if *truly adjacent* in the original token list
+        if next_idx == idx + 1:
+            if "PRODUCT" in curr_label and "BRAND" in next_label:
+                issues.append(f"brand appears immediately after product ({tokens[idx]} {tokens[next_idx]})")
+            elif "BRAND" in curr_label and "BRAND" in next_label:
+                issues.append(f"consecutive brands ({tokens[idx]} {tokens[next_idx]})")
+            elif "PRODUCT" in curr_label and ("VARIANT" in next_label or "TOKEN" in next_label):
+                issues.append(f"product followed immediately by variant ({tokens[idx]} {tokens[next_idx]})")
+    
+    if issues:
+        grouped_result["status"] = "needs_llm_fix"
+        grouped_result["notes"] = grouped_result.get("notes", []) + issues
+        debug_print("[DEBUG] check_group_token_order: flagged issues", issues)
+    else:
+        debug_print("[DEBUG] check_group_token_order: no structural issues detected")
+    
     return grouped_result
 
 
@@ -104,8 +150,9 @@ def extract_entities(tokens: List[str], labels: List[str]) -> Dict[str, Any]:
         Dictionary with extracted entities by type
         
     NOTE: Matches semantics/entity_grouping.py lines 168-273 exactly
+    NOTE: Extended to support B-ORDINAL for positional references
     """
-    action_tokens, brands, products, quantities, units, variants = [], [], [], [], [], []
+    action_tokens, brands, products, quantities, units, variants, ordinals = [], [], [], [], [], [], []
     
     for i, (tok, lab) in enumerate(zip(tokens, labels)):
         lab_type = lab.replace("B-", "").replace("I-", "")
@@ -122,6 +169,8 @@ def extract_entities(tokens: List[str], labels: List[str]) -> Dict[str, Any]:
             units.append(tok)
         elif lab_type == "TOKEN":
             variants.append(tok)
+        elif lab_type == "ORDINAL":
+            ordinals.append(tok)
     
     action = " ".join(action_tokens) if action_tokens else ""
     
@@ -131,7 +180,8 @@ def extract_entities(tokens: List[str], labels: List[str]) -> Dict[str, Any]:
         "products": products,
         "quantities": quantities,
         "units": units,
-        "variants": variants
+        "variants": variants,
+        "ordinals": ordinals
     }
 
 
@@ -232,7 +282,7 @@ def align_quantities_to_products(
     return aligned_q, aligned_u
 
 
-def determine_status(intent: Optional[str], action: str, products: List[str], quantities: List[str], brands: List[str]) -> Tuple[str, Optional[str]]:
+def determine_status(intent: Optional[str], action: str, products: List[str], quantities: List[str], brands: List[str], ordinals: Optional[List[str]] = None) -> Tuple[str, Optional[str]]:
     """
     Determine processing status based on extracted entities.
     
@@ -242,11 +292,13 @@ def determine_status(intent: Optional[str], action: str, products: List[str], qu
         products: List of products
         quantities: List of quantities
         brands: List of brands
+        ordinals: List of ordinal references (optional)
         
     Returns:
         Tuple of (status, reason)
         
     NOTE: Matches semantics/entity_grouping.py lines 357-380 exactly
+    NOTE: Extended to support ordinal references
     """
     status = "ok"
     reason = None
@@ -254,7 +306,8 @@ def determine_status(intent: Optional[str], action: str, products: List[str], qu
     if not action:
         status = "error"
         reason = "no_action"
-    elif not products and not brands:
+    elif not products and not brands and not (ordinals and len(ordinals) > 0):
+        # No products/brands AND no ordinals = needs LLM
         status = "needs_llm"
         reason = "no_product_or_brand"
     
@@ -279,34 +332,62 @@ def simple_group_entities(tokens: List[str], labels: List[str], debug: bool = Fa
     ents = extract_entities(tokens, labels)
     action = ents["action"]
     
-    # Intent mapping - disabled for now (ENABLE_INTENT_MAPPER = False in luma)
-    intent, score = None, None
+    # Intent mapping
+    # NOTE: Matches semantics/entity_grouping.py lines 390-393 exactly
+    if config.ENABLE_INTENT_MAPPER and intent_mapper and action:
+        intent, score = intent_mapper.map_action_to_intent(action)
+    else:
+        intent, score = None, None
     
     products = ents["products"]
+    ordinals = ents.get("ordinals", [])
     
     quantities, units = align_quantities_to_products(tokens, labels, products, ents["quantities"], ents["units"])
     
     groups = []
-    for i, prod in enumerate(products or [None]):
-        q = quantities[i] if i < len(quantities) else None
-        u = units[i] if i < len(units) else None
-        
-        # ✅ NEW: assign brand by index, not full copy
-        brand = [ents["brands"][i]] if i < len(ents["brands"]) else []
-        
-        g = {
-            "action": action,
-            "intent": intent,
-            "intent_confidence": score,
-            "products": [prod] if prod else [],
-            "quantities": [q] if q else [],
-            "units": [u] if u else [],
-            "brands": brand,          # ✅ fixed
-            "variants": [ents["variants"][i]] if i < len(ents["variants"]) else [],
-        }
-        groups.append(g)
     
-    status, reason = determine_status(intent, action, products, quantities, ents["brands"])
+    # NEW: If no products but ordinals exist, create one group per ordinal
+    if not products and ordinals:
+        for i, ord_ref in enumerate(ordinals):
+            q = quantities[i] if i < len(quantities) else None
+            u = units[i] if i < len(units) else None
+            brand = [ents["brands"][i]] if i < len(ents["brands"]) else []
+            
+            g = {
+                "action": action,
+                "intent": intent,
+                "intent_confidence": score,
+                "products": [],  # Empty - ordinal will be resolved by agent
+                "quantities": [q] if q else [],
+                "units": [u] if u else [],
+                "brands": brand,
+                "variants": [ents["variants"][i]] if i < len(ents["variants"]) else [],
+                "ordinal_ref": ord_ref,  # Each group gets one ordinal
+            }
+            groups.append(g)
+    else:
+        # Original logic: group by products
+        for i, prod in enumerate(products or [None]):
+            q = quantities[i] if i < len(quantities) else None
+            u = units[i] if i < len(units) else None
+            
+            # ✅ NEW: assign brand by index, not full copy
+            brand = [ents["brands"][i]] if i < len(ents["brands"]) else []
+            
+            g = {
+                "action": action,
+                "intent": intent,
+                "intent_confidence": score,
+                "products": [prod] if prod else [],
+                "quantities": [q] if q else [],
+                "units": [u] if u else [],
+                "brands": brand,          # ✅ fixed
+                "variants": [ents["variants"][i]] if i < len(ents["variants"]) else [],
+                "ordinal_ref": None,  # No ordinal when explicit products present
+            }
+            groups.append(g)
+    
+    status, reason = determine_status(intent, action, products, quantities, ents["brands"], ordinals)
     res = {"status": status, "reason": reason, "groups": groups}
     
     debug_print(f"[DEBUG] simple_group_entities -> res: {res}")

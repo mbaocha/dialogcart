@@ -23,11 +23,13 @@ def search_catalog(
     **kwargs: Any,
 ) -> Dict[str, Any]:
     """
-    Search for catalog items by name using exact, partial, and fuzzy matching.
+    Search for catalog items by name using GSI4_TitlePrefix for efficient prefix matching,
+    with fallback to fuzzy matching if catalog_items is provided.
 
-    Catalog-only interface.
+    Catalog-only interface. Uses new db/catalog.py GSI4 index for better performance.
     """
-    return _service.search_catalog(catalog_name, catalog_items, threshold)
+    tenant_id = _default_tenant_id()
+    return _service.search_catalog(catalog_name, catalog_items, threshold, tenant_id=tenant_id)
 
 
 def list_catalog_by_categories_formatted(

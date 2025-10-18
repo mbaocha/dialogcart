@@ -203,6 +203,211 @@ modify_cart_examples = {
     "add 1 bottle Nivea lotion , Olay cream and Garnier shampoo": ['B-ACTION', 'B-QUANTITY', 'B-UNIT', 'B-BRAND', 'B-PRODUCT', 'O', 'B-BRAND', 'B-PRODUCT', 'O', 'B-BRAND', 'B-PRODUCT'],
 }
 
+# Ordinal reference commands (positional selection from previously shown catalog/list)
+ordinal_examples = {
+    # Word ordinals: first, second, third, etc.
+    "add the first one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the first": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add first one": ['B-ACTION', 'B-ORDINAL', 'O'],
+    "add the second one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the second": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add second": ['B-ACTION', 'B-ORDINAL'],
+    "add the third one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the third": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add the fourth": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add the fifth one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the sixth": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add the seventh one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the eighth": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add the ninth one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the tenth": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove the first one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "remove the second": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove first": ['B-ACTION', 'B-ORDINAL'],
+    "remove second one": ['B-ACTION', 'B-ORDINAL', 'O'],
+    "remove third": ['B-ACTION', 'B-ORDINAL'],
+    "cancel the third one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "cancel the fourth": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "I want the first one": ['O', 'B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "I want the second": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "I want the third": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "give me the first": ['B-ACTION', 'O', 'O', 'B-ORDINAL'],
+    "give me the second one": ['B-ACTION', 'O', 'O', 'B-ORDINAL', 'O'],
+    "give me the third one": ['B-ACTION', 'O', 'O', 'B-ORDINAL', 'O'],
+    "take the first": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "take the second one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    
+    # Numeric ordinal patterns - with suffix (1st, 2nd, 3rd, etc)
+    "add the 1st one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the 1st": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add 1st": ['B-ACTION', 'B-ORDINAL'],
+    "add the 2nd one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the 2nd": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add 2nd": ['B-ACTION', 'B-ORDINAL'],
+    "add the 3rd one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the 3rd": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add 3rd": ['B-ACTION', 'B-ORDINAL'],
+    "add the 4th one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the 4th": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add 4th": ['B-ACTION', 'B-ORDINAL'],
+    "add the 5th one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the 5th": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add 5th": ['B-ACTION', 'B-ORDINAL'],
+    "add the 6th": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add the 7th one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the 8th": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add the 9th": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add the 10th one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "remove the 1st": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove the 2nd one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "remove the 3rd": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove 4th": ['B-ACTION', 'B-ORDINAL'],
+    "remove 5th one": ['B-ACTION', 'B-ORDINAL', 'O'],
+    "cancel the 5th one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "cancel the 6th": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "I want the 1st": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "I want the 2nd one": ['O', 'B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "I want the 3rd": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    
+    # "number N" pattern - explicit ordinal marker
+    "add number 1": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add number 2": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add number 3": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add number 4": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add number 5": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add number 6": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add number 7": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add number 8": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add number 9": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add number 10": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove number 1": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove number 2": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove number 3": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove number 5": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "cancel number 3": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "cancel number 4": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "I want number 1": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "I want number 2": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "I want number 4": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "give me number 2": ['B-ACTION', 'O', 'O', 'B-ORDINAL'],
+    "give me number 5": ['B-ACTION', 'O', 'O', 'B-ORDINAL'],
+    "give me number 7": ['B-ACTION', 'O', 'O', 'B-ORDINAL'],
+    "put number 3 in cart": ['B-ACTION', 'O', 'B-ORDINAL', 'O', 'O'],
+    "put number 5 to cart": ['B-ACTION', 'O', 'B-ORDINAL', 'O', 'O'],
+    
+    # "item N" pattern - explicit ordinal marker
+    "add item 1": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add item 2": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add item 3": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add item 4": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add item 5": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add item 6": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add item 7": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add item 8": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add item 9": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add item 10": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove item 1": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove item 2": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove item 3": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove item 5": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "cancel item 3": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "cancel item 4": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "I want item 1": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "I want item 2": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "I want item 4": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "give me item 2": ['B-ACTION', 'O', 'O', 'B-ORDINAL'],
+    "give me item 5": ['B-ACTION', 'O', 'O', 'B-ORDINAL'],
+    "put item 5 in cart": ['B-ACTION', 'O', 'B-ORDINAL', 'O', 'O'],
+    "put item 3 to cart": ['B-ACTION', 'O', 'B-ORDINAL', 'O', 'O'],
+    
+    # "option N" pattern - explicit ordinal marker  
+    "add option 1": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add option 2": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add option 3": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add option 4": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add option 5": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove option 1": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove option 2": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "cancel option 3": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "I want option 1": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "I want option 2": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "give me option 1": ['B-ACTION', 'O', 'O', 'B-ORDINAL'],
+    "give me option 3": ['B-ACTION', 'O', 'O', 'B-ORDINAL'],
+    
+    # Hash/pound pattern (#N)
+    "add # 1": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add # 2": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add # 3": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add # 4": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add # 5": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove # 1": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove # 2": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "cancel # 3": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "I want # 1": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "I want # 2": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "give me # 3": ['B-ACTION', 'O', 'O', 'B-ORDINAL'],
+    
+    # Relative position references (last, previous, earlier)
+    "add the last one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the last": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add last one": ['B-ACTION', 'B-ORDINAL', 'O'],
+    "add the earlier one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the previous one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the previous": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "add previous one": ['B-ACTION', 'B-ORDINAL', 'O'],
+    "add the latest": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove the last one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "remove the last": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove the earlier": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "remove the previous one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "cancel the last": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "I want the last one": ['O', 'B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "I want the last": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "give me the previous one": ['B-ACTION', 'O', 'O', 'B-ORDINAL', 'O'],
+    "give me the last one": ['B-ACTION', 'O', 'O', 'B-ORDINAL', 'O'],
+    
+    # With quantities (ordinal + quantity)
+    "add 2 kg of the first one": ['B-ACTION', 'B-QUANTITY', 'B-UNIT', 'O', 'O', 'B-ORDINAL', 'O'],
+    "add 3 bags of the second": ['B-ACTION', 'B-QUANTITY', 'B-UNIT', 'O', 'O', 'B-ORDINAL'],
+    "add 5 bottles of number 1": ['B-ACTION', 'B-QUANTITY', 'B-UNIT', 'O', 'O', 'B-ORDINAL'],
+    "add 4 packs of item 2": ['B-ACTION', 'B-QUANTITY', 'B-UNIT', 'O', 'O', 'B-ORDINAL'],
+    "add 2 kg of the 1st": ['B-ACTION', 'B-QUANTITY', 'B-UNIT', 'O', 'O', 'B-ORDINAL'],
+    "remove 2 kg of the third one": ['B-ACTION', 'B-QUANTITY', 'B-UNIT', 'O', 'O', 'B-ORDINAL', 'O'],
+    "remove 3 bags of the 2nd": ['B-ACTION', 'B-QUANTITY', 'B-UNIT', 'O', 'O', 'B-ORDINAL'],
+    "add 4 packs of the last one": ['B-ACTION', 'B-QUANTITY', 'B-UNIT', 'O', 'O', 'B-ORDINAL', 'O'],
+    "add 5 bottles of the previous": ['B-ACTION', 'B-QUANTITY', 'B-UNIT', 'O', 'O', 'B-ORDINAL'],
+    "I want 3 kg of the first": ['O', 'B-ACTION', 'B-QUANTITY', 'B-UNIT', 'O', 'O', 'B-ORDINAL'],
+    "I want 2 bags of number 3": ['O', 'B-ACTION', 'B-QUANTITY', 'B-UNIT', 'O', 'O', 'B-ORDINAL'],
+    "give me 5 kg of the second": ['B-ACTION', 'O', 'B-QUANTITY', 'B-UNIT', 'O', 'O', 'B-ORDINAL'],
+    
+    # Context phrases (with cart/basket/list mentions)
+    "add the first one to cart": ['B-ACTION', 'O', 'B-ORDINAL', 'O', 'O', 'O'],
+    "add the second to cart": ['B-ACTION', 'O', 'B-ORDINAL', 'O', 'O'],
+    "put the second one in basket": ['B-ACTION', 'O', 'B-ORDINAL', 'O', 'O', 'O'],
+    "put the third in basket": ['B-ACTION', 'O', 'B-ORDINAL', 'O', 'O'],
+    "include the third one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "add the first from the list": ['B-ACTION', 'O', 'B-ORDINAL', 'O', 'O', 'O'],
+    "add the second from list": ['B-ACTION', 'O', 'B-ORDINAL', 'O', 'O'],
+    "remove item 1 from cart": ['B-ACTION', 'O', 'B-ORDINAL', 'O', 'O'],
+    "remove number 2 from basket": ['B-ACTION', 'O', 'B-ORDINAL', 'O', 'O'],
+    "I'll take the first": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "I'll take the second": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "I'll take the third one": ['O', 'B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "I'll take number 3": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "I'll take item 2": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "I'll get the first": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    "I'll get number 1": ['O', 'B-ACTION', 'O', 'B-ORDINAL'],
+    
+    # Variations with "choose", "select", "pick"
+    "choose the first one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "choose number 1": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "select the second": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "select item 2": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "pick the first one": ['B-ACTION', 'O', 'B-ORDINAL', 'O'],
+    "pick number 3": ['B-ACTION', 'O', 'B-ORDINAL'],
+    "pick the third": ['B-ACTION', 'O', 'B-ORDINAL'],
+}
+
 check_examples = {
     "Do you have Prada socks size 38 in blue in stock ?": ['B-ACTION', 'I-ACTION', 'I-ACTION', 'B-BRAND', 'B-PRODUCT', 'O', 'B-TOKEN', 'O', 'B-TOKEN', 'O', 'O', 'O'],
     "Do you have Dior eyeshadow palette ?": ['B-ACTION', 'I-ACTION', 'I-ACTION', 'B-BRAND', 'B-PRODUCT', 'I-PRODUCT', 'O'],
@@ -699,10 +904,38 @@ multi_product_examples = {
 }
 
 
-training_examples = {**modify_cart_examples, **check_examples, **multi_intent_examples, **modify_cart_placeholder_examples, **check_placeholder_examples, **multi_intent_placeholder_examples, **oov_product_examples}
+training_examples = {
+    **modify_cart_examples, 
+    **check_examples, 
+    **multi_intent_examples, 
+    **modify_cart_placeholder_examples, 
+    **check_placeholder_examples, 
+    **multi_intent_placeholder_examples, 
+    **oov_product_examples,
+    **ordinal_examples  # NEW: Ordinal reference examples
+}
 
-texts = list(modify_cart_examples.keys()) + list(check_examples.keys()) + list(multi_intent_examples.keys()) + list(modify_cart_placeholder_examples.keys()) + list(check_placeholder_examples.keys()) + list(multi_intent_placeholder_examples.keys()) + list(oov_product_examples.keys())
-labels = list(modify_cart_examples.values()) + list(check_examples.values()) + list(multi_intent_examples.values()) + list(modify_cart_placeholder_examples.values()) + list(check_placeholder_examples.values()) + list(multi_intent_placeholder_examples.values()) + list(oov_product_examples.values())    
+texts = (
+    list(modify_cart_examples.keys()) + 
+    list(check_examples.keys()) + 
+    list(multi_intent_examples.keys()) + 
+    list(modify_cart_placeholder_examples.keys()) + 
+    list(check_placeholder_examples.keys()) + 
+    list(multi_intent_placeholder_examples.keys()) + 
+    list(oov_product_examples.keys()) +
+    list(ordinal_examples.keys())  # NEW
+)
+
+labels = (
+    list(modify_cart_examples.values()) + 
+    list(check_examples.values()) + 
+    list(multi_intent_examples.values()) + 
+    list(modify_cart_placeholder_examples.values()) + 
+    list(check_placeholder_examples.values()) + 
+    list(multi_intent_placeholder_examples.values()) + 
+    list(oov_product_examples.values()) +
+    list(ordinal_examples.values())  # NEW
+)
 
 
 

@@ -17,6 +17,13 @@ class ProcessingStatus(Enum):
     NO_ENTITIES = "no_entities_found"
 
 
+class ProcessingRoute(Enum):
+    """Recommended routing for extracted results."""
+    RULE = "rule"       # Use rule-based logic (complete extraction)
+    MEMORY = "memory"   # Needs conversation memory (pronouns like "it")
+    LLM = "llm"         # Needs LLM assistance (ambiguous/complex)
+
+
 @dataclass
 class Entity:
     """
@@ -136,6 +143,9 @@ class EntityGroup:
     units: List[str] = field(default_factory=list)
     variants: List[str] = field(default_factory=list)
     
+    # Ordinal reference (for "add the first one", "add item 2", etc.)
+    ordinal_ref: Optional[str] = None
+    
     def __post_init__(self):
         """Validate group has required fields."""
         if not self.action:
@@ -178,6 +188,7 @@ class GroupingResult:
     groups: List[EntityGroup] = field(default_factory=list)
     status: str = "ok"  # "ok", "error", "needs_llm"
     reason: Optional[str] = None
+    route: Optional[str] = None  # "rule", "memory", "llm" - recommended routing
     
     def is_successful(self) -> bool:
         """Check if grouping was successful."""

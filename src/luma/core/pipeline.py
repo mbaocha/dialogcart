@@ -8,6 +8,7 @@ The pipeline can be controlled via environment variable:
     USE_LUMA_PIPELINE=true  -> Use new luma implementation (Phase 3+)
     USE_LUMA_PIPELINE=false -> Use legacy semantics code (default)
 """
+import logging
 import os
 import sys
 from typing import Optional
@@ -15,6 +16,11 @@ from pathlib import Path
 
 from luma.data_types import ExtractionResult, ProcessingStatus, NERPrediction
 from luma.adapters import from_legacy_result, to_legacy_result, from_legacy_ner_result
+from luma.logging_config import log_function_call
+from luma.config import config
+
+# Module logger
+logger = logging.getLogger(__name__)
 
 
 # Debug logging
@@ -80,7 +86,9 @@ class EntityExtractionPipeline:
         self,
         use_luma: Optional[bool] = None,
         use_luma_ner: Optional[bool] = None,
-        entity_file: Optional[str] = None
+        entity_file: Optional[str] = None,
+        enable_llm_fallback: bool = False,
+        llm_model: str = "gpt-4o-mini"
     ):
         """
         Initialize pipeline.
@@ -91,9 +99,12 @@ class EntityExtractionPipeline:
             use_luma_ner: Force use of luma NER only (overrides env var).
                          Phase 3A: Use clean NER, keep rest as legacy
             entity_file: Optional custom entity file (for luma mode)
+            enable_llm_fallback: Enable LLM fallback for ambiguous cases (default: False)
+            llm_model: OpenAI model to use for fallback (default: gpt-4o-mini)
         """
         self.use_luma = use_luma if use_luma is not None else USE_LUMA
         self.use_luma_ner = use_luma_ner if use_luma_ner is not None else USE_LUMA_NER
+        self.enable_llm_fallback = enable_llm_fallback or config.ENABLE_LLM_FALLBACK
         
         # Load legacy if not using full luma
         self._legacy_extract = None
@@ -104,6 +115,7 @@ class EntityExtractionPipeline:
         self.entity_matcher = None
         self.ner_model = None
         self.grouper = None
+        self.llm_extractor = None
         
         if self.use_luma:
             # Full luma pipeline - using new stage-based structure
@@ -111,23 +123,41 @@ class EntityExtractionPipeline:
             from luma.classification import NERModel
             from luma.grouping import decide_processing_path, index_parameterized_tokens
             
+            logger.info("Loading EntityMatcher (spaCy)")
             self.entity_matcher = EntityMatcher(entity_file=entity_file)
+            
+            logger.info("Loading NER Model (BERT)")
             self.ner_model = NERModel()
+            
             self.grouper = decide_processing_path
             self.indexer = index_parameterized_tokens
+            
+            # Initialize LLM fallback if enabled
+            if self.enable_llm_fallback:
+                try:
+                    from luma.llm import LLMExtractor
+                    logger.info(f"Loading LLM extractor", extra={'model': llm_model})
+                    self.llm_extractor = LLMExtractor(model=llm_model)
+                    logger.info("LLM fallback enabled")
+                except ImportError:
+                    logger.warning("LLM fallback unavailable (openai not installed)")
+                    self.llm_extractor = None
             
         elif self.use_luma_ner:
             # Hybrid: NER only
             from luma.classification import NERModel
+            logger.info("Loading NER Model (BERT)")
             self.ner_model = NERModel()
     
-    def extract(self, sentence: str, debug: bool = False) -> ExtractionResult:
+    @log_function_call()
+    def extract(self, sentence: str, debug: bool = False, force_llm: bool = False) -> ExtractionResult:
         """
         Extract entities from sentence.
         
         Args:
             sentence: Input text to extract entities from
             debug: Enable debug logging
+            force_llm: Force LLM extraction (bypass rule-based)
             
         Returns:
             ExtractionResult with extracted entity groups
@@ -138,15 +168,50 @@ class EntityExtractionPipeline:
             >>> assert result.is_successful()
             >>> assert len(result.groups) == 1
         """
+        # Force LLM if requested and available
+        if force_llm and self.llm_extractor:
+            logger.debug("Force LLM extraction requested")
+            return self._extract_with_llm(sentence, debug)
+        
+        # Try rule-based extraction first
         if self.use_luma:
             # Phase 3+: Use full luma implementation
-            return self._extract_with_luma(sentence, debug)
+            result = self._extract_with_luma(sentence, debug)
         elif self.use_luma_ner:
             # Phase 3A: Hybrid - use luma NER, keep rest as legacy
-            return self._extract_hybrid_ner(sentence, debug)
+            result = self._extract_hybrid_ner(sentence, debug)
         else:
             # Phase 2: Delegate to legacy code
-            return self._extract_with_legacy(sentence, debug)
+            result = self._extract_with_legacy(sentence, debug)
+        
+        # Auto-fallback to LLM if needed and enabled
+        if self.enable_llm_fallback and self.llm_extractor and result.needs_llm_processing():
+            logger.info("Falling back to LLM", extra={'reason': 'needs_llm_processing'})
+            llm_result = self._extract_with_llm(sentence, debug)
+            llm_result.notes += f" | Original rule-based status: {result.status.value}"
+            return llm_result
+        
+        return result
+    
+    @log_function_call(level='DEBUG')
+    def extract_dict(self, sentence: str, debug: bool = False, force_llm: bool = False) -> dict:
+        """
+        Extract entities and return as dict (legacy format).
+        
+        Convenience method that calls extract() and converts to dict format.
+        Useful for REST APIs and backward compatibility.
+        
+        Args:
+            sentence: Input text to extract entities from
+            debug: Enable debug logging
+            force_llm: Force LLM extraction
+            
+        Returns:
+            Dict in legacy format (compatible with semantics)
+        """
+        from luma.adapters import to_legacy_result
+        result = self.extract(sentence, debug, force_llm)
+        return to_legacy_result(result)
     
     def _extract_with_legacy(self, sentence: str, debug: bool) -> ExtractionResult:
         """
@@ -223,19 +288,19 @@ class EntityExtractionPipeline:
             from luma.adapters import from_legacy_nlp_result
             
             # Step 1: Entity Matching & Parameterization
-            debug_print("[LUMA Pipeline] Step 1: Entity Matching...")
+            logger.debug("LUMA Pipeline Step 1: Entity Matching")
             nlp_result_dict = self.entity_matcher.extract_with_parameterization(
                 sentence,
                 debug_units=debug
             )
             
             # Step 2: NER Classification
-            debug_print("[LUMA Pipeline] Step 2: NER Classification...")
+            logger.debug("LUMA Pipeline Step 2: NER Classification")
             parameterized_sentence = nlp_result_dict["psentence"]
             ner_result = self.ner_model.predict(parameterized_sentence)
             
             # Step 3: Index parameterized tokens
-            debug_print("[LUMA Pipeline] Step 3: Indexing tokens...")
+            logger.debug("LUMA Pipeline Step 3: Indexing tokens")
             indexed_tokens = self.indexer(ner_result.tokens)
             
             # Build index map
@@ -245,15 +310,25 @@ class EntityExtractionPipeline:
                     index_map[indexed] = original
             
             # Step 4: Grouping
-            debug_print("[LUMA Pipeline] Step 4: Grouping...")
+            logger.debug("LUMA Pipeline Step 4: Grouping")
             grouped_result, route, route_reason = self.grouper(
                 indexed_tokens,
                 ner_result.labels,
                 memory_state=None
             )
             
-            # Step 5: Convert to typed result
-            debug_print("[LUMA Pipeline] Step 5: Building result...")
+            # Step 5: Map indexed tokens back to original values
+            logger.debug("LUMA Pipeline Step 5: Reverse mapping")
+            from luma.grouping.reverse_mapper import map_tokens_to_original_values
+            
+            grouped_result = map_tokens_to_original_values(
+                grouped_result,
+                nlp_result_dict,
+                index_map
+            )
+            
+            # Step 6: Convert to typed result
+            logger.debug("LUMA Pipeline Step 6: Building result")
             
             from luma.data_types import EntityGroup, GroupingResult
             
@@ -267,14 +342,16 @@ class EntityExtractionPipeline:
                     brands=g.get("brands", []),
                     quantities=g.get("quantities", []),
                     units=g.get("units", []),
-                    variants=g.get("variants", [])
+                    variants=g.get("variants", []),
+                    ordinal_ref=g.get("ordinal_ref")
                 )
                 groups.append(group)
             
             grouping = GroupingResult(
                 groups=groups,
                 status=grouped_result.get("status", "ok"),
-                reason=grouped_result.get("reason")
+                reason=grouped_result.get("reason"),
+                route=route  # Store route in grouping result
             )
             
             # Build NLPExtraction
@@ -313,6 +390,33 @@ class EntityExtractionPipeline:
                 parameterized_sentence="",
                 notes=f"Luma pipeline error: {str(e)}"
             )
+    
+    @log_function_call(level='DEBUG')
+    def _extract_with_llm(self, sentence: str, debug: bool) -> ExtractionResult:
+        """
+        Extract using LLM fallback.
+        
+        Uses OpenAI GPT to extract entities when rule-based methods fail.
+        Handles spelling corrections and complex/ambiguous cases.
+        
+        Args:
+            sentence: Input sentence
+            debug: Enable debug logging
+            
+        Returns:
+            ExtractionResult from LLM
+        """
+        if not self.llm_extractor:
+            logger.warning("LLM extraction requested but not available")
+            return ExtractionResult(
+                status=ProcessingStatus.ERROR,
+                original_sentence=sentence,
+                parameterized_sentence="",
+                notes="LLM fallback not available (not initialized or openai not installed)"
+            )
+        
+        logger.debug("Using LLM extraction")
+        return self.llm_extractor.extract(sentence, debug=debug)
 
 
 def extract_entities(sentence: str, debug: bool = False) -> ExtractionResult:

@@ -16,10 +16,14 @@ Phase 3A: ✅ NER Model - Clean implementation
 Phase 3B-C: 🔜 Entity matcher & Grouper
 """
 
+# Export configuration
+from luma.config import config, LumaConfig
+
 # Export core types
 from luma.data_types import (
     # Enums
     ProcessingStatus,
+    ProcessingRoute,
     
     # Data structures
     Entity,
@@ -50,13 +54,27 @@ from luma.adapters import (
 )
 
 # Stage-based imports (new structure)
-from luma.extraction import EntityMatcher
+from luma.extraction import EntityMatcher, EntityClassifier
 from luma.classification import NERModel
 from luma.grouping import (
     simple_group_entities,
     index_parameterized_tokens,
     decide_processing_path,
 )
+
+# Optional features
+try:
+    from luma.extraction import FuzzyEntityMatcher, FUZZY_AVAILABLE
+except ImportError:
+    FuzzyEntityMatcher = None
+    FUZZY_AVAILABLE = False
+
+try:
+    from luma.cli import interactive_main
+    CLI_AVAILABLE = True
+except ImportError:
+    interactive_main = None
+    CLI_AVAILABLE = False
 
 # Backward compatibility: also available via old paths
 # luma.models.NERModel still works
@@ -66,6 +84,10 @@ __version__ = "1.0.0"  # Phase 3D Complete - Full Integration! 🎉
 __author__ = "DialogCart Team"
 
 __all__ = [
+    # Configuration
+    "config",
+    "LumaConfig",
+    
     # Main API
     "extract_entities",          # New typed API (recommended)
     "extract_entities_legacy",   # Old dict API (backward compat)
@@ -74,6 +96,7 @@ __all__ = [
     # Components
     "NERModel",                  # NER model (Phase 3A)
     "EntityMatcher",             # Entity matcher (Phase 3B)
+    "EntityClassifier",          # Context-based classifier (Phase 3B+)
     
     # Grouping Functions
     "simple_group_entities",     # Grouping logic (Phase 3C)
@@ -82,6 +105,7 @@ __all__ = [
     
     # Enums
     "ProcessingStatus",
+    "ProcessingRoute",
     
     # Core types
     "Entity",
@@ -100,5 +124,11 @@ __all__ = [
     # Adapters (for migration)
     "from_legacy_result",
     "to_legacy_result",
+    
+    # Optional features
+    "FuzzyEntityMatcher",
+    "FUZZY_AVAILABLE",
+    "interactive_main",
+    "CLI_AVAILABLE",
 ]
 

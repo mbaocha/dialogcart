@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from decimal import Decimal
 
 from .repo import CatalogRepo
@@ -8,57 +8,47 @@ from utils.response import standard_response
 
 class CatalogService:
     """
-    Pure business logic. Returns standard_response(...) to match current behavior.
+    Customer-facing catalog service for read-only operations.
+    
+    Admin operations (create, update, delete) should be handled by a separate admin service.
+    This service focuses on browsing, searching, and retrieving catalog data for customers.
     """
 
     def __init__(self, repo: Optional[CatalogRepo] = None):
         self.repo = repo or CatalogRepo()
 
-    # ---- Commands ----
-    def create_catalog_item(
-        self,
-        *,
-        name: str,
-        unit: str,
-        price: float,
-        allowed_quantities: Optional[Union[Dict[str, Any], List[int]]] = None,
-        available_quantity: Optional[float] = None,
-        category: Optional[str] = None,
-        description: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        try:
-            # This path is not wired to Dynamo-backed repo in this codebase; keeping placeholder
-            item = {
-                "id": name.lower().replace(" ", "-"),
-                "name": name,
-                "unit": unit,
-                "price": price,
-                "allowed_quantities": allowed_quantities,
-                "available_quantity": available_quantity,
-                "category": category,
-                "description": description,
-            }
-            return standard_response(True, data=item)
-        except ValueError as e:
-            return standard_response(False, error=str(e))
-
     # ---- Queries ----
     def get(self, tenant_id: str, catalog_id: str) -> Optional[Dict[str, Any]]:
-        return self.repo.get(tenant_id, catalog_id)
+        return self.repo.get_catalog_item(tenant_id, catalog_id)
 
     def get_catalog_item(self, catalog_id: str, tenant_id: Optional[str] = None) -> Dict[str, Any]:
         if not tenant_id:
             return standard_response(False, error="tenant_id is required")
-        item = self.repo.get(tenant_id, catalog_id)
+        item = self.repo.get_catalog_item(tenant_id, catalog_id)
         return standard_response(True, data=item) if item else standard_response(False, error="Catalog item not found")
+
+    def get_variant(self, tenant_id: str, variant_id: str) -> Dict[str, Any]:
+        """Get a specific variant by variant_id."""
+        variant = self.repo.get_variant(tenant_id, variant_id)
+        return standard_response(True, data=variant) if variant else standard_response(False, error="Variant not found")
+
+    def list_variants_for_catalog_item(self, tenant_id: str, catalog_id: str, limit: int = 100) -> Dict[str, Any]:
+        """List all variants for a given catalog item (customer-facing, for viewing product options)."""
+        try:
+            variants, last_key = self.repo.list_variants_for_catalog_item(tenant_id, catalog_id, limit=limit)
+            return standard_response(True, data={"variants": variants, "last_key": last_key})
+        except Exception as e:
+            return standard_response(False, error=str(e))
 
     def list_catalog_by_categories(self, tenant_id: str) -> Dict[str, Any]:
         """
         - list variants from catalog and reconstruct products by variant title/name
-        - filter enabled & available_quantity > 0
+        - filter active status & in_stock = True
         - group by category (default 'Uncategorized')
         - sort within category
         - prefix key label with emoji
+        
+        Aligned with new db/catalog.py schema.
         """
         try:
             # Fetch a sample of in-stock variants by scanning the tenant partition (avoid empty prefix queries)
@@ -85,24 +75,49 @@ class CatalogService:
 
             categories: Dict[str, List[Dict[str, Any]]] = {}
             for variant in items:
-                status = variant.get('status', 'enabled')
-                if status != 'enabled':
+                # Check status: should be "active" (not "enabled" from old schema)
+                status = variant.get('status', 'active')
+                if status not in ('active', 'enabled'):  # Support both for transition
                     continue
-                available_qty = variant.get('available_qty') or variant.get('available_quantity') or 0
+                
+                # Use available_qty from new schema
+                available_qty = variant.get('available_qty', 0)
                 if isinstance(available_qty, Decimal):
                     available_qty = float(available_qty)
-                if (available_qty or 0) <= 0:
+                if available_qty <= 0:
                     continue
-                category = variant.get('category_name') or variant.get('category') or 'Uncategorized'
+                
+                # Extract category_name (new schema has this as dedicated field)
+                category = variant.get('category_name', 'Uncategorized')
+                if not category:
+                    # Fallback to category.name if category is a map
+                    cat_obj = variant.get('category')
+                    if isinstance(cat_obj, dict):
+                        category = cat_obj.get('name', 'Uncategorized')
+                    else:
+                        category = 'Uncategorized'
+                
+                # Build catalog item view matching presenter expectations
                 catalog_item_view = {
-                    "id": variant.get("catalog_id") or variant.get("product_id") or variant.get("variant_id"),
+                    "id": variant.get("catalog_id") or variant.get("variant_id"),
                     "name": variant.get("title") or variant.get("variant_title") or "",
-                    "unit": variant.get("unit"),
+                    "unit": variant.get("unit"),  # May be in rules.unit in new schema
                     "price": float(variant.get("price_num", 0)) if isinstance(variant.get("price_num"), (int, float, Decimal)) else 0,
                     "available_quantity": available_qty,
                     "category": category,
                     "category_emoji": variant.get('category_emoji', DEFAULT_CATEGORY_EMOJI),
                 }
+                
+                # Extract unit and allowed_quantities from rules if present
+                rules = variant.get("rules")
+                if rules and isinstance(rules, dict):
+                    if "unit" in rules:
+                        catalog_item_view["unit"] = rules["unit"]
+                    if "allowed_quantities" in rules:
+                        catalog_item_view["allowed_quantities"] = rules["allowed_quantities"]
+                    if "min_order_qty" in rules:
+                        catalog_item_view["allowed_quantities"] = {"min": rules["min_order_qty"]}
+                
                 categories.setdefault(category, []).append(catalog_item_view)
 
             for category in list(categories.keys()):
@@ -142,7 +157,10 @@ class CatalogService:
             return standard_response(False, error=str(e))
 
     def list_catalog_flat(self, tenant_id: str, limit: int = 10_000) -> Dict[str, str]:
-        # Build flat map from variants
+        """
+        Build flat map from variants {catalog_id: title}.
+        Aligned with new db/catalog.py schema.
+        """
         from db.catalog import CatalogDB, pk_tenant
         from boto3.dynamodb.conditions import Key, Attr
         db = CatalogDB()
@@ -159,7 +177,8 @@ class CatalogService:
                 kwargs["ExclusiveStartKey"] = last_evaluated_key
             resp = db.table.query(**kwargs)
             for v in resp.get("Items", []):
-                cid = v.get("catalog_id") or v.get("product_id") or v.get("variant_id")
+                # Use catalog_id from new schema (not product_id)
+                cid = v.get("catalog_id") or v.get("variant_id")
                 title = v.get("title") or v.get("variant_title")
                 if cid and title:
                     acc[cid] = title
@@ -169,40 +188,68 @@ class CatalogService:
                 break
         return acc
 
-    def search_catalog(self, catalog_name: str, catalog_items: Dict[str, str] = None, threshold: float = 0.6) -> Dict[str, Any]:
+    def search_catalog(self, catalog_name: str, catalog_items: Dict[str, str] = None, threshold: float = 0.6, tenant_id: Optional[str] = None) -> Dict[str, Any]:
         """
-        Search for catalog items by name using exact, partial, and fuzzy matching.
+        Search for catalog items by name using GSI4_TitlePrefix for prefix matching,
+        with fallback to fuzzy matching if needed.
         
         Args:
             catalog_name: The name to search for
-            catalog_items: Optional pre-loaded catalog dictionary. If None, will load from database.
+            catalog_items: Optional pre-loaded catalog dictionary. If None, will use GSI4 search.
             threshold: Minimum similarity score for fuzzy matching (0.0 to 1.0)
+            tenant_id: Tenant ID (required if catalog_items is None)
             
         Returns:
             Dict with success status and search results
         """
         try:
-            from utils.coreutil import search_in_list
+            # If catalog_items provided, use legacy fuzzy search
+            if catalog_items is not None:
+                from utils.coreutil import search_in_list
+                matches = search_in_list(catalog_name, catalog_items, fallback_to_fuzzy=True, threshold=threshold)
+                
+                if not matches:
+                    return standard_response(False, error=f"No catalog items found matching '{catalog_name}'")
+                
+                results = []
+                for catalog_id in matches:
+                    catalog_name_found = catalog_items.get(catalog_id, catalog_id)
+                    results.append({
+                        "id": catalog_id,
+                        "name": catalog_name_found,
+                        "available": True
+                    })
+                
+                return standard_response(True, data={
+                    "query": catalog_name,
+                    "matches": results,
+                    "count": len(results)
+                })
             
-            # Use provided catalog items or load from database
-            if catalog_items is None:
+            # Use GSI4_TitlePrefix for efficient prefix search
+            if not tenant_id:
                 tenant_id = getattr(self, '_tenant_id', 'demo-tenant-001')
-                catalog_items = self.list_catalog_flat(tenant_id)
             
-            # Search for matches
-            matches = search_in_list(catalog_name, catalog_items, fallback_to_fuzzy=True, threshold=threshold)
+            variants, _ = self.repo.search_title_prefix(tenant_id, catalog_name, limit=20)
             
-            if not matches:
+            if not variants:
                 return standard_response(False, error=f"No catalog items found matching '{catalog_name}'")
             
-            # Get catalog item details for matches
+            # Deduplicate by catalog_id and format results
+            seen = set()
             results = []
-            for catalog_id in matches:
-                catalog_name_found = catalog_items.get(catalog_id, catalog_id)
+            for variant in variants:
+                catalog_id = variant.get("catalog_id") or variant.get("variant_id")
+                if catalog_id in seen:
+                    continue
+                seen.add(catalog_id)
+                
                 results.append({
                     "id": catalog_id,
-                    "name": catalog_name_found,
-                    "available": True
+                    "name": variant.get("title") or variant.get("variant_title") or "",
+                    "available": variant.get("in_stock", False),
+                    "price": float(variant.get("price_num", 0)) if variant.get("price_num") else None,
+                    "variant_id": variant.get("variant_id"),
                 })
             
             return standard_response(True, data={

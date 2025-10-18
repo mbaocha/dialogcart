@@ -9,8 +9,9 @@ Handles:
 """
 from typing import List, Dict, Any, Set
 
-# Import normalization for debug_print and post_normalize
-from .normalization import debug_print, post_normalize_parameterized_text
+# Import config and normalization functions
+from luma.config import debug_print
+from .normalization import post_normalize_parameterized_text
 
 
 def _remove_entity_occurrence(entity_list: List, position: int, length: int) -> None:
@@ -141,6 +142,14 @@ def extract_entities_from_doc(
         lemma = ent.text.lower()
         span_len = ent.end - ent.start
         
+        # ✅ Skip "item" if followed by a digit (ordinal pattern: "item 1", "item 2")
+        if lemma in {"item", "items"}:
+            next_token = doc[ent.end] if ent.end < len(doc) else None
+            if next_token and (next_token.text.isdigit() or next_token.like_num):
+                if debug_units:
+                    debug_print(f"[DEBUG] Skipping '{ent.text}' - ordinal pattern detected (followed by '{next_token.text}')")
+                continue
+        
         if ent.label_ == "PRODUCTBRAND":
             add_entity_with_tracking(result, entity_counts, "productbrands",
                                     ent.text, ent.start, debug_units, length=span_len)
@@ -190,6 +199,12 @@ def extract_entities_from_doc(
         lemma = clean_text.lower()
         if not lemma.isalpha():
             continue
+        
+        # ✅ Skip "item" if followed by a digit (ordinal pattern: "item 1")
+        if lemma in {"item", "items"}:
+            next_token = doc[i + 1] if i + 1 < len(doc) else None
+            if next_token and (next_token.text.isdigit() or next_token.like_num):
+                continue
         
         if lemma in brand_map:
             add_entity_with_tracking(result, entity_counts, "brands", clean_text, i, debug_units)
@@ -426,73 +441,87 @@ def canonicalize_entities(
     return result
 
 
+# ===============================================================================
+# Context-Based Entity Classification
+# ===============================================================================
+# Ported from semantics/nlp_processor.py lines 847-1111
+# Refactored into EntityClassifier class for better performance and organization
+
+from .entity_classifier import EntityClassifier
+
+
+# Backward compatibility: Standalone function wrappers
 def classify_productbrands(doc, productbrands: List[Dict], product_lex: Set[str], unit_lex: Set[str], debug: bool = False) -> List[Dict]:
     """
     Promote each productbrand to BRAND or PRODUCT.
-    Rule:
-      - If followed by a known product → BRAND
-      - Otherwise → PRODUCT (default)
     
-    Args:
-        doc: spaCy Doc object
-        productbrands: List of productbrand entity dicts
-        product_lex: Set of known product terms
-        unit_lex: Set of known unit terms
-        debug: Enable debug logging
-        
-    Returns:
-        List of classified entities with label="brand" or "product"
-        
+    Wrapper for backward compatibility. For better performance, use EntityClassifier directly.
+    
     NOTE: Matches semantics/nlp_processor.py lines 1071-1111 exactly
     """
-    results = []
-    for pb in productbrands:
-        if not isinstance(pb, dict):
-            continue
-        start = pb["position"]
-        end = start + pb.get("length", 1)
-        next_token = doc[end] if end < len(doc) else None
-        label = "product"  # default
-        
-        if next_token:
-            next_lower = next_token.text.lower()
-            
-            # ✅ Rule: followed by known product → brand
-            if next_lower in product_lex:
-                label = "brand"
-            
-            # Optional: if followed by unit/number, it's definitely product
-            elif next_lower in unit_lex or next_token.pos_ == "NUM":
-                label = "product"
-        
-        if debug:
-            nxt = next_token.text if next_token else "None"
-            debug_print(f"[DEBUG] Analyzing productbrand '{pb['text']}' at pos={start}")
-            debug_print(f"  Next: {nxt} ({next_token.pos_ if next_token else '-'})")
-            debug_print(f"  Final classification → {label.upper()}")
-        
-        results.append({
-            "text": pb["text"],
-            "position": start,
-            "length": pb["length"],
-            "label": label
-        })
+    # Note: This wrapper doesn't need entities parameter since classify_productbrands
+    # doesn't use cached lookups (it receives product_lex/unit_lex directly)
+    classifier = EntityClassifier([])  # Empty entities list is fine here
+    return classifier.classify_productbrands(doc, productbrands, product_lex, unit_lex, debug)
+
+
+def classify_ambiguous_units(sentence: str, entity_list: List[str], ambiguous_units: Set[str], entities: List[Dict], debug: bool = False) -> Dict:
+    """
+    Classify ambiguous entities as units or products.
     
-    return results
+    Examples:
+        - "Add 2 **bags** of rice" → bag is UNIT (preceded by number)
+        - "Add 1 Gucci **bag**" → bag is PRODUCT (preceded by brand)
+    
+    Returns two lists:
+      - units: entities classified as units
+      - products: entities classified as products
+      
+    NOTE: Matches semantics/nlp_processor.py lines 847-921 exactly
+    """
+    classifier = EntityClassifier(entities)
+    return classifier.classify_units(sentence, entity_list, ambiguous_units, debug)
 
 
-# Ambiguity classification stubs (Chunk 8 - optional for now)
-def classify_ambiguous_units(sentence: str, entity_list: List[str], ambiguous_units: Set[str], entities: List[Dict], debug: bool = False) -> Dict:  # noqa: ARG001
-    """Stub for ambiguous unit classification. TODO: Implement in Chunk 8 if needed."""
-    return {"units": [], "products": []}
+def classify_ambiguous_variants(sentence: str, entity_list: List[str], ambiguous_variants: Set[str], entities: List[Dict], debug: bool = False) -> Dict:
+    """
+    Classify ambiguous entities as variants or products based on context.
+    
+    Examples:
+        - "red **rice**" → rice is PRODUCT (variant precedes it)
+        - "nike air **force**" → force is VARIANT (follows product)
+    
+    Returns two lists:
+      - variants: entities classified as variants
+      - products: entities classified as products
+      
+    NOTE: Matches semantics/nlp_processor.py lines 924-1003 exactly
+    """
+    classifier = EntityClassifier(entities)
+    return classifier.classify_variants(sentence, entity_list, ambiguous_variants, debug)
 
 
-def classify_ambiguous_variants(sentence: str, entity_list: List[str], ambiguous_variants: Set[str], entities: List[Dict], debug: bool = False) -> Dict:  # noqa: ARG001
-    """Stub for ambiguous variant classification. TODO: Implement in Chunk 8 if needed."""
-    return {"variants": [], "products": []}
-
-
-def classify_ambiguous_brands(doc, entity_list: List[str], ambiguous_brands: Set[str], entities: List[Dict], debug: bool = False) -> Dict:  # noqa: ARG001
-    """Stub for ambiguous brand classification. TODO: Implement in Chunk 8 if needed."""
-    return {"brands": [], "products": []}
+def classify_ambiguous_brands(doc, entity_list: List[str], ambiguous_brands: Set[str], entities: List[Dict], debug: bool = False) -> Dict:
+    """
+    Classify ambiguous entities as BRAND or PRODUCT based on context.
+    Uses spaCy POS tagging and already-tokenized entities.
+    
+    Examples:
+        - "**dove** soap" → dove is BRAND (followed by product)
+        - "add **dove**" → dove is PRODUCT (standalone)
+    
+    Args:
+        doc: spaCy Doc object (for POS tagging)
+        entity_list: List of ambiguous entity strings
+        ambiguous_brands: Set of known ambiguous brand terms
+        entities: Full entity catalog
+        debug: Enable debug logging
+    
+    Returns:
+        Dict with "brands" and "products" lists
+        
+    NOTE: Matches semantics/nlp_processor.py lines 1005-1068 exactly
+    """
+    classifier = EntityClassifier(entities)
+    return classifier.classify_brands(doc, entity_list, ambiguous_brands, debug)
 

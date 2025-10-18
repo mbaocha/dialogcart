@@ -1,4 +1,18 @@
 venv/
+venv*/
+env/
+ENV/
+.rasa*/
+
+# Build files and distributions
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+*.whl
+*.manifest
+*.spec
 
 # Log files
 src/intents/core/logs/
@@ -16,13 +30,26 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.so
+*.dll
+*.dylib
 .Python
+*.py[cod]
+*$py.class
+.mypy_cache/
+.dmypy.json
+dmypy.json
 
 # Testing
 .pytest_cache/
 .coverage
+.coverage.*
 htmlcov/
+.tox/
+.nox/
+*.cover
 *.log
+.hypothesis/
 
 # IDE
 .vscode/
@@ -41,5 +68,19 @@ checkpoint-*/
 *.tmp
 *.bak
 review_output.txt
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# OS specific
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# SAM build artifacts
+.aws-sam/
 
 src/intents/entity_extraction/spacy_model/

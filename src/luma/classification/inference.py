@@ -16,13 +16,13 @@ import torch
 from luma.data_types import NERPrediction
 
 
-# Debug logging
-DEBUG_ENABLED = os.environ.get("DEBUG_NLP", "0") == "1"
+# Configuration
+from luma.config import config
 
 
 def _debug_print(*args, **kwargs):
     """Print debug message only if DEBUG_ENABLED is True."""
-    if DEBUG_ENABLED:
+    if config.DEBUG_ENABLED:
         print(*args, **kwargs)
 
 
@@ -393,7 +393,7 @@ class NERModel:
         scores: List[float]
     ):
         """Print debug output if DEBUG_ENABLED."""
-        if not DEBUG_ENABLED:
+        if not config.DEBUG_ENABLED:
             return
         
         _debug_print("\n[DEBUG] HR Inference Output (flat labels only):")

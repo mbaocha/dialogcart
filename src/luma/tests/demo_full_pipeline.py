@@ -36,6 +36,11 @@ try:
         "add 2kg white rice and 3 bottles of milk",
         "remove 1 Nike shoes",
         "add 5 bags of beans",
+        "add 2kg white rice and 3 bottles of milk",
+        "add the first one",
+        "add the second one",
+        "add item 1",
+        "add item one"
     ]
     
     print("\n[1] Using extract_entities() API...")
