@@ -146,8 +146,11 @@ def compile_typo_map(raw_typos: Dict[str, Dict[str, List[str]]]) -> Dict[str, st
                 "tomorrow": ["tomorow", "tommorow", "tmrw"],
                 "today": ["todat", "tody"]
             },
-            "time_keywords": {
+            "time_window": {
                 "morning": ["mornign"]
+            },
+            "weekday": {
+                "monday": ["moneday"]
             }
         }
 
@@ -207,9 +210,199 @@ def compile_typo_map(raw_typos: Dict[str, Dict[str, List[str]]]) -> Dict[str, st
     return compiled_map
 
 
+def _validate_typo_config(
+    typos: Dict[str, Any],
+    entity_types: Dict[str, Any],
+    vocabularies: Dict[str, Any]
+) -> None:
+    """
+    Validate typo configuration against entity_types and vocabularies.
+
+    Rules (v2 schema):
+    1. Every typo canonical must exist in entity_types OR vocabularies
+    2. No duplicate canonicals across typo categories
+    3. weekday/month canonicals must exist in vocabularies (as keys)
+    4. Every weekday/month in vocabularies must exist in entity_types.date.{weekday|month}.to_number
+    5. time_window canonicals must exist in entity_types.time.keywords[].value
+    6. date_relative canonicals must exist in entity_types.date.relative[].value
+    7. No weekday/month variant appears under more than one canonical
+    8. CRITICAL: Typo variants must NOT appear in vocabularies (typos = invalid, vocabularies = accepted)
+
+    Raises ValueError with clear error message if validation fails.
+    """
+    errors = []
+
+    # Build sets of valid canonicals
+    # New structure: vocabularies.weekdays is canonical-first (canonical -> [variants])
+    weekdays_dict = vocabularies.get("weekdays", {})
+    valid_weekdays = set(weekdays_dict.keys()) if isinstance(
+        weekdays_dict, dict) else set()
+
+    # Build set of all weekday variants to check for duplicates
+    all_weekday_variants: Dict[str, str] = {}  # variant -> canonical
+    for canonical, variants in weekdays_dict.items():
+        if isinstance(variants, list):
+            for variant in variants:
+                variant_lower = variant.lower()
+                if variant_lower in all_weekday_variants:
+                    errors.append(
+                        f"Duplicate weekday variant '{variant}' appears under both "
+                        f"'{all_weekday_variants[variant_lower]}' and '{canonical}'"
+                    )
+                else:
+                    all_weekday_variants[variant_lower] = canonical
+        # Canonical itself is also a valid variant
+        canonical_lower = canonical.lower()
+        if canonical_lower not in all_weekday_variants:
+            all_weekday_variants[canonical_lower] = canonical
+
+    # Validate that all weekdays in vocabularies exist in entity_types.date.weekday.to_number
+    weekday_to_number = entity_types.get("date", {}).get(
+        "weekday", {}).get("to_number", {})
+    for weekday in valid_weekdays:
+        if weekday.lower() not in weekday_to_number:
+            errors.append(
+                f"Weekday '{weekday}' in vocabularies.weekdays not found in "
+                f"entity_types.date.weekday.to_number"
+            )
+
+    # Build sets of valid month canonicals
+    months_dict = vocabularies.get("months", {})
+    valid_months = set(months_dict.keys()) if isinstance(
+        months_dict, dict) else set()
+
+    # Build set of all month variants to check for duplicates
+    all_month_variants: Dict[str, str] = {}  # variant -> canonical
+    for canonical, variants in months_dict.items():
+        if isinstance(variants, list):
+            for variant in variants:
+                variant_lower = variant.lower()
+                if variant_lower in all_month_variants:
+                    errors.append(
+                        f"Duplicate month variant '{variant}' appears under both "
+                        f"'{all_month_variants[variant_lower]}' and '{canonical}'"
+                    )
+                else:
+                    all_month_variants[variant_lower] = canonical
+        # Canonical itself is also a valid variant
+        canonical_lower = canonical.lower()
+        if canonical_lower not in all_month_variants:
+            all_month_variants[canonical_lower] = canonical
+
+    # Validate that all months in vocabularies exist in entity_types.date.month.to_number
+    month_to_number = entity_types.get("date", {}).get(
+        "month", {}).get("to_number", {})
+    for month in valid_months:
+        if month.lower() not in month_to_number:
+            errors.append(
+                f"Month '{month}' in vocabularies.months not found in "
+                f"entity_types.date.month.to_number"
+            )
+
+    valid_time_windows = set()
+    time_keywords = entity_types.get("time", {}).get("keywords", [])
+    for keyword in time_keywords:
+        value = keyword.get("value", "")
+        if value:
+            valid_time_windows.add(value.lower())
+
+    valid_date_relatives = set()
+    date_relatives = entity_types.get("date", {}).get("relative", [])
+    for rel_date in date_relatives:
+        value = rel_date.get("value", "")
+        if value:
+            valid_date_relatives.add(value.lower())
+
+    # Build set of all vocabulary variants (weekdays, months) to check typos don't overlap
+    # V2 Rule: Typos must NOT appear in vocabularies (typos = invalid, vocabularies = accepted)
+    all_vocab_variants = set()
+    # Add all weekday variants
+    for canonical, variants in weekdays_dict.items():
+        if isinstance(variants, list):
+            for variant in variants:
+                all_vocab_variants.add(variant.lower())
+        all_vocab_variants.add(canonical.lower())
+    # Add all month variants
+    for canonical, variants in months_dict.items():
+        if isinstance(variants, list):
+            for variant in variants:
+                all_vocab_variants.add(variant.lower())
+        all_vocab_variants.add(canonical.lower())
+
+    # Track all canonicals to detect duplicates
+    all_canonicals: Dict[str, str] = {}  # canonical -> category
+
+    # Validate each typo category
+    for category, canonicals in typos.items():
+        if category.startswith("_"):
+            continue
+
+        if not isinstance(canonicals, dict):
+            continue
+
+        for canonical, variants in canonicals.items():
+            canonical_lower = canonical.lower()
+
+            # Check for duplicates
+            if canonical_lower in all_canonicals:
+                errors.append(
+                    f"Duplicate typo canonical '{canonical}' in both '{all_canonicals[canonical_lower]}' "
+                    f"and '{category}'"
+                )
+            else:
+                all_canonicals[canonical_lower] = category
+
+            # Validate based on category
+            if category == "weekday":
+                if canonical_lower not in valid_weekdays:
+                    errors.append(
+                        f"Typo canonical '{canonical}' in category 'weekday' not found in "
+                        f"vocabularies.weekdays (as a key)"
+                    )
+                # V2 Rule: Typo variants must NOT be in vocabularies (typos = invalid only)
+                for variant in variants:
+                    variant_lower = variant.lower()
+                    if variant_lower in all_vocab_variants:
+                        errors.append(
+                            f"Typo variant '{variant}' in category 'weekday' appears in vocabularies. "
+                            f"Typos must be invalid spellings only, not accepted variants."
+                        )
+            elif category == "time_window":
+                if canonical_lower not in valid_time_windows:
+                    errors.append(
+                        f"Typo canonical '{canonical}' in category 'time_window' not found in "
+                        f"entity_types.time.keywords[].value"
+                    )
+            elif category == "date_relative":
+                if canonical_lower not in valid_date_relatives:
+                    errors.append(
+                        f"Typo canonical '{canonical}' in category 'date_relative' not found in "
+                        f"entity_types.date.relative[].value"
+                    )
+            elif category == "month":
+                if canonical_lower not in valid_months:
+                    errors.append(
+                        f"Typo canonical '{canonical}' in category 'month' not found in "
+                        f"vocabularies.months (as a key)"
+                    )
+                # V2 Rule: Typo variants must NOT be in vocabularies (typos = invalid only)
+                for variant in variants:
+                    variant_lower = variant.lower()
+                    if variant_lower in all_vocab_variants:
+                        errors.append(
+                            f"Typo variant '{variant}' in category 'month' appears in vocabularies. "
+                            f"Typos must be invalid spellings only, not accepted variants."
+                        )
+
+    if errors:
+        error_msg = "Typo configuration validation failed:\n" + \
+            "\n".join(f"  - {e}" for e in errors)
+        raise ValueError(error_msg)
+
+
 def load_global_typo_config(global_json_path: Path) -> Dict[str, str]:
     """
-    Load global typo correction configuration from global JSON.
+    Load and validate global typo correction configuration from global JSON.
 
     The JSON uses canonical-first format:
         {
@@ -219,16 +412,31 @@ def load_global_typo_config(global_json_path: Path) -> Dict[str, str]:
                         "tomorrow": ["tomorow", "tommorow", "tmrw"],
                         "today": ["todat", "tody"]
                     },
-                    "time_keywords": {
+                    "time_window": {
                         "morning": ["mornign"]
+                    },
+                    "weekday": {
+                        "monday": ["moneday"]
+                    }
+                },
+                "vocabularies": {
+                    "weekdays": {
+                        "monday": ["mon", "mondays"]
                     }
                 }
             }
         }
 
-    This function compiles it into variant → canonical format for runtime use.
+    This function:
+    1. Validates that all typo canonicals exist in entity_types or vocabularies
+    2. Compiles typos into variant → canonical format
+    3. Also includes vocabulary variants from vocabularies.weekdays and vocabularies.months
+       (accepted variants like abbreviations and plurals) so they normalize to canonical form
+       (e.g., "mon" → "monday", "mondays" → "monday", "jan" → "january")
 
     Returns a dictionary mapping typo variants to canonical forms.
+
+    Raises ValueError if validation fails.
 
     Example output:
         {
@@ -236,19 +444,52 @@ def load_global_typo_config(global_json_path: Path) -> Dict[str, str]:
             "tommorow": "tomorrow",
             "tmrw": "tomorrow",
             "todat": "today",
-            "mornign": "morning"
+            "mornign": "morning",
+            "moneday": "monday",
+            "mon": "monday",      # from vocabularies.weekdays (accepted variant)
+            "mondays": "monday",  # from vocabularies.weekdays (accepted variant)
+            "jan": "january"      # from vocabularies.months (accepted variant)
         }
-
-    Updated to read from normalization.typos in new structure.
     """
     with open(global_json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    # New structure: normalization.typos
+    # Extract sections
     typos = data.get("normalization", {}).get("typos", {})
+    entity_types = data.get("entity_types", {})
+    vocabularies = data.get("normalization", {}).get("vocabularies", {})
+
+    # Validate before compiling
+    _validate_typo_config(typos, entity_types, vocabularies)
 
     # Compile canonical-first format to variant → canonical map
     compiled_map = compile_typo_map(typos)
+
+    # V2: Also add vocabulary variants (weekdays, months) to the normalization map
+    # This ensures accepted variants (abbreviations, plurals) normalize to canonical
+    # Note: These are NOT typos - they're accepted language variants
+    weekdays_dict = vocabularies.get("weekdays", {})
+    if isinstance(weekdays_dict, dict):
+        for canonical, variants in weekdays_dict.items():
+            canonical_lower = canonical.lower()
+            if isinstance(variants, list):
+                for variant in variants:
+                    variant_lower = variant.lower()
+                    # Don't override existing entries (typos take precedence)
+                    if variant_lower not in compiled_map:
+                        compiled_map[variant_lower] = canonical_lower
+
+    # Add month vocabulary variants (abbreviations like "jan" → "january")
+    months_dict = vocabularies.get("months", {})
+    if isinstance(months_dict, dict):
+        for canonical, variants in months_dict.items():
+            canonical_lower = canonical.lower()
+            if isinstance(variants, list):
+                for variant in variants:
+                    variant_lower = variant.lower()
+                    # Don't override existing entries (typos take precedence)
+                    if variant_lower not in compiled_map:
+                        compiled_map[variant_lower] = canonical_lower
 
     return compiled_map
 
@@ -442,14 +683,16 @@ def load_global_entity_types(global_json_path: Path) -> Dict[str, Any]:
 
 def build_date_patterns(entity_types: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
-    Build spaCy EntityRuler patterns for DATE entities (relative dates only).
+    Build spaCy EntityRuler patterns for DATE entities.
 
-    Extracts relative date values from entity_types.date.relative.
-    Examples: today, tomorrow, next week
+    Includes:
+    - Relative dates from entity_types.date.relative (e.g., today, tomorrow, next week)
+    - Weekday canonicals from entity_types.date.weekday.to_number (e.g., monday, friday)
     """
     patterns = []
     date_config = entity_types.get("date", {})
     relative_dates = date_config.get("relative", [])
+    weekday_map = date_config.get("weekday", {}).get("to_number", {})
 
     for rel_date in relative_dates:
         if isinstance(rel_date, dict):
@@ -459,6 +702,13 @@ def build_date_patterns(entity_types: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "label": "DATE",
                     "pattern": value.lower()
                 })
+
+    # Add weekday canonicals as DATE patterns (normalization maps variants to canonicals)
+    for weekday in weekday_map.keys():
+        patterns.append({
+            "label": "DATE",
+            "pattern": weekday.lower()
+        })
 
     return patterns
 
@@ -911,3 +1161,81 @@ def init_nlp_with_entities(json_path: Path):
     ruler.add_patterns(patterns)
 
     return nlp, entities
+
+
+def load_global_vocabularies(global_json_path: Path) -> Dict[str, Any]:
+    """
+    Load global vocabularies from global JSON.
+
+    Returns vocabularies for weekdays, relative dates, vague patterns, etc.
+    """
+    with open(global_json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    vocabularies = data.get("normalization", {}).get("vocabularies", {})
+    return vocabularies
+
+
+def load_relative_date_offsets(global_json_path: Path) -> Dict[str, int]:
+    """
+    Load relative date offsets from entity_types.date.relative.
+
+    Returns dict mapping date strings to offset days.
+    """
+    with open(global_json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    relative_dates = data.get("entity_types", {}).get(
+        "date", {}).get("relative", [])
+    offsets = {}
+    for rel_date in relative_dates:
+        value = rel_date.get("value", "")
+        offset = rel_date.get("offset_days", 0)
+        if value:
+            offsets[value] = offset
+
+    # Add weekend approximations (these are approximate, would need day-of-week logic)
+    offsets["this weekend"] = 0
+    offsets["next weekend"] = 7
+
+    return offsets
+
+
+def load_time_window_bounds(global_json_path: Path) -> Dict[str, Dict[str, str]]:
+    """
+    Load time window bounds from entity_types.time.keywords.
+
+    Returns dict mapping window names to {start, end} bounds.
+    """
+    with open(global_json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    time_keywords = data.get("entity_types", {}).get(
+        "time", {}).get("keywords", [])
+    bounds = {}
+    for keyword in time_keywords:
+        value = keyword.get("value", "")
+        range_list = keyword.get("range", [])
+        if value and len(range_list) >= 2:
+            bounds[value] = {
+                "start": range_list[0],
+                "end": range_list[1]
+            }
+
+    return bounds
+
+
+def load_month_names(global_json_path: Path) -> Dict[str, int]:
+    """
+    Load month name to number mapping from entity_types.date.month.to_number.
+
+    Returns dict mapping canonical month names to month numbers (1-12).
+    Only canonical names (january, february, etc.) are returned.
+    Variants (jan, feb, etc.) are normalized via vocabularies.months.
+    """
+    with open(global_json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    entity_types = data.get("entity_types", {})
+    months = entity_types.get("date", {}).get("month", {}).get("to_number", {})
+    return months

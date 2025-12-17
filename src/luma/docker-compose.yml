@@ -11,9 +11,7 @@ services:
       DEBUG_NLP: "0"
       
       # Feature toggles
-      ENABLE_LLM_FALLBACK: "false"
       ENABLE_FUZZY_MATCHING: "false"
-      ENABLE_INTENT_MAPPER: "true"
       
       # Logging settings
       LOG_LEVEL: "INFO"
@@ -21,10 +19,6 @@ services:
       ENABLE_REQUEST_LOGGING: "true"
       LOG_PERFORMANCE_METRICS: "true"
       # LOG_FILE: "/var/log/luma/api.log"  # Optional: enable for file-based logs
-      
-      # LLM settings (if enabled)
-      # OPENAI_API_KEY: "your-key-here"
-      LLM_MODEL: "gpt-4"
     
     # Optional: Mount volume for file-based logs
     # volumes:

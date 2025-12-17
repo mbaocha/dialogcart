@@ -18,16 +18,24 @@ from .matcher import EntityMatcher
 from .normalization import (
     normalize_hyphens,
     pre_normalization,
-    normalize_typos,
     normalize_orthography,
     post_normalize_parameterized_text,
     normalize_natural_language_variants,
+)
+
+# Vocabulary normalization (new structure)
+from .vocabulary_normalization import (
+    load_vocabularies,
+    compile_vocabulary_maps,
+    normalize_vocabularies,
+    validate_vocabularies,
 )
 
 # Entity loading utilities
 from .entity_loading import (
     load_normalization_entities,
     load_global_noise_set,
+    load_global_orthography_rules,
     build_entity_patterns,
     build_support_maps,
     init_nlp_with_entities,
@@ -51,31 +59,33 @@ except ImportError:
 __all__ = [
     # Main classes
     "EntityMatcher",
-    
+
     # Normalization
     "normalize_hyphens",
     "pre_normalization",
-    "normalize_typos",
     "normalize_orthography",
     "post_normalize_parameterized_text",
     "normalize_natural_language_variants",
-    
+
+    # Vocabulary normalization
+    "load_vocabularies",
+    "compile_vocabulary_maps",
+    "normalize_vocabularies",
+    "validate_vocabularies",
+
     # Entity loading
     "load_normalization_entities",
     "load_global_noise_set",
-    "load_global_orthography_rules",
-    "load_global_typo_config",
     "build_entity_patterns",
     "build_support_maps",
     "init_nlp_with_entities",
-    
+
     # Processing (advanced)
     "extract_entities_from_doc",
     "build_parameterized_sentence",
     "canonicalize_services",
-    
+
     # Fuzzy matching (optional)
     "TenantFuzzyMatcher",
     "FUZZY_AVAILABLE",
 ]
-

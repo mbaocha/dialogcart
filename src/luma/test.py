@@ -181,7 +181,7 @@ def _localize_datetime(dt: datetime, tz_str: str) -> datetime:
 
 
 def find_normalization_dir() -> Path:
-    """Find the normalization directory containing global.v1.json."""
+    """Find the normalization directory containing global.v2.json."""
     # Try multiple locations
     possible_paths = [
         script_dir.parent.parent / "store" / "normalization",
@@ -190,12 +190,12 @@ def find_normalization_dir() -> Path:
     ]
 
     for path in possible_paths:
-        if path.exists() and (path / "global.v1.json").exists():
+        if path.exists() and (path / "global.v2.json").exists():
             return path
 
     # If not found, raise error with helpful message
     raise FileNotFoundError(
-        f"Could not find normalization directory with global.v1.json. "
+        f"Could not find normalization directory with global.v2.json. "
         f"Tried: {[str(p) for p in possible_paths]}"
     )
 

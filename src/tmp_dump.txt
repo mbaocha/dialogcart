@@ -1,0 +1,277 @@
+def _resolve_date_semantics(
+    entities: Dict[str, Any],
+    structure: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Resolve date semantics with hardened, production-safe subset.
+
+    Supports:
+    - Relative days: today, tomorrow, day after tomorrow, tonight → single_day
+    - Week-based: this week, next week → range
+    - Weekends: this weekend, next weekend → range (Sat-Sun)
+    - Specific weekdays: this Monday, next Monday, coming Friday → single_day
+    - Month-relative: this month, next month → range (full month)
+    - Calendar dates: 15th Dec, Dec 15, 12 July, 12/07 → single_day
+      (locale ambiguous like 07/12 → flagged for clarification)
+    - Simple ranges: between Monday and Wednesday → range
+    - Misspellings: normalized first
+
+    Does NOT resolve (requires clarification):
+    - Plural weekdays: next Mondays → clarification
+    - Vague references: sometime soon → clarification
+    - Context-dependent: Thursday just gone → clarification
+
+    Fine-grained modifiers resolve to ranges only:
+    - early/mid/end of next week → range
+    - early/mid/end of next month → range
+
+    Args:
+        entities: Raw extraction output
+        structure: Structure interpretation result
+
+    Returns:
+        Dict with "mode", "refs", and optional "needs_clarification" flag
+    """
+    debug_print(
+        "DEBUG[semantic]: enter _resolve_date_semantics "
+        f"keys={list(entities.keys())} "
+        f"osentence={entities.get('osentence')} "
+        f"psentence={entities.get('psentence')}"
+    )
+    dates = entities.get("dates", [])
+    dates_absolute = entities.get("dates_absolute", [])
+
+    # Collect date modifiers (semantic metadata; additive only)
+    osentence = str(entities.get("osentence", "")).lower()
+    # IMPORTANT: load modifiers from raw normalization config (not compiled vocab cache)
+    raw_config_path = _get_global_config_path()
+    raw_config = load_global_config(raw_config_path)
+    raw_vocab = raw_config.get("normalization", {}).get(
+        "normalization", {}).get("vocabularies", {})
+    raw_mods = raw_vocab.get("date_modifiers", [])
+    modifier_values: List[str] = []
+    if isinstance(raw_mods, list):
+        for mod in raw_mods:
+            if isinstance(mod, str):
+                norm_mod = mod.strip().lower()
+                if norm_mod:
+                    modifier_values.append(norm_mod)
+    date_modifiers: List[str] = []
+    if osentence and modifier_values:
+        for mod in modifier_values:
+            if isinstance(mod, str):
+                if re.search(rf"\b{re.escape(mod.lower())}\b", osentence):
+                    date_modifiers.append(mod.lower())
+    debug_print(
+        "DEBUG[semantic]: after modifiers "
+        f"sentence={osentence} "
+        f"date_modifiers={date_modifiers}"
+    )
+
+    # Normalize date texts (handle misspellings)
+    normalized_dates = [_normalize_date_text(d.get("text", "")) for d in dates]
+    normalized_absolute = [_normalize_date_text(
+        da.get("text", "")) for da in dates_absolute]
+
+    # Rule 1: Check for vague/ambiguous patterns that require clarification
+    all_date_texts = normalized_dates + normalized_absolute
+    for date_text in all_date_texts:
+        if _is_vague_date_reference(date_text):
+            # Will be flagged in _check_ambiguity
+            pass
+        if _is_plural_weekday(date_text):
+            # Will be flagged in _check_ambiguity
+            pass
+        if _is_context_dependent(date_text):
+            # Will be flagged in _check_ambiguity
+            pass
+
+    # Rule 2: Absolute dates take precedence
+    if dates_absolute:
+        if len(dates_absolute) == 1:
+            date_text = normalized_absolute[0]
+            # Check for locale ambiguity (e.g., 07/12 could be July 12 or Dec 7)
+            if _is_locale_ambiguous(date_text):
+                # Will be flagged in _check_ambiguity
+                pass
+            debug_print(
+                "DEBUG[semantic]: returning ABSOLUTE_SINGLE "
+                f"date_refs={[normalized_absolute[0]]} "
+                f"date_modifiers={date_modifiers}"
+            )
+            return {
+                "mode": "single_day",
+                "refs": [normalized_absolute[0]],  # Use normalized text
+                "modifiers": date_modifiers
+            }
+        elif len(dates_absolute) >= 2:
+            # Multiple absolute dates → check for range marker
+            if structure.get("date_type") == "range" or "between" in str(structure).lower() or "from" in str(structure).lower():
+                debug_print(
+                    "DEBUG[semantic]: returning ABSOLUTE_RANGE "
+                    f"date_refs={normalized_absolute[:2]} "
+                    f"date_modifiers={date_modifiers}"
+                )
+                return {
+                    "mode": "range",
+                    "refs": normalized_absolute[:2],  # Use normalized text
+                    "modifiers": date_modifiers
+                }
+            else:
+                # Ambiguous - will be flagged
+                debug_print(
+                    "DEBUG[semantic]: returning ABSOLUTE_RANGE_AMBIG "
+                    f"date_refs={normalized_absolute[:2]} "
+                    f"date_modifiers={date_modifiers}"
+                )
+                return {
+                    "mode": "range",  # Default to range, but flag ambiguity
+                    "refs": normalized_absolute[:2],  # Use normalized text
+                    "modifiers": date_modifiers
+                }
+
+    # Rule 3: Relative dates
+    if dates:
+        if len(dates) == 1:
+            date_text = normalized_dates[0]
+
+            # Check for fine-grained modifiers (early/mid/end) → always range
+            if _has_fine_grained_modifier(date_text):
+                debug_print(
+                    "DEBUG[semantic]: returning RELATIVE_FINE_GRAINED "
+                    f"date_refs={[normalized_dates[0]]} "
+                    f"date_modifiers={date_modifiers}"
+                )
+                return {
+                    "mode": "range",
+                    "refs": [normalized_dates[0]],  # Use normalized text
+                    "modifiers": date_modifiers
+                }
+
+            # Simple relative days → single_day
+            if _is_simple_relative_day(date_text):
+                debug_print(
+                    "DEBUG[semantic]: returning RELATIVE_SIMPLE "
+                    f"date_refs={[normalized_dates[0]]} "
+                    f"date_modifiers={date_modifiers}"
+                )
+                return {
+                    "mode": "single_day",
+                    "refs": [normalized_dates[0]],  # Use normalized text
+                    "modifiers": date_modifiers
+                }
+
+            # Week-based → range
+            if _is_week_based(date_text):
+                debug_print(
+                    "DEBUG[semantic]: returning RELATIVE_WEEK_BASED "
+                    f"date_refs={[normalized_dates[0]]} "
+                    f"date_modifiers={date_modifiers}"
+                )
+                return {
+                    "mode": "range",
+                    "refs": [normalized_dates[0]],  # Use normalized text
+                    "modifiers": date_modifiers
+                }
+
+            # Weekend → range
+            if _is_weekend_reference(date_text):
+                debug_print(
+                    "DEBUG[semantic]: returning RELATIVE_WEEKEND "
+                    f"date_refs={[normalized_dates[0]]} "
+                    f"date_modifiers={date_modifiers}"
+                )
+                return {
+                    "mode": "range",
+                    "refs": [normalized_dates[0]],  # Use normalized text
+                    "modifiers": date_modifiers
+                }
+
+            # Specific weekday → single_day
+            if _is_specific_weekday(date_text):
+                debug_print(
+                    "DEBUG[semantic]: returning RELATIVE_WEEKDAY "
+                    f"date_refs={[normalized_dates[0]]} "
+                    f"date_modifiers={date_modifiers}"
+                )
+                return {
+                    "mode": "single_day",
+                    "refs": [normalized_dates[0]],  # Use normalized text
+                    "modifiers": date_modifiers
+                }
+
+            # Month-relative → range (full month)
+            if _is_month_relative(date_text):
+                debug_print(
+                    "DEBUG[semantic]: returning RELATIVE_MONTH "
+                    f"date_refs={[normalized_dates[0]]} "
+                    f"date_modifiers={date_modifiers}"
+                )
+                return {
+                    "mode": "range",
+                    "refs": [normalized_dates[0]],  # Use normalized text
+                    "modifiers": date_modifiers
+                }
+
+            # Default: single_day
+            debug_print(
+                "DEBUG[semantic]: returning RELATIVE_DEFAULT "
+                f"date_refs={[normalized_dates[0]]} "
+                f"date_modifiers={date_modifiers}"
+            )
+            return {
+                "mode": "single_day",
+                "refs": [normalized_dates[0]],  # Use normalized text
+                "modifiers": date_modifiers
+            }
+        elif len(dates) >= 2:
+            # Multiple relative dates → check for range marker
+            if structure.get("date_type") == "range" or "between" in str(structure).lower() or "from" in str(structure).lower():
+                debug_print(
+                    "DEBUG[semantic]: returning RELATIVE_MULTI_RANGE "
+                    f"date_refs={normalized_dates[:2]} "
+                    f"date_modifiers={date_modifiers}"
+                )
+                return {
+                    "mode": "range",
+                    "refs": normalized_dates[:2],  # Use normalized text
+                    "modifiers": date_modifiers
+                }
+            else:
+                # Ambiguous - will be flagged
+                debug_print(
+                    "DEBUG[semantic]: returning RELATIVE_MULTI_AMBIG "
+                    f"date_refs={normalized_dates[:2]} "
+                    f"date_modifiers={date_modifiers}"
+                )
+                return {
+                    "mode": "range",  # Default to range, but flag ambiguity
+                    "refs": normalized_dates[:2],  # Use normalized text
+                    "modifiers": date_modifiers
+                }
+
+    # Rule 4: Mixed absolute and relative
+    if dates_absolute and dates:
+        # Absolute takes precedence
+        debug_print(
+            "DEBUG[semantic]: returning MIXED_ABSOLUTE_RELATIVE "
+            f"date_refs={[normalized_absolute[0]]} "
+            f"date_modifiers={date_modifiers}"
+        )
+        return {
+            "mode": "single_day",
+            "refs": [normalized_absolute[0]],  # Use normalized text
+            "modifiers": date_modifiers
+        }
+
+    # Rule 5: No dates
+    debug_print(
+        "DEBUG[semantic]: returning NO_DATES "
+        f"date_refs=[] "
+        f"date_modifiers={date_modifiers}"
+    )
+    return {
+        "mode": "flexible",
+        "refs": [],
+        "modifiers": date_modifiers
+    }

@@ -14,16 +14,21 @@ from luma.config import debug_print
 from .normalization import (
     normalize_hyphens,
     pre_normalization,
-    normalize_typos,
     normalize_orthography,
     normalize_natural_language_variants,
+)
+
+from .vocabulary_normalization import (
+    load_vocabularies,
+    compile_vocabulary_maps,
+    normalize_vocabularies,
+    validate_vocabularies,
 )
 
 from .entity_loading import (
     init_nlp_with_service_families,
     load_global_noise_set,
     load_global_orthography_rules,
-    load_global_typo_config,
     load_global_service_families,
     build_service_family_synonym_map,
     load_global_entity_types,
@@ -122,27 +127,28 @@ class EntityMatcher:
         self.domain = domain
 
         # Find global JSON file (required for service families)
-        entity_path = Path(entity_file) if entity_file else None
+        entity_path = Path(entity_file).resolve() if entity_file else None
         if entity_path:
-            # Look for global.v1.json in same directory
-            global_json_path = entity_path.parent / "global.v1.json"
+            # Look for global.v2.json in same directory
+            global_json_path = entity_path.parent / "global.v2.json"
         else:
-            # Try to find global.v1.json in standard location
+            # Try to find global.v2.json in standard location
             # This is a fallback - ideally entity_file should point to a file in the normalization directory
+            # From matcher.py: parent = extraction/, parent.parent = luma/, so luma/store/normalization/
             script_dir = Path(__file__).parent
-            global_json_path = script_dir.parent.parent / \
-                "store" / "normalization" / "global.v1.json"
+            global_json_path = script_dir.parent / \
+                "store" / "normalization" / "global.v2.json"
             if not global_json_path.exists():
                 global_json_path = None
 
         if not global_json_path or not global_json_path.exists():
             raise ValueError(
-                "global.v1.json not found. Please provide entity_file pointing to a file in the normalization directory.")
+                "global.v2.json not found. Please provide entity_file pointing to a file in the normalization directory.")
 
         # Load global service families (GLOBAL semantic concepts)
         self.service_families = load_global_service_families(global_json_path)
         debug_print(
-            f"[EntityMatcher] Loaded service families from global JSON")
+            "[EntityMatcher] Loaded service families from global JSON 2")
 
         # Build natural language variant map from service families
         # This maps variants to preferred natural language forms (NOT canonical IDs)
@@ -153,11 +159,23 @@ class EntityMatcher:
         self.service_family_map = build_service_family_synonym_map(
             self.service_families)
 
-        # Load global normalization (orthography, typos, noise)
+        # Load global normalization (orthography, noise, vocabularies)
         self.noise_set = load_global_noise_set(global_json_path)
         self.orthography_rules = load_global_orthography_rules(
             global_json_path)
-        self.typo_map = load_global_typo_config(global_json_path)
+
+        # Load vocabularies with synonyms and typos
+        vocabularies = load_vocabularies(global_json_path)
+        self.vocabularies = vocabularies
+        entity_types = load_global_entity_types(global_json_path)
+        service_families = load_global_service_families(global_json_path)
+
+        # Validate vocabularies
+        validate_vocabularies(vocabularies, entity_types, service_families)
+
+        # Compile vocabulary maps
+        self.synonym_map, self.typo_map, self.all_canonicals = compile_vocabulary_maps(
+            vocabularies)
 
         # Load global entity types (date, time, duration)
         self.entity_types = load_global_entity_types(global_json_path)
@@ -195,13 +213,16 @@ class EntityMatcher:
             raise RuntimeError("spaCy not initialized")
 
         # 1️⃣ Normalize (natural language only - NO canonical IDs)
+        # Pipeline order: lowercase → orthography → vocabulary (synonyms + typos) → noise removal
         text = normalize_hyphens(text)
-        normalized = pre_normalization(text)
-        # Apply typo normalization (closed-vocabulary only)
-        normalized = normalize_typos(normalized, self.typo_map)
+        normalized = pre_normalization(text)  # lowercase, unicode, etc.
         # Apply orthographic normalization (surface-form standardization)
         normalized = normalize_orthography(normalized, self.orthography_rules)
-        # Apply natural language variant normalization (synonym mapping)
+        # Apply vocabulary normalization (synonyms and typos → canonical)
+        normalized, normalized_from_correction = normalize_vocabularies(
+            normalized, self.synonym_map, self.typo_map
+        )
+        # Apply natural language variant normalization (synonym mapping for services)
         normalized = normalize_natural_language_variants(
             normalized, self.variant_map)
 
@@ -297,6 +318,31 @@ class EntityMatcher:
                 "end": position + length
             })
 
+        # Check for unresolved date/time-like language after normalization
+        # If vocabulary canonicals exist but no entities were extracted, require clarification
+        needs_clarification = False
+        clarification = None
+        if not dates and not dates_absolute and not times and not time_windows:
+            # Check if normalized text contains vocabulary canonicals that should have been extracted
+            normalized_lower = normalized.lower()
+            normalized_words = set(normalized_lower.split())
+
+            # Check if any canonical from vocabularies appears in normalized text
+            # but wasn't extracted as an entity
+            has_unresolved_vocab = False
+            for canonical in self.all_canonicals:
+                if canonical in normalized_words:
+                    has_unresolved_vocab = True
+                    break
+
+            if has_unresolved_vocab:
+                from ..clarification import Clarification, ClarificationReason
+                needs_clarification = True
+                clarification = Clarification(
+                    reason=ClarificationReason.CONTEXT_DEPENDENT_VALUE,
+                    data={"text": normalized}
+                )
+
         result = {
             "osentence": osentence,
             "psentence": psentence,
@@ -305,14 +351,20 @@ class EntityMatcher:
             "dates_absolute": dates_absolute,
             "times": times,
             "time_windows": time_windows,
-            "durations": durations
+            "durations": durations,
+            "normalized_from_correction": normalized_from_correction,
+            "date_modifiers_vocab": self.vocabularies.get("date_modifiers", []),
         }
+
+        if needs_clarification:
+            result["needs_clarification"] = True
+            result["clarification"] = clarification.to_dict()
 
         # 6️⃣ Domain filtering
         allowed_keys = DOMAIN_ENTITY_WHITELIST[self.domain]
         final_result = {
             k: v for k, v in result.items()
-            if k in allowed_keys or k in {"osentence", "psentence", "service_families"}
+            if k in allowed_keys or k in {"osentence", "psentence", "service_families", "date_modifiers_vocab"}
         }
 
         if debug_units:
