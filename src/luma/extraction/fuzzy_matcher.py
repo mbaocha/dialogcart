@@ -1,269 +1,324 @@
 """
-Fuzzy Entity Recovery
+Tenant-scoped fuzzy recovery for services and reservations.
 
-Recovers entities missed by EntityRuler using fuzzy string matching.
-Useful for handling typos, misspellings, and variant phrasings.
-
-Examples:
-    - "air force ones" → matches "air force 1" (85% similarity)
-    - "cocacola" → matches "coca-cola" (90% similarity)
-    - "nigerian beans" → matches "brown beans" (synonym match)
-
-Ported from semantics/fuzzy_search.py with enhancements.
+Used ONLY as a fallback when EntityRuler misses a grounded entity.
+Matches multi-word phrases (2–4 tokens) using fuzzy string matching.
 """
-from typing import List, Dict, Set, Any
+
+from typing import List, Dict, Any, Set, Tuple
 import re
 
-# Optional dependency
 try:
     from rapidfuzz import process, fuzz
-    RAPIDFUZZ_AVAILABLE = True
 except ImportError:
-    RAPIDFUZZ_AVAILABLE = False
     process = None
     fuzz = None
 
 
-class FuzzyEntityMatcher:
+# Stopwords allowed ONLY inside phrases (never at boundaries)
+STOPWORDS = {"and", "or", "to", "of", "for", "in", "the", "a"}
+
+
+class TenantFuzzyMatcher:
     """
-    Fuzzy matcher for recovering entities missed by rule-based extraction.
-    
-    Uses rapidfuzz for fuzzy string matching to handle:
-    - Typos and misspellings
-    - Variant phrasings
-    - Missing spaces or hyphens
-    
-    Performance:
-    - Caches catalog maps at initialization
-    - Configurable threshold (default 88%)
-    - Skips meaningless spans (stopwords, punctuation)
-    
-    Example:
-        >>> matcher = FuzzyEntityMatcher(entities, threshold=85)
-        >>> results = matcher.recover_entities(doc, debug=True)
-        >>> # [{"type": "product", "text": "air force 1", "span": (2, 5), "score": 92}]
+    Fuzzy matcher for tenant services / reservations.
+
+    Matches:
+    - "hair kut" → "haircut"
+    - "double rom" → "double room"
+    - "airport pick up" → "airport pickup"
+
+    Does NOT match:
+    - "hair" → "haircut"
+    - "airport" → "airport pickup"
     """
-    
-    # Stopwords to skip during n-gram generation
-    STOPWORDS = {"and", "or", "to", "of", "for", "in", "the", "a"}
-    
-    def __init__(self, entities: List[Dict], threshold: int = 88):
+
+    def __init__(
+        self,
+        entity_map: Dict[str, List[str]],
+        threshold: int = 88
+    ):
         """
-        Initialize fuzzy matcher with entity catalog.
-        
         Args:
-            entities: List of entity dicts from global catalog
-            threshold: Minimum similarity score (0-100) for matches
-        
-        Raises:
-            ImportError: If rapidfuzz is not installed
+            entity_map:
+                {
+                    "service": ["haircut", "beard trim"],
+                    "room_type": ["double room", "suite"],
+                    "amenity": ["airport pickup", "breakfast"]
+                }
+            threshold: fuzzy score cutoff
         """
-        if not RAPIDFUZZ_AVAILABLE:
-            raise ImportError(
-                "rapidfuzz is required for fuzzy matching. "
-                "Install with: pip install rapidfuzz"
-            )
-        
-        self.entities = entities
-        self.threshold = threshold
-        
-        # Build catalog maps (cached for performance)
-        self.catalog_maps = self._build_catalog_maps()
-    
-    def _build_catalog_maps(self) -> Dict[str, Dict[str, str]]:
-        """
-        Build fuzzy lookup maps for each entity type.
-        
-        Returns:
-            Dict mapping entity types to {term: canonical} lookups
-        """
-        catalog_maps = {
-            "brand": {},
-            "product": {},
-            "variant": {},
-            "unit": {}
+        if process is None or fuzz is None:
+            raise ImportError("rapidfuzz required: pip install rapidfuzz")
+
+        self.entity_map = {
+            k: [v.lower() for v in values]
+            for k, values in entity_map.items()
         }
-        
-        for ent in self.entities:
-            canonical = ent["canonical"].lower()
-            types = ent.get("type", [])
-            
-            # Handle both list and string types
-            if isinstance(types, str):
-                types = [types]
-            
-            synonyms = [s.lower() for s in ent.get("synonyms", [])]
-            all_terms = {canonical, *synonyms}
-            
-            for t in types:
-                if t in catalog_maps:
-                    for term in all_terms:
-                        catalog_maps[t][term] = canonical
-        
-        return catalog_maps
-    
-    def recover_entities(
-        self, 
-        doc: Any,  # spaCy Doc object
-        debug: bool = False
-    ) -> List[Dict[str, Any]]:
-        """
-        Recover entities from non-entity spans using fuzzy matching.
-        
-        Args:
-            doc: spaCy Doc object (already processed)
-            debug: Enable debug logging
-        
-        Returns:
-            List of recovered entities with format:
-            [{"type": str, "text": str, "span": (start, end), "score": int, "source": "fuzzy"}]
-        """
-        # === Step 1: Collect tokens not already marked as entities ===
-        tokens = [t.text.lower() for t in doc]
-        ent_spans = {(ent.start, ent.end) for ent in doc.ents}
-        
-        # Build index of token positions that belong to an entity
-        occupied = set()
-        for start, end in ent_spans:
-            occupied.update(range(start, end))
-        
-        # === Step 2: Generate multi-word spans (n-grams) for non-entity tokens ===
-        ngrams = self._generate_ngrams(tokens, occupied, debug)
-        
-        # === Step 3: Run fuzzy match against catalog ===
-        results = self._fuzzy_match_ngrams(ngrams, debug)
-        
-        return results
-    
+        self.threshold = threshold
+
+        # Precompute single-token entities only (safe for typo recovery)
+        self.single_token_entities = {
+            entity_type: [v for v in values if " " not in v]
+            for entity_type, values in self.entity_map.items()
+        }
+
+    # -----------------------------------------------------
+    # N-gram generation (STRICT)
+    # -----------------------------------------------------
+
     def _generate_ngrams(
-        self, 
-        tokens: List[str], 
-        occupied: Set[int],
-        debug: bool = False
-    ) -> List[tuple]:
+        self,
+        tokens: List[str],
+        occupied: Set[int]
+    ) -> List[Tuple[int, int, str]]:
         """
-        Generate n-gram candidates from non-entity tokens.
-        
-        Args:
-            tokens: List of token strings
-            occupied: Set of token indices already covered by entities
-            debug: Enable debug logging
-        
-        Returns:
-            List of (phrase, start_idx, end_idx) tuples
+        Generate ONLY multi-word spans (2–4 tokens).
+
+        Skips:
+        - occupied tokens
+        - punctuation / numeric spans
+        - stopwords at boundaries
         """
         ngrams = []
-        
-        for n in range(2, 5):  # 2–4 word phrases only
-            for i in range(len(tokens) - n + 1):
-                # Skip if any token in span is already an entity
-                if any((i + j) in occupied for j in range(n)):
+        n_tokens = len(tokens)
+
+        for n in range(2, 5):  # 🔒 2–4 tokens ONLY
+            for start in range(n_tokens - n + 1):
+                end = start + n
+
+                if any(i in occupied for i in range(start, end)):
                     continue
-                
-                span_tokens = tokens[i:i+n]
-                
-                # Skip punctuation-only or numeric-only phrases
+
+                span_tokens = tokens[start:end]
+
+                # Skip junk
                 if all(re.fullmatch(r"[\W\d]+", t) for t in span_tokens):
                     continue
-                
+
+                # No stopwords at boundaries
+                if span_tokens[0] in STOPWORDS or span_tokens[-1] in STOPWORDS:
+                    continue
+
+                # Internal stopwords allowed
                 phrase = " ".join(span_tokens)
-                
-                # Skip spans with internal stopwords (e.g., "rice and beans")
-                if any(tok in self.STOPWORDS for tok in span_tokens[1:-1]):
-                    continue
-                
-                # Skip if phrase is entirely stopwords
-                if all(tok in self.STOPWORDS for tok in span_tokens):
-                    continue
-                
-                ngrams.append((phrase, i, i+n))
-        
-        if debug:
-            print(f"[FUZZY] Candidate n-grams: {len(ngrams)}")
-        
+                ngrams.append((start, end, phrase))
+
         return ngrams
-    
-    def _fuzzy_match_ngrams(
-        self, 
-        ngrams: List[tuple],
+
+    # -----------------------------------------------------
+    # Fuzzy recovery
+    # -----------------------------------------------------
+
+    def recover(
+        self,
+        tokens: List[str],
+        occupied_positions: Set[int],
         debug: bool = False
     ) -> List[Dict[str, Any]]:
         """
-        Fuzzy match n-grams against catalog.
-        
-        Args:
-            ngrams: List of (phrase, start, end) tuples
-            debug: Enable debug logging
-        
+        Recover entities missed by EntityRuler.
+
         Returns:
-            List of matched entities
+            [
+              {
+                "type": "service",
+                "text": "haircut",
+                "start": 2,
+                "end": 4,
+                "score": 92,
+                "source": "fuzzy"
+              }
+            ]
         """
-        results = []
-        
-        for phrase, start, end in ngrams:
-            for label, cmap in self.catalog_maps.items():
-                if not cmap:
-                    continue
-                
-                # Ignore stopwords during matching for better accuracy
-                cleaned_phrase = re.sub(
-                    r"\b(and|or|to|of|for|in|the|a)\b", 
-                    "", 
-                    phrase
-                ).strip()
-                
-                # Run fuzzy matching
-                best_match = process.extractOne(
-                    cleaned_phrase,
-                    cmap.keys(),
+        recovered: List[Dict[str, Any]] = []
+        matched_spans: Set[Tuple[int, int]] = set()
+
+        ngrams = self._generate_ngrams(tokens, occupied_positions)
+
+        # 🔑 Longest span first
+        ngrams.sort(key=lambda x: x[1] - x[0], reverse=True)
+
+        for start, end, phrase in ngrams:
+            if any(
+                not (end <= s or start >= e)
+                for s, e in matched_spans
+            ):
+                continue
+
+            best = None
+
+            for entity_type, values in self.entity_map.items():
+                match = process.extractOne(
+                    phrase,
+                    values,
                     scorer=fuzz.token_sort_ratio
                 )
-                
-                if not best_match:
+
+                if not match:
                     continue
-                
-                matched_text, score, _ = best_match
-                
+
+                text, score, _ = match
+
                 if score >= self.threshold:
-                    canonical = cmap[matched_text]
-                    results.append({
-                        "type": label,
-                        "text": canonical,
-                        "span": (start, end),
-                        "score": score,
-                        "source": "fuzzy"
-                    })
-                    
-                    if debug:
-                        print(f"[FUZZY] '{phrase}' → '{canonical}' ({score}%) [{label}]")
-        
-        return results
+                    if best is None or score > best["score"]:
+                        best = {
+                            "type": entity_type,
+                            "text": text,
+                            "start": start,
+                            "end": end,
+                            "score": int(score),
+                            "source": "fuzzy"
+                        }
+
+            if best:
+                recovered.append(best)
+                matched_spans.add((start, end))
+
+                if debug:
+                    span_text = " ".join(tokens[start:end])
+                    print(
+                        f"[FUZZY] '{span_text}' → {best['text']} ({best['score']}%)"
+                    )
+
+        # --------------------------------------------------
+        # Pass 2: single-token typo recovery (SAFE MODE)
+        # --------------------------------------------------
+        for i, token in enumerate(tokens):
+            if i in occupied_positions:
+                continue
+
+            if not token.isalpha() or len(token) < 4:
+                continue
+
+            # Skip stopwords (prevents matching "want", "the", etc.)
+            if token.lower() in STOPWORDS:
+                continue
+
+            # Skip if already matched by phrase recovery
+            if any(start <= i < end for start, end in matched_spans):
+                continue
+
+            best_score = 0
+            best_entity = None
+            best_type = None
+
+            for entity_type, values in self.single_token_entities.items():
+                if not values:
+                    continue
+
+                # Use ratio for single-token matching (better for single-word typos)
+                match = process.extractOne(
+                    token.lower(),
+                    values,
+                    scorer=fuzz.ratio
+                )
+
+                if not match:
+                    continue
+
+                text, score, _ = match
+                if score > best_score:
+                    best_score = score
+                    best_entity = text
+                    best_type = entity_type
+
+            if debug and best_score > 0:
+                print(
+                    f"[FUZZY-SINGLE] '{token}' → {best_entity} (score: {best_score:.1f}%, threshold: 85)")
+
+            # HIGH threshold to avoid semantic drift (85 for single-token typos)
+            # Single-character typos like "hairkut" → "haircut" typically score 85-92%
+            if best_score >= 85:
+                recovered.append({
+                    "type": best_type,
+                    "text": best_entity,
+                    "start": i,
+                    "end": i + 1,
+                    "score": int(best_score),
+                    "source": "fuzzy_single"
+                })
+
+                matched_spans.add((i, i + 1))
+
+                if debug:
+                    print(
+                        f"[FUZZY-SINGLE] ACCEPTED '{token}' → {best_entity} ({best_score}%)")
+
+        return recovered
 
 
-def fuzzy_recover_multiword_entities(
-    doc: Any,
-    entities: List[Dict],
-    threshold: int = 88,
-    debug: bool = False
-) -> List[Dict[str, Any]]:
-    """
-    Fuzzy-recover multiword entities (products, brands, variants, units)
-    that were not matched by the EntityRuler.
-    
-    Standalone function for backward compatibility.
-    For better performance, use FuzzyEntityMatcher class directly.
-    
-    Args:
-        doc: spaCy Doc object
-        entities: List of entity dicts from global catalog
-        threshold: Minimum similarity score (default 88)
-        debug: Enable debug logging
-    
-    Returns:
-        List of recovered entities
-        
-    NOTE: Matches semantics/fuzzy_search.py lines 4-106 exactly
-    """
-    matcher = FuzzyEntityMatcher(entities, threshold)
-    return matcher.recover_entities(doc, debug)
+if __name__ == "__main__":
+    import sys
 
+    if process is None or fuzz is None:
+        print("Error: rapidfuzz not installed. Install with: pip install rapidfuzz")
+        sys.exit(1)
+
+    # -------------------------------------------------
+    # Test entity map (natural language only)
+    # -------------------------------------------------
+    entity_map = {
+        "service": [
+            "haircut",
+            "hair trim",
+            "beard trim"
+        ],
+        "room_type": [
+            "double room",
+            "suite"
+        ],
+        "amenity": [
+            "airport pickup",
+            "breakfast"
+        ]
+    }
+
+    matcher = TenantFuzzyMatcher(entity_map, threshold=88)
+
+    print("=" * 60)
+    print("TenantFuzzyMatcher – Interactive Test")
+    print("=" * 60)
+    print("Type a sentence and press Enter.")
+    print("Type 'quit' to exit.")
+    print()
+
+    while True:
+        try:
+            sentence = input("> ").strip().lower()
+        except KeyboardInterrupt:
+            print("\nExiting.")
+            break
+
+        if not sentence:
+            continue
+
+        if sentence in {"quit", "exit"}:
+            break
+
+        # -------------------------------------------------
+        # Light tokenization (matches your pipeline style)
+        # -------------------------------------------------
+        tokens = sentence.split()
+
+        # Simulate EntityRuler finding nothing
+        occupied_positions = set()
+
+        print("\nInput sentence:")
+        print(f"  {sentence}")
+
+        print("\nRecovered entities:")
+        results = matcher.recover(tokens, occupied_positions, debug=True)
+
+        if not results:
+            print("  (none)")
+        else:
+            for r in results:
+                span_text = " ".join(tokens[r["start"]:r["end"]])
+                print(
+                    f"  [{r['start']}:{r['end']}] "
+                    f"'{span_text}' → {r['type']} = '{r['text']}' "
+                    f"({r['score']}%)"
+                )
+
+        print("-" * 60)

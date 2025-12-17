@@ -54,13 +54,26 @@ from luma.adapters import (
 )
 
 # Stage-based imports (new structure)
-from luma.extraction import EntityMatcher, EntityClassifier
-from luma.classification import NERModel
+from luma.extraction import EntityMatcher
+
+# Optional: NERModel (requires transformers)
+try:
+    from luma.classification import NERModel
+except ImportError:
+    NERModel = None
+
 from luma.grouping import (
-    simple_group_entities,
-    index_parameterized_tokens,
-    decide_processing_path,
+    group_appointment,
+    BOOK_APPOINTMENT_INTENT,
+    STATUS_OK,
+    STATUS_NEEDS_CLARIFICATION,
 )
+
+# Optional: EntityClassifier (if available)
+try:
+    from luma.extraction import EntityClassifier
+except ImportError:
+    EntityClassifier = None
 
 # Optional features
 try:
@@ -96,7 +109,7 @@ __all__ = [
     # Components
     "NERModel",                  # NER model (Phase 3A)
     "EntityMatcher",             # Entity matcher (Phase 3B)
-    "EntityClassifier",          # Context-based classifier (Phase 3B+)
+    "EntityClassifier",          # Context-based classifier (Phase 3B+, optional)
     
     # Grouping Functions
     "simple_group_entities",     # Grouping logic (Phase 3C)

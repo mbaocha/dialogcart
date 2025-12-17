@@ -1,36 +1,54 @@
 """
 Stage 3: Entity Grouping & Alignment
 
-Groups classified entities by action and aligns quantities/units to products.
+Appointment/reservation booking grouping for service-based businesses.
+
+Groups extracted entities into a single BOOK_APPOINTMENT intent.
+Resolves user intent using rule-based logic.
 """
 
-from luma.grouping.grouper import (
-    simple_group_entities,
-    index_parameterized_tokens,
-    decide_processing_path,
-    extract_entities,
-    align_quantities_to_products,
+from luma.grouping.appointment_grouper import (
+    group_appointment,
+    BOOK_APPOINTMENT_INTENT,
+    STATUS_OK,
+    STATUS_NEEDS_CLARIFICATION,
 )
 
-from luma.grouping.reverse_mapper import (
-    map_tokens_to_original_values,
+from luma.grouping.reservation_intent_resolver import (
+    ReservationIntentResolver,
+    resolve_intent,
+    DISCOVERY,
+    DETAILS,
+    AVAILABILITY,
+    QUOTE,
+    RECOMMENDATION,
+    CREATE_BOOKING,
+    BOOKING_INQUIRY,
+    MODIFY_BOOKING,
+    CANCEL_BOOKING,
+    PAYMENT,
+    UNKNOWN,
 )
-
-# Intent mapper is optional - only imported if enabled
-try:
-    from luma.grouping.intent_mapper import IntentMapper
-    INTENT_MAPPER_AVAILABLE = True
-except ImportError:
-    IntentMapper = None
-    INTENT_MAPPER_AVAILABLE = False
 
 __all__ = [
-    "simple_group_entities",
-    "index_parameterized_tokens",
-    "decide_processing_path",
-    "extract_entities",
-    "align_quantities_to_products",
-    "map_tokens_to_original_values",
-    "IntentMapper",
+    # Appointment grouping
+    "group_appointment",
+    "BOOK_APPOINTMENT_INTENT",
+    "STATUS_OK",
+    "STATUS_NEEDS_CLARIFICATION",
+    # Intent resolution (10 production intents)
+    "ReservationIntentResolver",
+    "resolve_intent",
+    "DISCOVERY",
+    "DETAILS",
+    "AVAILABILITY",
+    "QUOTE",
+    "RECOMMENDATION",
+    "CREATE_BOOKING",
+    "BOOKING_INQUIRY",
+    "MODIFY_BOOKING",
+    "CANCEL_BOOKING",
+    "PAYMENT",
+    "UNKNOWN",
 ]
 

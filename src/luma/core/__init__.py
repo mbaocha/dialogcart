@@ -12,15 +12,17 @@ New structure:
 # Backward compatibility: re-export from new locations
 from luma.extraction import EntityMatcher
 from luma.grouping import (
-    simple_group_entities,
-    index_parameterized_tokens,
-    decide_processing_path,
+    group_appointment,
+    BOOK_APPOINTMENT_INTENT,
+    STATUS_OK,
+    STATUS_NEEDS_CLARIFICATION,
 )
 
 __all__ = [
     "EntityMatcher",
-    "simple_group_entities",
-    "index_parameterized_tokens",
-    "decide_processing_path",
+    "group_appointment",
+    "BOOK_APPOINTMENT_INTENT",
+    "STATUS_OK",
+    "STATUS_NEEDS_CLARIFICATION",
 ]
 
