@@ -1,4 +1,4 @@
-# Luma Entity Extraction API - Dockerfile
+# Luma Service/Reservation Booking API - Dockerfile
 FROM python:3.10-slim
 
 # Set working directory

@@ -1,42 +1,53 @@
-# Luma - Entity Extraction Pipeline
+# Luma - Service/Reservation Booking Pipeline
 
 **Version:** 1.0.0  
 **Status:** ✅ Production Ready
 
-A clean, typed, modular entity extraction system for e-commerce applications. Fully migrated from `semantics/` with 100% functional parity + enhancements.
+A clean, typed, modular service/reservation booking system that processes natural language booking requests and extracts structured booking information.
 
 ---
 
 ## 📖 What is Luma?
 
-Luma is an **NLP-based entity extraction pipeline** that processes natural language shopping commands and extracts structured information:
+Luma is an **NLP-based service/reservation booking pipeline** that processes natural language booking requests and extracts structured information:
 
 **Input:**  
-`"add 2kg rice and 3 bottles of Coca-Cola to cart"`
+`"book haircut tomorrow at 2pm"`
 
 **Output:**
 ```json
 {
-  "status": "success",
-  "groups": [
-    {
-      "action": "add",
-      "intent": "add",
-      "products": ["rice"],
-      "quantities": ["2"],
-      "units": ["kg"]
+  "stages": {
+    "extraction": {
+      "service_families": [{"text": "haircut", "canonical": "haircut"}],
+      "dates": [{"text": "tomorrow"}],
+      "times": [{"text": "2pm"}]
     },
-    {
-      "action": "add",
-      "intent": "add",
-      "products": ["coca-cola"],
-      "brands": ["coca-cola"],
-      "quantities": ["3"],
-      "units": ["bottles"]
+    "intent": {
+      "intent": "CREATE_BOOKING",
+      "confidence": "HIGH"
+    },
+    "semantic": {
+      "resolved_booking": {
+        "date_mode": "relative",
+        "date_refs": ["tomorrow"],
+        "time_mode": "exact",
+        "time_refs": ["2pm"]
+      }
+    },
+    "calendar": {
+      "calendar_booking": {
+        "date_range": {"start": "2025-01-15", "end": "2025-01-15"},
+        "time_range": {"start_time": "14:00", "end_time": "14:00"},
+        "datetime_range": {
+          "start": "2025-01-15T14:00:00Z",
+          "end": "2025-01-15T14:00:00Z"
+        }
+      }
     }
-  ],
-  "grouping_result": {
-    "route": "rule"
+  },
+  "clarification": {
+    "needed": false
   }
 }
 ```
@@ -44,13 +55,13 @@ Luma is an **NLP-based entity extraction pipeline** that processes natural langu
 ### 🌟 Key Features
 
 - ✅ **Type-Safe** - Typed dataclasses with full IDE support
-- ✅ **Modular** - Clean separation of concerns (16 focused files)
-- ✅ **Fast** - 2.4x faster entity classification (cached lookups)
-- ✅ **Smart** - ML-based intent mapping, ordinal references
-- ✅ **Tested** - Comprehensive test suite (9 test files)
-- ✅ **Production-Ready** - REST API, Docker support
+- ✅ **Modular** - Clean separation of concerns across pipeline stages
+- ✅ **Smart** - Intent resolution, semantic resolution, calendar binding
+- ✅ **Clarification System** - Template-driven clarification prompts
+- ✅ **Tested** - Comprehensive test suite
+- ✅ **Production-Ready** - REST API, interactive CLI
 - ✅ **Configurable** - Centralized configuration via `config.py`
-- ✅ **100% Compatible** - Full parity with semantics codebase
+- ✅ **Timezone-Aware** - Full timezone support for calendar binding
 
 ---
 
@@ -64,25 +75,26 @@ pip install -r luma/requirements.txt
 
 # Download spaCy model
 python -m spacy download en_core_web_sm
-
-# Optional: For fuzzy matching
-pip install rapidfuzz
 ```
 
 ### Basic Usage
 
 ```python
-from luma.core.pipeline import EntityExtractionPipeline
+from luma.test import run_full_pipeline
 
-# Initialize once
-pipeline = EntityExtractionPipeline(use_luma=True)
+# Run complete pipeline
+result = run_full_pipeline(
+    "book haircut tomorrow at 2pm",
+    domain="service",
+    timezone="UTC"
+)
 
-# Extract entities
-result = pipeline.extract("add 2 kg rice")
+# Access results
+semantic = result["stages"]["semantic"]
+calendar = result["stages"]["calendar"]
 
-# Use the result
-print(result.status)          # ProcessingStatus.SUCCESS
-print(result.groups[0])       # EntityGroup(action="add", products=["rice"], ...)
+print(semantic["resolved_booking"]["date_mode"])  # "relative"
+print(calendar["calendar_booking"]["time_range"])  # {"start_time": "14:00", ...}
 ```
 
 ### REST API
@@ -93,9 +105,9 @@ cd src
 python luma/api.py
 
 # Test endpoint
-curl -X POST http://localhost:9001/extract \
+curl -X POST http://localhost:9001/book \
   -H "Content-Type: application/json" \
-  -d '{"text": "add 2 kg rice"}' | jq
+  -d '{"text": "book haircut tomorrow at 2pm"}' | jq
 ```
 
 ### Interactive CLI
@@ -104,42 +116,60 @@ curl -X POST http://localhost:9001/extract \
 cd src
 python luma/cli/interactive.py
 
-💬 Enter sentence: add 2 kg rice
-# See pretty-printed extraction results
+💬 Enter booking request: book haircut tomorrow at 2pm
+# See pretty-printed pipeline results
 ```
 
 ---
 
 ## 🏗️ Architecture
 
-### Three-Stage Pipeline
+### Six-Stage Pipeline
 
 ```
-Input: "add 2kg rice"
+Input: "book haircut tomorrow at 2pm"
          ↓
 ┌─────────────────────────────────────────────┐
-│  STAGE 1: Entity Matcher (spaCy + Patterns) │
-│  ✅ Extracts: products, brands, units        │
-│  ✅ Normalizes: coca-cola, 2kg → 2 kg        │
-│  ✅ Parameterizes: rice → producttoken       │
-└───────────────────┬─────────────────────────┘
-                    ↓ "add 2 kg producttoken"
-┌─────────────────────────────────────────────┐
-│  STAGE 2: NER Model (BERT)                  │
-│  ✅ Labels: [B-ACTION, B-QUANTITY, B-UNIT,  │
-│              B-PRODUCT]                      │
-│  ✅ Handles: ordinals (B-ORDINAL)            │
-└───────────────────┬─────────────────────────┘
-                    ↓ Tokens + Labels
-┌─────────────────────────────────────────────┐
-│  STAGE 3: Grouper (Rule-Based + ML)         │
-│  ✅ Groups: Entities by action               │
-│  ✅ Aligns: Quantities to products           │
-│  ✅ Maps: Actions to intents (ML)            │
-│  ✅ Routes: rule / memory / llm              │
+│  STAGE 1: Entity Extraction                 │
+│  ✅ Extracts: services, dates, times        │
+│  ✅ Normalizes: "haircut" → canonical        │
+│  ✅ Parameterizes: "haircut" → servicetoken  │
 └───────────────────┬─────────────────────────┘
                     ↓
-         ExtractionResult (Typed)
+┌─────────────────────────────────────────────┐
+│  STAGE 2: Intent Resolution                  │
+│  ✅ Determines: CREATE_BOOKING, QUERY, etc.  │
+│  ✅ Confidence: HIGH, MEDIUM, LOW            │
+└───────────────────┬─────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│  STAGE 3: Structural Interpretation         │
+│  ✅ Booking count, service scope            │
+│  ✅ Time scope, date scope                  │
+│  ✅ Time type (exact, range, window)        │
+└───────────────────┬─────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│  STAGE 4: Appointment Grouping              │
+│  ✅ Groups services with date/time           │
+│  ✅ Validates booking structure              │
+└───────────────────┬─────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│  STAGE 5: Semantic Resolution               │
+│  ✅ Resolves: date_mode, time_mode          │
+│  ✅ Detects: ambiguity, missing info         │
+│  ✅ Generates: clarification requests        │
+└───────────────────┬─────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│  STAGE 6: Calendar Binding                  │
+│  ✅ Converts: relative → ISO-8601 dates     │
+│  ✅ Converts: time refs → 24h format         │
+│  ✅ Validates: date/time constraints         │
+└───────────────────┬─────────────────────────┘
+                    ↓
+         CalendarBindingResult (Typed)
 ```
 
 ### File Structure
@@ -147,39 +177,37 @@ Input: "add 2kg rice"
 ```
 src/luma/
 ├── config.py                   # ⚙️  Central configuration
-├── data_types.py               # 🎯 Type definitions
-├── adapters.py                 # 🔄 Legacy compatibility
+├── test.py                     # 🧪 Full pipeline test runner
 │
 ├── extraction/                 # 🔵 STAGE 1: Entity Extraction
 │   ├── matcher.py              # Main EntityMatcher class
-│   ├── normalization.py        # Text normalization
 │   ├── entity_loading.py       # Entity catalog loading
-│   ├── entity_processing.py    # spaCy entity extraction
-│   ├── entity_classifier.py    # Context-based classification
-│   └── fuzzy_matcher.py        # Fuzzy recovery (optional)
+│   └── ...
 │
-├── classification/             # 🟢 STAGE 2: NER Classification
-│   ├── inference.py            # BERT NER model
-│   ├── training.py             # Model training
-│   └── training_data.py        # Training examples
+├── grouping/                   # 🟡 STAGE 2 & 4: Intent & Grouping
+│   ├── reservation_intent_resolver.py  # Intent resolution
+│   └── appointment_grouper.py # Appointment grouping
 │
-├── grouping/                   # 🟡 STAGE 3: Grouping & Routing
-│   ├── grouper.py              # Entity grouping logic
-│   ├── intent_mapper.py        # ML intent mapping
-│   └── reverse_mapper.py       # Token reverse mapping
+├── structure/                  # 🟢 STAGE 3: Structural Analysis
+│   └── interpreter.py         # Structural interpretation
 │
-├── llm/                        # 🤖 LLM Fallback (optional)
-│   └── fallback.py             # OpenAI GPT extraction
+├── resolution/                 # 🟠 STAGE 5: Semantic Resolution
+│   └── semantic_resolver.py   # Semantic resolution & ambiguity detection
+│
+├── calendar/                   # 🔴 STAGE 6: Calendar Binding
+│   ├── calendar_binder.py      # Calendar binding logic
+│   └── ...
+│
+├── clarification/              # 💬 Clarification System
+│   ├── reasons.py              # ClarificationReason enum
+│   ├── models.py               # Clarification dataclass
+│   └── renderer.py             # Template renderer
 │
 ├── cli/                        # 🖥️  Interactive Tools
 │   └── interactive.py          # REPL for testing
 │
-├── core/                       # 🔗 Pipeline Orchestration
-│   └── pipeline.py             # EntityExtractionPipeline
-│
 ├── api.py                      # 🌐 REST API
-├── Dockerfile                  # 🐳 Docker support
-└── docker-compose.yml          # 🐳 Docker Compose
+└── README.md                   # This file
 ```
 
 ---
@@ -187,89 +215,90 @@ src/luma/
 ## 🎯 Core Components
 
 ### 1. EntityMatcher (Stage 1)
-Extracts and parameterizes entities using spaCy:
+Extracts services, dates, times, and durations:
 
 ```python
-from luma.extraction import EntityMatcher
+from luma.extraction.matcher import EntityMatcher
 
-matcher = EntityMatcher()
-doc, result = matcher.extract("add 2 kg rice")
+matcher = EntityMatcher(domain="service", entity_file="...")
+result = matcher.extract_with_parameterization("book haircut tomorrow at 2pm")
 
-print(result["psentence"])  # "add 2 kg producttoken"
-print(result["products"])   # ["rice"]
+print(result["service_families"])  # [{"text": "haircut", ...}]
+print(result["dates"])            # [{"text": "tomorrow"}]
+print(result["times"])            # [{"text": "2pm"}]
 ```
 
-### 2. NERModel (Stage 2)
-BERT-based token classification:
+### 2. ReservationIntentResolver (Stage 2)
+Determines user intent:
 
 ```python
-from luma.classification import NERModel
+from luma.grouping.reservation_intent_resolver import ReservationIntentResolver
 
-model = NERModel()
-result = model.predict("add 2 kg producttoken")
-
-print(result.tokens)  # ["add", "2", "kg", "producttoken"]
-print(result.labels)  # ["B-ACTION", "B-QUANTITY", "B-UNIT", "B-PRODUCT"]
-```
-
-### 3. Entity Grouper (Stage 3)
-Groups entities by action and aligns quantities:
-
-```python
-from luma.grouping import simple_group_entities
-
-result = simple_group_entities(
-    tokens=["add", "2", "kg", "rice"],
-    labels=["B-ACTION", "B-QUANTITY", "B-UNIT", "B-PRODUCT"]
+resolver = ReservationIntentResolver()
+intent, confidence = resolver.resolve_intent(
+    "book haircut tomorrow at 2pm",
+    extraction_result
 )
 
-print(result["groups"][0])
-# {"action": "add", "products": ["rice"], "quantities": ["2"], "units": ["kg"]}
+print(intent)      # "CREATE_BOOKING"
+print(confidence)  # "HIGH"
 ```
 
-### 4. EntityClassifier ⭐ NEW
-Context-based entity disambiguation:
+### 3. Structural Interpreter (Stage 3)
+Analyzes booking structure:
 
 ```python
-from luma.extraction import EntityClassifier
+from luma.structure.interpreter import interpret_structure
 
-classifier = EntityClassifier(entities)
+structure = interpret_structure(psentence, extraction_result)
 
-# Disambiguate "bag" (unit vs product)
-result = classifier.classify_units(
-    "add 2 bags of rice and 1 Gucci bag",
-    ["bags", "bag"],
-    ambiguous_units={"bag", "bags"}
+print(structure.booking_count)  # 1
+print(structure.service_scope)  # "single"
+print(structure.time_type)      # "exact"
+```
+
+### 4. Semantic Resolver (Stage 5)
+Resolves semantics and detects ambiguity:
+
+```python
+from luma.resolution.semantic_resolver import resolve_semantics
+
+semantic_result = resolve_semantics(grouped_result, extraction_result)
+
+print(semantic_result.resolved_booking["date_mode"])  # "relative"
+print(semantic_result.needs_clarification)            # False
+```
+
+### 5. Calendar Binder (Stage 6)
+Converts to ISO-8601 dates/times:
+
+```python
+from luma.calendar.calendar_binder import bind_calendar
+
+calendar_result = bind_calendar(
+    semantic_result,
+    now=datetime.now(),
+    timezone="UTC",
+    intent="CREATE_BOOKING"
 )
 
-print(result["units"])      # [{"entity": "bags", ...}]
-print(result["products"])   # [{"entity": "bag", ...}]
+print(calendar_result.calendar_booking["datetime_range"])
+# {"start": "2025-01-15T14:00:00Z", "end": "2025-01-15T14:00:00Z"}
 ```
 
-### 5. IntentMapper
-ML-based action-to-intent mapping:
+### 6. Clarification System
+Template-driven clarification prompts:
 
 ```python
-from luma.grouping import IntentMapper
+from luma.clarification import render_clarification, Clarification, ClarificationReason
 
-mapper = IntentMapper()
-intent, confidence = mapper.map_action_to_intent("buy")
+clarification = Clarification(
+    reason=ClarificationReason.AMBIGUOUS_TIME_NO_WINDOW,
+    data={"time": "2"}
+)
 
-print(intent, confidence)  # ("add", 0.98)
-```
-
-### 6. FuzzyEntityMatcher ⭐ NEW (Optional)
-Typo tolerance using fuzzy matching:
-
-```python
-from luma.extraction import FuzzyEntityMatcher, FUZZY_AVAILABLE
-
-if FUZZY_AVAILABLE:
-    fuzzy = FuzzyEntityMatcher(entities, threshold=88)
-    doc = nlp("add airforce ones")  # typo: should be "air force 1"
-    
-    recovered = fuzzy.recover_entities(doc)
-    # [{"type": "product", "text": "air force 1", "score": 92}]
+message = render_clarification(clarification)
+print(message)  # "Do you mean 2am or 2pm?"
 ```
 
 ---
@@ -285,154 +314,91 @@ from luma import config
 print(config.summary())
 
 # Check settings
-print(config.ENABLE_INTENT_MAPPER)   # True
-print(config.ENABLE_LLM_FALLBACK)    # False
 print(config.API_PORT)               # 9001
+print(config.LOG_LEVEL)              # INFO
 ```
 
 ### Environment Variables
 
 ```bash
-# Features
-export ENABLE_INTENT_MAPPER=true
-export ENABLE_LLM_FALLBACK=true
-export ENABLE_FUZZY_MATCHING=true
+# API
+export PORT=9001
 
-# LLM
-export OPENAI_API_KEY=sk-your-key
-export LLM_MODEL=gpt-4
+# Logging
+export LOG_LEVEL=INFO
+export LOG_FILE=luma.log
 
 # Debug
 export DEBUG_NLP=1
-
-# API
-export PORT=9001
-```
-
-**See:** `CONFIGURATION.md` for complete guide
-
----
-
-## 🆕 What's New in Luma
-
-Beyond migrating semantics, luma adds:
-
-### 1. Ordinal Reference Support ⭐
-```python
-# Handles: "add item 1", "add 1st and 2nd", "add the first one"
-result = pipeline.extract("add item 1")
-print(result.groups[0].ordinal_ref)  # "1"
-print(result.grouping_result.route)  # "rule"
-```
-
-### 2. Processing Routes ⭐
-Clear signals for downstream handling:
-
-| Route | When | Action |
-|-------|------|--------|
-| `rule` | Standard extraction | Use extracted entities directly |
-| `memory` | Pronouns ("it", "that") | Resolve from conversation state |
-| `llm` | Ambiguous/complex | Use LLM fallback |
-
-```python
-result = pipeline.extract("add it")
-if result.grouping_result.route == "memory":
-    product = resolve_from_conversation_memory()
-```
-
-### 3. Cached Entity Classification ⭐
-2.4x faster than semantics:
-
-```python
-classifier = EntityClassifier(entities)  # Build lookups once
-result1 = classifier.classify_units(...)  # Fast!
-result2 = classifier.classify_units(...)  # Fast!
-```
-
-### 4. Fuzzy Matching ⭐ (Optional)
-Handles typos and misspellings:
-
-```python
-# "cocacola" → "coca-cola"
-# "airforce ones" → "air force 1"
-```
-
-### 5. Interactive CLI ⭐
-REPL for testing and debugging:
-
-```bash
-python luma/cli/interactive.py
-
-💬 Enter sentence: add 2 kg rice
-⚙️  Processing...
-✅ Results displayed!
-```
-
-### 6. REST API ⭐
-Production-ready Flask endpoint:
-
-```bash
-python luma/api.py
-# API at http://localhost:9001
 ```
 
 ---
 
-## 📦 Installation
+## 💡 Usage Examples
 
-### Required Dependencies
+### Example 1: Simple Booking
 
-```bash
-pip install -r luma/requirements.txt
+```python
+from luma.test import run_full_pipeline
+
+result = run_full_pipeline("book haircut tomorrow at 2pm")
+
+calendar = result["stages"]["calendar"]
+booking = calendar["calendar_booking"]
+
+print(f"Date: {booking['date_range']['start']}")
+print(f"Time: {booking['time_range']['start_time']}")
 ```
 
-**Includes:**
-- `spacy>=3.7.2`
-- `transformers>=4.36.0`
-- `torch>=2.1.0`
-- `sentence-transformers>=2.2.2`
-- `flask>=3.0.0`
+### Example 2: Multi-Service Booking
 
-### Optional Dependencies
+```python
+result = run_full_pipeline(
+    "Can I get a haircut and beard trim tomorrow at 1pm?"
+)
 
-```bash
-# For fuzzy matching
-pip install rapidfuzz>=3.5.2
-
-# For LLM fallback
-pip install openai>=1.12.0
+intent = result["stages"]["intent"]
+print(intent["intent"])  # "CREATE_BOOKING"
 ```
 
-### spaCy Model
+### Example 3: Clarification Needed
 
-```bash
-python -m spacy download en_core_web_sm
+```python
+result = run_full_pipeline("book haircut saturday at 2")
+
+clarification = result.get("clarification", {})
+if clarification.get("needed"):
+    print(clarification["message"])
+    # "Do you mean 2am or 2pm?"
+```
+
+### Example 4: Time Range
+
+```python
+result = run_full_pipeline("book massage today around 6ish")
+
+semantic = result["stages"]["semantic"]
+resolved = semantic["resolved_booking"]
+
+print(resolved["time_mode"])  # "range" or needs clarification
 ```
 
 ---
 
 ## 🧪 Testing
 
-### Run All Tests
+### Run Full Pipeline Test
+
+```bash
+cd src
+python -m luma.test --examples
+```
+
+### Run Unit Tests
 
 ```bash
 cd src
 pytest luma/tests/ -v
-```
-
-### Test Files
-
-```
-tests/
-├── test_types.py                     # Data structures
-├── test_ner_model.py                 # NER inference
-├── test_entity_matcher.py            # Entity extraction
-├── test_ambiguous_classification.py  # Entity classification
-├── test_fuzzy_matcher.py             # Fuzzy recovery
-├── test_luma_components.py           # Component integration
-├── test_pipeline.py                  # Full pipeline
-├── test_parity.py                    # Semantics parity
-└── test_adapters.py                  # Backward compatibility
 ```
 
 ### Interactive Testing
@@ -455,206 +421,83 @@ python luma/api.py
 
 ### Endpoints
 
-**POST `/extract`** - Extract entities
+**POST `/book`** - Process booking request
 ```bash
-curl -X POST http://localhost:9001/extract \
+curl -X POST http://localhost:9001/book \
   -H "Content-Type: application/json" \
-  -d '{"text": "add 2 kg rice"}' | jq
+  -d '{"text": "book haircut tomorrow at 2pm", "domain": "service"}' | jq
 ```
 
 **GET `/health`** - Health check  
 **GET `/info`** - API information
 
-**See:** `API_README.md` for complete documentation
-
 ---
 
-## 🐳 Docker
+## 📊 Pipeline Stages
 
-### Docker Compose (Recommended)
+### Stage 1: Entity Extraction
+- Extracts services, dates, times, durations
+- Normalizes entity text
+- Parameterizes sentence
 
-```bash
-cd src/luma
-docker compose up --build
-```
+### Stage 2: Intent Resolution
+- Determines user intent (CREATE_BOOKING, QUERY, etc.)
+- Assigns confidence level
 
-### Manual Docker Build
+### Stage 3: Structural Interpretation
+- Analyzes booking count
+- Determines service/time/date scope
+- Identifies time type (exact, range, window)
 
-```bash
-cd src
-docker build -f luma/Dockerfile -t luma-api .
-docker run -p 9001:9001 luma-api
-```
+### Stage 4: Appointment Grouping
+- Groups services with date/time references
+- Validates booking structure
 
----
+### Stage 5: Semantic Resolution
+- Resolves date/time modes
+- Detects ambiguity
+- Generates clarification requests
 
-## 📊 Migration from Semantics
-
-### ✅ 100% Complete
-
-All valuable code from `semantics/` successfully migrated:
-
-| Component | Status | Enhancements |
-|-----------|--------|--------------|
-| Core Pipeline | ✅ Complete | + LLM fallback, lazy loading |
-| Entity Extraction | ✅ Complete | + Modular structure |
-| Entity Classification | ✅ Complete | + Class-based (2.4x faster) |
-| Grouping & Routing | ✅ Complete | + Ordinal support |
-| Intent Mapping | ✅ Complete | + 90 examples (vs 40) |
-| Structural Validation | ✅ Complete | + Fully implemented |
-| Fuzzy Matching | ✅ Complete | + Class-based |
-| Interactive CLI | ✅ Complete | + Enhanced |
-
-### What's Better in Luma
-
-**Performance:**
-- 2.4x faster entity classification (cached lookups)
-- Lazy loading support
-- Model warmup optimization
-
-**Code Quality:**
-- Type-safe dataclasses
-- 16 focused modules (vs 6 monolithic files)
-- Zero linter errors
-- Full type hints
-
-**Features:**
-- Ordinal references ("add item 1")
-- Processing routes (rule/memory/llm)
-- Centralized configuration
-- REST API + Docker
-- Enhanced documentation
-
----
-
-## 🎯 Processing Routes
-
-Luma returns a `route` indicating how to handle the extraction:
-
-```python
-result = pipeline.extract(text)
-route = result.grouping_result.route
-
-if route == "rule":
-    # Use extracted entities directly
-    products = result.groups[0].products
-    
-elif route == "memory":
-    # Resolve pronouns from conversation state
-    # e.g., "it", "that" → lookup last mentioned product
-    product = resolve_from_memory(conversation_state)
-    
-elif route == "llm":
-    # Use LLM for complex/ambiguous cases
-    result = pipeline.extract(text, force_llm=True)
-```
-
-### Routing Logic
-
-| Input | Products | Ordinal | Route | Action |
-|-------|----------|---------|-------|--------|
-| "add rice" | ["rice"] | null | `rule` | Use products |
-| "add it" | ["it"] | null | `memory` | Resolve pronoun |
-| "add item 1" | [] | "1" | `rule` | Resolve ordinal |
-| "show me stuff" | [] | null | `llm` | Use LLM |
-
----
-
-## 💡 Usage Examples
-
-### Example 1: E-commerce Cart
-
-```python
-from luma.core.pipeline import EntityExtractionPipeline
-
-pipeline = EntityExtractionPipeline(use_luma=True)
-result = pipeline.extract("add 2 bags of rice and remove 3 bottles of Coke")
-
-for group in result.groups:
-    print(f"{group.action}: {group.products[0]} ({group.quantities[0]} {group.units[0]})")
-# Output:
-# add: rice (2 bags)
-# remove: coca-cola (3 bottles)
-```
-
-### Example 2: Ordinal References
-
-```python
-result = pipeline.extract("add item 1 and item 3")
-
-for group in result.groups:
-    if group.ordinal_ref:
-        print(f"Add item at position: {group.ordinal_ref}")
-# Output:
-# Add item at position: 1
-# Add item at position: 3
-```
-
-### Example 3: Intent Detection
-
-```python
-result = pipeline.extract("do you have rice in stock?")
-
-print(result.groups[0].intent)  # "check"
-print(result.groups[0].action)  # "do you have"
-```
-
-### Example 4: With LLM Fallback
-
-```python
-pipeline = EntityExtractionPipeline(
-    use_luma=True,
-    enable_llm_fallback=True
-)
-
-# Ambiguous case → auto-fallback to LLM
-result = pipeline.extract("I need some groceries")
-print(result.notes)  # "LLM fallback used"
-```
+### Stage 6: Calendar Binding
+- Converts relative dates to ISO-8601
+- Converts time references to 24h format
+- Validates date/time constraints
 
 ---
 
 ## 🔧 Advanced Features
 
-### Entity Classification
+### Clarification Templates
 
-Handle ambiguous entities based on context:
+All clarification messages are template-driven and stored in JSON:
+
+```json
+{
+  "AMBIGUOUS_TIME_NO_WINDOW": {
+    "template": "Do you mean {{time}}am or {{time}}pm?",
+    "required_fields": ["time"]
+  }
+}
+```
+
+### Timezone Support
+
+Full timezone awareness for calendar binding:
 
 ```python
-from luma.extraction import EntityClassifier
-
-classifier = EntityClassifier(entities)
-
-# "bag" can be unit or product
-result = classifier.classify_units(
-    "add 2 bags of rice",  # "bags" → UNIT
-    ["bags"],
-    {"bag", "bags"}
+result = run_full_pipeline(
+    "book haircut tomorrow at 2pm",
+    timezone="America/New_York"
 )
 ```
 
-### Fuzzy Entity Recovery
+### Ambiguity Detection
 
-Recover misspelled entities:
-
-```python
-from luma.extraction import FuzzyEntityMatcher
-
-fuzzy = FuzzyEntityMatcher(entities, threshold=88)
-doc = nlp("add cocacola")  # Missing hyphen
-
-recovered = fuzzy.recover_entities(doc)
-# [{"type": "brand", "text": "coca-cola", "score": 95}]
-```
-
-### Custom Entity Catalog
-
-```python
-pipeline = EntityExtractionPipeline(
-    use_luma=True,
-    entity_file="/path/to/custom_entities.json"
-)
-```
+Automatic detection of:
+- Bare weekdays ("saturday")
+- Hour-only times ("at 2")
+- Fuzzy hours ("around 6ish")
+- Missing information
 
 ---
 
@@ -663,15 +506,12 @@ pipeline = EntityExtractionPipeline(
 ### Feature Toggles
 
 ```bash
-# Intent Mapping (default: ON)
-export ENABLE_INTENT_MAPPER=true
+# API
+export PORT=9001
 
-# LLM Fallback (default: OFF)
-export ENABLE_LLM_FALLBACK=true
-export OPENAI_API_KEY=sk-your-key
-
-# Fuzzy Matching (default: OFF)
-export ENABLE_FUZZY_MATCHING=true
+# Logging
+export LOG_LEVEL=INFO
+export LOG_FILE=luma.log
 ```
 
 ### Debug Mode
@@ -682,16 +522,6 @@ python luma/api.py
 # See detailed debug logs
 ```
 
-### API Configuration
-
-```bash
-export PORT=9001
-export HOST=0.0.0.0
-python luma/api.py
-```
-
-**Full configuration guide:** See `CONFIGURATION.md`
-
 ---
 
 ## 📚 Documentation
@@ -699,98 +529,9 @@ python luma/api.py
 | File | Description |
 |------|-------------|
 | `README.md` | This file - main documentation |
-| `CONFIGURATION.md` | Complete configuration guide |
-| `API_README.md` | REST API documentation |
-| `cli/README.md` | Interactive CLI guide |
-
----
-
-## 🔬 Testing & Validation
-
-### Parity with Semantics
-
-```bash
-# Run parity tests
-cd src
-python luma/tests/test_parity.py
-# ✅ 100% functional parity confirmed
-```
-
-### Unit Tests
-
-```bash
-pytest luma/tests/ -v --cov=luma
-# ✅ 9 test files, comprehensive coverage
-```
-
-### Manual Testing
-
-```bash
-# Interactive REPL
-python luma/cli/interactive.py
-
-# API testing
-./luma/test_api.sh        # Linux/Mac
-./luma/test_api.ps1       # Windows
-```
-
----
-
-## 🚀 Deployment
-
-### Local Development
-
-```bash
-cd src
-python luma/api.py
-```
-
-### Production (Gunicorn)
-
-```bash
-cd src
-gunicorn -w 4 -b 0.0.0.0:9001 luma.api:app
-```
-
-### Docker Compose
-
-```bash
-cd src/luma
-docker compose up -d
-```
-
----
-
-## 🔄 Migration from Semantics
-
-### Gradual Migration Strategy
-
-```python
-# Phase 1: Feature flag (run both in parallel)
-from luma.core.pipeline import EntityExtractionPipeline
-
-pipeline = EntityExtractionPipeline(
-    use_luma=True   # Toggle between luma/semantics
-)
-
-# Phase 2: Monitor parity
-result_luma = pipeline.extract("add rice")  # use_luma=True
-result_semantics = legacy_extract("add rice")
-assert results_match(result_luma, result_semantics)
-
-# Phase 3: Full cutover
-# Remove semantics code after validation
-```
-
-### Backward Compatibility
-
-```python
-# Old semantics API still works
-from luma import extract_entities_legacy
-
-result = extract_entities_legacy("add rice")
-# Returns dict format (like semantics)
-```
+| `test.py` | Full pipeline test runner |
+| `api.py` | REST API implementation |
+| `cli/interactive.py` | Interactive CLI |
 
 ---
 
@@ -804,37 +545,16 @@ cd src
 python luma/api.py
 ```
 
-### Issue: rapidfuzz not found
+### Issue: spaCy model not found
 
-**Solution:** Fuzzy matching is optional
+**Solution:** Download spaCy model
 ```bash
-pip install rapidfuzz  # If you need it
+python -m spacy download en_core_web_sm
 ```
 
-### Issue: Intent is null
+### Issue: Normalization directory not found
 
-**Solution:** Enable intent mapping
-```bash
-export ENABLE_INTENT_MAPPER=true
-```
-
-### Issue: Ordinal not detected
-
-**Solution:** Ensure NER model is trained
-```bash
-python luma/classification/training.py
-```
-
----
-
-## 📈 Performance
-
-| Metric | Semantics | Luma | Improvement |
-|--------|-----------|------|-------------|
-| **Startup Time** | 3-5s | 2-3s | 40% faster |
-| **Classification** | Rebuilds lookups | Cached | 2.4x faster |
-| **Memory** | Baseline | -20% | More efficient |
-| **Type Safety** | None | Full | 100% coverage |
+**Solution:** Ensure normalization files exist in `luma/store/normalization/` or `intents/normalization/`
 
 ---
 
@@ -842,14 +562,13 @@ python luma/classification/training.py
 
 ### Quick Guides
 - 🚀 **Quick Start**: See examples above
-- ⚙️ **Configuration**: `CONFIGURATION.md`
-- 🌐 **REST API**: `API_README.md`
-- 🖥️ **CLI Tools**: `cli/README.md`
+- ⚙️ **Configuration**: See `config.py`
+- 🌐 **REST API**: See `api.py`
+- 🖥️ **CLI Tools**: See `cli/interactive.py`
 
 ### For Developers
 - 📂 **File Structure**: See Architecture section
-- 🧪 **Testing**: Run `pytest luma/tests/ -v`
-- 🔄 **Migration**: 100% complete from semantics
+- 🧪 **Testing**: Run `python -m luma.test --examples`
 
 ---
 
@@ -860,6 +579,7 @@ python luma/classification/training.py
 ```bash
 cd src
 pytest luma/tests/ -v
+python -m luma.test --examples
 ```
 
 ### Code Style
@@ -869,13 +589,6 @@ pytest luma/tests/ -v
 flake8 luma/
 mypy luma/
 ```
-
-### Adding Features
-
-1. Update `config.py` for new settings
-2. Add tests in `tests/`
-3. Update this README
-4. Maintain backward compatibility
 
 ---
 
@@ -887,19 +600,20 @@ Part of the DialogCart project.
 
 ## 🎉 Summary
 
-**Luma** is a production-ready entity extraction pipeline that:
+**Luma** is a production-ready service/reservation booking pipeline that:
 
-- ✅ Matches semantics 100% (full parity)
-- ✅ Adds 8 new enhancements
-- ✅ 2.4x faster entity classification
+- ✅ Processes natural language booking requests
+- ✅ Extracts services, dates, times with high accuracy
+- ✅ Resolves intent and semantics
+- ✅ Binds to calendar dates/times
+- ✅ Generates clarification prompts when needed
+- ✅ REST API and CLI ready
 - ✅ Type-safe and well-tested
-- ✅ REST API and Docker ready
-- ✅ Centralized configuration
 
 **Ready for production use!** 🚀
 
 ---
 
 **Version:** 1.0.0  
-**Last Updated:** 2025-10-11  
+**Last Updated:** 2025-01-15  
 **Status:** ✅ Production Ready

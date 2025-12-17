@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 from decimal import Decimal
 
 from .repo import CatalogRepo
+from .search import CatalogSearchService
 from .presenter import categories_bulleted, DEFAULT_CATEGORY_EMOJI
 from utils.response import standard_response
 
@@ -16,6 +17,7 @@ class CatalogService:
 
     def __init__(self, repo: Optional[CatalogRepo] = None):
         self.repo = repo or CatalogRepo()
+        self.search_service = CatalogSearchService()
 
     # ---- Queries ----
     def get(self, tenant_id: str, catalog_id: str) -> Optional[Dict[str, Any]]:
@@ -260,3 +262,59 @@ class CatalogService:
             
         except Exception as e:
             return standard_response(False, error=f"Search failed: {str(e)}")
+    
+    def search_catalog_by_attributes(
+        self,
+        tenant_id: str,
+        attributes: Dict[str, Any],
+        fuzzy_threshold: float = 0.65,
+        limit: int = 20
+    ) -> Dict[str, Any]:
+        """
+        Smart catalog search with fuzzy matching, synonym expansion, and flexible filtering.
+        
+        Args:
+            tenant_id: Tenant ID
+            attributes: Search criteria dictionary:
+                {
+                    "product": "shoes",           # Product name/type (required)
+                    "brand": "nike",              # Brand/vendor (optional)
+                    "variants": ["black", "42"]   # Variant attributes like color, size (optional)
+                }
+            fuzzy_threshold: Minimum similarity score (0.0-1.0), default 0.65
+            limit: Maximum results to return, default 20
+            
+        Returns:
+            Standard response with matches and smart presentation based on query type
+            
+        Examples:
+            # General product search
+            service.search_catalog_by_attributes(
+                tenant_id="demo-001",
+                attributes={"product": "shoes"}
+            )
+            
+            # Search with brand
+            service.search_catalog_by_attributes(
+                tenant_id="demo-001",
+                attributes={"product": "shoes", "brand": "nike"}
+            )
+            
+            # Search with variant filter (shows size options)
+            service.search_catalog_by_attributes(
+                tenant_id="demo-001",
+                attributes={"product": "shoes", "variants": ["black"]}
+            )
+            
+            # Specific SKU search
+            service.search_catalog_by_attributes(
+                tenant_id="demo-001",
+                attributes={"product": "shoes", "variants": ["black", "42"]}
+            )
+        """
+        return self.search_service.search_by_attributes(
+            tenant_id=tenant_id,
+            attributes=attributes,
+            fuzzy_threshold=fuzzy_threshold,
+            limit=limit
+        )

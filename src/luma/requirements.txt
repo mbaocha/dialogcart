@@ -4,13 +4,7 @@ gunicorn==21.2.0
 
 # NLP dependencies
 spacy==3.7.2
-transformers==4.36.0
-torch==2.1.0
 numpy==1.26.2
-sentence-transformers==2.2.2
-
-# LLM dependencies (optional - for fallback extraction)
-openai==1.12.0
 
 # Fuzzy matching (optional - for typo tolerance)
 # rapidfuzz==3.5.2

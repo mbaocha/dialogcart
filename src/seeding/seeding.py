@@ -495,11 +495,15 @@ items = [
         'variants': [
             {
                 'variant_id': 'african-bean-001-v1',
-                'variant_title': 'Default',
+                'variant_title': 'Brown Beans / 5kg',
                 'unit': 'kg',
                 'price_num': Decimal('5.50'),
                 'available_qty': Decimal('10'),
                 'rules': {'min_order_qty': 1},
+                'options': {
+                    'Type': 'Brown Beans',
+                    'Package': '5kg'
+                }
             }
         ]
     },
@@ -513,11 +517,27 @@ items = [
         'variants': [
             {
                 'variant_id': 'yam-001-v1',
-                'variant_title': 'Default',
+                'variant_title': 'White Yam / Whole',
                 'unit': 'kg',
                 'price_num': Decimal('8.00'),
                 'available_qty': Decimal('10'),
                 'rules': {'min_order_qty': 1},
+                'options': {
+                    'Type': 'White Yam',
+                    'Cut': 'Whole'
+                }
+            },
+            {
+                'variant_id': 'yam-001-v2',
+                'variant_title': 'White Yam / Sliced',
+                'unit': 'kg',
+                'price_num': Decimal('8.50'),
+                'available_qty': Decimal('8'),
+                'rules': {'min_order_qty': 1},
+                'options': {
+                    'Type': 'White Yam',
+                    'Cut': 'Sliced'
+                }
             }
         ]
     },
@@ -531,11 +551,27 @@ items = [
         'variants': [
             {
                 'variant_id': 'plantain-001-v1',
-                'variant_title': 'Default',
+                'variant_title': 'Ripe Plantain / Bunch',
                 'unit': 'bunch',
                 'price_num': Decimal('3.00'),
                 'available_qty': Decimal('10'),
                 'rules': {'min_order_qty': 1},
+                'options': {
+                    'Ripeness': 'Ripe',
+                    'Package': 'Bunch'
+                }
+            },
+            {
+                'variant_id': 'plantain-001-v2',
+                'variant_title': 'Green Plantain / Bunch',
+                'unit': 'bunch',
+                'price_num': Decimal('2.50'),
+                'available_qty': Decimal('12'),
+                'rules': {'min_order_qty': 1},
+                'options': {
+                    'Ripeness': 'Green',
+                    'Package': 'Bunch'
+                }
             }
         ]
     },
@@ -549,12 +585,29 @@ items = [
         'variants': [
             {
                 'variant_id': 'frozen-chicken-001-v1',
-                'variant_title': 'Box (10kg)',
+                'variant_title': 'Whole Chicken / 10kg Box',
                 'unit': 'box',
                 'price_num': Decimal('120.00'),
                 'available_qty': Decimal('12'),
                 'rules': {'min_order_qty': 1},
-                'package_size': {'value': Decimal('10'), 'unit': 'kg'}
+                'package_size': {'value': Decimal('10'), 'unit': 'kg'},
+                'options': {
+                    'Cut': 'Whole',
+                    'Package': '10kg Box'
+                }
+            },
+            {
+                'variant_id': 'frozen-chicken-001-v2',
+                'variant_title': 'Chicken Pieces / 5kg Box',
+                'unit': 'box',
+                'price_num': Decimal('65.00'),
+                'available_qty': Decimal('15'),
+                'rules': {'min_order_qty': 1},
+                'package_size': {'value': Decimal('5'), 'unit': 'kg'},
+                'options': {
+                    'Cut': 'Pieces',
+                    'Package': '5kg Box'
+                }
             }
         ]
     },
@@ -568,11 +621,27 @@ items = [
         'variants': [
             {
                 'variant_id': 'egusi-001-v1',
-                'variant_title': 'Default',
+                'variant_title': 'Ground Egusi / 1kg',
                 'unit': 'kg',
                 'price_num': Decimal('12.00'),
                 'available_qty': Decimal('10'),
                 'rules': {'min_order_qty': 2},
+                'options': {
+                    'Preparation': 'Ground',
+                    'Package': '1kg'
+                }
+            },
+            {
+                'variant_id': 'egusi-001-v2',
+                'variant_title': 'Whole Egusi / 1kg',
+                'unit': 'kg',
+                'price_num': Decimal('10.00'),
+                'available_qty': Decimal('8'),
+                'rules': {'min_order_qty': 2},
+                'options': {
+                    'Preparation': 'Whole',
+                    'Package': '1kg'
+                }
             }
         ]
     },
@@ -586,11 +655,27 @@ items = [
         'variants': [
             {
                 'variant_id': 'okra-001-v1',
-                'variant_title': 'Default',
+                'variant_title': 'Fresh Okra / 1kg',
                 'unit': 'kg',
                 'price_num': Decimal('7.00'),
                 'available_qty': Decimal('10'),
                 'rules': {'min_order_qty': 1},
+                'options': {
+                    'Freshness': 'Fresh',
+                    'Package': '1kg'
+                }
+            },
+            {
+                'variant_id': 'okra-001-v2',
+                'variant_title': 'Dried Okra / 500g',
+                'unit': 'kg',
+                'price_num': Decimal('15.00'),
+                'available_qty': Decimal('5'),
+                'rules': {'min_order_qty': 1},
+                'options': {
+                    'Freshness': 'Dried',
+                    'Package': '500g'
+                }
             }
         ]
     },
@@ -604,11 +689,27 @@ items = [
         'variants': [
             {
                 'variant_id': 'palm-oil-001-v1',
-                'variant_title': 'Default',
+                'variant_title': 'Red Palm Oil / 1L',
                 'unit': 'litre',
                 'price_num': Decimal('10.00'),
                 'available_qty': Decimal('10'),
                 'rules': {'min_order_qty': 1},
+                'options': {
+                    'Type': 'Red Palm Oil',
+                    'Package': '1L'
+                }
+            },
+            {
+                'variant_id': 'palm-oil-001-v2',
+                'variant_title': 'Red Palm Oil / 5L',
+                'unit': 'litre',
+                'price_num': Decimal('45.00'),
+                'available_qty': Decimal('6'),
+                'rules': {'min_order_qty': 1},
+                'options': {
+                    'Type': 'Red Palm Oil',
+                    'Package': '5L'
+                }
             }
         ]
     },
@@ -622,11 +723,27 @@ items = [
         'variants': [
             {
                 'variant_id': 'dried-catfish-001-v1',
-                'variant_title': 'Default',
+                'variant_title': 'Small Pieces / 5kg',
                 'unit': 'kg',
                 'price_num': Decimal('15.00'),
                 'available_qty': Decimal('10'),
                 'rules': {'allowed_quantities': [5, 8, 15]},
+                'options': {
+                    'Cut': 'Small Pieces',
+                    'Package': '5kg'
+                }
+            },
+            {
+                'variant_id': 'dried-catfish-001-v2',
+                'variant_title': 'Whole Fish / 8kg',
+                'unit': 'kg',
+                'price_num': Decimal('14.00'),
+                'available_qty': Decimal('8'),
+                'rules': {'allowed_quantities': [8, 12, 16]},
+                'options': {
+                    'Cut': 'Whole',
+                    'Package': '8kg'
+                }
             }
         ]
     },
@@ -640,11 +757,27 @@ items = [
         'variants': [
             {
                 'variant_id': 'ogbono-001-v1',
-                'variant_title': 'Default',
+                'variant_title': 'Ground Ogbono / 1kg',
                 'unit': 'kg',
                 'price_num': Decimal('9.50'),
                 'available_qty': Decimal('10'),
                 'rules': {'min_order_qty': 1},
+                'options': {
+                    'Preparation': 'Ground',
+                    'Package': '1kg'
+                }
+            },
+            {
+                'variant_id': 'ogbono-001-v2',
+                'variant_title': 'Whole Ogbono / 1kg',
+                'unit': 'kg',
+                'price_num': Decimal('8.00'),
+                'available_qty': Decimal('12'),
+                'rules': {'min_order_qty': 1},
+                'options': {
+                    'Preparation': 'Whole',
+                    'Package': '1kg'
+                }
             }
         ]
     },
@@ -658,11 +791,27 @@ items = [
         'variants': [
             {
                 'variant_id': 'crayfish-001-v1',
-                'variant_title': 'Default',
+                'variant_title': 'Ground Crayfish / 1kg',
                 'unit': 'kg',
                 'price_num': Decimal('18.00'),
                 'available_qty': Decimal('10'),
                 'rules': {'min_order_qty': 1},
+                'options': {
+                    'Preparation': 'Ground',
+                    'Package': '1kg'
+                }
+            },
+            {
+                'variant_id': 'crayfish-001-v2',
+                'variant_title': 'Whole Crayfish / 1kg',
+                'unit': 'kg',
+                'price_num': Decimal('16.00'),
+                'available_qty': Decimal('8'),
+                'rules': {'min_order_qty': 1},
+                'options': {
+                    'Preparation': 'Whole',
+                    'Package': '1kg'
+                }
             }
         ]
     },
@@ -676,7 +825,7 @@ items = [
         'variants': [
             {
                 'variant_id': 'stockfish-001-v1',
-                'variant_title': 'Box (10kg)',
+                'variant_title': 'Whole Stockfish / 10kg Box',
                 'unit': 'box',
                 'price_num': Decimal('25.00'),
                 'available_qty': Decimal('15'),
@@ -684,6 +833,26 @@ items = [
                 'package_size': {
                     'value': Decimal('10'),
                     'unit': 'kg'
+                },
+                'options': {
+                    'Cut': 'Whole',
+                    'Package': '10kg Box'
+                }
+            },
+            {
+                'variant_id': 'stockfish-001-v2',
+                'variant_title': 'Stockfish Pieces / 5kg Box',
+                'unit': 'box',
+                'price_num': Decimal('13.00'),
+                'available_qty': Decimal('20'),
+                'rules': {'min_order_qty': 1},
+                'package_size': {
+                    'value': Decimal('5'),
+                    'unit': 'kg'
+                },
+                'options': {
+                    'Cut': 'Pieces',
+                    'Package': '5kg Box'
                 }
             }
         ]
@@ -698,11 +867,39 @@ items = [
         'variants': [
             {
                 'variant_id': 'rice-001-v1',
-                'variant_title': 'Long Grain',
+                'variant_title': 'Long Grain Rice / 5kg',
                 'unit': 'kg',
                 'price_num': Decimal('6.50'),
                 'available_qty': Decimal('20'),
                 'rules': {'min_order_qty': 1},
+                'options': {
+                    'Type': 'Long Grain',
+                    'Package': '5kg'
+                }
+            },
+            {
+                'variant_id': 'rice-001-v2',
+                'variant_title': 'Basmati Rice / 5kg',
+                'unit': 'kg',
+                'price_num': Decimal('8.50'),
+                'available_qty': Decimal('15'),
+                'rules': {'min_order_qty': 1},
+                'options': {
+                    'Type': 'Basmati',
+                    'Package': '5kg'
+                }
+            },
+            {
+                'variant_id': 'rice-001-v3',
+                'variant_title': 'Jasmine Rice / 5kg',
+                'unit': 'kg',
+                'price_num': Decimal('7.50'),
+                'available_qty': Decimal('18'),
+                'rules': {'min_order_qty': 1},
+                'options': {
+                    'Type': 'Jasmine',
+                    'Package': '5kg'
+                }
             }
         ]
     }
@@ -747,6 +944,7 @@ def seed_catalog_data():
                     "in_stock": v["available_qty"] > 0,
                     "rules": v.get("rules"),
                     "package_size": v.get("package_size"),
+                    "options": v.get("options", {}),  # Add options field
                     "updated_at": now_iso(),
                     "GSI4PK": f"TENANT#{TENANT_ID}#TITLE",
                     "GSI4SK": p["title"].lower()

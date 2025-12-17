@@ -18,15 +18,24 @@ from .matcher import EntityMatcher
 from .normalization import (
     normalize_hyphens,
     pre_normalization,
+    normalize_orthography,
     post_normalize_parameterized_text,
-    normalize_longest_phrases,
-    normalize_plural_to_singular,
+    normalize_natural_language_variants,
+)
+
+# Vocabulary normalization (new structure)
+from .vocabulary_normalization import (
+    load_vocabularies,
+    compile_vocabulary_maps,
+    normalize_vocabularies,
+    validate_vocabularies,
 )
 
 # Entity loading utilities
 from .entity_loading import (
-    load_global_entities,
-    build_global_synonym_map,
+    load_normalization_entities,
+    load_global_noise_set,
+    load_global_orthography_rules,
     build_entity_patterns,
     build_support_maps,
     init_nlp_with_entities,
@@ -35,59 +44,48 @@ from .entity_loading import (
 # Processing utilities (for advanced usage)
 from .entity_processing import (
     extract_entities_from_doc,
-    canonicalize_entities,
-    simplify_result,
-    classify_ambiguous_units,
-    classify_ambiguous_variants,
-    classify_ambiguous_brands,
-    classify_productbrands,
+    build_parameterized_sentence,
+    canonicalize_services,
 )
-
-# Context-based entity classification
-from .entity_classifier import EntityClassifier
 
 # Fuzzy matching (optional - requires rapidfuzz)
 try:
-    from .fuzzy_matcher import FuzzyEntityMatcher, fuzzy_recover_multiword_entities
+    from .fuzzy_matcher import TenantFuzzyMatcher
     FUZZY_AVAILABLE = True
 except ImportError:
-    FuzzyEntityMatcher = None
-    fuzzy_recover_multiword_entities = None
+    TenantFuzzyMatcher = None
     FUZZY_AVAILABLE = False
 
 __all__ = [
     # Main classes
     "EntityMatcher",
-    "EntityClassifier",
-    "FuzzyEntityMatcher",
-    
+
     # Normalization
     "normalize_hyphens",
     "pre_normalization",
+    "normalize_orthography",
     "post_normalize_parameterized_text",
-    "normalize_longest_phrases",
-    "normalize_plural_to_singular",
-    
+    "normalize_natural_language_variants",
+
+    # Vocabulary normalization
+    "load_vocabularies",
+    "compile_vocabulary_maps",
+    "normalize_vocabularies",
+    "validate_vocabularies",
+
     # Entity loading
-    "load_global_entities",
-    "build_global_synonym_map",
+    "load_normalization_entities",
+    "load_global_noise_set",
     "build_entity_patterns",
     "build_support_maps",
     "init_nlp_with_entities",
-    
+
     # Processing (advanced)
     "extract_entities_from_doc",
-    "canonicalize_entities",
-    "simplify_result",
-    
-    # Ambiguity classification
-    "classify_ambiguous_units",
-    "classify_ambiguous_variants",
-    "classify_ambiguous_brands",
-    "classify_productbrands",
-    
+    "build_parameterized_sentence",
+    "canonicalize_services",
+
     # Fuzzy matching (optional)
-    "fuzzy_recover_multiword_entities",
+    "TenantFuzzyMatcher",
     "FUZZY_AVAILABLE",
 ]
-

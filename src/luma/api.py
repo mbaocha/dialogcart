@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
-Luma Entity Extraction REST API
+Luma Service/Reservation Booking REST API
 
-A Flask-based REST API for entity extraction with support for:
-- Rule-based extraction
-- LLM fallback (optional)
-- Fuzzy matching (optional)
-- Intent mapping
-- Ordinal references
-- Structural validation
+A Flask-based REST API for service/reservation booking processing with support for:
+- Entity extraction (services, dates, times)
+- Intent resolution
+- Structural interpretation
+- Appointment grouping
+- Semantic resolution
+- Calendar binding
 
 Usage:
     python luma/api.py
@@ -18,7 +18,7 @@ Usage:
     gunicorn -w 4 -b 0.0.0.0:9001 luma.api:app
 
 Endpoints:
-    POST /extract - Extract entities from text
+    POST /book - Process service/reservation booking request
     GET /health - Health check
     GET /info - API information
 """
@@ -32,22 +32,19 @@ if __name__ == "__main__":
         sys.path.insert(0, str(src_path))
 
 import time  # noqa: E402
+from datetime import datetime  # noqa: E402
 from flask import Flask, request, jsonify, g  # noqa: E402
-from luma.core.pipeline import EntityExtractionPipeline  # noqa: E402
+from luma.calendar.calendar_binder import bind_calendar  # noqa: E402
+from luma.resolution.semantic_resolver import resolve_semantics  # noqa: E402
+from luma.grouping.appointment_grouper import group_appointment  # noqa: E402
+from luma.structure.interpreter import interpret_structure  # noqa: E402
+from luma.grouping.reservation_intent_resolver import ReservationIntentResolver  # noqa: E402
+from luma.extraction.matcher import EntityMatcher  # noqa: E402
+from luma.clarification import render_clarification  # noqa: E402
 from luma.config import config  # noqa: E402
 from luma.logging_config import setup_logging, generate_request_id  # noqa: E402
 
-# Optional features
-try:
-    from luma.extraction import FUZZY_AVAILABLE
-except ImportError:
-    FUZZY_AVAILABLE = False
-
 # Apply config settings
-ENABLE_LLM_FALLBACK = config.ENABLE_LLM_FALLBACK
-ENABLE_FUZZY_MATCHING = config.ENABLE_FUZZY_MATCHING and FUZZY_AVAILABLE
-ENABLE_INTENT_MAPPER = config.ENABLE_INTENT_MAPPER
-LLM_MODEL = config.LLM_MODEL
 PORT = config.API_PORT
 
 # Flask app
@@ -61,8 +58,9 @@ logger = setup_logging(
     log_file=config.LOG_FILE
 )
 
-# Global pipeline instance
-pipeline = None
+# Global pipeline components
+entity_matcher = None
+intent_resolver = None
 
 
 # Request tracking middleware
@@ -104,25 +102,51 @@ def after_request(response):
     return response
 
 
+def find_normalization_dir():
+    """Find the normalization directory."""
+    current_file = Path(__file__).resolve()
+    store_dir = current_file.parent / "store" / "normalization"
+    if store_dir.exists():
+        return store_dir
+    src_dir = current_file.parent.parent
+    intents_norm = src_dir / "intents" / "normalization"
+    if intents_norm.exists():
+        return intents_norm
+    return None
+
+
+def _localize_datetime(dt: datetime, timezone: str) -> datetime:
+    """Localize datetime to timezone."""
+    try:
+        from zoneinfo import ZoneInfo
+        tz = ZoneInfo(timezone)
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=tz)
+        return dt.astimezone(tz)
+    except Exception:
+        try:
+            import pytz
+            tz = pytz.timezone(timezone)
+            if dt.tzinfo is None:
+                return tz.localize(dt)
+            return dt.astimezone(tz)
+        except Exception:
+            return dt
+
+
 def init_pipeline():
-    """Initialize the extraction pipeline with configuration."""
-    global pipeline  # noqa: PLW0603
+    """Initialize the pipeline components."""
+    global entity_matcher, intent_resolver  # noqa: PLW0603
     
     logger.info("=" * 60)
-    logger.info("Initializing Luma Extraction Pipeline", extra={
-        'llm_fallback': ENABLE_LLM_FALLBACK,
-        'fuzzy_matching': ENABLE_FUZZY_MATCHING,
-        'intent_mapping': ENABLE_INTENT_MAPPER,
-        'llm_model': LLM_MODEL if ENABLE_LLM_FALLBACK else None
-    })
+    logger.info("Initializing Luma Service/Reservation Booking Pipeline")
     
     try:
-        pipeline = EntityExtractionPipeline(
-            use_luma=True,
-            enable_llm_fallback=ENABLE_LLM_FALLBACK,
-            llm_model=LLM_MODEL if ENABLE_LLM_FALLBACK else None,
-        )
-        logger.info("Pipeline initialized successfully")
+        # Initialize intent resolver (lightweight, no file I/O)
+        intent_resolver = ReservationIntentResolver()
+        
+        # Entity matcher will be initialized per-request with entity file
+        logger.info("Pipeline components initialized successfully")
         return True
     except Exception as e:  # noqa: BLE001
         logger.error(f"Failed to initialize pipeline: {e}", exc_info=True)
@@ -132,18 +156,17 @@ def init_pipeline():
 @app.route("/health", methods=["GET"])
 def health():
     """Health check endpoint."""
-    if pipeline is None:
+    if entity_matcher is None and intent_resolver is None:
         return jsonify({
             "status": "unhealthy",
-            "message": "Pipeline not initialized"
+            "message": "Pipeline components not initialized"
         }), 503
     
     return jsonify({
         "status": "healthy",
-        "features": {
-            "llm_fallback": ENABLE_LLM_FALLBACK,
-            "fuzzy_matching": ENABLE_FUZZY_MATCHING,
-            "intent_mapping": ENABLE_INTENT_MAPPER,
+        "components": {
+            "intent_resolver": intent_resolver is not None,
+            "entity_matcher": "lazy_initialized"
         }
     })
 
@@ -152,17 +175,17 @@ def health():
 def info():
     """API information endpoint."""
     return jsonify({
-        "name": "Luma Entity Extraction API",
+        "name": "Luma Service/Reservation Booking API",
         "version": "1.0.0",
-        "description": "Entity extraction with NER, grouping, and intent mapping",
+        "description": "Service and reservation booking processing with entity extraction, intent resolution, semantic resolution, and calendar binding",
         "endpoints": {
-            "/extract": {
+            "/book": {
                 "method": "POST",
-                "description": "Extract entities from text",
+                "description": "Process service/reservation booking request",
                 "parameters": {
-                    "text": "string (required) - Input text to analyze",
-                    "force_llm": "boolean (optional) - Force LLM extraction",
-                    "enable_fuzzy": "boolean (optional) - Enable fuzzy matching",
+                    "text": "string (required) - Booking request text",
+                    "domain": "string (optional) - 'service' or 'reservation' (default: 'service')",
+                    "timezone": "string (optional) - Timezone for calendar binding (default: 'UTC')",
                 }
             },
             "/health": {
@@ -174,60 +197,46 @@ def info():
                 "description": "API information"
             }
         },
-        "features": {
-            "llm_fallback": ENABLE_LLM_FALLBACK,
-            "fuzzy_matching": ENABLE_FUZZY_MATCHING,
-            "intent_mapping": ENABLE_INTENT_MAPPER,
-        },
         "configuration": {
-            "llm_model": LLM_MODEL if ENABLE_LLM_FALLBACK else None,
             "port": PORT,
         }
     })
 
 
-@app.route("/extract", methods=["POST"])
-def extract():
+@app.route("/book", methods=["POST"])
+def book():
     """
-    Extract entities from input text.
+    Process service/reservation booking request.
     
     Request body:
     {
-        "text": "add 2 kg rice",
-        "force_llm": false,           // optional
-        "enable_fuzzy": false         // optional
+        "text": "book haircut tomorrow at 2pm",
+        "domain": "service",           // optional, default: "service"
+        "timezone": "UTC"              // optional, default: "UTC"
     }
     
     Response:
     {
         "success": true,
         "data": {
-            "status": "success",
-            "original_sentence": "add 2 kg rice",
-            "parameterized_sentence": "add 2 kg producttoken",
-            "groups": [{
-                "action": "add",
-                "intent": "add",
-                "intent_confidence": 0.98,
-                "products": ["rice"],
-                "quantities": ["2"],
-                "units": ["kg"],
-                "brands": [],
-                "variants": [],
-                "ordinal_ref": null
-            }],
-            "grouping_result": {
-                "status": "ok",
-                "reason": null,
-                "route": "rule"
+            "stages": {
+                "extraction": {...},
+                "intent": {...},
+                "structure": {...},
+                "grouping": {...},
+                "semantic": {...},
+                "calendar": {...}
             },
-            "notes": "Luma pipeline (route=rule)"
+            "clarification": {
+                "needed": true,
+                "message": "Do you mean 2am or 2pm?"
+            }
         }
     }
     """
     request_id = g.request_id if hasattr(g, 'request_id') else 'unknown'
     
-    if pipeline is None:
+    if intent_resolver is None:
         logger.error("Pipeline not initialized", extra={'request_id': request_id})
         return jsonify({
             "success": False,
@@ -245,8 +254,8 @@ def extract():
             }), 400
         
         text = data["text"]
-        force_llm = data.get("force_llm", False)
-        _enable_fuzzy = data.get("enable_fuzzy", False) and ENABLE_FUZZY_MATCHING  # noqa: F841
+        domain = data.get("domain", "service")
+        timezone = data.get("timezone", "UTC")
         
         if not text or not isinstance(text, str):
             logger.warning("Invalid text parameter", extra={'request_id': request_id})
@@ -255,13 +264,14 @@ def extract():
                 "error": "'text' must be a non-empty string"
             }), 400
         
-        # Log extraction start
+        # Log request
         logger.info(
-            "Processing extraction request",
+            "Processing booking request",
             extra={
                 'request_id': request_id,
                 'text_length': len(text),
-                'force_llm': force_llm
+                'domain': domain,
+                'timezone': timezone
             }
         )
         
@@ -276,42 +286,144 @@ def extract():
             "error": f"Invalid request format: {str(e)}"
         }), 400
     
-    # Process extraction
+    # Process booking request
     try:
         start_time = time.time()
         
-        # Extract entities and get dict format
-        result_dict = pipeline.extract_dict(text, force_llm=force_llm)
+        # Find normalization directory
+        normalization_dir = find_normalization_dir()
+        if not normalization_dir:
+            return jsonify({
+                "success": False,
+                "error": "Normalization directory not found"
+            }), 500
+        
+        entity_file = str(normalization_dir / "101.v1.json")
+        
+        # Initialize now datetime
+        now = datetime.now()
+        now = _localize_datetime(now, timezone)
+        
+        results = {
+            "input": {
+                "sentence": text,
+                "domain": domain,
+                "timezone": timezone,
+                "now": now.isoformat()
+            },
+            "stages": {}
+        }
+        
+        # Stage 1: Entity Extraction
+        try:
+            matcher = EntityMatcher(domain=domain, entity_file=entity_file)
+            extraction_result = matcher.extract_with_parameterization(text)
+            results["stages"]["extraction"] = extraction_result
+        except Exception as e:
+            results["stages"]["extraction"] = {"error": str(e)}
+            return jsonify({"success": False, "data": results}), 500
+        
+        # Stage 2: Intent Resolution
+        try:
+            intent, confidence = intent_resolver.resolve_intent(text, extraction_result)
+            results["stages"]["intent"] = {"intent": intent, "confidence": confidence}
+        except Exception as e:
+            results["stages"]["intent"] = {"error": str(e)}
+            return jsonify({"success": False, "data": results}), 500
+        
+        # Stage 3: Structural Interpretation
+        try:
+            psentence = extraction_result.get('psentence', '')
+            structure = interpret_structure(psentence, extraction_result)
+            results["stages"]["structure"] = structure.to_dict()["structure"]
+        except Exception as e:
+            results["stages"]["structure"] = {"error": str(e)}
+            return jsonify({"success": False, "data": results}), 500
+        
+        # Stage 4: Appointment Grouping
+        try:
+            grouped_result = group_appointment(extraction_result, structure)
+            results["stages"]["grouping"] = grouped_result
+        except Exception as e:
+            results["stages"]["grouping"] = {"error": str(e)}
+            return jsonify({"success": False, "data": results}), 500
+        
+        # Stage 5: Semantic Resolution
+        try:
+            semantic_result = resolve_semantics(grouped_result, extraction_result)
+            results["stages"]["semantic"] = semantic_result.to_dict()
+        except Exception as e:
+            results["stages"]["semantic"] = {"error": str(e)}
+            return jsonify({"success": False, "data": results}), 500
+        
+        # Stage 6: Calendar Binding
+        try:
+            calendar_result = bind_calendar(
+                semantic_result,
+                now,
+                timezone,
+                intent=intent,
+                entities=extraction_result
+            )
+            results["stages"]["calendar"] = calendar_result.to_dict()
+        except Exception as e:
+            results["stages"]["calendar"] = {"error": str(e)}
+            return jsonify({"success": False, "data": results}), 500
+        
+        # Extract clarification message if needed
+        clarification = None
+        if semantic_result.needs_clarification and semantic_result.clarification:
+            try:
+                message = render_clarification(semantic_result.clarification)
+                clarification = {
+                    "needed": True,
+                    "reason": semantic_result.clarification.reason.value,
+                    "message": message
+                }
+            except Exception:
+                clarification = {
+                    "needed": True,
+                    "reason": semantic_result.clarification.reason.value
+                }
+        elif calendar_result.needs_clarification and calendar_result.clarification:
+            try:
+                message = render_clarification(calendar_result.clarification)
+                clarification = {
+                    "needed": True,
+                    "reason": calendar_result.clarification.reason.value,
+                    "message": message
+                }
+            except Exception:
+                clarification = {
+                    "needed": True,
+                    "reason": calendar_result.clarification.reason.value
+                }
+        else:
+            clarification = {"needed": False}
         
         processing_time = round((time.time() - start_time) * 1000, 2)
         
-        # Log successful extraction
+        # Log successful processing
         if config.LOG_PERFORMANCE_METRICS:
             logger.info(
-                "Extraction completed successfully",
+                "Booking request processed successfully",
                 extra={
                     'request_id': request_id,
                     'processing_time_ms': processing_time,
-                    'groups_count': len(result_dict.get('groups', [])),
-                    'route': result_dict.get('grouping_result', {}).get('route'),
-                    'text_length': len(text)
+                    'needs_clarification': clarification["needed"],
+                    'intent': intent
                 }
             )
         
-        # Note: Fuzzy matching can be added here if needed
-        # if _enable_fuzzy and FUZZY_AVAILABLE:
-        #     from luma.extraction import FuzzyEntityMatcher
-        #     fuzzy = FuzzyEntityMatcher(pipeline.entities, threshold=88)
-        #     ... merge fuzzy results ...
-        
         return jsonify({
             "success": True,
-            "data": result_dict
+            "data": results,
+            "clarification": clarification
         })
     
     except Exception as e:  # noqa: BLE001
         logger.error(
-            f"Extraction failed: {str(e)}",
+            f"Processing failed: {str(e)}",
             extra={
                 'request_id': request_id,
                 'error_type': type(e).__name__,
@@ -321,7 +433,7 @@ def extract():
         )
         return jsonify({
             "success": False,
-            "error": f"Extraction failed: {str(e)}"
+            "error": f"Processing failed: {str(e)}"
         }), 500
 
 
@@ -331,7 +443,7 @@ def not_found(error):  # noqa: ARG001, pylint: disable=unused-argument
     return jsonify({
         "success": False,
         "error": "Endpoint not found",
-        "available_endpoints": ["/extract", "/health", "/info"]
+        "available_endpoints": ["/book", "/health", "/info"]
     }), 404
 
 
@@ -347,7 +459,7 @@ def internal_error(error):  # noqa: ARG001, pylint: disable=unused-argument
 def main():
     """Run the Flask development server."""
     logger.info("=" * 60)
-    logger.info("Luma Entity Extraction API")
+    logger.info("Luma Service/Reservation Booking API")
     logger.info(f"Starting server on http://localhost:{PORT}")
     logger.info("=" * 60)
     
@@ -357,7 +469,7 @@ def main():
         sys.exit(1)
     
     logger.info(f"API ready! Listening on port {PORT}")
-    logger.info(f"Try: curl -X POST http://localhost:{PORT}/extract -H 'Content-Type: application/json' -d '{{\"text\": \"add 2 kg rice\"}}'")
+    logger.info(f"Try: curl -X POST http://localhost:{PORT}/book -H 'Content-Type: application/json' -d '{{\"text\": \"book haircut tomorrow at 2pm\"}}'")
     
     # Run Flask
     app.run(
@@ -369,4 +481,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
