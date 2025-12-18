@@ -134,8 +134,14 @@ def resolve_semantics(
     # Extract services
     services = booking.get("services", [])
 
-    # Resolve time semantics
-    time_resolution = _resolve_time_semantics(entities, structure)
+    # Detect time constraints BEFORE time resolution (to exclude them from binding)
+    time_constraint = _detect_time_constraint(entities)
+
+    # Filter out constraint times from entities for regular time resolution
+    filtered_entities = _filter_constraint_times(entities, time_constraint)
+
+    # Resolve time semantics (excluding constraint times)
+    time_resolution = _resolve_time_semantics(filtered_entities, structure)
 
     # Resolve date semantics
     date_resolution = _resolve_date_semantics(entities, structure)
@@ -198,7 +204,8 @@ def resolve_semantics(
         "date_modifiers": date_resolution.get("modifiers", []),
         "time_mode": time_resolution["mode"],
         "time_refs": time_resolution["refs"],
-        "duration": duration
+        "duration": duration,
+        "time_constraint": time_constraint
     }
 
     return SemanticResolutionResult(
@@ -303,6 +310,94 @@ def _resolve_time_semantics(
         "mode": "none",
         "refs": []
     }
+
+
+def _detect_time_constraint(
+    entities: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """
+    Detect time constraint patterns like "by 4pm" or "before 5pm".
+
+    Args:
+        entities: Raw extraction output containing psentence and times
+
+    Returns:
+        Dict with "latest_time" if constraint detected, None otherwise
+    """
+    psentence = entities.get("psentence", "")
+    if not psentence:
+        return None
+
+    # Check for "by timetoken" or "before timetoken" patterns in psentence
+    # Pattern: "by timetoken" or "before timetoken"
+    constraint_pattern = re.compile(
+        r'\b(by|before)\s+timetoken\b', re.IGNORECASE)
+    if not constraint_pattern.search(psentence):
+        return None
+
+    # If constraint pattern found, find which time entity corresponds to it
+    # We need to match the position in psentence to the time entity
+    times = entities.get("times", [])
+    if not times:
+        return None
+
+    # Find the time that appears after "by" or "before" in psentence
+    # Simple approach: if there's only one time and the pattern matches, use it
+    # More robust: match by position, but for now this should work
+    if len(times) == 1:
+        # Single time with constraint pattern → it's the constraint
+        latest_time = times[0].get("text", "")
+        if latest_time:
+            return {
+                "latest_time": latest_time
+            }
+    else:
+        # Multiple times: need to find which one is after "by"/"before"
+        # For now, if pattern exists, use the first time as constraint
+        # (This could be improved with position matching)
+        latest_time = times[0].get("text", "")
+        if latest_time:
+            return {
+                "latest_time": latest_time
+            }
+
+    return None
+
+
+def _filter_constraint_times(
+    entities: Dict[str, Any],
+    time_constraint: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Filter out constraint times from entities so they don't get bound as regular times.
+
+    Args:
+        entities: Raw extraction output
+        time_constraint: Time constraint dict with latest_time, or None
+
+    Returns:
+        Filtered entities dict with constraint times removed
+    """
+    if not time_constraint:
+        return entities
+
+    # Create a copy to avoid mutating original
+    filtered = entities.copy()
+    constraint_time = time_constraint.get("latest_time", "")
+
+    if not constraint_time:
+        return filtered
+
+    # Filter out times that match the constraint time
+    times = filtered.get("times", [])
+    if times:
+        filtered_times = [
+            t for t in times
+            if t.get("text", "") != constraint_time
+        ]
+        filtered["times"] = filtered_times
+
+    return filtered
 
 
 # Date pattern matching helpers

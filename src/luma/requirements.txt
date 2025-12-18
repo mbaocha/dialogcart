@@ -9,5 +9,8 @@ numpy==1.26.2
 # Fuzzy matching (optional - for typo tolerance)
 # rapidfuzz==3.5.2
 
+# Memory / Redis
+redis==5.0.1
+
 # Utility
 pydantic==2.5.0
