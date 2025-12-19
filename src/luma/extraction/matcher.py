@@ -302,11 +302,18 @@ class EntityMatcher:
         for time_window_ent in raw_result.get("time_windows", []):
             position = time_window_ent.get("position", 0)
             length = time_window_ent.get("length", 1)
-            time_windows.append({
+            time_window_text = time_window_ent.get("text", "").lower()
+            
+            # Build time window entity with symbolic label only
+            # Numeric expansion is handled by calendar binding using configurable mapping
+            time_window_obj = {
                 "text": time_window_ent.get("text", ""),
                 "start": position,
-                "end": position + length
-            })
+                "end": position + length,
+                "time_window": time_window_text  # Symbolic semantic field only
+            }
+            
+            time_windows.append(time_window_obj)
 
         durations = []
         for duration_ent in raw_result.get("durations", []):

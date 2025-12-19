@@ -230,6 +230,83 @@ def _is_fuzzy_hour(time_text: str) -> bool:
     return any(pattern in time_lower for pattern in fuzzy_patterns)
 
 
+def _extract_hour_only_time(entities: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Extract hour-only time patterns from original sentence.
+
+    Patterns:
+    - Direct: "at 9", "at 10", "by 4", "before 6", "after 3"
+    - Contextual modifications: "make it 10", "set it to 9", "change it 11", "move it to 14"
+
+    Only extracts if:
+    - No full time already extracted (CRITICAL: skip if TIME tokens with am/pm exist)
+    - No time window already extracted
+    - Pattern matches hour-only expression
+    - No time constraint pattern (constraints handled separately)
+
+    Args:
+        entities: Raw extraction output containing osentence
+
+    Returns:
+        Dict with "hour" (int 0-23) and "text" (original match) if found, None otherwise
+    """
+    # CRITICAL: Skip fallback if TIME tokens with am/pm already exist
+    times = entities.get("times", [])
+    if times:
+        # Check if any time has am/pm - if so, don't use fallback
+        for time_entity in times:
+            time_text = time_entity.get("text", "").lower()
+            if "am" in time_text or "pm" in time_text:
+                return None  # TIME token with am/pm exists, skip fallback
+
+    osentence = entities.get("osentence", "")
+    if not osentence:
+        return None
+
+    # Pattern 1: Direct hour-only patterns (exclude constraint patterns)
+    # (at)\s+(\d{1,2})\b - only "at" for direct times, not "by/before/after" (those are constraints)
+    # Matches: "at 9", "at 10" (but NOT "by 4", "before 6", "after 3" - those are constraints)
+    direct_pattern = re.compile(
+        r'\b(at)\s+(\d{1,2})\b',
+        re.IGNORECASE
+    )
+
+    match = direct_pattern.search(osentence)
+    if match:
+        hour_str = match.group(2)
+        hour = int(hour_str)
+
+        # Validate hour range (0-23)
+        if 0 <= hour <= 23:
+            return {
+                "hour": hour,
+                "text": match.group(0)  # Full match like "at 10"
+            }
+
+    # Pattern 2: Contextual modification patterns
+    # (make|set|change|update|move)\s+(it|this)\s+(to\s+)?(\d{1,2})\b
+    # Matches: "make it 10", "set it to 9", "change it 11", "move it to 14"
+    modification_pattern = re.compile(
+        r'\b(make|set|change|update|move)\s+(it|this)\s+(to\s+)?(\d{1,2})\b',
+        re.IGNORECASE
+    )
+
+    match = modification_pattern.search(osentence)
+    if match:
+        # Hour is in group 4 (after verb, pronoun, optional "to")
+        hour_str = match.group(4)
+        hour = int(hour_str)
+
+        # Validate hour range (0-23)
+        if 0 <= hour <= 23:
+            return {
+                "hour": hour,
+                "text": match.group(0)  # Full match like "make it 10"
+            }
+
+    return None
+
+
 def _resolve_time_semantics(
     entities: Dict[str, Any],
     structure: Dict[str, Any]
@@ -305,7 +382,32 @@ def _resolve_time_semantics(
             "refs": [tw.get("text") for tw in time_windows]
         }
 
-    # Rule 5: None
+    # Rule 5: Hour-only fallback - extract hour-only patterns if no times/windows extracted
+    # CRITICAL: Only trigger if no TIME tokens exist (prevents fallback from overriding parsed times)
+    # Also skip if time_constraint exists (constraints are handled separately)
+    if not times and not time_windows:
+        # Check if there's a time constraint - if so, don't use fallback
+        # (time constraints are handled separately and should not trigger hour-only fallback)
+        osentence = entities.get("osentence", "")
+        has_constraint_pattern = re.search(
+            r'\b(by|before|after)\s+\d+', osentence, re.IGNORECASE)
+
+        # Only use fallback if no constraint pattern and no extracted times
+        if not has_constraint_pattern:
+            hour_only_match = _extract_hour_only_time(entities)
+            if hour_only_match:
+                hour = hour_only_match["hour"]
+                # Normalize to HH:00 format (24-hour)
+                time_ref = f"{hour:02d}:00"
+                print(
+                    f"[time-extract]: extracted hour-only time from semantic fallback: {hour_only_match['text']} → {time_ref}")
+                return {
+                    "mode": "exact",
+                    "refs": [time_ref],
+                    "precision": "hour"  # Mark as hour-only precision
+                }
+
+    # Rule 6: None
     return {
         "mode": "none",
         "refs": []
@@ -316,52 +418,112 @@ def _detect_time_constraint(
     entities: Dict[str, Any]
 ) -> Optional[Dict[str, Any]]:
     """
-    Detect time constraint patterns like "by 4pm" or "before 5pm".
+    Detect time constraint patterns like "by 4pm", "before 5pm", or "after 10am".
 
     Args:
         entities: Raw extraction output containing psentence and times
 
     Returns:
-        Dict with "latest_time" if constraint detected, None otherwise
+        Dict with "type" ("before", "after", "by") and "time" (HH:MM format) if constraint detected, None otherwise
     """
     psentence = entities.get("psentence", "")
-    if not psentence:
+    osentence = entities.get("osentence", "")
+    if not psentence or not osentence:
         return None
 
-    # Check for "by timetoken" or "before timetoken" patterns in psentence
-    # Pattern: "by timetoken" or "before timetoken"
+    # Check for constraint patterns: "by timetoken", "before timetoken", "after timetoken"
+    # Pattern: constraint word + timetoken
     constraint_pattern = re.compile(
-        r'\b(by|before)\s+timetoken\b', re.IGNORECASE)
-    if not constraint_pattern.search(psentence):
+        r'\b(by|before|after)\s+timetoken\b', re.IGNORECASE)
+    match = constraint_pattern.search(psentence)
+    if not match:
         return None
+
+    constraint_type = match.group(1).lower()  # "by", "before", or "after"
 
     # If constraint pattern found, find which time entity corresponds to it
-    # We need to match the position in psentence to the time entity
     times = entities.get("times", [])
     if not times:
         return None
 
-    # Find the time that appears after "by" or "before" in psentence
-    # Simple approach: if there's only one time and the pattern matches, use it
-    # More robust: match by position, but for now this should work
+    # Find the time that appears after constraint word in original sentence
+    # Extract the time text and convert to 24-hour format if needed
     if len(times) == 1:
         # Single time with constraint pattern → it's the constraint
-        latest_time = times[0].get("text", "")
-        if latest_time:
-            return {
-                "latest_time": latest_time
-            }
+        time_text = times[0].get("text", "")
+        if time_text:
+            # Convert time to 24-hour format (preserve am/pm semantics)
+            time_24h = _convert_time_to_24h(time_text)
+            if time_24h:
+                return {
+                    "type": constraint_type,
+                    "time": time_24h
+                }
     else:
-        # Multiple times: need to find which one is after "by"/"before"
-        # For now, if pattern exists, use the first time as constraint
-        # (This could be improved with position matching)
-        latest_time = times[0].get("text", "")
-        if latest_time:
-            return {
-                "latest_time": latest_time
-            }
+        # Multiple times: find which one is after constraint word
+        # Match constraint word position in original sentence
+        constraint_word_match = re.search(
+            r'\b(by|before|after)\s+', osentence, re.IGNORECASE)
+        if constraint_word_match:
+            constraint_pos = constraint_word_match.end()
+            # Find first time entity after constraint position
+            for time_entity in times:
+                time_start = time_entity.get("start", 0)
+                if time_start >= constraint_pos:
+                    time_text = time_entity.get("text", "")
+                    if time_text:
+                        time_24h = _convert_time_to_24h(time_text)
+                        if time_24h:
+                            return {
+                                "type": constraint_type,
+                                "time": time_24h
+                            }
+        # Fallback: use first time if position matching fails
+        time_text = times[0].get("text", "")
+        if time_text:
+            time_24h = _convert_time_to_24h(time_text)
+            if time_24h:
+                return {
+                    "type": constraint_type,
+                    "time": time_24h
+                }
 
     return None
+
+
+def _convert_time_to_24h(time_text: str) -> Optional[str]:
+    """
+    Convert time text to 24-hour format (HH:MM), preserving am/pm semantics.
+
+    Examples:
+    - "4pm" → "16:00"
+    - "10am" → "10:00"
+    - "12:30pm" → "12:30"
+    - "14:00" → "14:00" (already 24-hour)
+    """
+    time_lower = time_text.lower().strip()
+
+    # Check if already 24-hour format (HH:MM or HH.MM)
+    if re.match(r'^([01]?[0-9]|2[0-3])[:.][0-5][0-9]$', time_text):
+        # Already 24-hour, return as-is
+        return time_text.replace('.', ':')
+
+    # Extract hour, minutes, and meridiem
+    match = re.match(r'^(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?$', time_lower)
+    if not match:
+        return None
+
+    hour = int(match.group(1))
+    minutes = int(match.group(2)) if match.group(2) else 0
+    meridiem = match.group(3)
+
+    # Convert to 24-hour format
+    if meridiem == "pm" and hour != 12:
+        hour = hour + 12
+    elif meridiem == "am" and hour == 12:
+        hour = 0
+
+    return f"{hour:02d}:{minutes:02d}"
 
 
 def _filter_constraint_times(
@@ -373,7 +535,7 @@ def _filter_constraint_times(
 
     Args:
         entities: Raw extraction output
-        time_constraint: Time constraint dict with latest_time, or None
+        time_constraint: Time constraint dict with "type" and "time" (or legacy "latest_time"), or None
 
     Returns:
         Filtered entities dict with constraint times removed
@@ -383,18 +545,28 @@ def _filter_constraint_times(
 
     # Create a copy to avoid mutating original
     filtered = entities.copy()
-    constraint_time = time_constraint.get("latest_time", "")
+
+    # Support both new format ("time") and legacy format ("latest_time")
+    constraint_time = time_constraint.get(
+        "time") or time_constraint.get("latest_time", "")
 
     if not constraint_time:
         return filtered
 
     # Filter out times that match the constraint time
+    # Need to match both original format and 24-hour format
     times = filtered.get("times", [])
     if times:
-        filtered_times = [
-            t for t in times
-            if t.get("text", "") != constraint_time
-        ]
+        filtered_times = []
+        for t in times:
+            time_text = t.get("text", "")
+            # Don't filter if time doesn't match constraint (may be different format)
+            # Only filter exact matches to avoid false positives
+            if time_text != constraint_time:
+                # Also check if time_text converts to same 24h format
+                time_24h = _convert_time_to_24h(time_text)
+                if time_24h != constraint_time:
+                    filtered_times.append(t)
         filtered["times"] = filtered_times
 
     return filtered

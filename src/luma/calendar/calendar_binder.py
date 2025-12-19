@@ -37,6 +37,7 @@ from ..extraction.entity_loading import (
     load_time_window_bounds,
     load_month_names,
     load_global_vocabularies,
+    load_booking_policy,
 )
 
 
@@ -70,6 +71,7 @@ def _load_config() -> Dict[str, Any]:
         _CONFIG_CACHE["time_window_bounds"] = load_time_window_bounds(
             config_path)
         _CONFIG_CACHE["month_names"] = load_month_names(config_path)
+        _CONFIG_CACHE["booking_policy"] = load_booking_policy(config_path)
         vocabularies = load_global_vocabularies(config_path)
         _CONFIG_CACHE["weekday_to_number"] = vocabularies.get(
             "weekdays", {}).get("to_number", {})
@@ -84,6 +86,11 @@ def _get_relative_date_offsets() -> Dict[str, int]:
 def _get_time_window_bounds() -> Dict[str, Dict[str, str]]:
     """Get time window bounds from config."""
     return _load_config()["time_window_bounds"]
+
+
+def _get_booking_policy() -> Dict[str, bool]:
+    """Get booking policy from config."""
+    return _load_config()["booking_policy"]
 
 
 def _get_month_names() -> Dict[str, int]:
@@ -384,45 +391,8 @@ def bind_calendar(
     # Ensure now is timezone-aware
     now = _localize_datetime(now, tz)
 
-    # SHORT-CIRCUIT: If semantic resolution requires clarification, trust it
-    # Calendar binding must NOT re-evaluate ambiguity
-    # BUT: Preserve resolved dates even when clarification is needed
-    if semantic_result.needs_clarification:
-        resolved_booking = semantic_result.resolved_booking
-        services = resolved_booking.get("services", [])
-        duration = resolved_booking.get("duration")
-
-        # Try to bind date even if clarification is needed (preserve resolved dates)
-        date_refs = resolved_booking.get("date_refs", [])
-        date_mode = resolved_booking.get("date_mode", "flexible")
-        date_range = None
-        if date_refs:
-            date_range = _bind_dates(date_refs, date_mode, now, tz)
-
-        # Update clarification data to include resolved date if present
-        clarification = semantic_result.clarification
-        if clarification and date_range:
-            # Create updated clarification with date included
-            updated_data = clarification.data.copy()
-            updated_data["date"] = date_range.get("start_date")
-            clarification = Clarification(
-                reason=clarification.reason,
-                data=updated_data
-            )
-
-        # Preserve date_range if successfully bound, even with clarification
-        return CalendarBindingResult(
-            calendar_booking={
-                "services": services,
-                "date_range": date_range,  # Preserve resolved date
-                "time_range": None,
-                "datetime_range": None,
-                "duration": duration
-            },
-            needs_clarification=True,
-            clarification=clarification
-        )
-
+    # Calendar binding assumes inputs are already approved by Decision layer
+    # No implicit clarification triggers - just bind what's provided
     resolved_booking = semantic_result.resolved_booking
     # ALLOW: Calendar binding to proceed even if services is missing (as long as date/time exists)
     # Guardrail: Do not reject binding if services == []
@@ -439,106 +409,9 @@ def bind_calendar(
     print(
         f"DEBUG: date_refs={date_refs}, date_mode={date_mode}, time_refs={time_refs}, time_mode={time_mode}", file=sys.stderr)
 
-    # Bind dates
+    # Bind dates - assume inputs are approved, just bind what's provided
     date_range = _bind_dates(date_refs, date_mode, now, tz)
     print(f"DEBUG: date_range={date_range}", file=sys.stderr)
-
-    # Check for time constraint
-    time_constraint = resolved_booking.get("time_constraint")
-    if time_constraint:
-        # Time constraint exists - it's a constraint, not an exact time
-        # If no date, require clarification
-        if not date_range:
-            return CalendarBindingResult(
-                calendar_booking={
-                    "services": services,
-                    "date_range": None,
-                    "time_range": None,
-                    "datetime_range": None,
-                    "duration": duration
-                },
-                needs_clarification=True,
-                clarification=Clarification(
-                    reason=ClarificationReason.MISSING_DATE_FOR_TIME_CONSTRAINT,
-                    data={
-                        "time_constraint": time_constraint.get("latest_time"),
-                        "constraint_type": "latest"
-                    }
-                )
-            )
-        # If date exists but only constraint (no exact time), don't create datetime_range
-        # Time constraints like "by 4pm" are constraints, not exact times
-        # They should NOT produce a resolved datetime_range
-        # Check if there are any regular time_refs (not constraint times)
-        if not time_refs:
-            # Only constraint time, no regular time → don't create datetime_range
-            # Return date_range only, no datetime_range
-            # Include resolved date in clarification data
-            clarification_data = {
-                "time_constraint": time_constraint.get("latest_time"),
-                "constraint_type": "latest"
-            }
-            if date_range:
-                # Include resolved date in ISO format (start_date)
-                clarification_data["date"] = date_range.get("start_date")
-
-            return CalendarBindingResult(
-                calendar_booking={
-                    "services": services,
-                    "date_range": date_range,  # Preserve resolved date
-                    "time_range": None,
-                    "datetime_range": None,  # No datetime_range for constraints alone
-                    "duration": duration
-                },
-                needs_clarification=True,
-                clarification=Clarification(
-                    reason=ClarificationReason.MISSING_TIME,
-                    data=clarification_data
-                )
-            )
-
-    # If date_refs exist but date_range is None, resolution failed - require clarification
-    if date_refs and not date_range:
-        # If the single unresolved ref is a bare weekday (no modifier), classify as context-dependent date
-        if len(date_refs) == 1:
-            weekday_map = _get_weekday_to_number()
-            ref = str(date_refs[0]).lower()
-            modifiers = ("this ", "next ", "coming ", "last ", "following ")
-            is_bare_weekday = ref in weekday_map and not ref.startswith(
-                modifiers)
-            if is_bare_weekday:
-                return CalendarBindingResult(
-                    calendar_booking={
-                        "services": services,
-                        "date_range": None,
-                        "time_range": None,
-                        "datetime_range": None,
-                        "duration": duration
-                    },
-                    needs_clarification=True,
-                    clarification=Clarification(
-                        reason=ClarificationReason.CONTEXT_DEPENDENT_DATE,
-                        data={"weekday": ref}
-                    )
-                )
-
-        return CalendarBindingResult(
-            calendar_booking={
-                "services": services,
-                "date_range": None,
-                "time_range": None,
-                "datetime_range": None,
-                "duration": duration
-            },
-            needs_clarification=True,
-            clarification=Clarification(
-                reason=ClarificationReason.CONFLICTING_SIGNALS,
-                data={
-                    "error_type": "unresolved_date_references",
-                    "date_refs": date_refs
-                }
-            )
-        )
 
     # Extract time windows from entities for bias rule (if available)
     time_windows = None
@@ -546,14 +419,9 @@ def bind_calendar(
         time_windows = entities.get("time_windows", [])
 
     # Bind times (with optional window info for bias rule)
-    # BUT: If time_constraint exists, don't bind constraint times as exact times
-    # Time constraints are constraints, not exact times - they should not produce datetime_range
-    if time_constraint and not time_refs:
-        # Only constraint time, no regular time → don't create datetime_range
-        time_range = None
-    else:
-        time_range = _bind_times(time_refs, time_mode, now,
-                                 tz, time_windows=time_windows)
+    # Decision layer has already approved all time configurations
+    time_range = _bind_times(time_refs, time_mode, now,
+                             tz, time_windows=time_windows)
     print(f"DEBUG: time_range={time_range}", file=sys.stderr)
 
     # Combine date + time into datetime range
@@ -567,49 +435,30 @@ def bind_calendar(
         datetime_range = _apply_duration(datetime_range, duration, tz)
 
     # Validate ranges (includes conflict detection)
-    # NOTE: Only validation errors are checked here - ambiguity is decided by semantic resolution
+    # NOTE: Only validation errors are checked here - all clarification decisions come from Decision layer
     validation_needs_clarification, validation_reason = _validate_ranges(
         date_range, time_range, datetime_range, semantic_result, duration
     )
 
-    needs_clarification = validation_needs_clarification
-
-    # Check if time is missing when date is resolved (for CREATE_BOOKING intent)
-    # This handles cases where time is completely absent, not just ambiguous
-    time_missing = (
-        not time_refs and
-        not time_constraint and
-        time_mode == "none" and
-        date_range is not None and
-        intent in BINDING_INTENTS  # Only for booking intents
-    )
-
-    if time_missing:
-        needs_clarification = True
-
     calendar_booking = {
         "services": services,
-        "date_range": date_range,  # Always preserve if resolved
+        "date_range": date_range,  # Bind what's provided
         "time_range": time_range,
         "datetime_range": datetime_range,
         "duration": duration
     }
 
     clarification_obj = None
+    needs_clarification = validation_needs_clarification
+    # Only set clarification for validation errors (range conflicts, duration issues, etc.)
+    # All other clarification decisions come from Decision layer
     if needs_clarification:
         # Map validation errors to structured clarifications
-        # NOTE: Ambiguity reasons come from semantic resolution, not calendar binding
         reason_enum = ClarificationReason.CONFLICTING_SIGNALS  # default fallback
         data = {}
 
-        # Handle missing time when date is resolved
-        if time_missing:
-            reason_enum = ClarificationReason.MISSING_TIME
-            data = {}
-            if date_range:
-                data["date"] = date_range.get("start_date")
-        # Only handle validation errors (range conflicts, duration issues, etc.)
-        elif validation_reason:
+        # Handle validation errors (range conflicts, duration issues, etc.)
+        if validation_reason:
             validation_lower = validation_reason.lower()
             if "end date" in validation_lower or "end datetime" in validation_lower or "after" in validation_lower:
                 reason_enum = ClarificationReason.CONFLICTING_SIGNALS

@@ -34,9 +34,9 @@ if __name__ == "__main__":
 
 import time  # noqa: E402
 from typing import Dict, Any, Optional  # noqa: E402
-from datetime import datetime, timezone  # noqa: E402
+from datetime import datetime, timezone as dt_timezone  # noqa: E402
 from flask import Flask, request, jsonify, g  # noqa: E402
-from luma.calendar.calendar_binder import bind_calendar, _bind_times, _combine_datetime_range, _get_timezone  # noqa: E402
+from luma.calendar.calendar_binder import bind_calendar, _bind_times, _combine_datetime_range, _get_timezone, _get_booking_policy  # noqa: E402
 from luma.resolution.semantic_resolver import resolve_semantics  # noqa: E402
 from luma.grouping.appointment_grouper import group_appointment  # noqa: E402
 from luma.structure.interpreter import interpret_structure  # noqa: E402
@@ -47,6 +47,7 @@ from luma.logging_config import setup_logging, generate_request_id  # noqa: E402
 from luma.memory import RedisMemoryStore  # noqa: E402
 from luma.memory.merger import merge_booking_state, extract_memory_state_for_response  # noqa: E402
 from luma.clarification import ClarificationReason  # noqa: E402
+from luma.decision import decide_booking_status  # noqa: E402
 
 # Internal intent (never returned in API, never persisted)
 CONTEXTUAL_UPDATE = "CONTEXTUAL_UPDATE"
@@ -188,6 +189,143 @@ def _localize_datetime(dt: datetime, timezone: str) -> datetime:
             return dt
 
 
+def _is_partial_booking(memory_state: Optional[Dict[str, Any]]) -> bool:
+    """
+    Check if memory contains a PARTIAL booking draft.
+
+    A PARTIAL booking is one that:
+    - Has intent == "CREATE_BOOKING"
+    - Has clarification (needs_clarification) OR booking_state == "PARTIAL"
+    """
+    if not memory_state:
+        return False
+
+    if memory_state.get("intent") != "CREATE_BOOKING":
+        return False
+
+    # Check for clarification (indicates PARTIAL)
+    if memory_state.get("clarification") is not None:
+        return True
+
+    # Check booking_state if stored
+    booking_state = memory_state.get("booking_state", {})
+    if isinstance(booking_state, dict) and booking_state.get("booking_state") == "PARTIAL":
+        return True
+
+    return False
+
+
+def _has_active_booking(memory_state: Optional[Dict[str, Any]]) -> bool:
+    """
+    Check if memory contains an active booking (PARTIAL or RESOLVED).
+
+    An active booking is one that:
+    - Has intent == "CREATE_BOOKING"
+    - Has booking_state == "PARTIAL" or "RESOLVED" OR has clarification (PARTIAL)
+    """
+    if not memory_state:
+        return False
+
+    if memory_state.get("intent") != "CREATE_BOOKING":
+        return False
+
+    # Check for clarification (indicates PARTIAL)
+    if memory_state.get("clarification") is not None:
+        return True
+
+    # Check booking_state if stored
+    booking_state = memory_state.get("booking_state", {})
+    if isinstance(booking_state, dict):
+        booking_state_value = booking_state.get("booking_state")
+        if booking_state_value in ("PARTIAL", "RESOLVED"):
+            return True
+
+    return False
+
+
+def _merge_semantic_results(
+    memory_booking: Dict[str, Any],
+    current_resolved_booking: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Merge semantic results from memory and current input.
+
+    Rules:
+    - SERVICES: Keep from memory if present, otherwise use current
+    - DATE: Keep from memory if present, otherwise use current
+    - TIME: Use current if present, otherwise keep from memory
+    - DURATION: Use current if present, otherwise keep from memory
+    - TIME_CONSTRAINT: Use current if present, otherwise keep from memory
+
+    This preserves existing fields and fills missing ones only.
+    """
+    merged = {}
+
+    # SERVICES: Prefer memory (existing booking), fallback to current
+    # CRITICAL: If current has no services, preserve memory services (services are sticky)
+    memory_services = memory_booking.get("services", [])
+    current_services = current_resolved_booking.get("services", [])
+    if current_services:
+        # Current input has services → use current (explicit change)
+        merged["services"] = current_services
+    else:
+        # Current input has no services → preserve memory services (sticky)
+        merged["services"] = memory_services if memory_services else []
+
+    # DATE: Prefer memory if present, otherwise use current (promote current if memory is empty)
+    # CRITICAL: If memory has NO date and current provides date, promote current date
+    # This enables "time only" → "date only" → RESOLVED flow
+    memory_date_mode = memory_booking.get("date_mode", "none")
+    memory_date_refs = memory_booking.get("date_refs", [])
+    current_date_mode = current_resolved_booking.get("date_mode", "none")
+    current_date_refs = current_resolved_booking.get("date_refs", [])
+
+    if memory_date_refs and memory_date_mode != "none":
+        # Memory has date → keep memory date
+        merged["date_mode"] = memory_date_mode
+        merged["date_refs"] = memory_date_refs
+        merged["date_modifiers"] = memory_booking.get("date_modifiers", [])
+    elif current_date_refs and current_date_mode != "none":
+        # Memory has no date, current has date → promote current date
+        merged["date_mode"] = current_date_mode
+        merged["date_refs"] = current_date_refs
+        merged["date_modifiers"] = current_resolved_booking.get(
+            "date_modifiers", [])
+    else:
+        # Neither has date
+        merged["date_mode"] = "none"
+        merged["date_refs"] = []
+        merged["date_modifiers"] = []
+
+    # TIME: Prefer current (new input), fallback to memory
+    memory_time_mode = memory_booking.get("time_mode", "none")
+    memory_time_refs = memory_booking.get("time_refs", [])
+    current_time_mode = current_resolved_booking.get("time_mode", "none")
+    current_time_refs = current_resolved_booking.get("time_refs", [])
+
+    if current_time_refs and current_time_mode != "none":
+        merged["time_mode"] = current_time_mode
+        merged["time_refs"] = current_time_refs
+    elif memory_time_refs and memory_time_mode != "none":
+        merged["time_mode"] = memory_time_mode
+        merged["time_refs"] = memory_time_refs
+    else:
+        merged["time_mode"] = "none"
+        merged["time_refs"] = []
+
+    # TIME_CONSTRAINT: Prefer current, fallback to memory
+    current_time_constraint = current_resolved_booking.get("time_constraint")
+    memory_time_constraint = memory_booking.get("time_constraint")
+    merged["time_constraint"] = current_time_constraint if current_time_constraint else memory_time_constraint
+
+    # DURATION: Prefer current, fallback to memory
+    current_duration = current_resolved_booking.get("duration")
+    memory_duration = memory_booking.get("duration")
+    merged["duration"] = current_duration if current_duration is not None else memory_duration
+
+    return merged
+
+
 def init_pipeline():
     """Initialize the pipeline components."""
     global entity_matcher, intent_resolver, memory_store  # noqa: PLW0603
@@ -299,6 +437,9 @@ def resolve():
     }
     """
     request_id = g.request_id if hasattr(g, 'request_id') else 'unknown'
+
+    logger.info("TRACE: entered resolve() end-of-function marker",
+                extra={'request_id': request_id})
 
     if intent_resolver is None:
         logger.error("Pipeline not initialized",
@@ -437,6 +578,27 @@ def resolve():
             results["stages"]["intent"] = {"error": str(e)}
             return jsonify({"success": False, "data": results}), 500
 
+        # CRITICAL: Normalize intent for active booking continuations (PARTIAL or RESOLVED)
+        # If an active booking exists, force intent to CREATE_BOOKING regardless of raw classification
+        # This ensures merge logic always runs for continuations like "at 10" or "make it 10"
+        if _has_active_booking(memory_state):
+            original_intent = intent
+            intent = "CREATE_BOOKING"
+            logger.info(
+                f"Normalized intent to CREATE_BOOKING for active booking continuation: user {user_id}",
+                extra={
+                    'request_id': request_id,
+                    'original_intent': original_intent,
+                    'normalized_intent': intent,
+                    'is_partial': _is_partial_booking(memory_state),
+                    'is_resolved': memory_state.get("booking_state", {}).get("booking_state") == "RESOLVED" if memory_state and isinstance(memory_state.get("booking_state"), dict) else False
+                }
+            )
+            # Update results to reflect normalization
+            results["stages"]["intent"]["original_intent"] = original_intent
+            results["stages"]["intent"]["intent"] = intent
+            results["stages"]["intent"]["normalized_for_active_booking"] = True
+
         # Stage 3: Structural Interpretation
         try:
             psentence = extraction_result.get('psentence', '')
@@ -463,16 +625,835 @@ def resolve():
             results["stages"]["semantic"] = {"error": str(e)}
             return jsonify({"success": False, "data": results}), 500
 
+        # Check for PARTIAL booking continuation
+        # Continuation detection: flag continuation and load draft semantics for merge
+        # Continuation does NOT determine outcome - only merged completeness determines booking_state
+        # Initialize merged_semantic_result to semantic_result (will be updated if continuation detected)
+        merged_semantic_result = semantic_result
+        is_continuation = False
+        if intent == "CREATE_BOOKING" and _has_active_booking(memory_state):
+            # This is a continuation of an active booking (PARTIAL or RESOLVED)
+            is_continuation = True
+            memory_booking_state = memory_state.get("booking_state", {})
+            # Determine if this is a PARTIAL or RESOLVED booking for logging
+            booking_state_value = memory_booking_state.get(
+                "booking_state") if isinstance(memory_booking_state, dict) else None
+            is_resolved_continuation = booking_state_value == "RESOLVED"
+
+            # Extract resolved_booking from memory (if stored) or reconstruct from booking_state
+            # Memory stores booking_state with services, datetime_range, etc.
+            # We also store resolved_booking_semantics if available for proper merging
+            memory_resolved_booking = memory_state.get(
+                "resolved_booking_semantics", {})
+
+            # If not stored, reconstruct from booking_state
+            if not memory_resolved_booking:
+                memory_resolved_booking = {}
+                # Services from memory
+                memory_services = memory_booking_state.get("services", [])
+                if memory_services:
+                    memory_resolved_booking["services"] = memory_services
+                # Note: date/time refs not available from booking_state alone
+                # We'll rely on current input to fill them
+
+            # Diagnostic: Log what was loaded from memory
+            logger.info(
+                f"Loaded memory resolved_booking for continuation: user {user_id}",
+                extra={
+                    'request_id': request_id,
+                    'has_resolved_booking_semantics': bool(memory_resolved_booking),
+                    'memory_date_refs': memory_resolved_booking.get('date_refs', []),
+                    'memory_date_mode': memory_resolved_booking.get('date_mode', 'none'),
+                    'memory_time_refs': memory_resolved_booking.get('time_refs', []),
+                    'memory_time_mode': memory_resolved_booking.get('time_mode', 'none'),
+                    'memory_services': len(memory_resolved_booking.get('services', []))
+                }
+            )
+
+            # Merge semantic results: preserve memory, fill with current
+            merged_resolved_booking = _merge_semantic_results(
+                memory_resolved_booking,
+                semantic_result.resolved_booking
+            )
+
+            # Diagnostic: Log merged result
+            logger.info(
+                f"Merged resolved_booking: user {user_id}",
+                extra={
+                    'request_id': request_id,
+                    'merged_date_refs': merged_resolved_booking.get('date_refs', []),
+                    'merged_date_mode': merged_resolved_booking.get('date_mode', 'none'),
+                    'merged_time_refs': merged_resolved_booking.get('time_refs', []),
+                    'merged_time_mode': merged_resolved_booking.get('time_mode', 'none'),
+                    'merged_services': len(merged_resolved_booking.get('services', []))
+                }
+            )
+
+            # Create merged semantic result
+            from luma.resolution.semantic_resolver import SemanticResolutionResult
+            merged_semantic_result = SemanticResolutionResult(
+                resolved_booking=merged_resolved_booking,
+                needs_clarification=False,  # Will be re-evaluated by decision layer
+                clarification=None
+            )
+
+            logger.info("TRACE: reached merge+decision block",
+                        extra={'request_id': request_id})
+
+            # Store merged result in debug output
+            results["stages"]["semantic_merged"] = {
+                "original": semantic_result.to_dict(),
+                "merged": merged_semantic_result.to_dict(),
+                "is_continuation": True
+            }
+
+            logger.info(
+                f"Detected {'RESOLVED' if is_resolved_continuation else 'PARTIAL'} booking continuation for user {user_id}",
+                extra={
+                    'request_id': request_id,
+                    'original_intent': intent,
+                    'booking_state': booking_state_value,
+                    'is_resolved_continuation': is_resolved_continuation,
+                    'merged_services': len(merged_resolved_booking.get("services", [])),
+                    'merged_date_refs': len(merged_resolved_booking.get("date_refs", [])),
+                    'merged_time_refs': len(merged_resolved_booking.get("time_refs", []))
+                }
+            )
+
+        # NEW: Persist service-only and service+date drafts as active booking drafts
+        # This ensures multi-turn slot filling works (service → date → time)
+        # Check the merged result (or current if no merge happened)
+        resolved_booking_for_draft_check = merged_semantic_result.resolved_booking
+        if resolved_booking_for_draft_check:
+            has_service = bool(
+                resolved_booking_for_draft_check.get("services"))
+            has_date = bool(
+                resolved_booking_for_draft_check.get("date_refs") or
+                resolved_booking_for_draft_check.get("date_range")
+            )
+            has_time = bool(
+                resolved_booking_for_draft_check.get("time_refs") or
+                resolved_booking_for_draft_check.get("time_range") or
+                resolved_booking_for_draft_check.get("time_constraint")
+            )
+
+            # Case 1: Service-only draft (persist for continuation)
+            if has_service and not has_date and not has_time:
+                # Ensure memory_state exists and is properly structured for persistence
+                if not memory_state:
+                    memory_state = {}
+
+                # Set intent if not already set
+                if "intent" not in memory_state:
+                    memory_state["intent"] = "CREATE_BOOKING"
+
+                # Store the semantic draft for proper merging on next turn
+                memory_state["resolved_booking_semantics"] = resolved_booking_for_draft_check
+                memory_state["booking_state"] = {
+                    "booking_state": "PARTIAL",
+                    "reason": "MISSING_DATE_AND_TIME"
+                }
+
+                # Debug log #2: After memory mutation
+                logger.info(
+                    "MEMORY_WRITE",
+                    extra={
+                        'request_id': request_id,
+                        'user_id': user_id,
+                        'keys': list(memory_state.keys()),
+                        'booking_state': memory_state.get("booking_state"),
+                        'has_resolved_booking': "resolved_booking_semantics" in memory_state,
+                    }
+                )
+
+                # Persist immediately to memory store if available
+                if memory_store and intent == "CREATE_BOOKING":
+                    try:
+                        # Debug log #1: Right before memory write
+                        logger.info(
+                            "SERVICE_ONLY_CHECK",
+                            extra={
+                                'request_id': request_id,
+                                'user_id': user_id,
+                                'has_service': bool(resolved_booking_for_draft_check.get("services")),
+                                'has_date': bool(resolved_booking_for_draft_check.get("date_refs") or resolved_booking_for_draft_check.get("date_range")),
+                                'has_time': bool(resolved_booking_for_draft_check.get("time_refs") or resolved_booking_for_draft_check.get("time_range")),
+                                'decision': None,  # Decision not yet made at this point
+                            }
+                        )
+                        memory_state["last_updated"] = datetime.now(
+                            dt_timezone.utc).isoformat()
+                        memory_store.set(
+                            user_id=user_id,
+                            domain=domain,
+                            state=memory_state,
+                            ttl=config.MEMORY_TTL
+                        )
+                        logger.info(
+                            "Persisted service-only booking draft to memory store",
+                            extra={
+                                'request_id': request_id,
+                                'user_id': user_id,
+                                'services': [s.get("text", "") for s in resolved_booking_for_draft_check.get("services", []) if isinstance(s, dict)]
+                            }
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(
+                            f"Failed to persist service-only draft: {e}",
+                            extra={'request_id': request_id}
+                        )
+                else:
+                    # Debug log #1: Right before memory write (when persistence will happen later)
+                    logger.info(
+                        "SERVICE_ONLY_CHECK",
+                        extra={
+                            'request_id': request_id,
+                            'user_id': user_id,
+                            'has_service': bool(resolved_booking_for_draft_check.get("services")),
+                            'has_date': bool(resolved_booking_for_draft_check.get("date_refs") or resolved_booking_for_draft_check.get("date_range")),
+                            'has_time': bool(resolved_booking_for_draft_check.get("time_refs") or resolved_booking_for_draft_check.get("time_range")),
+                            'decision': None,  # Decision not yet made at this point
+                        }
+                    )
+                    logger.info(
+                        "Prepared service-only semantic draft (will be persisted later)",
+                        extra={
+                            'request_id': request_id,
+                            'user_id': user_id,
+                            'services': [s.get("text", "") for s in resolved_booking_for_draft_check.get("services", []) if isinstance(s, dict)]
+                        }
+                    )
+
+            # Case 2: Service + date draft (persist for continuation)
+            elif has_service and has_date and not has_time:
+                # Ensure memory_state exists and is properly structured for persistence
+                if not memory_state:
+                    memory_state = {}
+
+                # Set intent if not already set
+                if "intent" not in memory_state:
+                    memory_state["intent"] = "CREATE_BOOKING"
+
+                # Store the semantic draft for proper merging on next turn
+                memory_state["resolved_booking_semantics"] = resolved_booking_for_draft_check
+                memory_state["booking_state"] = {
+                    "booking_state": "PARTIAL",
+                    "reason": "MISSING_TIME"
+                }
+
+                # Debug log #2: After memory mutation
+                logger.info(
+                    "MEMORY_WRITE",
+                    extra={
+                        'request_id': request_id,
+                        'user_id': user_id,
+                        'keys': list(memory_state.keys()),
+                        'booking_state': memory_state.get("booking_state"),
+                        'has_resolved_booking': "resolved_booking_semantics" in memory_state,
+                    }
+                )
+
+                # Persist immediately to memory store if available
+                if memory_store and intent == "CREATE_BOOKING":
+                    try:
+                        # Debug log #1: Right before memory write
+                        logger.info(
+                            "SERVICE_ONLY_CHECK",
+                            extra={
+                                'request_id': request_id,
+                                'user_id': user_id,
+                                'has_service': bool(resolved_booking_for_draft_check.get("services")),
+                                'has_date': bool(resolved_booking_for_draft_check.get("date_refs") or resolved_booking_for_draft_check.get("date_range")),
+                                'has_time': bool(resolved_booking_for_draft_check.get("time_refs") or resolved_booking_for_draft_check.get("time_range")),
+                                'decision': None,  # Decision not yet made at this point
+                            }
+                        )
+                        memory_state["last_updated"] = datetime.now(
+                            dt_timezone.utc).isoformat()
+                        memory_store.set(
+                            user_id=user_id,
+                            domain=domain,
+                            state=memory_state,
+                            ttl=config.MEMORY_TTL
+                        )
+                        logger.info(
+                            "Persisted service+date booking draft to memory store",
+                            extra={
+                                'request_id': request_id,
+                                'user_id': user_id,
+                                'services': len(resolved_booking_for_draft_check.get("services", [])),
+                                'date_refs': resolved_booking_for_draft_check.get("date_refs", []),
+                                'date_mode': resolved_booking_for_draft_check.get("date_mode", "none")
+                            }
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(
+                            f"Failed to persist service+date draft: {e}",
+                            extra={'request_id': request_id}
+                        )
+                else:
+                    # Debug log #1: Right before memory write (when persistence will happen later)
+                    logger.info(
+                        "SERVICE_ONLY_CHECK",
+                        extra={
+                            'request_id': request_id,
+                            'user_id': user_id,
+                            'has_service': bool(resolved_booking_for_draft_check.get("services")),
+                            'has_date': bool(resolved_booking_for_draft_check.get("date_refs") or resolved_booking_for_draft_check.get("date_range")),
+                            'has_time': bool(resolved_booking_for_draft_check.get("time_refs") or resolved_booking_for_draft_check.get("time_range")),
+                            'decision': None,  # Decision not yet made at this point
+                        }
+                    )
+                    logger.info(
+                        "Prepared service+date semantic draft (will be persisted later)",
+                        extra={
+                            'request_id': request_id,
+                            'user_id': user_id,
+                            'services': len(resolved_booking_for_draft_check.get("services", [])),
+                            'date_refs': resolved_booking_for_draft_check.get("date_refs", []),
+                            'date_mode': resolved_booking_for_draft_check.get("date_mode", "none")
+                        }
+                    )
+
+        # Contextual time-only update detection
+        # If user says "make it 10" and there's an active booking in memory,
+        # treat it as a modification by reusing date from memory
+        logger.info(
+            f"Checking contextual time-only update: user {user_id}",
+            extra={
+                'request_id': request_id,
+                'intent': intent,
+                'has_memory_state': memory_state is not None,
+                'memory_intent': memory_state.get("intent") if memory_state else None,
+                'memory_booking_state': memory_state.get("booking_state", {}).get("booking_state") if memory_state and isinstance(memory_state.get("booking_state"), dict) else None,
+                'has_resolved_booking_semantics': bool(memory_state.get("resolved_booking_semantics", {})) if memory_state else False
+            }
+        )
+
+        # Check for resolved_booking_semantics in memory (gating condition for contextual updates)
+        # This allows contextual updates for both PARTIAL and RESOLVED bookings
+        has_resolved_booking_semantics = bool(
+            memory_state and memory_state.get("resolved_booking_semantics")
+        )
+        logger.info(
+            f"Contextual update gate check: user {user_id}",
+            extra={
+                'request_id': request_id,
+                'has_resolved_booking_semantics': has_resolved_booking_semantics,
+                'intent': intent,
+                'intent_matches': intent == "CREATE_BOOKING"
+            }
+        )
+
+        if intent == "CREATE_BOOKING" and has_resolved_booking_semantics:
+            # Check current turn for time_refs (from original semantic_result)
+            current_resolved_booking = semantic_result.resolved_booking
+            current_time_refs = current_resolved_booking.get("time_refs", [])
+            current_time_mode = current_resolved_booking.get(
+                "time_mode", "none")
+
+            # Check merged semantic state for date_refs (may already be merged from PARTIAL continuation)
+            merged_resolved_booking = merged_semantic_result.resolved_booking
+            merged_date_refs = merged_resolved_booking.get("date_refs", [])
+            merged_date_mode = merged_resolved_booking.get("date_mode", "none")
+
+            # If merged state doesn't have date_refs, check memory
+            # This handles RESOLVED bookings where merged_semantic_result is just semantic_result
+            if not merged_date_refs or merged_date_mode == "none":
+                memory_resolved_booking = memory_state.get(
+                    "resolved_booking_semantics", {})
+                if memory_resolved_booking:
+                    merged_date_refs = memory_resolved_booking.get(
+                        "date_refs", [])
+                    merged_date_mode = memory_resolved_booking.get(
+                        "date_mode", "none")
+
+            logger.info(
+                f"Evaluating contextual update conditions: user {user_id}",
+                extra={
+                    'request_id': request_id,
+                    'current_time_refs': current_time_refs,
+                    'current_time_mode': current_time_mode,
+                    'merged_date_refs': merged_date_refs,
+                    'merged_date_mode': merged_date_mode,
+                    'has_time': bool(current_time_refs) and current_time_mode != "none",
+                    'has_merged_date': bool(merged_date_refs) and merged_date_mode != "none",
+                    'condition_1_time_refs': bool(current_time_refs),
+                    'condition_2_time_mode': current_time_mode != "none",
+                    'condition_3_merged_date_refs': bool(merged_date_refs),
+                    'condition_4_merged_date_mode': merged_date_mode != "none",
+                    'all_conditions_met': bool(current_time_refs) and current_time_mode != "none" and bool(merged_date_refs) and merged_date_mode != "none"
+                }
+            )
+
+            # Check if this is a contextual time-only update
+            # Allow if: current turn has time_refs AND merged state (or memory) has date_refs
+            # Do NOT require current turn to have no date_refs
+            if current_time_refs and current_time_mode != "none" and merged_date_refs and merged_date_mode != "none":
+                logger.info(
+                    f"Contextual time-only update condition met: user {user_id}",
+                    extra={'request_id': request_id}
+                )
+
+                # Check if merged_semantic_result already has date_refs (from PARTIAL continuation merge)
+                # If not, merge date from memory into current turn's resolved_booking
+                if not merged_resolved_booking.get("date_refs") or merged_resolved_booking.get("date_mode") == "none":
+                    # Load date from memory
+                    memory_resolved_booking = memory_state.get(
+                        "resolved_booking_semantics", {})
+
+                    logger.info(
+                        f"Loaded resolved_booking_semantics from memory: user {user_id}",
+                        extra={
+                            'request_id': request_id,
+                            'has_resolved_booking_semantics': bool(memory_resolved_booking),
+                            'memory_date_refs': memory_resolved_booking.get("date_refs", []),
+                            'memory_date_mode': memory_resolved_booking.get("date_mode", "none")
+                        }
+                    )
+
+                    # If not stored, try to reconstruct from booking_state
+                    if not memory_resolved_booking:
+                        logger.info(
+                            f"No resolved_booking_semantics in memory, trying booking_state: user {user_id}",
+                            extra={'request_id': request_id}
+                        )
+                        memory_booking_state = memory_state.get(
+                            "booking_state", {})
+                        memory_resolved_booking = {}
+                        memory_services = memory_booking_state.get(
+                            "services", [])
+                        if memory_services:
+                            memory_resolved_booking["services"] = memory_services
+
+                    memory_date_refs = memory_resolved_booking.get(
+                        "date_refs", [])
+                    memory_date_mode = memory_resolved_booking.get(
+                        "date_mode", "none")
+
+                    logger.info(
+                        f"Memory date info: user {user_id}",
+                        extra={
+                            'request_id': request_id,
+                            'memory_date_refs': memory_date_refs,
+                            'memory_date_mode': memory_date_mode,
+                            'can_merge': bool(memory_date_refs and memory_date_mode != "none")
+                        }
+                    )
+
+                    # If memory has date information, merge it
+                    if memory_date_refs and memory_date_mode != "none":
+                        # Create updated resolved_booking with date from memory
+                        updated_resolved_booking = current_resolved_booking.copy()
+                        updated_resolved_booking["date_refs"] = memory_date_refs
+                        updated_resolved_booking["date_mode"] = memory_date_mode
+                        if "date_modifiers" in memory_resolved_booking:
+                            updated_resolved_booking["date_modifiers"] = memory_resolved_booking.get(
+                                "date_modifiers", [])
+
+                        # Update merged_semantic_result
+                        from luma.resolution.semantic_resolver import SemanticResolutionResult
+                        merged_semantic_result = SemanticResolutionResult(
+                            resolved_booking=updated_resolved_booking,
+                            needs_clarification=False,  # Will be re-evaluated by decision layer
+                            clarification=None
+                        )
+
+                        logger.info(
+                            "Contextual time-only update detected, reusing date from memory",
+                            extra={
+                                'request_id': request_id,
+                                'user_id': user_id,
+                                'memory_date_refs': memory_date_refs,
+                                'memory_date_mode': memory_date_mode,
+                                'current_time_refs': current_time_refs,
+                                'merged_date_refs': updated_resolved_booking.get('date_refs', []),
+                                'merged_date_mode': updated_resolved_booking.get('date_mode', 'none')
+                            }
+                        )
+                    else:
+                        logger.info(
+                            f"Contextual update condition met but no date in memory: user {user_id}",
+                            extra={
+                                'request_id': request_id,
+                                'memory_date_refs': memory_date_refs,
+                                'memory_date_mode': memory_date_mode
+                            }
+                        )
+                else:
+                    # merged_semantic_result already has date_refs (from PARTIAL continuation merge)
+                    logger.info(
+                        "Contextual time-only update detected, date already in merged state",
+                        extra={
+                            'request_id': request_id,
+                            'user_id': user_id,
+                            'current_time_refs': current_time_refs,
+                            'merged_date_refs': merged_resolved_booking.get('date_refs', []),
+                            'merged_date_mode': merged_resolved_booking.get('date_mode', 'none')
+                        }
+                    )
+            else:
+                logger.info(
+                    f"Contextual update condition not met: user {user_id}",
+                    extra={
+                        'request_id': request_id,
+                        'current_time_refs': current_time_refs,
+                        'current_time_mode': current_time_mode,
+                        'merged_date_refs': merged_date_refs,
+                        'merged_date_mode': merged_date_mode,
+                        'has_time_refs': bool(current_time_refs),
+                        'time_mode_not_none': current_time_mode != "none",
+                        'has_merged_date_refs': bool(merged_date_refs),
+                        'merged_date_mode_not_none': merged_date_mode != "none",
+                        'condition_1': bool(current_time_refs),
+                        'condition_2': current_time_mode != "none",
+                        'condition_3': bool(merged_date_refs),
+                        'condition_4': merged_date_mode != "none",
+                        'all_conditions': bool(current_time_refs) and current_time_mode != "none" and bool(merged_date_refs) and merged_date_mode != "none"
+                    }
+                )
+        else:
+            logger.info(
+                f"Not checking contextual update: user {user_id}",
+                extra={
+                    'request_id': request_id,
+                    'intent': intent,
+                    'intent_is_create': intent == "CREATE_BOOKING",
+                    'has_resolved_booking_semantics': has_resolved_booking_semantics
+                }
+            )
+
+        # Decision / Policy Layer - ACTIVE
+        # Decision layer determines if clarification is needed BEFORE calendar binding
+        # Policy operates ONLY on semantic roles, never on raw text or regex
+        decision_result = None
+        try:
+            # Load booking policy from config
+            booking_policy = _get_booking_policy()
+
+            # CRITICAL INVARIANT: decision must see fully merged semantics
+            # If there is an active booking, the semantic object passed to decision
+            # MUST be the merged semantic booking, not the current fragment
+            if memory_state and _has_active_booking(memory_state) and merged_semantic_result:
+                semantic_for_decision = merged_semantic_result.resolved_booking
+                decision_source = "merged"
+            else:
+                semantic_for_decision = semantic_result.resolved_booking
+                decision_source = "current"
+
+            logger.info(
+                "Decision semantic source",
+                extra={
+                    'request_id': request_id,
+                    'user_id': user_id,
+                    'source': decision_source,
+                    'has_active_booking': bool(memory_state and _has_active_booking(memory_state)),
+                    'has_merged_result': bool(merged_semantic_result and merged_semantic_result != semantic_result)
+                }
+            )
+
+            decision_result = decide_booking_status(
+                semantic_for_decision,
+                entities=extraction_result,
+                policy=booking_policy
+            )
+
+            # Store decision result in results
+            results["stages"]["decision"] = {
+                "status": decision_result.status,
+                "reason": decision_result.reason,
+                "effective_time": decision_result.effective_time
+            }
+
+            # Log booking decision after merge
+            logger.info(
+                f"Booking decision after merge: state={decision_result.status}",
+                extra={
+                    'request_id': request_id,
+                    'user_id': user_id,
+                    'is_continuation': is_continuation,
+                    'decision_status': decision_result.status,
+                    'decision_reason': decision_result.reason
+                }
+            )
+
+            # If decision requires clarification, return early (before calendar binding)
+            if decision_result.status == "NEEDS_CLARIFICATION":
+                # Convert decision reason to ClarificationReason enum
+                # Note: ClarificationReason is already imported at top of file
+                reason_enum = ClarificationReason.CONFLICTING_SIGNALS  # default
+                if decision_result.reason == "MISSING_DATE":
+                    reason_enum = ClarificationReason.MISSING_DATE
+                elif decision_result.reason == "MISSING_TIME":
+                    reason_enum = ClarificationReason.MISSING_TIME
+
+                # Debug: Log service-only booking detection
+                resolved_booking_for_check = merged_semantic_result.resolved_booking
+                has_service_only = (
+                    bool(resolved_booking_for_check.get("services")) and
+                    not bool(resolved_booking_for_check.get("date_refs") or resolved_booking_for_check.get("date_range")) and
+                    not bool(resolved_booking_for_check.get("time_refs")
+                             or resolved_booking_for_check.get("time_range"))
+                )
+                if has_service_only:
+                    logger.info(
+                        "Detected service-only booking - will persist as PARTIAL",
+                        extra={
+                            'request_id': request_id,
+                            'user_id': user_id,
+                            'services_count': len(resolved_booking_for_check.get("services", [])),
+                            'decision_reason': decision_result.reason
+                        }
+                    )
+
+                from luma.clarification import Clarification
+
+                clarification_obj = Clarification(
+                    reason=reason_enum,
+                    data={}
+                )
+
+                # Build PARTIAL booking with known semantic information
+                # Use merged semantic result if this is a continuation
+                resolved_booking = merged_semantic_result.resolved_booking
+
+                # CRITICAL: Extract services FIRST before checking memory_state
+                # This ensures service-only bookings always have services in resolved_booking
+                services = resolved_booking.get("services", [])
+
+                # If no services in resolved_booking, try extraction_result
+                # CRITICAL: For service-only bookings, services MUST be extracted and persisted
+                if not services:
+                    service_families = extraction_result.get(
+                        "service_families", [])
+                    services = [
+                        {
+                            "text": service.get("text", ""),
+                            "canonical": service.get("canonical", "")
+                        }
+                        for service in service_families
+                        if isinstance(service, dict) and service.get("text")
+                    ]
+                    # If we found services in extraction, update resolved_booking for persistence
+                    if services:
+                        resolved_booking["services"] = services
+
+                # CRITICAL: Check if memory_state already has resolved_booking_semantics from pre-decision persistence
+                # This happens for service-only bookings that were detected before decision
+                # But only use it if it has services (otherwise use our extracted services)
+                if memory_state and memory_state.get("resolved_booking_semantics"):
+                    memory_resolved_booking = memory_state.get(
+                        "resolved_booking_semantics")
+                    # Only use memory resolved_booking if it has services and we don't have services yet
+                    if memory_resolved_booking.get("services") and not services:
+                        resolved_booking = memory_resolved_booking
+                        services = resolved_booking.get("services", [])
+                        logger.info(
+                            f"Using existing resolved_booking_semantics from memory_state: user {user_id}",
+                            extra={
+                                'request_id': request_id,
+                                'has_services': bool(resolved_booking.get('services')),
+                                'has_date_refs': bool(resolved_booking.get('date_refs')),
+                                'has_time_refs': bool(resolved_booking.get('time_refs'))
+                            }
+                        )
+                    # If we have services from extraction, merge them into memory resolved_booking
+                    elif services and memory_resolved_booking.get("services"):
+                        # Merge: use our extracted services, keep date/time from memory if present
+                        resolved_booking = memory_resolved_booking.copy()
+                        resolved_booking["services"] = services
+                        logger.info(
+                            f"Merged extracted services with memory resolved_booking_semantics: user {user_id}",
+                            extra={
+                                'request_id': request_id,
+                                'services_count': len(services),
+                                'has_date_refs': bool(resolved_booking.get('date_refs')),
+                                'has_time_refs': bool(resolved_booking.get('time_refs'))
+                            }
+                        )
+
+                # Build PARTIAL booking: services (always), date if known, datetime_range = null
+                partial_booking = {
+                    "services": services,
+                    "datetime_range": None,
+                    "booking_state": "PARTIAL"
+                }
+
+                # Include date_range if date is known (but time is missing)
+                # Check if we have date information from semantic result
+                date_refs = resolved_booking.get("date_refs", [])
+                date_mode = resolved_booking.get("date_mode", "none")
+                if date_refs and date_mode != "none":
+                    # We have date but no time - include date_range if we can construct it
+                    # For PARTIAL bookings, we'll include date_range if available from calendar binding attempt
+                    # But since we're returning early, we'll leave date_range as None for now
+                    # The date information is preserved in semantic_result for future processing
+                    pass
+
+                # Persist PARTIAL booking to memory for continuation
+                # CRITICAL: Always persist PARTIAL bookings so they can be continued
+                # This ensures _has_active_booking() returns True on next turn
+                logger.info(
+                    f"PARTIAL persistence check: user {user_id}",
+                    extra={
+                        'request_id': request_id,
+                        'has_memory_store': bool(memory_store),
+                        'intent': intent,
+                        'intent_is_create': intent == "CREATE_BOOKING",
+                        'services_count': len(services),
+                        'resolved_booking_has_services': bool(resolved_booking.get('services'))
+                    }
+                )
+
+                # CRITICAL: Ensure services are in resolved_booking before persistence
+                if services and not resolved_booking.get("services"):
+                    resolved_booking["services"] = services
+
+                # CRITICAL: Always persist PARTIAL bookings for CREATE_BOOKING intent
+                # This is required for multi-turn slot filling to work
+                if memory_store and intent == "CREATE_BOOKING":
+                    try:
+                        # Diagnostic: Log what we're storing
+                        logger.info(
+                            f"Storing resolved_booking_semantics for PARTIAL: user {user_id}",
+                            extra={
+                                'request_id': request_id,
+                                'stored_date_refs': resolved_booking.get('date_refs', []),
+                                'stored_date_mode': resolved_booking.get('date_mode', 'none'),
+                                'stored_time_refs': resolved_booking.get('time_refs', []),
+                                'stored_time_mode': resolved_booking.get('time_mode', 'none'),
+                                'stored_services': len(resolved_booking.get('services', []))
+                            }
+                        )
+
+                        # Build memory state with PARTIAL booking
+                        # Include resolved_booking_semantics for proper merging on continuation
+                        # CRITICAL: Only store primitives and semantic dictionaries - no datetime objects
+                        partial_memory = {
+                            "intent": "CREATE_BOOKING",
+                            "booking_state": partial_booking,
+                            "clarification": clarification_obj.to_dict(),
+                            "resolved_booking_semantics": resolved_booking,  # Store semantic info for merging
+                            # Already ISO string
+                            "last_updated": datetime.now(dt_timezone.utc).isoformat()
+                        }
+                        memory_store.set(
+                            user_id=user_id,
+                            domain=domain,
+                            state=partial_memory,
+                            ttl=config.MEMORY_TTL
+                        )
+                        logger.info(
+                            f"Persisted PARTIAL booking for continuation: user {user_id}",
+                            extra={'request_id': request_id}
+                        )
+                    except Exception as e:  # noqa: BLE001
+                        # Log loudly - persistence failures should not be silent
+                        # Use ERROR level with full traceback to ensure visibility
+                        logger.error(
+                            f"CRITICAL: Failed to persist PARTIAL booking for user {user_id}: {e}",
+                            extra={
+                                'request_id': request_id,
+                                'user_id': user_id,
+                                'intent': intent,
+                                'error_type': type(e).__name__
+                            },
+                            exc_info=True
+                        )
+                        # Do not re-raise - allow API to return PARTIAL booking response
+                        # The error is logged loudly and will be visible in logs
+                else:
+                    # CRITICAL: Log why persistence did not happen
+                    # This should not happen for CREATE_BOOKING intent with memory_store available
+                    logger.error(
+                        f"CRITICAL: Failed to persist PARTIAL booking - condition not met: user {user_id}",
+                        extra={
+                            'request_id': request_id,
+                            'user_id': user_id,
+                            'has_memory_store': bool(memory_store),
+                            'intent': intent,
+                            'intent_is_create': intent == "CREATE_BOOKING",
+                            'services_count': len(services),
+                            'resolved_booking_has_services': bool(resolved_booking.get('services'))
+                        }
+                    )
+                    # CRITICAL: Even if condition fails, try to persist if we have services
+                    # This ensures service-only bookings are always persisted
+                    if services and memory_store:
+                        try:
+                            # Build minimal PARTIAL memory structure
+                            minimal_partial_memory = {
+                                "intent": "CREATE_BOOKING",
+                                "booking_state": {
+                                    "services": services,
+                                    "datetime_range": None,
+                                    "booking_state": "PARTIAL"
+                                },
+                                "clarification": clarification_obj.to_dict(),
+                                "resolved_booking_semantics": resolved_booking,
+                                "last_updated": datetime.now(dt_timezone.utc).isoformat()
+                            }
+                            memory_store.set(
+                                user_id=user_id,
+                                domain=domain,
+                                state=minimal_partial_memory,
+                                ttl=config.MEMORY_TTL
+                            )
+                            logger.info(
+                                f"Persisted PARTIAL booking via fallback path: user {user_id}",
+                                extra={'request_id': request_id}
+                            )
+                        except Exception as e:  # noqa: BLE001
+                            logger.error(
+                                f"CRITICAL: Fallback persistence also failed: {e}",
+                                extra={'request_id': request_id},
+                                exc_info=True
+                            )
+
+                # Return clarification immediately - do not proceed to calendar binding
+                # This ensures clarification decisions come ONLY from DecisionResult
+                # Determine debug mode (query param debug=1|true|yes)
+                debug_flag = str(request.args.get("debug", "0")).lower()
+                debug_mode = debug_flag in {"1", "true", "yes"}
+
+                response_body = {
+                    "success": True,
+                    "intent": {"name": intent, "confidence": confidence},
+                    "needs_clarification": True,
+                    "clarification": clarification_obj.to_dict(),
+                    "booking": partial_booking
+                }
+
+                if debug_mode:
+                    response_body["debug"] = results
+
+                return jsonify(response_body), 200
+
+            # Decision is RESOLVED - proceed to calendar binding unconditionally
+            # Calendar binding will assume inputs are already approved
+
+        except Exception as e:  # noqa: BLE001
+            # Decision layer failure should not block - log and continue
+            logger.error(
+                f"[DECISION] Decision layer failed: {e}",
+                extra={'request_id': request_id},
+                exc_info=True
+            )
+            results["stages"]["decision"] = {"error": str(e)}
+            # Continue to calendar binding on error (fallback behavior)
+
         # Post-classification: Detect CONTEXTUAL_UPDATE
         # CONTEXTUAL_UPDATE is internal only - never returned in API
+        # Also detect when CREATE_BOOKING is a continuation of PARTIAL booking
         effective_intent = intent
-        if (intent == "MODIFY_BOOKING" or intent == "UNKNOWN") and memory_state:
+        if memory_state and memory_state.get("intent") == "CREATE_BOOKING":
             # Check if this is a contextual update to existing CREATE_BOOKING draft
-            if memory_state.get("intent") == "CREATE_BOOKING":
+            # This includes both PARTIAL bookings and regular drafts
+            if intent == "MODIFY_BOOKING" or intent == "UNKNOWN":
                 # Check if at least one mutable slot is modified (date, time, or duration)
                 # Allows single or multiple slot updates (e.g., "Wednesday at 5pm")
                 mutable_slots_modified = _count_mutable_slots_modified(
-                    semantic_result, extraction_result
+                    merged_semantic_result, extraction_result
                 )
                 # Check if no service or booking verb is present
                 has_service = len(extraction_result.get(
@@ -491,13 +1472,21 @@ def resolve():
                                'original_intent': intent,
                                'slots_modified': mutable_slots_modified}
                     )
+            elif intent == "CREATE_BOOKING" and _is_partial_booking(memory_state):
+                # CREATE_BOOKING with PARTIAL memory is already handled above as continuation
+                # This is just for logging - the merge already happened
+                logger.info(
+                    f"CREATE_BOOKING continuation of PARTIAL booking for user {user_id}",
+                    extra={'request_id': request_id}
+                )
 
         # Stage 6: Calendar Binding
         # Use effective_intent for calendar binding (CONTEXTUAL_UPDATE treated as CREATE_BOOKING)
+        # Use merged semantic result if this was a PARTIAL continuation
         binding_intent = effective_intent if effective_intent != CONTEXTUAL_UPDATE else "CREATE_BOOKING"
         try:
             calendar_result = bind_calendar(
-                semantic_result,
+                merged_semantic_result,
                 now,
                 timezone,
                 intent=binding_intent,
@@ -517,12 +1506,17 @@ def resolve():
         calendar_booking = calendar_dict.get(
             "calendar_booking", {}) if calendar_dict else {}
 
-        # Extract current clarification
+        # Extract current clarification (only from validation errors in calendar binding)
+        # Decision layer handles all other clarification decisions
+        # CRITICAL: If decision is RESOLVED, clear any existing PARTIAL clarification
         current_clarification = None
-        if calendar_result.needs_clarification and calendar_result.clarification:
+        if decision_result and decision_result.status == "RESOLVED":
+            # Decision is RESOLVED - no clarification needed
+            # This clears any existing PARTIAL clarification from memory
+            current_clarification = None
+        elif calendar_result.needs_clarification and calendar_result.clarification:
+            # Only validation errors from calendar binding (range conflicts, etc.)
             current_clarification = calendar_result.clarification.to_dict()
-        elif semantic_result.needs_clarification and semantic_result.clarification:
-            current_clarification = semantic_result.clarification.to_dict()
 
         # Prepare current booking state (only canonical fields)
         # Include date_range and time_range for merge logic to handle time-only updates
@@ -542,7 +1536,8 @@ def resolve():
             current_datetime_range = current_booking.get("datetime_range")
 
             # Check if semantic result has exact time but calendar binding didn't create datetime_range
-            resolved_booking = semantic_result.resolved_booking
+            # Use merged_semantic_result to get merged semantics if this was a continuation
+            resolved_booking = merged_semantic_result.resolved_booking
             time_mode = resolved_booking.get("time_mode", "none")
             time_refs = resolved_booking.get("time_refs", [])
             date_refs = resolved_booking.get("date_refs", [])
@@ -646,6 +1641,32 @@ def resolve():
             # CONTEXTUAL_UPDATE merges into CREATE_BOOKING draft
             # Persist with intent = CREATE_BOOKING (never persist CONTEXTUAL_UPDATE)
             persist_intent = "CREATE_BOOKING"
+
+            # CRITICAL: Branch strictly on decision result for persistence
+            # RESOLVED: Clear PARTIAL state and persist RESOLVED booking
+            # NEEDS_CLARIFICATION: Persist PARTIAL booking (already handled in early return)
+            # This ensures decision outcome determines persistence, not continuation state
+            if decision_result and decision_result.status == "RESOLVED":
+                # Decision is RESOLVED - clear any existing PARTIAL state
+                # Don't merge with old PARTIAL booking, start fresh with RESOLVED state
+                if memory_state and _is_partial_booking(memory_state):
+                    # Clear the PARTIAL booking - start with fresh state
+                    memory_state = None
+                    logger.info(
+                        f"Clearing PARTIAL booking state for RESOLVED booking: user {user_id}",
+                        extra={'request_id': request_id}
+                    )
+
+                # Ensure current_clarification is None for RESOLVED (already set above)
+                # This ensures no PARTIAL clarification is persisted
+                if current_clarification is not None:
+                    logger.warning(
+                        f"Unexpected clarification for RESOLVED booking, clearing: user {user_id}",
+                        extra={'request_id': request_id}
+                    )
+                    current_clarification = None
+
+            # Merge booking state (memory_state may be None if RESOLVED and PARTIAL was cleared)
             merged_memory = merge_booking_state(
                 memory_state=memory_state,
                 current_intent=persist_intent,  # Always persist as CREATE_BOOKING
@@ -653,7 +1674,41 @@ def resolve():
                 current_clarification=current_clarification
             )
 
+            # CRITICAL: Verify merged state has no clarification if decision is RESOLVED
+            # This is a safety check to ensure RESOLVED bookings never persist as PARTIAL
+            if decision_result and decision_result.status == "RESOLVED":
+                if merged_memory.get("clarification") is not None:
+                    # Force clear clarification for RESOLVED bookings
+                    merged_memory["clarification"] = None
+                    logger.warning(
+                        f"Force-cleared clarification for RESOLVED booking: user {user_id}",
+                        extra={'request_id': request_id}
+                    )
+
+                # Store booking_state = "RESOLVED" inside the booking_state dict
+                # This is required for _has_active_booking() to detect RESOLVED bookings
+                if "booking_state" in merged_memory:
+                    merged_memory["booking_state"]["booking_state"] = "RESOLVED"
+
+                # Store resolved_booking_semantics for RESOLVED bookings to enable contextual updates
+                # This allows "make it 10" to reuse date from memory
+                resolved_booking = merged_semantic_result.resolved_booking
+                if resolved_booking:
+                    merged_memory["resolved_booking_semantics"] = resolved_booking
+                    logger.info(
+                        f"Storing resolved_booking_semantics for RESOLVED: user {user_id}",
+                        extra={
+                            'request_id': request_id,
+                            'stored_date_refs': resolved_booking.get('date_refs', []),
+                            'stored_date_mode': resolved_booking.get('date_mode', 'none'),
+                            'stored_time_refs': resolved_booking.get('time_refs', []),
+                            'stored_time_mode': resolved_booking.get('time_mode', 'none'),
+                            'stored_services': len(resolved_booking.get('services', []))
+                        }
+                    )
+
             # Persist merged state with CREATE_BOOKING intent
+            # Only persist if we have a valid booking state (RESOLVED or PARTIAL)
             if memory_store:
                 try:
                     memory_store.set(
@@ -661,6 +1716,13 @@ def resolve():
                         domain=domain,
                         state=merged_memory,
                         ttl=config.MEMORY_TTL
+                    )
+                    # Log persistence with decision status for debugging
+                    decision_status = decision_result.status if decision_result else "UNKNOWN"
+                    logger.info(
+                        f"Persisted booking state: user {user_id}, decision={decision_status}, "
+                        f"has_clarification={merged_memory.get('clarification') is not None}",
+                        extra={'request_id': request_id}
                     )
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"Failed to persist memory: {e}", extra={
@@ -695,8 +1757,71 @@ def resolve():
                 "intent": effective_intent if effective_intent != CONTEXTUAL_UPDATE else "CREATE_BOOKING",
                 "booking_state": current_booking if (is_booking_intent or is_modify_with_booking_id) else {},
                 "clarification": current_clarification,
-                "last_updated": datetime.now(timezone.utc).isoformat()
+                "last_updated": datetime.now(dt_timezone.utc).isoformat()
             }
+
+        # Post-semantic validation guard: Check for orphan slot updates
+        # If extracted slots exist but cannot be applied (no booking_id, no draft, no booking),
+        # return clarification instead of "successful" empty response
+        # Only apply if no existing clarification (don't override existing clarifications)
+        existing_clarification = merged_memory.get("clarification")
+        if not existing_clarification:
+            # Check if any slots were extracted
+            has_services = len(extraction_result.get(
+                "service_families", [])) > 0
+            has_dates = (len(extraction_result.get("dates", [])) > 0 or
+                         len(extraction_result.get("dates_absolute", [])) > 0)
+            has_times = (len(extraction_result.get("times", [])) > 0 or
+                         len(extraction_result.get("time_windows", [])) > 0)
+            has_duration = len(extraction_result.get("durations", [])) > 0
+
+            # Check semantic result for date/time refs
+            # Use merged_semantic_result to get merged semantics if this was a continuation
+            resolved_booking = merged_semantic_result.resolved_booking
+            has_date_refs = len(resolved_booking.get("date_refs", [])) > 0
+            has_time_refs = len(resolved_booking.get("time_refs", [])) > 0
+
+            # Check if any slots were extracted
+            has_extracted_slots = (has_services or has_dates or has_times or
+                                   has_duration or has_date_refs or has_time_refs)
+
+            # Check if calendar binding produced a booking
+            calendar_has_booking = current_booking.get(
+                "datetime_range") is not None
+
+            # Check context availability
+            booking_id = data.get("booking_id")
+            has_draft = memory_state and memory_state.get(
+                "intent") == "CREATE_BOOKING"
+            has_context = booking_id is not None or has_draft
+
+            # If slots extracted but no context and no booking produced → clarification needed
+            if (has_extracted_slots and
+                not has_context and
+                not calendar_has_booking and
+                    effective_intent in {"UNKNOWN", "MODIFY_BOOKING"}):
+                # Determine what's missing
+                missing_requirements = []
+                if not has_draft and not booking_id:
+                    missing_requirements.append("booking_reference")
+                if has_times or has_time_refs:
+                    if not has_dates and not has_date_refs:
+                        missing_requirements.append("date")
+                if has_dates or has_date_refs:
+                    if not has_times and not has_time_refs:
+                        missing_requirements.append("time")
+                if not has_services:
+                    missing_requirements.append("service")
+
+                # Set clarification
+                context_clarification = {
+                    "reason": ClarificationReason.MISSING_CONTEXT.value,
+                    "data": {
+                        "missing_requirements": missing_requirements
+                    }
+                }
+                # Update merged_memory with clarification
+                merged_memory["clarification"] = context_clarification
 
         # Build production response
         # Map CONTEXTUAL_UPDATE to CREATE_BOOKING in API response
@@ -704,16 +1829,91 @@ def resolve():
         intent_payload = {"name": api_intent, "confidence": confidence}
 
         # Extract clarification from merged state
+        # Also check decision_result if available (for early return cases that might have been bypassed)
         merged_clarification = merged_memory.get("clarification")
         needs_clarification = merged_clarification is not None
 
+        # If decision layer returned NEEDS_CLARIFICATION but we didn't return early,
+        # ensure we have clarification set from decision_result
+        if decision_result and decision_result.status == "NEEDS_CLARIFICATION" and not needs_clarification:
+            # Decision layer says clarification needed, but merged_memory doesn't have it
+            # This can happen if we bypassed the early return somehow
+            reason_enum = ClarificationReason.CONFLICTING_SIGNALS  # default
+            if decision_result.reason == "MISSING_DATE":
+                reason_enum = ClarificationReason.MISSING_DATE
+            elif decision_result.reason == "MISSING_TIME":
+                reason_enum = ClarificationReason.MISSING_TIME
+            merged_clarification = {
+                "reason": reason_enum.value,
+                "data": {}
+            }
+            needs_clarification = True
+
         # Return booking state for CREATE_BOOKING, CONTEXTUAL_UPDATE, or MODIFY_BOOKING
+        # CRITICAL: For CREATE_BOOKING, booking must NEVER be null, even when clarification is needed
         booking_payload = None
         if (is_booking_intent or is_modify_with_booking_id) and not needs_clarification:
             booking_payload = extract_memory_state_for_response(merged_memory)
+            # Add booking_state = "RESOLVED" for resolved bookings
+            if booking_payload:
+                booking_payload["booking_state"] = "RESOLVED"
         elif memory_state and memory_state.get("intent") == "CREATE_BOOKING" and not needs_clarification:
             # Return existing booking state from memory for follow-ups
             booking_payload = extract_memory_state_for_response(memory_state)
+            if booking_payload:
+                booking_payload["booking_state"] = "RESOLVED"
+        elif is_booking_intent and needs_clarification:
+            # For CREATE_BOOKING with clarification, build PARTIAL booking
+            # Extract services from semantic result or extraction result
+            # Use merged_semantic_result to get merged semantics if this was a continuation
+            resolved_booking = merged_semantic_result.resolved_booking
+            services = resolved_booking.get("services", [])
+
+            # If no services in resolved_booking, try extraction_result
+            if not services:
+                service_families = extraction_result.get(
+                    "service_families", [])
+                services = [
+                    {
+                        "text": service.get("text", ""),
+                        "canonical": service.get("canonical", "")
+                    }
+                    for service in service_families
+                    if isinstance(service, dict) and service.get("text")
+                ]
+
+            # Build PARTIAL booking: services (always), date if known, datetime_range = null
+            booking_payload = {
+                "services": services,
+                "datetime_range": None,
+                "booking_state": "PARTIAL"
+            }
+
+            # If we have date information but no time, we could include date_range
+            # For now, we'll keep datetime_range as None for PARTIAL bookings
+            # The date information is preserved in semantic_result for future processing
+        elif is_booking_intent and booking_payload is None:
+            # Fallback: If we somehow got here with CREATE_BOOKING and no booking_payload,
+            # build a minimal PARTIAL booking to ensure booking is never null
+            # This should not normally happen, but ensures contract compliance
+            resolved_booking = merged_semantic_result.resolved_booking
+            services = resolved_booking.get("services", [])
+            if not services:
+                service_families = extraction_result.get(
+                    "service_families", [])
+                services = [
+                    {
+                        "text": service.get("text", ""),
+                        "canonical": service.get("canonical", "")
+                    }
+                    for service in service_families
+                    if isinstance(service, dict) and service.get("text")
+                ]
+            booking_payload = {
+                "services": services,
+                "datetime_range": None,
+                "booking_state": "PARTIAL"
+            }
 
         # Extract entities for non-booking intents (DISCOVERY, QUOTE, DETAILS, etc.)
         # CREATE_BOOKING and MODIFY_BOOKING should not include entities field
@@ -735,6 +1935,79 @@ def resolve():
                     if isinstance(service, dict) and service.get("text")
                 ]
 
+        # Final response validation guard: Check for orphan slot updates
+        # Prevents "successful" responses when slots are extracted but cannot be applied
+        if not needs_clarification:
+            # Check if booking_payload is null OR has null datetime_range
+            booking_is_invalid = (booking_payload is None or
+                                  booking_payload.get("datetime_range") is None)
+
+            if booking_is_invalid:
+                # Check if slots were extracted
+                # Use merged_semantic_result to get merged semantics if this was a continuation
+                resolved_booking = merged_semantic_result.resolved_booking
+                has_time_refs = len(resolved_booking.get("time_refs", [])) > 0
+                has_date_refs = len(resolved_booking.get("date_refs", [])) > 0
+                has_services = len(extraction_result.get(
+                    "service_families", [])) > 0
+                has_duration = len(extraction_result.get("durations", [])) > 0
+
+                has_extracted_slots = has_time_refs or has_date_refs or has_services or has_duration
+
+                # Check context availability
+                booking_id = data.get("booking_id")
+                has_draft = memory_state and memory_state.get(
+                    "intent") == "CREATE_BOOKING"
+                has_context = booking_id is not None or has_draft
+
+                # If slots extracted but no context and booking is invalid → clarification needed
+                if has_extracted_slots and not has_context:
+                    # Determine which slots were provided
+                    provided_slots = []
+                    if has_time_refs:
+                        provided_slots.append("time")
+                    if has_date_refs:
+                        provided_slots.append("date")
+                    if has_services:
+                        provided_slots.append("service")
+                    if has_duration:
+                        provided_slots.append("duration")
+
+                    # Set clarification
+                    needs_clarification = True
+                    merged_clarification = {
+                        "reason": ClarificationReason.MISSING_CONTEXT.value,
+                        "data": {
+                            "provided_slots": provided_slots
+                        }
+                    }
+                    # For CREATE_BOOKING, build PARTIAL booking instead of null
+                    if is_booking_intent and booking_payload is None:
+                        # Extract services from semantic result or extraction result
+                        # Use merged_semantic_result to get merged semantics if this was a continuation
+                        resolved_booking = merged_semantic_result.resolved_booking
+                        services = resolved_booking.get("services", [])
+
+                        # If no services in resolved_booking, try extraction_result
+                        if not services:
+                            service_families = extraction_result.get(
+                                "service_families", [])
+                            services = [
+                                {
+                                    "text": service.get("text", ""),
+                                    "canonical": service.get("canonical", "")
+                                }
+                                for service in service_families
+                                if isinstance(service, dict) and service.get("text")
+                            ]
+
+                        # Build PARTIAL booking
+                        booking_payload = {
+                            "services": services,
+                            "datetime_range": None,
+                            "booking_state": "PARTIAL"
+                        }
+
         processing_time = round((time.time() - start_time) * 1000, 2)
 
         # Log successful processing
@@ -749,12 +2022,42 @@ def resolve():
                 }
             )
 
+        # For CREATE_BOOKING, always include booking (never null)
+        # Final safety check: ensure booking_payload is never null for CREATE_BOOKING
+        if api_intent == "CREATE_BOOKING" and booking_payload is None:
+            # This should not happen, but ensures contract compliance
+            # Build minimal PARTIAL booking from merged semantic result
+            resolved_booking = merged_semantic_result.resolved_booking
+            services = resolved_booking.get("services", [])
+            if not services:
+                service_families = extraction_result.get(
+                    "service_families", [])
+                services = [
+                    {
+                        "text": service.get("text", ""),
+                        "canonical": service.get("canonical", "")
+                    }
+                    for service in service_families
+                    if isinstance(service, dict) and service.get("text")
+                ]
+            booking_payload = {
+                "services": services,
+                "datetime_range": None,
+                "booking_state": "PARTIAL" if needs_clarification else "RESOLVED"
+            }
+            logger.warning(
+                f"Fallback: Built PARTIAL booking for CREATE_BOOKING when booking_payload was None",
+                extra={'request_id': request_id, 'intent': api_intent}
+            )
+
+        # booking_payload is already set above for both RESOLVED and PARTIAL cases
+        # For non-booking intents, booking_payload may be None (which is fine)
         response_body = {
             "success": True,
             "intent": intent_payload,
             "needs_clarification": needs_clarification,
             "clarification": merged_clarification if needs_clarification else None,
-            "booking": booking_payload if not needs_clarification else None,
+            "booking": booking_payload,
         }
 
         # Add entities field for non-booking intents (always include, even if empty)

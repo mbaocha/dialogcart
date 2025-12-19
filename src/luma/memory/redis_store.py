@@ -101,6 +101,35 @@ class RedisMemoryStore(MemoryStore):
             logger.warning(f"Failed to get memory for {user_id}: {e}")
             return None
     
+    def _sanitize_for_storage(self, obj: Any) -> Any:
+        """
+        Recursively sanitize objects for JSON storage.
+        
+        Ensures only primitives (str, int, float, bool, None) and
+        collections (dict, list) are stored. Converts datetime objects
+        to ISO format strings. No datetime conversion on strings.
+        
+        Args:
+            obj: Object to sanitize
+            
+        Returns:
+            Sanitized object safe for JSON serialization
+        """
+        if obj is None:
+            return None
+        elif isinstance(obj, (str, int, float, bool)):
+            return obj
+        elif isinstance(obj, datetime):
+            # Convert datetime to ISO string - this is the ONLY place datetime conversion happens
+            return obj.isoformat()
+        elif isinstance(obj, dict):
+            return {k: self._sanitize_for_storage(v) for k, v in obj.items()}
+        elif isinstance(obj, (list, tuple)):
+            return [self._sanitize_for_storage(item) for item in obj]
+        else:
+            # For any other type, convert to string (fallback)
+            return str(obj)
+    
     def set(self, user_id: str, domain: str, state: Dict[str, Any], ttl: int = 3600) -> None:
         """
         Store memory state for a user.
@@ -115,13 +144,29 @@ class RedisMemoryStore(MemoryStore):
             return
         
         try:
+            # Sanitize state to ensure only JSON-serializable primitives are stored
+            # This prevents datetime conversion on strings and ensures safe storage
+            sanitized_state = self._sanitize_for_storage(state)
+            
             key = self._make_key(user_id, domain)
-            value = json.dumps(state, default=str)
+            value = json.dumps(sanitized_state, default=str)
             self._client.setex(key, ttl, value)
         except Exception as e:
             import logging
             logger = logging.getLogger(__name__)
-            logger.warning(f"Failed to set memory for {user_id}: {e}")
+            # Log loudly - persistence failures should not be silent
+            # Use ERROR level with full traceback to ensure visibility
+            logger.error(
+                f"CRITICAL: Failed to persist memory for {user_id} in {domain}: {e}",
+                extra={
+                    'user_id': user_id,
+                    'domain': domain,
+                    'error_type': type(e).__name__
+                },
+                exc_info=True
+            )
+            # Do not re-raise - allow graceful degradation if Redis is unavailable
+            # The error is logged loudly and will be visible in logs
     
     def clear(self, user_id: str, domain: str) -> None:
         """
