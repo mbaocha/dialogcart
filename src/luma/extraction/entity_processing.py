@@ -11,7 +11,6 @@ Note: Noise is NOT extracted as an entity.
 
 import logging
 from typing import Dict, List, Any
-from luma.config import debug_print
 from .normalization import post_normalize_parameterized_text
 
 logger = logging.getLogger(__name__)
@@ -42,45 +41,10 @@ def extract_entities_from_doc(nlp, text: str) -> Dict[str, List]:
     TIME represents precise clock times (9 am, 12:30 pm, etc.).
     Noise is NOT extracted - it's not an entity.
     """
-    # Diagnostic: Log entry of time extraction (using print to ensure visibility)
-    print(f"[time-extract]: input_sentence=\"{text}\"")
-    
     doc = nlp(text)
-    
-    # Diagnostic: Log tokenized sentence
-    tokenized = " ".join([t.text for t in doc])
-    print(f"[time-extract]: tokenized_sentence=\"{tokenized}\"")
-    
-    # Diagnostic: Log pre-normalized form (same as input for now)
-    print(f"[time-extract]: pre_normalized=\"{text}\"")
-    
-    # Diagnostic: Manually test common time patterns against tokenized text
-    # This helps diagnose why patterns aren't matching
+
     tokens = [t.text for t in doc]
-    token_lowers = [t.lower_ for t in doc]
-    print(f"[time-extract]: tokens={tokens} token_lowers={token_lowers}")
-    
-    # Test "at 10" pattern manually (updated for 0-23 range)
-    if len(tokens) >= 2 and token_lowers[0] == "at" and tokens[1].isdigit():
-        hour = int(tokens[1])
-        if 0 <= hour <= 23:
-            print(f"[time-extract]: trying pattern=\"time_bare_hour\" against text=\"{text}\" tokens={tokens}")
-            print(f"[time-extract]: pattern=\"time_bare_hour\" -> POTENTIAL MATCH (at={token_lowers[0]}, hour={tokens[1]})")
-        else:
-            print(f"[time-extract]: trying pattern=\"time_bare_hour\" against text=\"{text}\" tokens={tokens}")
-            print(f"[time-extract]: pattern=\"time_bare_hour\" -> NO MATCH (hour {hour} not in range 0-23)")
-    elif len(tokens) >= 1 and tokens[0].isdigit():
-        hour = int(tokens[0])
-        if 0 <= hour <= 23:
-            print(f"[time-extract]: trying pattern=\"time_bare_hour_standalone\" against text=\"{text}\" tokens={tokens}")
-            print(f"[time-extract]: pattern=\"time_bare_hour_standalone\" -> POTENTIAL MATCH (hour={tokens[0]})")
-        else:
-            print(f"[time-extract]: trying pattern=\"time_bare_hour_standalone\" against text=\"{text}\" tokens={tokens}")
-            print(f"[time-extract]: pattern=\"time_bare_hour_standalone\" -> NO MATCH (hour {hour} not in range 0-23)")
-    else:
-        print(f"[time-extract]: trying pattern=\"time_bare_hour\" against text=\"{text}\" tokens={tokens}")
-        print(f"[time-extract]: pattern=\"time_bare_hour\" -> NO MATCH (no 'at' + hour pattern found)")
-    
+
     result = {
         "services": [],  # Kept for compatibility - contains SERVICE_FAMILY entities
         "dates": [],  # Relative dates (today, tomorrow, etc.)
@@ -91,9 +55,6 @@ def extract_entities_from_doc(nlp, text: str) -> Dict[str, List]:
         "durations": []
     }
 
-    # Diagnostic: Track TIME entities found
-    time_entities_found = []
-    
     for ent in doc.ents:
         label = ent.label_.upper()
         span_len = ent.end - ent.start
@@ -109,27 +70,6 @@ def extract_entities_from_doc(nlp, text: str) -> Dict[str, List]:
             add_entity(result, "dates_absolute", ent.text, ent.start, span_len)
         elif label == "TIME":
             # Precise clock times (9 am, 12:30 pm, etc.)
-            # Diagnostic: Log TIME entity match (using print to ensure visibility)
-            # Check if this is an hour-only time (no colon, no am/pm)
-            ent_text = ent.text.strip()
-            is_hour_only = False
-            hour_value = None
-            
-            # Detect hour-only pattern: "at 10", "10", etc. (no colon, no am/pm)
-            if ":" not in ent_text and "am" not in ent_text.lower() and "pm" not in ent_text.lower():
-                # Try to extract hour number
-                import re
-                hour_match = re.search(r'\b(\d{1,2})\b', ent_text)
-                if hour_match:
-                    hour_value = int(hour_match.group(1))
-                    if 0 <= hour_value <= 23:
-                        is_hour_only = True
-                        print(
-                            f"[time-extract]: matched hour-only time=\"{ent.text}\" → {hour_value:02d}:00")
-            
-            if not is_hour_only:
-                print(f"[time-extract]: MATCH label=TIME raw=\"{ent.text}\" start={ent.start} end={ent.end}")
-            time_entities_found.append(ent.text)
             add_entity(result, "times", ent.text, ent.start, span_len)
         elif label == "TIME_WINDOW":
             # Coarse time ranges (morning, afternoon, evening, night)
@@ -138,16 +78,13 @@ def extract_entities_from_doc(nlp, text: str) -> Dict[str, List]:
             add_entity(result, "durations", ent.text, ent.start, span_len)
         # Noise is NOT extracted - it's not an entity
 
-    # Diagnostic: Log final extracted times (using print to ensure visibility)
-    print(f"[time-extract]: extracted_times={result['times']}")
-    
-    # Diagnostic: Check if timetoken was injected (will be checked after parameterization)
-    # This will be logged in build_parameterized_sentence
+    # Store tokens in result for logging
+    result["_tokens"] = tokens
 
     return result, doc
 
 
-def build_parameterized_sentence(doc, entities: Dict[str, List]) -> str:
+def build_parameterized_sentence(doc, entities: Dict[str, List]) -> tuple[str, List[Dict[str, Any]]]:
     """
     Build parameterized sentence by replacing entities with tokens.
 
@@ -158,9 +95,13 @@ def build_parameterized_sentence(doc, entities: Dict[str, List]) -> str:
     - Replacements are applied from end-to-start (backwards) to avoid index shifting
     - Multiple entities of same type are allowed (e.g., multiple timetoken)
     - No re-scanning or re-tokenization occurs during replacement
+
+    Returns:
+        tuple: (parameterized_sentence, list of replacement info for logging)
     """
     tokens = [t.text.lower() for t in doc]
     replacements = []
+    phase2_replacements = []  # Track replacements for logging
 
     placeholders = {
         "services": "servicefamilytoken",  # Updated to reflect SERVICE_FAMILY
@@ -181,7 +122,21 @@ def build_parameterized_sentence(doc, entities: Dict[str, List]) -> str:
         for e in ents:
             start = e["position"]
             end = start + e.get("length", 1)
+            entity_text = e.get("text", "")
             replacements.append((start, end, placeholder))
+            # Track for logging
+            if entity_type in ("dates", "dates_absolute"):
+                phase2_replacements.append({
+                    "type": "date",
+                    "span": entity_text,
+                    "replaced_with": placeholder
+                })
+            elif entity_type in ("times", "time_windows"):
+                phase2_replacements.append({
+                    "type": "time",
+                    "span": entity_text,
+                    "replaced_with": placeholder
+                })
 
     # Sort by END position descending, then by START descending
     # This ensures we replace from right-to-left, preventing index shifts
@@ -208,12 +163,8 @@ def build_parameterized_sentence(doc, entities: Dict[str, List]) -> str:
             i += 1
     post_guarded = " ".join(merged)
     final_psentence = post_normalize_parameterized_text(post_guarded)
-    
-    # Diagnostic: Log whether timetoken was injected (using print to ensure visibility)
-    has_timetoken = "timetoken" in final_psentence
-    print(f"[time-extract]: psentence_after=\"{final_psentence}\" has_timetoken={has_timetoken}")
-    
-    return final_psentence
+
+    return final_psentence, phase2_replacements
 
 
 def canonicalize_services(

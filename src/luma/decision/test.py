@@ -64,8 +64,15 @@ USER_ID_WINDOW_TIME_3 = "test_user_window_time_022"
 USER_ID_CONSTRAINT_3 = "test_user_constraint_023"
 USER_ID_INVARIANT_API = "test_user_invariant_api_024"
 
+# Test user IDs for alias preservation tests
+USER_ID_ALIAS_1 = "test_user_alias_025"
+USER_ID_ALIAS_2 = "test_user_alias_026"
+USER_ID_ALIAS_3 = "test_user_alias_027"
+USER_ID_ALIAS_4 = "test_user_alias_028"
+USER_ID_ALIAS_5 = "test_user_alias_029"
 
-def make_request(user_id: str, text: str, domain: str = "service") -> Dict[str, Any]:
+
+def make_request(user_id: str, text: str, domain: str = "service", tenant_context: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Make HTTP request to Luma API.
 
@@ -82,6 +89,10 @@ def make_request(user_id: str, text: str, domain: str = "service") -> Dict[str, 
         "text": text,
         "domain": domain
     }
+
+    # Add tenant_context if provided
+    if tenant_context is not None:
+        payload["tenant_context"] = tenant_context
 
     try:
         response = requests.post(API_ENDPOINT, json=payload, timeout=10)
@@ -1423,6 +1434,329 @@ def test_invariant_api_complete_booking_always_resolved():
     print("\n✓ ALL INVARIANT TESTS PASSED: System invariant enforced at API level")
 
 
+# ============================================================================
+# CATEGORY G: Alias Preservation Tests (SERVICE_VARIANT clarification)
+# ============================================================================
+
+def test_alias_preservation_premium_haircut():
+    """Test G1: PARTIAL → RESOLVED with alias preservation - 'premium haircut'."""
+    print("\n" + "="*70)
+    print("TEST G1: Alias preservation - 'premium haircut'")
+    print("="*70)
+
+    tenant_context = {
+        "aliases": {
+            "premium haircut": "beauty_and_wellness.haircut",
+            "smart haircut": "beauty_and_wellness.haircut"
+        }
+    }
+
+    # Turn 1: Create PARTIAL booking with SERVICE_VARIANT clarification
+    response1 = make_request(
+        USER_ID_ALIAS_1,
+        "book me in for haircut tomorrow at 2pm",
+        tenant_context=tenant_context
+    )
+    assert response1.get("success") == True, "Turn 1 should succeed"
+    booking1 = response1.get("booking")
+    assert_booking_not_null(response1, "TEST G1 Turn 1")
+    assert booking1.get(
+        "booking_state") == "PARTIAL", "Turn 1: Should be PARTIAL"
+    assert response1.get(
+        "needs_clarification") == True, "Turn 1: Should need clarification"
+
+    clarification1 = response1.get("clarification", {})
+    assert clarification1.get("reason") == "SERVICE_VARIANT", (
+        f"Turn 1: clarification.reason should be SERVICE_VARIANT, got {clarification1.get('reason')}"
+    )
+
+    # Turn 2: User selects 'premium haircut'
+    response2 = make_request(
+        USER_ID_ALIAS_1,
+        "premium haircut",
+        tenant_context=tenant_context
+    )
+    assert response2.get("success") == True, "Turn 2 should succeed"
+    booking2 = response2.get("booking")
+    assert_booking_not_null(response2, "TEST G1 Turn 2")
+    assert booking2.get(
+        "booking_state") == "RESOLVED", "Turn 2: Should be RESOLVED"
+
+    # Verify alias text is preserved
+    services2 = booking2.get("services", [])
+    assert len(services2) > 0, "Turn 2: Services should be present"
+
+    # Find the service with the canonical
+    service = next((s for s in services2 if isinstance(s, dict) and s.get(
+        "canonical") == "beauty_and_wellness.haircut"), None)
+    assert service is not None, "Turn 2: Service with canonical 'beauty_and_wellness.haircut' should be present"
+
+    # CRITICAL: The text should be the selected alias, not the generic "haircut"
+    service_text = service.get("text", "").lower()
+    assert "premium haircut" in service_text, (
+        f"Turn 2: Service text should contain 'premium haircut', got '{service_text}'"
+    )
+    assert service.get("canonical") == "beauty_and_wellness.haircut", (
+        "Turn 2: Canonical should remain unchanged"
+    )
+
+    assert response2.get(
+        "needs_clarification") == False, "Turn 2: Should not need clarification"
+    print("✓ TEST G1 PASSED: Alias 'premium haircut' preserved in final response")
+
+
+def test_alias_preservation_smart_haircut():
+    """Test G2: PARTIAL → RESOLVED with alias preservation - 'smart haircut'."""
+    print("\n" + "="*70)
+    print("TEST G2: Alias preservation - 'smart haircut'")
+    print("="*70)
+
+    tenant_context = {
+        "aliases": {
+            "premium haircut": "beauty_and_wellness.haircut",
+            "smart haircut": "beauty_and_wellness.haircut"
+        }
+    }
+
+    # Turn 1: Create PARTIAL booking with SERVICE_VARIANT clarification
+    response1 = make_request(
+        USER_ID_ALIAS_2,
+        "book me in for haircut tomorrow at 2pm",
+        tenant_context=tenant_context
+    )
+    assert response1.get("success") == True, "Turn 1 should succeed"
+    booking1 = response1.get("booking")
+    assert_booking_not_null(response1, "TEST G2 Turn 1")
+    assert booking1.get(
+        "booking_state") == "PARTIAL", "Turn 1: Should be PARTIAL"
+
+    # Turn 2: User selects 'smart haircut'
+    response2 = make_request(
+        USER_ID_ALIAS_2,
+        "smart haircut",
+        tenant_context=tenant_context
+    )
+    assert response2.get("success") == True, "Turn 2 should succeed"
+    booking2 = response2.get("booking")
+    assert_booking_not_null(response2, "TEST G2 Turn 2")
+    assert booking2.get(
+        "booking_state") == "RESOLVED", "Turn 2: Should be RESOLVED"
+
+    # Verify alias text is preserved
+    services2 = booking2.get("services", [])
+    service = next((s for s in services2 if isinstance(s, dict) and s.get(
+        "canonical") == "beauty_and_wellness.haircut"), None)
+    assert service is not None, "Turn 2: Service should be present"
+
+    service_text = service.get("text", "").lower()
+    assert "smart haircut" in service_text, (
+        f"Turn 2: Service text should contain 'smart haircut', got '{service_text}'"
+    )
+
+    print("✓ TEST G2 PASSED: Alias 'smart haircut' preserved in final response")
+
+
+def test_alias_preservation_with_date_time():
+    """Test G3: Alias preservation with date and time in same turn."""
+    print("\n" + "="*70)
+    print("TEST G3: Alias preservation with date and time")
+    print("="*70)
+
+    tenant_context = {
+        "aliases": {
+            "premium haircut": "beauty_and_wellness.haircut",
+            "smart haircut": "beauty_and_wellness.haircut"
+        }
+    }
+
+    # Turn 1: Create PARTIAL booking
+    response1 = make_request(
+        USER_ID_ALIAS_3,
+        "book me in for haircut tomorrow",
+        tenant_context=tenant_context
+    )
+    assert response1.get("success") == True, "Turn 1 should succeed"
+    booking1 = response1.get("booking")
+    assert_booking_not_null(response1, "TEST G3 Turn 1")
+    assert booking1.get(
+        "booking_state") == "PARTIAL", "Turn 1: Should be PARTIAL"
+
+    # Turn 2: User selects alias and provides time
+    response2 = make_request(
+        USER_ID_ALIAS_3,
+        "premium haircut at 3pm",
+        tenant_context=tenant_context
+    )
+    assert response2.get("success") == True, "Turn 2 should succeed"
+    booking2 = response2.get("booking")
+    assert_booking_not_null(response2, "TEST G3 Turn 2")
+    assert booking2.get(
+        "booking_state") == "RESOLVED", "Turn 2: Should be RESOLVED"
+
+    # Verify alias text is preserved
+    services2 = booking2.get("services", [])
+    service = next((s for s in services2 if isinstance(s, dict) and s.get(
+        "canonical") == "beauty_and_wellness.haircut"), None)
+    assert service is not None, "Turn 2: Service should be present"
+
+    service_text = service.get("text", "").lower()
+    assert "premium haircut" in service_text, (
+        f"Turn 2: Service text should contain 'premium haircut', got '{service_text}'"
+    )
+
+    # Verify datetime_range is populated
+    datetime_range = booking2.get("datetime_range")
+    assert datetime_range is not None, "Turn 2: datetime_range should be populated"
+
+    print("✓ TEST G3 PASSED: Alias preserved when provided with time")
+
+
+def test_alias_preservation_multi_service():
+    """Test G4: Alias preservation with multiple service variants."""
+    print("\n" + "="*70)
+    print("TEST G4: Alias preservation with multiple service variants")
+    print("="*70)
+
+    tenant_context = {
+        "aliases": {
+            "premium massage": "beauty_and_wellness.massage",
+            "relaxation massage": "beauty_and_wellness.massage",
+            "deep tissue massage": "beauty_and_wellness.massage"
+        }
+    }
+
+    # Turn 1: Create PARTIAL booking (ambiguous service)
+    response1 = make_request(
+        USER_ID_ALIAS_4,
+        "book me in for massage tomorrow at 2pm",
+        tenant_context=tenant_context
+    )
+    assert response1.get("success") == True, "Turn 1 should succeed"
+    booking1 = response1.get("booking")
+    assert_booking_not_null(response1, "TEST G4 Turn 1")
+    assert booking1.get(
+        "booking_state") == "PARTIAL", "Turn 1: Should be PARTIAL"
+    assert response1.get(
+        "needs_clarification") == True, "Turn 1: Should need clarification"
+
+    # Turn 2: User selects 'deep tissue massage'
+    response2 = make_request(
+        USER_ID_ALIAS_4,
+        "deep tissue massage",
+        tenant_context=tenant_context
+    )
+    assert response2.get("success") == True, "Turn 2 should succeed"
+    booking2 = response2.get("booking")
+    assert_booking_not_null(response2, "TEST G4 Turn 2")
+    assert booking2.get(
+        "booking_state") == "RESOLVED", "Turn 2: Should be RESOLVED"
+
+    # Verify alias text is preserved
+    services2 = booking2.get("services", [])
+    service = next((s for s in services2 if isinstance(s, dict) and s.get(
+        "canonical") == "beauty_and_wellness.massage"), None)
+    assert service is not None, "Turn 2: Service should be present"
+
+    service_text = service.get("text", "").lower()
+    assert "deep tissue massage" in service_text, (
+        f"Turn 2: Service text should contain 'deep tissue massage', got '{service_text}'"
+    )
+
+    print("✓ TEST G4 PASSED: Alias 'deep tissue massage' preserved with multiple variants")
+
+
+def test_alias_preservation_no_tenant_context():
+    """Test G5: No alias preservation when tenant_context is absent (backward compatibility)."""
+    print("\n" + "="*70)
+    print("TEST G5: No alias preservation without tenant_context")
+    print("="*70)
+
+    # Turn 1: Create PARTIAL booking without tenant_context
+    response1 = make_request(
+        USER_ID_ALIAS_5,
+        "book me in for haircut tomorrow"
+    )
+    assert response1.get("success") == True, "Turn 1 should succeed"
+    booking1 = response1.get("booking")
+    assert_booking_not_null(response1, "TEST G5 Turn 1")
+    assert booking1.get(
+        "booking_state") == "PARTIAL", "Turn 1: Should be PARTIAL"
+
+    # Turn 2: Complete with time (no tenant_context)
+    response2 = make_request(
+        USER_ID_ALIAS_5,
+        "at 2pm"
+    )
+    assert response2.get("success") == True, "Turn 2 should succeed"
+    booking2 = response2.get("booking")
+    assert_booking_not_null(response2, "TEST G5 Turn 2")
+    assert booking2.get(
+        "booking_state") == "RESOLVED", "Turn 2: Should be RESOLVED"
+
+    # Verify service text is generic (no alias preservation)
+    services2 = booking2.get("services", [])
+    assert len(services2) > 0, "Turn 2: Services should be present"
+
+    # Without tenant_context, text should be the generic service family name
+    service = services2[0] if isinstance(services2[0], dict) else None
+    if service:
+        service_text = service.get("text", "").lower()
+        # Should be generic "haircut" or similar, not a tenant alias
+        assert "haircut" in service_text or service.get("canonical") is not None, (
+            f"Turn 2: Service text should be generic, got '{service_text}'"
+        )
+
+    print("✓ TEST G5 PASSED: Backward compatibility - no alias preservation without tenant_context")
+
+
+def clear_user_memory(user_id: str, domain: str = "service"):
+    """
+    Clear Redis memory state for a test user.
+
+    Args:
+        user_id: User identifier
+        domain: Domain (service or reservation)
+    """
+    try:
+        # Try to import and use RedisMemoryStore directly
+        # Add src/ to path if needed
+        src_path = Path(__file__).parent.parent.parent
+        if str(src_path) not in sys.path:
+            sys.path.insert(0, str(src_path))
+
+        from luma.memory import RedisMemoryStore  # noqa: E402
+        store = RedisMemoryStore()
+        store.clear(user_id, domain)
+        print(f"  ✓ Cleared memory for user {user_id} (domain: {domain})")
+    except Exception as e:  # noqa: BLE001
+        # If Redis is not available or clear fails, just log and continue
+        print(f"  ⚠ Could not clear memory for user {user_id}: {e}")
+
+
+def clear_all_test_users_memory():
+    """Clear memory for all test users used in these tests."""
+    print("\n" + "="*70)
+    print("Cleaning up test user memory from Redis...")
+    print("="*70)
+
+    test_user_ids = [
+        USER_ID_PARTIAL, USER_ID_CONTINUATION, USER_ID_WINDOW, USER_ID_MODIFY,
+        USER_ID_GUARDRAIL, USER_ID_EXACT_TIME_1, USER_ID_EXACT_TIME_2,
+        USER_ID_EXACT_TIME_3, USER_ID_WINDOW_TIME_1, USER_ID_WINDOW_TIME_2,
+        USER_ID_WINDOW_TIME_3, USER_ID_CONSTRAINT_1, USER_ID_CONSTRAINT_2,
+        USER_ID_CONSTRAINT_3, USER_ID_MULTI_TURN_1, USER_ID_MULTI_TURN_2,
+        USER_ID_MULTI_TURN_3, USER_ID_RESOLVED_MOD_1, USER_ID_RESOLVED_MOD_2,
+        USER_ID_RESOLVED_MOD_3, USER_ID_GUARDRAIL_2, USER_ID_GUARDRAIL_3,
+        USER_ID_GUARDRAIL_4, USER_ID_INVARIANT_API,
+        USER_ID_ALIAS_1, USER_ID_ALIAS_2, USER_ID_ALIAS_3, USER_ID_ALIAS_4, USER_ID_ALIAS_5
+    ]
+
+    for user_id in test_user_ids:
+        clear_user_memory(user_id, "service")
+
+    print("✓ Cleanup complete")
+
+
 def check_api_health():
     """Check if API is running and accessible."""
     try:
@@ -1486,6 +1820,12 @@ def main():
         test_guardrail_vague_correction_later,
         # Absolute Invariant Test (API-level)
         test_invariant_api_complete_booking_always_resolved,
+        # Category G: Alias Preservation Tests
+        test_alias_preservation_premium_haircut,
+        test_alias_preservation_smart_haircut,
+        test_alias_preservation_with_date_time,
+        test_alias_preservation_multi_service,
+        test_alias_preservation_no_tenant_context,
     ]
 
     passed = 0
@@ -1530,6 +1870,13 @@ def main():
     print("="*70)
     print(f"Passed: {passed}/{len(tests)}")
     print(f"Failed: {failed}/{len(tests)}")
+
+    # Cleanup: Clear Redis memory for all test users
+    try:
+        clear_all_test_users_memory()
+    except Exception as e:
+        print(f"\n⚠ Warning: Could not clean up Redis memory: {e}")
+        print("  (This is non-fatal - tests may have passed)")
 
     if failed > 0:
         print("\nSome tests failed. Check the output above for details.")

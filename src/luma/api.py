@@ -71,6 +71,29 @@ entity_matcher = None
 intent_resolver = None
 memory_store = None
 
+# Structured stage logger
+def _log_stage(logger, request_id: str, stage: str, input_data=None, output_data=None, notes=None, duration_ms=None, level="info"):
+    """Log a pipeline stage with structured format."""
+    # Create a meaningful message for the log
+    message = f"stage={stage}"
+    if duration_ms is not None:
+        message += f", duration_ms={duration_ms}"
+    
+    payload = {
+        "request_id": request_id,
+        "stage": stage,
+    }
+    if input_data is not None:
+        payload["input"] = input_data
+    if output_data is not None:
+        payload["output"] = output_data
+    if notes is not None:
+        payload["notes"] = notes
+    if duration_ms is not None:
+        payload["duration_ms"] = duration_ms
+    log_fn = logger.debug if level == "debug" else logger.info
+    log_fn(message, extra=payload)
+
 
 # Request tracking middleware
 @app.before_request
@@ -122,6 +145,34 @@ def find_normalization_dir():
     if intents_norm.exists():
         return intents_norm
     return None
+
+
+def _format_service_for_response(service: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Format a service dict for API response, preserving resolved alias if present.
+    
+    When a tenant alias was explicitly matched, use it for the text field.
+    Otherwise, use the original text field.
+    
+    Args:
+        service: Service dict with text, canonical, and optionally resolved_alias
+        
+    Returns:
+        Formatted service dict with text and canonical
+    """
+    # If resolved_alias exists (from explicit tenant alias match), use it
+    resolved_alias = service.get("resolved_alias")
+    if resolved_alias:
+        return {
+            "text": resolved_alias,
+            "canonical": service.get("canonical", "")
+        }
+    
+    # Otherwise, use existing text field
+    return {
+        "text": service.get("text", ""),
+        "canonical": service.get("canonical", "")
+    }
 
 
 def _count_mutable_slots_modified(
@@ -438,9 +489,6 @@ def resolve():
     """
     request_id = g.request_id if hasattr(g, 'request_id') else 'unknown'
 
-    logger.info("TRACE: entered resolve() end-of-function marker",
-                extra={'request_id': request_id})
-
     if intent_resolver is None:
         logger.error("Pipeline not initialized",
                      extra={'request_id': request_id})
@@ -489,6 +537,15 @@ def resolve():
         text = data["text"]
         domain = data.get("domain", "service")
         timezone = data.get("timezone", "UTC")
+        tenant_context = data.get("tenant_context")  # Optional tenant context with aliases
+        
+        # Log tenant_context for debugging
+        if tenant_context:
+            aliases_count = len(tenant_context.get("aliases", {})) if isinstance(tenant_context.get("aliases"), dict) else 0
+            logger.info(
+                f"Received tenant_context with {aliases_count} aliases",
+                extra={'request_id': request_id, 'aliases_count': aliases_count}
+            )
 
         if not text or not isinstance(text, str):
             logger.warning("Invalid text parameter", extra={
@@ -507,17 +564,12 @@ def resolve():
                 logger.warning(f"Failed to load memory: {e}", extra={
                                'request_id': request_id})
 
-        # Log request
-        logger.info(
-            "Processing conversational input",
-            extra={
-                'request_id': request_id,
-                'user_id': user_id,
-                'text_length': len(text),
-                'domain': domain,
-                'timezone': timezone,
-                'has_memory': memory_state is not None
-            }
+        # Stage 1: INPUT - Log request entry
+        _log_stage(
+            logger, request_id, "input",
+            input_data={"raw_text": text, "domain": domain, "timezone": timezone},
+            output_data=None,
+            notes=None
         )
 
     except Exception as e:  # noqa: BLE001
@@ -559,11 +611,68 @@ def resolve():
             "stages": {}
         }
 
-        # Stage 1: Entity Extraction
+        # Stage 2: TOKENIZATION & ENTITY EXTRACTION
         try:
+            stage_start = time.time()
             matcher = EntityMatcher(domain=domain, entity_file=entity_file)
-            extraction_result = matcher.extract_with_parameterization(text)
+            extraction_result = matcher.extract_with_parameterization(
+                text, request_id=request_id, tenant_aliases=tenant_context.get("aliases") if tenant_context else None
+            )
+            stage_duration = round((time.time() - stage_start) * 1000, 2)
             results["stages"]["extraction"] = extraction_result
+            
+            # Stage 2: TOKENIZATION - Log token list only
+            tokens = extraction_result.get("_tokens", [])
+            if tokens:
+                _log_stage(
+                    logger, request_id, "tokenization",
+                    input_data={"text": text},
+                    output_data={"tokens": tokens},
+                    duration_ms=stage_duration
+                )
+            
+            # Stage 3: ENTITY EXTRACTION - Log extracted entities grouped by type
+            entities_by_type = {
+                "services": extraction_result.get("service_families", []),
+                "dates": extraction_result.get("dates", []) + extraction_result.get("dates_absolute", []),
+                "times": extraction_result.get("times", []),
+                "durations": extraction_result.get("durations", [])
+            }
+            _log_stage(
+                logger, request_id, "entity_extraction",
+                input_data={"text": text},
+                output_data=entities_by_type,
+                duration_ms=stage_duration
+            )
+            
+            # Stage 4: PARAMETERIZATION PHASE 1 - Service/tenant alias replacement
+            phase1_replacements = extraction_result.get("_phase1_replacements", [])
+            if phase1_replacements:
+                phase1_sentence = extraction_result.get("osentence", "")
+                _log_stage(
+                    logger, request_id, "parameterization.phase1",
+                    input_data={"sentence": phase1_sentence},
+                    output_data={
+                        "replacements": phase1_replacements,
+                        "resulting_sentence": phase1_sentence
+                    },
+                    notes="Service/tenant alias replacement"
+                )
+            
+            # Stage 5: PARAMETERIZATION PHASE 2 - Date/time replacement
+            phase2_replacements = extraction_result.get("_phase2_replacements", [])
+            final_psentence = extraction_result.get("psentence", "")
+            if phase2_replacements or final_psentence:
+                _log_stage(
+                    logger, request_id, "parameterization.phase2",
+                    input_data={"sentence": extraction_result.get("osentence", "")},
+                    output_data={
+                        "date_replacements": [r for r in phase2_replacements if r.get("type") == "date"],
+                        "time_replacements": [r for r in phase2_replacements if r.get("type") == "time"],
+                        "final_parameterized_sentence": final_psentence
+                    },
+                    notes="Date/time token replacement"
+                )
         except Exception as e:
             results["stages"]["extraction"] = {"error": str(e)}
             return jsonify({"success": False, "data": results}), 500
@@ -616,11 +725,27 @@ def resolve():
             results["stages"]["grouping"] = {"error": str(e)}
             return jsonify({"success": False, "data": results}), 500
 
-        # Stage 5: Semantic Resolution
+        # Stage 6: Semantic Resolution
         try:
+            stage_start = time.time()
             semantic_result = resolve_semantics(
-                grouped_result, extraction_result)
+                grouped_result, extraction_result, tenant_context=tenant_context)
+            stage_duration = round((time.time() - stage_start) * 1000, 2)
             results["stages"]["semantic"] = semantic_result.to_dict()
+            
+            # Stage 6: SEMANTIC RESOLUTION - Log resolved semantic values
+            resolved_booking = semantic_result.resolved_booking
+            _log_stage(
+                logger, request_id, "semantic_resolution",
+                input_data={"grouped_result": grouped_result},
+                output_data={
+                    "service_family": [s.get("text", "") for s in resolved_booking.get("services", []) if isinstance(s, dict)],
+                    "date": resolved_booking.get("date_refs", []),
+                    "time": resolved_booking.get("time_refs", []),
+                    "confidence": "high" if resolved_booking.get("services") else "low"
+                },
+                duration_ms=stage_duration
+            )
         except Exception as e:
             results["stages"]["semantic"] = {"error": str(e)}
             return jsonify({"success": False, "data": results}), 500
@@ -690,15 +815,25 @@ def resolve():
             )
 
             # Create merged semantic result
+            # CRITICAL: Preserve semantic clarifications (e.g., SERVICE_VARIANT) from original semantic_result
+            # These must not be lost during merge
             from luma.resolution.semantic_resolver import SemanticResolutionResult
+            merged_needs_clarification = semantic_result.needs_clarification
+            merged_clarification = semantic_result.clarification
+            
+            # Only override if the original didn't have clarification
+            # Semantic clarifications (like SERVICE_VARIANT) take precedence
+            if not merged_needs_clarification or not merged_clarification:
+                # Will be re-evaluated by decision layer if no semantic clarification exists
+                merged_needs_clarification = False
+                merged_clarification = None
+            
             merged_semantic_result = SemanticResolutionResult(
                 resolved_booking=merged_resolved_booking,
-                needs_clarification=False,  # Will be re-evaluated by decision layer
-                clarification=None
+                needs_clarification=merged_needs_clarification,
+                clarification=merged_clarification
             )
 
-            logger.info("TRACE: reached merge+decision block",
-                        extra={'request_id': request_id})
 
             # Store merged result in debug output
             results["stages"]["semantic_merged"] = {
@@ -1052,11 +1187,21 @@ def resolve():
                                 "date_modifiers", [])
 
                         # Update merged_semantic_result
+                        # CRITICAL: Preserve semantic clarifications (e.g., SERVICE_VARIANT) from original semantic_result
                         from luma.resolution.semantic_resolver import SemanticResolutionResult
+                        # Preserve original clarification if it exists
+                        preserved_needs_clarification = semantic_result.needs_clarification
+                        preserved_clarification = semantic_result.clarification
+                        
+                        # Only override if the original didn't have clarification
+                        if not preserved_needs_clarification or not preserved_clarification:
+                            preserved_needs_clarification = False
+                            preserved_clarification = None
+                        
                         merged_semantic_result = SemanticResolutionResult(
                             resolved_booking=updated_resolved_booking,
-                            needs_clarification=False,  # Will be re-evaluated by decision layer
-                            clarification=None
+                            needs_clarification=preserved_needs_clarification,
+                            clarification=preserved_clarification
                         )
 
                         logger.info(
@@ -1152,11 +1297,13 @@ def resolve():
                 }
             )
 
+            stage_start = time.time()
             decision_result = decide_booking_status(
                 semantic_for_decision,
                 entities=extraction_result,
                 policy=booking_policy
             )
+            stage_duration = round((time.time() - stage_start) * 1000, 2)
 
             # Store decision result in results
             results["stages"]["decision"] = {
@@ -1165,16 +1312,15 @@ def resolve():
                 "effective_time": decision_result.effective_time
             }
 
-            # Log booking decision after merge
-            logger.info(
-                f"Booking decision after merge: state={decision_result.status}",
-                extra={
-                    'request_id': request_id,
-                    'user_id': user_id,
-                    'is_continuation': is_continuation,
-                    'decision_status': decision_result.status,
-                    'decision_reason': decision_result.reason
-                }
+            # Stage 7: DECISION - Log decision state and reason
+            _log_stage(
+                logger, request_id, "decision",
+                input_data={"semantic_for_decision": semantic_for_decision},
+                output_data={
+                    "decision_state": decision_result.status,
+                    "reason": decision_result.reason
+                },
+                duration_ms=stage_duration
             )
 
             # If decision requires clarification, return early (before calendar binding)
@@ -1337,15 +1483,30 @@ def resolve():
                             # Already ISO string
                             "last_updated": datetime.now(dt_timezone.utc).isoformat()
                         }
+                        stage_start = time.time()
                         memory_store.set(
                             user_id=user_id,
                             domain=domain,
                             state=partial_memory,
                             ttl=config.MEMORY_TTL
                         )
-                        logger.info(
-                            f"Persisted PARTIAL booking for continuation: user {user_id}",
-                            extra={'request_id': request_id}
+                        stage_duration = round((time.time() - stage_start) * 1000, 2)
+                        
+                        # Stage 8: STATE PERSIST - Log what was stored
+                        storage_backend = "redis" if hasattr(memory_store, 'redis') else "memory"
+                        _log_stage(
+                            logger, request_id, "state_persist",
+                            input_data={"user_id": user_id, "domain": domain},
+                            output_data={
+                                "stored": {
+                                    "intent": "CREATE_BOOKING",
+                                    "booking_state": "PARTIAL",
+                                    "has_services": bool(resolved_booking.get("services")),
+                                    "has_datetime_range": False
+                                },
+                                "storage_backend": storage_backend
+                            },
+                            duration_ms=stage_duration
                         )
                     except Exception as e:  # noqa: BLE001
                         # Log loudly - persistence failures should not be silent
@@ -1506,11 +1667,22 @@ def resolve():
         calendar_booking = calendar_dict.get(
             "calendar_booking", {}) if calendar_dict else {}
 
-        # Extract current clarification (only from validation errors in calendar binding)
-        # Decision layer handles all other clarification decisions
-        # CRITICAL: If decision is RESOLVED, clear any existing PARTIAL clarification
+        # Extract current clarification
+        # Priority: semantic clarification > calendar binding clarification > decision layer
+        # CRITICAL: Semantic clarifications (e.g., SERVICE_VARIANT) must be preserved
+        # even if decision layer says RESOLVED (due to invariant override)
         current_clarification = None
-        if decision_result and decision_result.status == "RESOLVED":
+        
+        # First priority: Check semantic resolution clarification (e.g., SERVICE_VARIANT ambiguity)
+        if merged_semantic_result and merged_semantic_result.needs_clarification and merged_semantic_result.clarification:
+            # Semantic resolution detected ambiguity (e.g., service variant ambiguity)
+            # This must be preserved even if decision layer says RESOLVED
+            current_clarification = merged_semantic_result.clarification.to_dict()
+            logger.info(
+                f"Preserving semantic clarification: {current_clarification.get('reason')}",
+                extra={'request_id': request_id, 'clarification_reason': current_clarification.get('reason')}
+            )
+        elif decision_result and decision_result.status == "RESOLVED":
             # Decision is RESOLVED - no clarification needed
             # This clears any existing PARTIAL clarification from memory
             current_clarification = None
@@ -1520,8 +1692,16 @@ def resolve():
 
         # Prepare current booking state (only canonical fields)
         # Include date_range and time_range for merge logic to handle time-only updates
+        # Format services to preserve resolved_alias if present
+        calendar_services = calendar_booking.get("services", [])
+        formatted_services = [
+            _format_service_for_response(service)
+            for service in calendar_services
+            if isinstance(service, dict)
+        ] if calendar_services else []
+        
         current_booking = {
-            "services": calendar_booking.get("services", []),
+            "services": formatted_services,
             "datetime_range": calendar_booking.get("datetime_range"),
             "date_range": calendar_booking.get("date_range"),
             "time_range": calendar_booking.get("time_range"),
@@ -1711,18 +1891,30 @@ def resolve():
             # Only persist if we have a valid booking state (RESOLVED or PARTIAL)
             if memory_store:
                 try:
+                    stage_start = time.time()
                     memory_store.set(
                         user_id=user_id,
                         domain=domain,
                         state=merged_memory,
                         ttl=config.MEMORY_TTL
                     )
-                    # Log persistence with decision status for debugging
-                    decision_status = decision_result.status if decision_result else "UNKNOWN"
-                    logger.info(
-                        f"Persisted booking state: user {user_id}, decision={decision_status}, "
-                        f"has_clarification={merged_memory.get('clarification') is not None}",
-                        extra={'request_id': request_id}
+                    stage_duration = round((time.time() - stage_start) * 1000, 2)
+                    
+                    # Stage 8: STATE PERSIST - Log what was stored
+                    storage_backend = "redis" if hasattr(memory_store, 'redis') else "memory"
+                    _log_stage(
+                        logger, request_id, "state_persist",
+                        input_data={"user_id": user_id, "domain": domain},
+                        output_data={
+                            "stored": {
+                                "intent": merged_memory.get("intent"),
+                                "booking_state": merged_memory.get("booking_state", {}).get("booking_state") if isinstance(merged_memory.get("booking_state"), dict) else None,
+                                "has_services": bool(merged_memory.get("booking_state", {}).get("services") if isinstance(merged_memory.get("booking_state"), dict) else False),
+                                "has_datetime_range": bool(merged_memory.get("booking_state", {}).get("datetime_range") if isinstance(merged_memory.get("booking_state"), dict) else False)
+                            },
+                            "storage_backend": storage_backend
+                        },
+                        duration_ms=stage_duration
                     )
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"Failed to persist memory: {e}", extra={
@@ -1833,6 +2025,12 @@ def resolve():
         merged_clarification = merged_memory.get("clarification")
         needs_clarification = merged_clarification is not None
 
+        # CRITICAL: If semantic resolution has clarification (e.g., SERVICE_VARIANT),
+        # it takes precedence over decision layer and merged memory
+        if merged_semantic_result and merged_semantic_result.needs_clarification and merged_semantic_result.clarification:
+            needs_clarification = True
+            merged_clarification = merged_semantic_result.clarification.to_dict()
+
         # If decision layer returned NEEDS_CLARIFICATION but we didn't return early,
         # ensure we have clarification set from decision_result
         if decision_result and decision_result.status == "NEEDS_CLARIFICATION" and not needs_clarification:
@@ -1857,12 +2055,48 @@ def resolve():
             # Add booking_state = "RESOLVED" for resolved bookings
             if booking_payload:
                 booking_payload["booking_state"] = "RESOLVED"
+                # Format services to preserve resolved_alias if present in current semantic result
+                if merged_semantic_result:
+                    current_services = merged_semantic_result.resolved_booking.get("services", [])
+                    if current_services:
+                        # Use services from current semantic result (which may have resolved_alias)
+                        booking_payload["services"] = [
+                            _format_service_for_response(service)
+                            for service in current_services
+                            if isinstance(service, dict)
+                        ]
+                    else:
+                        # Format existing services from memory
+                        booking_payload["services"] = [
+                            _format_service_for_response(service)
+                            for service in booking_payload.get("services", [])
+                            if isinstance(service, dict)
+                        ]
         elif memory_state and memory_state.get("intent") == "CREATE_BOOKING" and not needs_clarification:
             # Return existing booking state from memory for follow-ups
             booking_payload = extract_memory_state_for_response(memory_state)
             if booking_payload:
                 booking_payload["booking_state"] = "RESOLVED"
+                # Format services to preserve resolved_alias if present in current semantic result
+                if merged_semantic_result:
+                    current_services = merged_semantic_result.resolved_booking.get("services", [])
+                    if current_services:
+                        # Use services from current semantic result (which may have resolved_alias)
+                        booking_payload["services"] = [
+                            _format_service_for_response(service)
+                            for service in current_services
+                            if isinstance(service, dict)
+                        ]
+                    else:
+                        # Format existing services from memory
+                        booking_payload["services"] = [
+                            _format_service_for_response(service)
+                            for service in booking_payload.get("services", [])
+                            if isinstance(service, dict)
+                        ]
         elif is_booking_intent and needs_clarification:
+            # For CREATE_BOOKING with clarification (including semantic clarifications like SERVICE_VARIANT),
+            # build PARTIAL booking
             # For CREATE_BOOKING with clarification, build PARTIAL booking
             # Extract services from semantic result or extraction result
             # Use merged_semantic_result to get merged semantics if this was a continuation
@@ -1874,12 +2108,16 @@ def resolve():
                 service_families = extraction_result.get(
                     "service_families", [])
                 services = [
-                    {
-                        "text": service.get("text", ""),
-                        "canonical": service.get("canonical", "")
-                    }
+                    _format_service_for_response(service)
                     for service in service_families
                     if isinstance(service, dict) and service.get("text")
+                ]
+            else:
+                # Format services, preserving resolved_alias if present
+                services = [
+                    _format_service_for_response(service)
+                    for service in services
+                    if isinstance(service, dict)
                 ]
 
             # Build PARTIAL booking: services (always), date if known, datetime_range = null
@@ -1902,12 +2140,16 @@ def resolve():
                 service_families = extraction_result.get(
                     "service_families", [])
                 services = [
-                    {
-                        "text": service.get("text", ""),
-                        "canonical": service.get("canonical", "")
-                    }
+                    _format_service_for_response(service)
                     for service in service_families
                     if isinstance(service, dict) and service.get("text")
+                ]
+            else:
+                # Format services, preserving resolved_alias if present
+                services = [
+                    _format_service_for_response(service)
+                    for service in services
+                    if isinstance(service, dict)
                 ]
             booking_payload = {
                 "services": services,
@@ -1926,11 +2168,9 @@ def resolve():
             entities_payload = {}
             if service_families:
                 # Format services with text and canonical (same format as booking.services)
+                # Preserve resolved_alias if present
                 entities_payload["services"] = [
-                    {
-                        "text": service.get("text", ""),
-                        "canonical": service.get("canonical", "")
-                    }
+                    _format_service_for_response(service)
                     for service in service_families
                     if isinstance(service, dict) and service.get("text")
                 ]
@@ -2067,6 +2307,18 @@ def resolve():
         # Attach full internal pipeline data only in debug mode
         if debug_mode:
             response_body["debug"] = results
+
+        # Stage 9: RESPONSE - Log response data
+        _log_stage(
+            logger, request_id, "response",
+            input_data={"intent": api_intent},
+            output_data={
+                "booking_state": booking_payload.get("booking_state") if booking_payload else None,
+                "services": [s.get("text", "") for s in booking_payload.get("services", []) if isinstance(s, dict)] if booking_payload else [],
+                "datetime_range": booking_payload.get("datetime_range") if booking_payload else None
+            },
+            notes=f"needs_clarification={needs_clarification}"
+        )
 
         return jsonify(response_body)
 

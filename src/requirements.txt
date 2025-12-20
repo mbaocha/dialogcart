@@ -4,3 +4,5 @@ langchain_core
 langgraph
 langchain
 sentencepiece>=0.1.99
+python-dotenv
+httpx

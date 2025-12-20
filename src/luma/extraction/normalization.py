@@ -57,7 +57,8 @@ def pre_normalization(text: str) -> str:
     # Pattern: "6 p" or "6 p," → "6 pm" or "6 pm ,"
     # Match: digit + space + 'a' or 'p' (not followed by 'm') + optional punctuation or word boundary
     # Use lookahead to ensure we don't match "6 pm" (already has 'm')
-    text = re.sub(r"\b(\d{1,2})\s+([ap])(?!m)(?=\s|[,\.]|\b)", r"\1 \2m", text, flags=re.IGNORECASE)
+    text = re.sub(
+        r"\b(\d{1,2})\s+([ap])(?!m)(?=\s|[,\.]|\b)", r"\1 \2m", text, flags=re.IGNORECASE)
 
     # 5️⃣ Add spaces around punctuation
     text = re.sub(r"([.!?;:,])(?=\S)", r"\1 ", text)

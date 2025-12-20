@@ -405,13 +405,8 @@ def bind_calendar(
     duration = resolved_booking.get("duration")
 
     # Debug: Log binding inputs
-    import sys
-    print(
-        f"DEBUG: date_refs={date_refs}, date_mode={date_mode}, time_refs={time_refs}, time_mode={time_mode}", file=sys.stderr)
-
     # Bind dates - assume inputs are approved, just bind what's provided
     date_range = _bind_dates(date_refs, date_mode, now, tz)
-    print(f"DEBUG: date_range={date_range}", file=sys.stderr)
 
     # Extract time windows from entities for bias rule (if available)
     time_windows = None
@@ -422,13 +417,11 @@ def bind_calendar(
     # Decision layer has already approved all time configurations
     time_range = _bind_times(time_refs, time_mode, now,
                              tz, time_windows=time_windows)
-    print(f"DEBUG: time_range={time_range}", file=sys.stderr)
 
     # Combine date + time into datetime range
     # NOTE: If date_range is None, datetime_range will also be None (no fallback to today)
     # NOTE: If only time_constraint exists (no regular time), datetime_range will be None
     datetime_range = _combine_datetime_range(date_range, time_range, now, tz)
-    print(f"DEBUG: datetime_range={datetime_range}", file=sys.stderr)
 
     # Apply duration if present
     if duration and datetime_range:
@@ -1122,7 +1115,11 @@ def _validate_ranges(
 
     # Check semantic-level ambiguity flag
     if semantic_result.needs_clarification:
-        reasons.append(semantic_result.reason or "Semantic ambiguity detected")
+        # Get reason from clarification object if available
+        reason_text = "Semantic ambiguity detected"
+        if semantic_result.clarification:
+            reason_text = semantic_result.clarification.reason.value
+        reasons.append(reason_text)
 
     # Check duration + multi-day date range conflict
     if duration and date_range:

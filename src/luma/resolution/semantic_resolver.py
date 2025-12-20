@@ -19,11 +19,13 @@ from ..extraction.entity_loading import (
 )
 from ..clarification import Clarification, ClarificationReason
 from ..config import debug_print
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 from typing import Dict, Any, Optional, Tuple, Set, List
 from pathlib import Path
 from dataclasses import dataclass
-print("DEBUG: semantic_resolver loaded from", __file__)
 
 
 def _get_global_config_path() -> Path:
@@ -100,9 +102,202 @@ class SemanticResolutionResult:
         return result
 
 
+def _build_variants_by_family(tenant_context: Optional[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """
+    Build variants_by_family dictionary from tenant_context.aliases.
+
+    Args:
+        tenant_context: Optional tenant context with aliases mapping
+                       Contains: aliases (Dict[str, str] mapping alias -> service_family)
+
+    Returns:
+        Dictionary mapping service_family -> list of tenant alias strings
+    """
+    variants_by_family: Dict[str, List[str]] = {}
+
+    if not tenant_context:
+        logger.debug("[semantic] no tenant_context provided")
+        return variants_by_family
+
+    aliases = tenant_context.get("aliases", {})
+    if not isinstance(aliases, dict):
+        logger.debug(f"[semantic] aliases is not a dict: {type(aliases)}")
+        return variants_by_family
+
+    logger.info(f"[semantic] building variants_by_family from {len(aliases)} aliases")
+
+    # Build reverse mapping: service_family -> list of aliases
+    for alias, service_family in aliases.items():
+        if not isinstance(alias, str) or not isinstance(service_family, str):
+            continue
+        if service_family not in variants_by_family:
+            variants_by_family[service_family] = []
+        variants_by_family[service_family].append(alias)
+        logger.debug(f"[semantic] mapped alias '{alias}' -> service_family '{service_family}'")
+
+    # Sort aliases for deterministic output
+    for service_family in variants_by_family:
+        variants_by_family[service_family].sort()
+
+    logger.info(f"[semantic] built variants_by_family: {variants_by_family}")
+    return variants_by_family
+
+
+def _track_explicit_alias_match(
+    services: List[Dict[str, Any]],
+    entities: Dict[str, Any],
+    variants_by_family: Dict[str, List[str]]
+) -> None:
+    """
+    Track explicit tenant alias matches and store in service dicts.
+    
+    When a tenant alias is explicitly matched in the input, store it in the service
+    dict so it can be preserved in the final output.
+    
+    Args:
+        services: List of service dictionaries (modified in place)
+        entities: Raw extraction output containing osentence
+        variants_by_family: Dictionary mapping service_family -> list of tenant alias strings
+    """
+    if not variants_by_family or not services:
+        return
+    
+    osentence = entities.get("osentence", "").lower()
+    if not osentence:
+        return
+    
+    # For each service, check if an explicit alias was matched
+    for service in services:
+        if not isinstance(service, dict):
+            continue
+        
+        canonical = service.get("canonical")
+        if not canonical or not isinstance(canonical, str) or "." not in canonical:
+            continue
+        
+        variants = variants_by_family.get(canonical, [])
+        if not variants:
+            continue
+        
+        # Check if any variant (tenant alias) appears in the original sentence
+        matched_alias = None
+        for variant in variants:
+            variant_lower = variant.lower()
+            # Check if variant appears as a phrase in the original sentence
+            pattern = r'\b' + re.escape(variant_lower) + r'\b'
+            if re.search(pattern, osentence):
+                matched_alias = variant  # Store original case-preserved alias
+                logger.info(f"[semantic] resolved service via tenant alias: {matched_alias} → {canonical}")
+                break
+        
+        # Store matched alias in service dict for later use
+        if matched_alias:
+            service["resolved_alias"] = matched_alias
+
+
+def _check_service_variant_ambiguity(
+    services: List[Dict[str, Any]],
+    entities: Dict[str, Any],
+    variants_by_family: Dict[str, List[str]]
+) -> Optional[Clarification]:
+    """
+    Check for service variant ambiguity when a service family maps to multiple tenant variants.
+
+    Ambiguity exists if:
+    - service family is resolved
+    - tenant_context contains >1 alias mapping to that family
+    - user input did NOT explicitly match one alias
+
+    Args:
+        services: List of resolved service dictionaries from booking
+                  Each service dict has "text" (natural language) and "canonical" (service family ID)
+        entities: Raw extraction output containing service_families
+        variants_by_family: Dictionary mapping service_family -> list of tenant alias strings
+
+    Returns:
+        Clarification object if ambiguity detected, None otherwise
+    """
+    if not variants_by_family:
+        logger.debug("[semantic] no variants_by_family, skipping service variant ambiguity check")
+        return None
+
+    if not services:
+        logger.debug("[semantic] no services, skipping service variant ambiguity check")
+        return None
+
+    logger.info(f"[semantic] checking service variant ambiguity: {len(services)} services, {len(variants_by_family)} families with variants")
+
+    # Get service families from resolved services
+    # Services are dicts with "canonical" field containing service family ID (e.g., "beauty_and_wellness.haircut")
+    service_families = []
+    for service in services:
+        if isinstance(service, dict):
+            # Check canonical field first (primary source of service family ID)
+            canonical = service.get("canonical")
+            if canonical and isinstance(canonical, str) and "." in canonical:
+                service_families.append(canonical)
+                logger.debug(f"[semantic] found service family from canonical: {canonical}")
+            # Fallback: check if text field contains canonical format
+            elif service.get("text") and "." in str(service.get("text", "")):
+                service_families.append(str(service.get("text", "")))
+                logger.debug(f"[semantic] found service family from text: {service.get('text')}")
+
+    if not service_families:
+        logger.debug("[semantic] no service families extracted from services")
+        return None
+
+    # Check each resolved service family for ambiguity
+    for service_family in service_families:
+        variants = variants_by_family.get(service_family, [])
+        logger.info(f"[semantic] service_family={service_family}, variants={variants}, count={len(variants)}")
+        
+        if len(variants) <= 1:
+            logger.debug(f"[semantic] skipping {service_family}: {len(variants)} variants (no ambiguity)")
+            continue  # No ambiguity if 0 or 1 variant
+
+        # Check if user input explicitly matched one of the aliases
+        # Check the original sentence to see if any variant (tenant alias) appears in it
+        osentence = entities.get("osentence", "").lower()
+        logger.info(f"[semantic] checking osentence for explicit alias match: '{osentence}'")
+        explicit_alias_match = False
+
+        if osentence:
+            # Check if any variant (tenant alias) appears in the original sentence
+            for variant in variants:
+                variant_lower = variant.lower()
+                # Check if variant appears as a phrase in the original sentence
+                # Use word boundary matching to avoid false positives
+                # Pattern: variant as a phrase (with word boundaries)
+                pattern = r'\b' + re.escape(variant_lower) + r'\b'
+                if re.search(pattern, osentence):
+                    explicit_alias_match = True
+                    logger.info(f"[semantic] explicit alias match found: '{variant_lower}' in '{osentence}'")
+                    break
+                else:
+                    logger.debug(f"[semantic] no match for variant '{variant_lower}' in '{osentence}'")
+
+        # If no explicit alias match, ambiguity exists
+        if not explicit_alias_match:
+            logger.info(
+                f"[semantic] detected service variant ambiguity: {service_family} → {variants}"
+            )
+            return Clarification(
+                reason=ClarificationReason.SERVICE_VARIANT,
+                data={
+                    "type": "SERVICE_VARIANT",
+                    "reason": "MULTIPLE_MATCHES",
+                    "options": variants,
+                    "service_family": service_family
+                }
+            )
+
+    return None
+
+
 def resolve_semantics(
     intent_result: Dict[str, Any],
-    entities: Dict[str, Any]
+    entities: Dict[str, Any],
+    tenant_context: Optional[Dict[str, Any]] = None
 ) -> SemanticResolutionResult:
     """
     Resolve semantic meaning from intent result and entities.
@@ -116,6 +311,8 @@ def resolve_semantics(
         entities: Raw extraction output from EntityMatcher
                  Contains: service_families, dates, dates_absolute, times,
                           time_windows, durations
+        tenant_context: Optional tenant context with aliases mapping
+                       Contains: aliases (Dict[str, str] mapping alias -> service_family)
 
     Returns:
         SemanticResolutionResult with resolved booking semantics
@@ -185,10 +382,24 @@ def resolve_semantics(
     # Extract duration
     duration = booking.get("duration")
 
-    # Check for conflicts and ambiguity
-    clarification = _check_ambiguity(
-        entities, structure, time_resolution, date_resolution
+    # Build variants_by_family from tenant_context (if provided)
+    variants_by_family = _build_variants_by_family(tenant_context)
+    logger.info(f"[semantic] resolve_semantics called with tenant_context={bool(tenant_context)}, variants_by_family keys={list(variants_by_family.keys())}")
+
+    # Track explicit alias matches (before ambiguity check)
+    # This stores matched aliases in service dicts for later use
+    _track_explicit_alias_match(services, entities, variants_by_family)
+
+    # Check for service variant ambiguity (before other ambiguity checks)
+    clarification = _check_service_variant_ambiguity(
+        services, entities, variants_by_family
     )
+
+    # Check for conflicts and ambiguity (only if no service variant ambiguity)
+    if clarification is None:
+        clarification = _check_ambiguity(
+            entities, structure, time_resolution, date_resolution
+        )
 
     # Guard: Check for weekday-like patterns that weren't normalized
     # This prevents silent failure when normalization doesn't succeed
@@ -825,12 +1036,6 @@ def _resolve_date_semantics(
     Returns:
         Dict with "mode", "refs", and optional "needs_clarification" flag
     """
-    print(
-        "DEBUG[semantic]: enter _resolve_date_semantics "
-        f"keys={list(entities.keys())} "
-        f"osentence={entities.get('osentence')} "
-        f"psentence={entities.get('psentence')}"
-    )
     dates = entities.get("dates", [])
     dates_absolute = entities.get("dates_absolute", [])
 
@@ -842,22 +1047,12 @@ def _resolve_date_semantics(
         for m in modifier_values
         if isinstance(m, str) and m.strip()
     ]
-    print(
-        "DEBUG[semantic]: modifier_values raw =",
-        modifier_values,
-        type(modifier_values)
-    )
     date_modifiers: List[str] = []
     if osentence and modifier_values:
         for mod in modifier_values:
             if isinstance(mod, str):
                 if re.search(rf"\b{re.escape(mod.lower())}\b", osentence):
                     date_modifiers.append(mod.lower())
-    print(
-        "DEBUG[semantic]: after modifiers "
-        f"sentence={osentence} "
-        f"date_modifiers={date_modifiers}"
-    )
 
     # Normalize date texts (handle misspellings)
     normalized_dates = [_normalize_date_text(d.get("text", "")) for d in dates]
@@ -898,11 +1093,6 @@ def _resolve_date_semantics(
         elif len(dates_absolute) >= 2:
             # Multiple absolute dates → check for range marker
             if structure.get("date_type") == "range" or "between" in str(structure).lower() or "from" in str(structure).lower():
-                print(
-                    "DEBUG[semantic]: RETURN ABSOLUTE_RANGE "
-                    f"date_refs={normalized_absolute[:2]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",
                     "refs": normalized_absolute[:2],  # Use normalized text
@@ -910,11 +1100,6 @@ def _resolve_date_semantics(
                 }
             else:
                 # Ambiguous - will be flagged
-                print(
-                    "DEBUG[semantic]: RETURN ABSOLUTE_RANGE_AMBIG "
-                    f"date_refs={normalized_absolute[:2]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",  # Default to range, but flag ambiguity
                     "refs": normalized_absolute[:2],  # Use normalized text
@@ -928,11 +1113,6 @@ def _resolve_date_semantics(
 
             # Check for fine-grained modifiers (early/mid/end) → always range
             if _has_fine_grained_modifier(date_text):
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_FINE_GRAINED "
-                    f"date_refs={[normalized_dates[0]]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",
                     "refs": [normalized_dates[0]],  # Use normalized text
@@ -941,11 +1121,6 @@ def _resolve_date_semantics(
 
             # Simple relative days → single_day
             if _is_simple_relative_day(date_text):
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_SIMPLE "
-                    f"date_refs={[normalized_dates[0]]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "single_day",
                     "refs": [normalized_dates[0]],  # Use normalized text
@@ -954,11 +1129,6 @@ def _resolve_date_semantics(
 
             # Week-based → range
             if _is_week_based(date_text):
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_WEEK_BASED "
-                    f"date_refs={[normalized_dates[0]]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",
                     "refs": [normalized_dates[0]],  # Use normalized text
@@ -967,11 +1137,6 @@ def _resolve_date_semantics(
 
             # Weekend → range
             if _is_weekend_reference(date_text):
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_WEEKEND "
-                    f"date_refs={[normalized_dates[0]]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",
                     "refs": [normalized_dates[0]],  # Use normalized text
@@ -980,11 +1145,6 @@ def _resolve_date_semantics(
 
             # Specific weekday → single_day
             if _is_specific_weekday(date_text):
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_WEEKDAY "
-                    f"date_refs={[normalized_dates[0]]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "single_day",
                     "refs": [normalized_dates[0]],  # Use normalized text
@@ -993,11 +1153,6 @@ def _resolve_date_semantics(
 
             # Month-relative → range (full month)
             if _is_month_relative(date_text):
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_MONTH "
-                    f"date_refs={[normalized_dates[0]]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",
                     "refs": [normalized_dates[0]],  # Use normalized text
@@ -1005,11 +1160,6 @@ def _resolve_date_semantics(
                 }
 
             # Default: single_day
-            print(
-                "DEBUG[semantic]: RETURN RELATIVE_DEFAULT "
-                f"date_refs={[normalized_dates[0]]} "
-                f"date_modifiers={date_modifiers}"
-            )
             return {
                 "mode": "single_day",
                 "refs": [normalized_dates[0]],  # Use normalized text
@@ -1018,11 +1168,6 @@ def _resolve_date_semantics(
         elif len(dates) >= 2:
             # Multiple relative dates → check for range marker
             if structure.get("date_type") == "range" or "between" in str(structure).lower() or "from" in str(structure).lower():
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_MULTI_RANGE "
-                    f"date_refs={normalized_dates[:2]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",
                     "refs": normalized_dates[:2],  # Use normalized text
@@ -1030,11 +1175,6 @@ def _resolve_date_semantics(
                 }
             else:
                 # Ambiguous - will be flagged
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_MULTI_AMBIG "
-                    f"date_refs={normalized_dates[:2]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",  # Default to range, but flag ambiguity
                     "refs": normalized_dates[:2],  # Use normalized text
@@ -1044,11 +1184,6 @@ def _resolve_date_semantics(
     # Rule 4: Mixed absolute and relative
     if dates_absolute and dates:
         # Absolute takes precedence
-        print(
-            "DEBUG[semantic]: RETURN MIXED_ABSOLUTE_RELATIVE "
-            f"date_refs={[normalized_absolute[0]]} "
-            f"date_modifiers={date_modifiers}"
-        )
         return {
             "mode": "single_day",
             "refs": [normalized_absolute[0]],  # Use normalized text
@@ -1056,11 +1191,6 @@ def _resolve_date_semantics(
         }
 
     # Rule 5: No dates
-    print(
-        "DEBUG[semantic]: RETURN NO_DATES "
-        f"date_refs=[] "
-        f"date_modifiers={date_modifiers}"
-    )
     return {
         "mode": "flexible",
         "refs": [],

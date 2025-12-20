@@ -37,7 +37,8 @@ class JSONFormatter(logging.Formatter):
         optional_fields = [
             'request_id', 'method', 'path', 'status_code', 
             'duration_ms', 'text_length', 'groups_count', 
-            'route', 'processing_time_ms', 'error_type'
+            'route', 'processing_time_ms', 'error_type',
+            'stage', 'input', 'output', 'notes'
         ]
         
         for field in optional_fields:
