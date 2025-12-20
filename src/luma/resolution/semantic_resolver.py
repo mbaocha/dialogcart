@@ -19,11 +19,13 @@ from ..extraction.entity_loading import (
 )
 from ..clarification import Clarification, ClarificationReason
 from ..config import debug_print
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 from typing import Dict, Any, Optional, Tuple, Set, List
 from pathlib import Path
 from dataclasses import dataclass
-print("DEBUG: semantic_resolver loaded from", __file__)
 
 
 def _get_global_config_path() -> Path:
@@ -100,9 +102,202 @@ class SemanticResolutionResult:
         return result
 
 
+def _build_variants_by_family(tenant_context: Optional[Dict[str, Any]]) -> Dict[str, List[str]]:
+    """
+    Build variants_by_family dictionary from tenant_context.aliases.
+
+    Args:
+        tenant_context: Optional tenant context with aliases mapping
+                       Contains: aliases (Dict[str, str] mapping alias -> service_family)
+
+    Returns:
+        Dictionary mapping service_family -> list of tenant alias strings
+    """
+    variants_by_family: Dict[str, List[str]] = {}
+
+    if not tenant_context:
+        logger.debug("[semantic] no tenant_context provided")
+        return variants_by_family
+
+    aliases = tenant_context.get("aliases", {})
+    if not isinstance(aliases, dict):
+        logger.debug(f"[semantic] aliases is not a dict: {type(aliases)}")
+        return variants_by_family
+
+    logger.info(f"[semantic] building variants_by_family from {len(aliases)} aliases")
+
+    # Build reverse mapping: service_family -> list of aliases
+    for alias, service_family in aliases.items():
+        if not isinstance(alias, str) or not isinstance(service_family, str):
+            continue
+        if service_family not in variants_by_family:
+            variants_by_family[service_family] = []
+        variants_by_family[service_family].append(alias)
+        logger.debug(f"[semantic] mapped alias '{alias}' -> service_family '{service_family}'")
+
+    # Sort aliases for deterministic output
+    for service_family in variants_by_family:
+        variants_by_family[service_family].sort()
+
+    logger.info(f"[semantic] built variants_by_family: {variants_by_family}")
+    return variants_by_family
+
+
+def _track_explicit_alias_match(
+    services: List[Dict[str, Any]],
+    entities: Dict[str, Any],
+    variants_by_family: Dict[str, List[str]]
+) -> None:
+    """
+    Track explicit tenant alias matches and store in service dicts.
+    
+    When a tenant alias is explicitly matched in the input, store it in the service
+    dict so it can be preserved in the final output.
+    
+    Args:
+        services: List of service dictionaries (modified in place)
+        entities: Raw extraction output containing osentence
+        variants_by_family: Dictionary mapping service_family -> list of tenant alias strings
+    """
+    if not variants_by_family or not services:
+        return
+    
+    osentence = entities.get("osentence", "").lower()
+    if not osentence:
+        return
+    
+    # For each service, check if an explicit alias was matched
+    for service in services:
+        if not isinstance(service, dict):
+            continue
+        
+        canonical = service.get("canonical")
+        if not canonical or not isinstance(canonical, str) or "." not in canonical:
+            continue
+        
+        variants = variants_by_family.get(canonical, [])
+        if not variants:
+            continue
+        
+        # Check if any variant (tenant alias) appears in the original sentence
+        matched_alias = None
+        for variant in variants:
+            variant_lower = variant.lower()
+            # Check if variant appears as a phrase in the original sentence
+            pattern = r'\b' + re.escape(variant_lower) + r'\b'
+            if re.search(pattern, osentence):
+                matched_alias = variant  # Store original case-preserved alias
+                logger.info(f"[semantic] resolved service via tenant alias: {matched_alias} → {canonical}")
+                break
+        
+        # Store matched alias in service dict for later use
+        if matched_alias:
+            service["resolved_alias"] = matched_alias
+
+
+def _check_service_variant_ambiguity(
+    services: List[Dict[str, Any]],
+    entities: Dict[str, Any],
+    variants_by_family: Dict[str, List[str]]
+) -> Optional[Clarification]:
+    """
+    Check for service variant ambiguity when a service family maps to multiple tenant variants.
+
+    Ambiguity exists if:
+    - service family is resolved
+    - tenant_context contains >1 alias mapping to that family
+    - user input did NOT explicitly match one alias
+
+    Args:
+        services: List of resolved service dictionaries from booking
+                  Each service dict has "text" (natural language) and "canonical" (service family ID)
+        entities: Raw extraction output containing service_families
+        variants_by_family: Dictionary mapping service_family -> list of tenant alias strings
+
+    Returns:
+        Clarification object if ambiguity detected, None otherwise
+    """
+    if not variants_by_family:
+        logger.debug("[semantic] no variants_by_family, skipping service variant ambiguity check")
+        return None
+
+    if not services:
+        logger.debug("[semantic] no services, skipping service variant ambiguity check")
+        return None
+
+    logger.info(f"[semantic] checking service variant ambiguity: {len(services)} services, {len(variants_by_family)} families with variants")
+
+    # Get service families from resolved services
+    # Services are dicts with "canonical" field containing service family ID (e.g., "beauty_and_wellness.haircut")
+    service_families = []
+    for service in services:
+        if isinstance(service, dict):
+            # Check canonical field first (primary source of service family ID)
+            canonical = service.get("canonical")
+            if canonical and isinstance(canonical, str) and "." in canonical:
+                service_families.append(canonical)
+                logger.debug(f"[semantic] found service family from canonical: {canonical}")
+            # Fallback: check if text field contains canonical format
+            elif service.get("text") and "." in str(service.get("text", "")):
+                service_families.append(str(service.get("text", "")))
+                logger.debug(f"[semantic] found service family from text: {service.get('text')}")
+
+    if not service_families:
+        logger.debug("[semantic] no service families extracted from services")
+        return None
+
+    # Check each resolved service family for ambiguity
+    for service_family in service_families:
+        variants = variants_by_family.get(service_family, [])
+        logger.info(f"[semantic] service_family={service_family}, variants={variants}, count={len(variants)}")
+        
+        if len(variants) <= 1:
+            logger.debug(f"[semantic] skipping {service_family}: {len(variants)} variants (no ambiguity)")
+            continue  # No ambiguity if 0 or 1 variant
+
+        # Check if user input explicitly matched one of the aliases
+        # Check the original sentence to see if any variant (tenant alias) appears in it
+        osentence = entities.get("osentence", "").lower()
+        logger.info(f"[semantic] checking osentence for explicit alias match: '{osentence}'")
+        explicit_alias_match = False
+
+        if osentence:
+            # Check if any variant (tenant alias) appears in the original sentence
+            for variant in variants:
+                variant_lower = variant.lower()
+                # Check if variant appears as a phrase in the original sentence
+                # Use word boundary matching to avoid false positives
+                # Pattern: variant as a phrase (with word boundaries)
+                pattern = r'\b' + re.escape(variant_lower) + r'\b'
+                if re.search(pattern, osentence):
+                    explicit_alias_match = True
+                    logger.info(f"[semantic] explicit alias match found: '{variant_lower}' in '{osentence}'")
+                    break
+                else:
+                    logger.debug(f"[semantic] no match for variant '{variant_lower}' in '{osentence}'")
+
+        # If no explicit alias match, ambiguity exists
+        if not explicit_alias_match:
+            logger.info(
+                f"[semantic] detected service variant ambiguity: {service_family} → {variants}"
+            )
+            return Clarification(
+                reason=ClarificationReason.SERVICE_VARIANT,
+                data={
+                    "type": "SERVICE_VARIANT",
+                    "reason": "MULTIPLE_MATCHES",
+                    "options": variants,
+                    "service_family": service_family
+                }
+            )
+
+    return None
+
+
 def resolve_semantics(
     intent_result: Dict[str, Any],
-    entities: Dict[str, Any]
+    entities: Dict[str, Any],
+    tenant_context: Optional[Dict[str, Any]] = None
 ) -> SemanticResolutionResult:
     """
     Resolve semantic meaning from intent result and entities.
@@ -116,6 +311,8 @@ def resolve_semantics(
         entities: Raw extraction output from EntityMatcher
                  Contains: service_families, dates, dates_absolute, times,
                           time_windows, durations
+        tenant_context: Optional tenant context with aliases mapping
+                       Contains: aliases (Dict[str, str] mapping alias -> service_family)
 
     Returns:
         SemanticResolutionResult with resolved booking semantics
@@ -134,8 +331,14 @@ def resolve_semantics(
     # Extract services
     services = booking.get("services", [])
 
-    # Resolve time semantics
-    time_resolution = _resolve_time_semantics(entities, structure)
+    # Detect time constraints BEFORE time resolution (to exclude them from binding)
+    time_constraint = _detect_time_constraint(entities)
+
+    # Filter out constraint times from entities for regular time resolution
+    filtered_entities = _filter_constraint_times(entities, time_constraint)
+
+    # Resolve time semantics (excluding constraint times)
+    time_resolution = _resolve_time_semantics(filtered_entities, structure)
 
     # Resolve date semantics
     date_resolution = _resolve_date_semantics(entities, structure)
@@ -179,10 +382,24 @@ def resolve_semantics(
     # Extract duration
     duration = booking.get("duration")
 
-    # Check for conflicts and ambiguity
-    clarification = _check_ambiguity(
-        entities, structure, time_resolution, date_resolution
+    # Build variants_by_family from tenant_context (if provided)
+    variants_by_family = _build_variants_by_family(tenant_context)
+    logger.info(f"[semantic] resolve_semantics called with tenant_context={bool(tenant_context)}, variants_by_family keys={list(variants_by_family.keys())}")
+
+    # Track explicit alias matches (before ambiguity check)
+    # This stores matched aliases in service dicts for later use
+    _track_explicit_alias_match(services, entities, variants_by_family)
+
+    # Check for service variant ambiguity (before other ambiguity checks)
+    clarification = _check_service_variant_ambiguity(
+        services, entities, variants_by_family
     )
+
+    # Check for conflicts and ambiguity (only if no service variant ambiguity)
+    if clarification is None:
+        clarification = _check_ambiguity(
+            entities, structure, time_resolution, date_resolution
+        )
 
     # Guard: Check for weekday-like patterns that weren't normalized
     # This prevents silent failure when normalization doesn't succeed
@@ -198,7 +415,8 @@ def resolve_semantics(
         "date_modifiers": date_resolution.get("modifiers", []),
         "time_mode": time_resolution["mode"],
         "time_refs": time_resolution["refs"],
-        "duration": duration
+        "duration": duration,
+        "time_constraint": time_constraint
     }
 
     return SemanticResolutionResult(
@@ -221,6 +439,83 @@ def _is_fuzzy_hour(time_text: str) -> bool:
     time_lower = time_text.lower().strip()
     fuzzy_patterns = ["ish", "around", "about"]
     return any(pattern in time_lower for pattern in fuzzy_patterns)
+
+
+def _extract_hour_only_time(entities: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Extract hour-only time patterns from original sentence.
+
+    Patterns:
+    - Direct: "at 9", "at 10", "by 4", "before 6", "after 3"
+    - Contextual modifications: "make it 10", "set it to 9", "change it 11", "move it to 14"
+
+    Only extracts if:
+    - No full time already extracted (CRITICAL: skip if TIME tokens with am/pm exist)
+    - No time window already extracted
+    - Pattern matches hour-only expression
+    - No time constraint pattern (constraints handled separately)
+
+    Args:
+        entities: Raw extraction output containing osentence
+
+    Returns:
+        Dict with "hour" (int 0-23) and "text" (original match) if found, None otherwise
+    """
+    # CRITICAL: Skip fallback if TIME tokens with am/pm already exist
+    times = entities.get("times", [])
+    if times:
+        # Check if any time has am/pm - if so, don't use fallback
+        for time_entity in times:
+            time_text = time_entity.get("text", "").lower()
+            if "am" in time_text or "pm" in time_text:
+                return None  # TIME token with am/pm exists, skip fallback
+
+    osentence = entities.get("osentence", "")
+    if not osentence:
+        return None
+
+    # Pattern 1: Direct hour-only patterns (exclude constraint patterns)
+    # (at)\s+(\d{1,2})\b - only "at" for direct times, not "by/before/after" (those are constraints)
+    # Matches: "at 9", "at 10" (but NOT "by 4", "before 6", "after 3" - those are constraints)
+    direct_pattern = re.compile(
+        r'\b(at)\s+(\d{1,2})\b',
+        re.IGNORECASE
+    )
+
+    match = direct_pattern.search(osentence)
+    if match:
+        hour_str = match.group(2)
+        hour = int(hour_str)
+
+        # Validate hour range (0-23)
+        if 0 <= hour <= 23:
+            return {
+                "hour": hour,
+                "text": match.group(0)  # Full match like "at 10"
+            }
+
+    # Pattern 2: Contextual modification patterns
+    # (make|set|change|update|move)\s+(it|this)\s+(to\s+)?(\d{1,2})\b
+    # Matches: "make it 10", "set it to 9", "change it 11", "move it to 14"
+    modification_pattern = re.compile(
+        r'\b(make|set|change|update|move)\s+(it|this)\s+(to\s+)?(\d{1,2})\b',
+        re.IGNORECASE
+    )
+
+    match = modification_pattern.search(osentence)
+    if match:
+        # Hour is in group 4 (after verb, pronoun, optional "to")
+        hour_str = match.group(4)
+        hour = int(hour_str)
+
+        # Validate hour range (0-23)
+        if 0 <= hour <= 23:
+            return {
+                "hour": hour,
+                "text": match.group(0)  # Full match like "make it 10"
+            }
+
+    return None
 
 
 def _resolve_time_semantics(
@@ -298,11 +593,194 @@ def _resolve_time_semantics(
             "refs": [tw.get("text") for tw in time_windows]
         }
 
-    # Rule 5: None
+    # Rule 5: Hour-only fallback - extract hour-only patterns if no times/windows extracted
+    # CRITICAL: Only trigger if no TIME tokens exist (prevents fallback from overriding parsed times)
+    # Also skip if time_constraint exists (constraints are handled separately)
+    if not times and not time_windows:
+        # Check if there's a time constraint - if so, don't use fallback
+        # (time constraints are handled separately and should not trigger hour-only fallback)
+        osentence = entities.get("osentence", "")
+        has_constraint_pattern = re.search(
+            r'\b(by|before|after)\s+\d+', osentence, re.IGNORECASE)
+
+        # Only use fallback if no constraint pattern and no extracted times
+        if not has_constraint_pattern:
+            hour_only_match = _extract_hour_only_time(entities)
+            if hour_only_match:
+                hour = hour_only_match["hour"]
+                # Normalize to HH:00 format (24-hour)
+                time_ref = f"{hour:02d}:00"
+                print(
+                    f"[time-extract]: extracted hour-only time from semantic fallback: {hour_only_match['text']} → {time_ref}")
+                return {
+                    "mode": "exact",
+                    "refs": [time_ref],
+                    "precision": "hour"  # Mark as hour-only precision
+                }
+
+    # Rule 6: None
     return {
         "mode": "none",
         "refs": []
     }
+
+
+def _detect_time_constraint(
+    entities: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """
+    Detect time constraint patterns like "by 4pm", "before 5pm", or "after 10am".
+
+    Args:
+        entities: Raw extraction output containing psentence and times
+
+    Returns:
+        Dict with "type" ("before", "after", "by") and "time" (HH:MM format) if constraint detected, None otherwise
+    """
+    psentence = entities.get("psentence", "")
+    osentence = entities.get("osentence", "")
+    if not psentence or not osentence:
+        return None
+
+    # Check for constraint patterns: "by timetoken", "before timetoken", "after timetoken"
+    # Pattern: constraint word + timetoken
+    constraint_pattern = re.compile(
+        r'\b(by|before|after)\s+timetoken\b', re.IGNORECASE)
+    match = constraint_pattern.search(psentence)
+    if not match:
+        return None
+
+    constraint_type = match.group(1).lower()  # "by", "before", or "after"
+
+    # If constraint pattern found, find which time entity corresponds to it
+    times = entities.get("times", [])
+    if not times:
+        return None
+
+    # Find the time that appears after constraint word in original sentence
+    # Extract the time text and convert to 24-hour format if needed
+    if len(times) == 1:
+        # Single time with constraint pattern → it's the constraint
+        time_text = times[0].get("text", "")
+        if time_text:
+            # Convert time to 24-hour format (preserve am/pm semantics)
+            time_24h = _convert_time_to_24h(time_text)
+            if time_24h:
+                return {
+                    "type": constraint_type,
+                    "time": time_24h
+                }
+    else:
+        # Multiple times: find which one is after constraint word
+        # Match constraint word position in original sentence
+        constraint_word_match = re.search(
+            r'\b(by|before|after)\s+', osentence, re.IGNORECASE)
+        if constraint_word_match:
+            constraint_pos = constraint_word_match.end()
+            # Find first time entity after constraint position
+            for time_entity in times:
+                time_start = time_entity.get("start", 0)
+                if time_start >= constraint_pos:
+                    time_text = time_entity.get("text", "")
+                    if time_text:
+                        time_24h = _convert_time_to_24h(time_text)
+                        if time_24h:
+                            return {
+                                "type": constraint_type,
+                                "time": time_24h
+                            }
+        # Fallback: use first time if position matching fails
+        time_text = times[0].get("text", "")
+        if time_text:
+            time_24h = _convert_time_to_24h(time_text)
+            if time_24h:
+                return {
+                    "type": constraint_type,
+                    "time": time_24h
+                }
+
+    return None
+
+
+def _convert_time_to_24h(time_text: str) -> Optional[str]:
+    """
+    Convert time text to 24-hour format (HH:MM), preserving am/pm semantics.
+
+    Examples:
+    - "4pm" → "16:00"
+    - "10am" → "10:00"
+    - "12:30pm" → "12:30"
+    - "14:00" → "14:00" (already 24-hour)
+    """
+    time_lower = time_text.lower().strip()
+
+    # Check if already 24-hour format (HH:MM or HH.MM)
+    if re.match(r'^([01]?[0-9]|2[0-3])[:.][0-5][0-9]$', time_text):
+        # Already 24-hour, return as-is
+        return time_text.replace('.', ':')
+
+    # Extract hour, minutes, and meridiem
+    match = re.match(r'^(\d{1,2})(?:[:.](\d{2}))?\s*(am|pm)?$', time_lower)
+    if not match:
+        return None
+
+    hour = int(match.group(1))
+    minutes = int(match.group(2)) if match.group(2) else 0
+    meridiem = match.group(3)
+
+    # Convert to 24-hour format
+    if meridiem == "pm" and hour != 12:
+        hour = hour + 12
+    elif meridiem == "am" and hour == 12:
+        hour = 0
+
+    return f"{hour:02d}:{minutes:02d}"
+
+
+def _filter_constraint_times(
+    entities: Dict[str, Any],
+    time_constraint: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Filter out constraint times from entities so they don't get bound as regular times.
+
+    Args:
+        entities: Raw extraction output
+        time_constraint: Time constraint dict with "type" and "time" (or legacy "latest_time"), or None
+
+    Returns:
+        Filtered entities dict with constraint times removed
+    """
+    if not time_constraint:
+        return entities
+
+    # Create a copy to avoid mutating original
+    filtered = entities.copy()
+
+    # Support both new format ("time") and legacy format ("latest_time")
+    constraint_time = time_constraint.get(
+        "time") or time_constraint.get("latest_time", "")
+
+    if not constraint_time:
+        return filtered
+
+    # Filter out times that match the constraint time
+    # Need to match both original format and 24-hour format
+    times = filtered.get("times", [])
+    if times:
+        filtered_times = []
+        for t in times:
+            time_text = t.get("text", "")
+            # Don't filter if time doesn't match constraint (may be different format)
+            # Only filter exact matches to avoid false positives
+            if time_text != constraint_time:
+                # Also check if time_text converts to same 24h format
+                time_24h = _convert_time_to_24h(time_text)
+                if time_24h != constraint_time:
+                    filtered_times.append(t)
+        filtered["times"] = filtered_times
+
+    return filtered
 
 
 # Date pattern matching helpers
@@ -558,12 +1036,6 @@ def _resolve_date_semantics(
     Returns:
         Dict with "mode", "refs", and optional "needs_clarification" flag
     """
-    print(
-        "DEBUG[semantic]: enter _resolve_date_semantics "
-        f"keys={list(entities.keys())} "
-        f"osentence={entities.get('osentence')} "
-        f"psentence={entities.get('psentence')}"
-    )
     dates = entities.get("dates", [])
     dates_absolute = entities.get("dates_absolute", [])
 
@@ -575,22 +1047,12 @@ def _resolve_date_semantics(
         for m in modifier_values
         if isinstance(m, str) and m.strip()
     ]
-    print(
-        "DEBUG[semantic]: modifier_values raw =",
-        modifier_values,
-        type(modifier_values)
-    )
     date_modifiers: List[str] = []
     if osentence and modifier_values:
         for mod in modifier_values:
             if isinstance(mod, str):
                 if re.search(rf"\b{re.escape(mod.lower())}\b", osentence):
                     date_modifiers.append(mod.lower())
-    print(
-        "DEBUG[semantic]: after modifiers "
-        f"sentence={osentence} "
-        f"date_modifiers={date_modifiers}"
-    )
 
     # Normalize date texts (handle misspellings)
     normalized_dates = [_normalize_date_text(d.get("text", "")) for d in dates]
@@ -631,11 +1093,6 @@ def _resolve_date_semantics(
         elif len(dates_absolute) >= 2:
             # Multiple absolute dates → check for range marker
             if structure.get("date_type") == "range" or "between" in str(structure).lower() or "from" in str(structure).lower():
-                print(
-                    "DEBUG[semantic]: RETURN ABSOLUTE_RANGE "
-                    f"date_refs={normalized_absolute[:2]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",
                     "refs": normalized_absolute[:2],  # Use normalized text
@@ -643,11 +1100,6 @@ def _resolve_date_semantics(
                 }
             else:
                 # Ambiguous - will be flagged
-                print(
-                    "DEBUG[semantic]: RETURN ABSOLUTE_RANGE_AMBIG "
-                    f"date_refs={normalized_absolute[:2]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",  # Default to range, but flag ambiguity
                     "refs": normalized_absolute[:2],  # Use normalized text
@@ -661,11 +1113,6 @@ def _resolve_date_semantics(
 
             # Check for fine-grained modifiers (early/mid/end) → always range
             if _has_fine_grained_modifier(date_text):
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_FINE_GRAINED "
-                    f"date_refs={[normalized_dates[0]]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",
                     "refs": [normalized_dates[0]],  # Use normalized text
@@ -674,11 +1121,6 @@ def _resolve_date_semantics(
 
             # Simple relative days → single_day
             if _is_simple_relative_day(date_text):
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_SIMPLE "
-                    f"date_refs={[normalized_dates[0]]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "single_day",
                     "refs": [normalized_dates[0]],  # Use normalized text
@@ -687,11 +1129,6 @@ def _resolve_date_semantics(
 
             # Week-based → range
             if _is_week_based(date_text):
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_WEEK_BASED "
-                    f"date_refs={[normalized_dates[0]]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",
                     "refs": [normalized_dates[0]],  # Use normalized text
@@ -700,11 +1137,6 @@ def _resolve_date_semantics(
 
             # Weekend → range
             if _is_weekend_reference(date_text):
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_WEEKEND "
-                    f"date_refs={[normalized_dates[0]]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",
                     "refs": [normalized_dates[0]],  # Use normalized text
@@ -713,11 +1145,6 @@ def _resolve_date_semantics(
 
             # Specific weekday → single_day
             if _is_specific_weekday(date_text):
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_WEEKDAY "
-                    f"date_refs={[normalized_dates[0]]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "single_day",
                     "refs": [normalized_dates[0]],  # Use normalized text
@@ -726,11 +1153,6 @@ def _resolve_date_semantics(
 
             # Month-relative → range (full month)
             if _is_month_relative(date_text):
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_MONTH "
-                    f"date_refs={[normalized_dates[0]]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",
                     "refs": [normalized_dates[0]],  # Use normalized text
@@ -738,11 +1160,6 @@ def _resolve_date_semantics(
                 }
 
             # Default: single_day
-            print(
-                "DEBUG[semantic]: RETURN RELATIVE_DEFAULT "
-                f"date_refs={[normalized_dates[0]]} "
-                f"date_modifiers={date_modifiers}"
-            )
             return {
                 "mode": "single_day",
                 "refs": [normalized_dates[0]],  # Use normalized text
@@ -751,11 +1168,6 @@ def _resolve_date_semantics(
         elif len(dates) >= 2:
             # Multiple relative dates → check for range marker
             if structure.get("date_type") == "range" or "between" in str(structure).lower() or "from" in str(structure).lower():
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_MULTI_RANGE "
-                    f"date_refs={normalized_dates[:2]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",
                     "refs": normalized_dates[:2],  # Use normalized text
@@ -763,11 +1175,6 @@ def _resolve_date_semantics(
                 }
             else:
                 # Ambiguous - will be flagged
-                print(
-                    "DEBUG[semantic]: RETURN RELATIVE_MULTI_AMBIG "
-                    f"date_refs={normalized_dates[:2]} "
-                    f"date_modifiers={date_modifiers}"
-                )
                 return {
                     "mode": "range",  # Default to range, but flag ambiguity
                     "refs": normalized_dates[:2],  # Use normalized text
@@ -777,11 +1184,6 @@ def _resolve_date_semantics(
     # Rule 4: Mixed absolute and relative
     if dates_absolute and dates:
         # Absolute takes precedence
-        print(
-            "DEBUG[semantic]: RETURN MIXED_ABSOLUTE_RELATIVE "
-            f"date_refs={[normalized_absolute[0]]} "
-            f"date_modifiers={date_modifiers}"
-        )
         return {
             "mode": "single_day",
             "refs": [normalized_absolute[0]],  # Use normalized text
@@ -789,11 +1191,6 @@ def _resolve_date_semantics(
         }
 
     # Rule 5: No dates
-    print(
-        "DEBUG[semantic]: RETURN NO_DATES "
-        f"date_refs=[] "
-        f"date_modifiers={date_modifiers}"
-    )
     return {
         "mode": "flexible",
         "refs": [],

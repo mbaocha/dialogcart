@@ -1,0 +1,56 @@
+{
+    "AMBIGUOUS_TIME_NO_WINDOW": {
+        "template": "Do you mean {{time}}am or {{time}}pm?",
+        "required_fields": [
+            "time"
+        ]
+    },
+    "MISSING_TIME": {
+        "template": "What time would you like the {{service}} appointment?",
+        "required_fields": [
+            "service"
+        ]
+    },
+    "MISSING_DATE": {
+        "template": "What day should I book the {{service}} for?",
+        "required_fields": [
+            "service"
+        ]
+    },
+    "MISSING_SERVICE": {
+        "template": "Which service would you like to book?",
+        "required_fields": []
+    },
+    "LOCALE_AMBIGUOUS_DATE": {
+        "template": "Just to confirm — is this {{date_text}}?",
+        "required_fields": [
+            "date_text"
+        ]
+    },
+    "VAGUE_DATE_REFERENCE": {
+        "template": "Do you have a specific day in mind, or should I check availability for the whole period?",
+        "required_fields": []
+    },
+    "AMBIGUOUS_PLURAL_WEEKDAY": {
+        "template": "Which specific day should I use?",
+        "required_fields": []
+    },
+    "AMBIGUOUS_WEEKDAY_REFERENCE": {
+        "template": "Which {{date_text}} did you mean — this {{date_text}} or next {{date_text}}?",
+        "required_fields": [
+            "date_text"
+        ]
+    },
+    "CONFLICTING_SIGNALS": {
+        "template": "Just to confirm — which date should I use?",
+        "required_fields": []
+    },
+    "AMBIGUOUS_DATE_MULTIPLE": {
+        "template": "I found multiple dates. Which one should I use?",
+        "required_fields": []
+    },
+    "CONTEXT_DEPENDENT_DATE": {
+        "template": "Could you specify the exact date you have in mind?",
+        "required_fields": []
+    }
+}

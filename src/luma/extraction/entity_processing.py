@@ -9,9 +9,11 @@ Handles:
 Note: Noise is NOT extracted as an entity.
 """
 
+import logging
 from typing import Dict, List, Any
-from luma.config import debug_print
 from .normalization import post_normalize_parameterized_text
+
+logger = logging.getLogger(__name__)
 
 
 def add_entity(
@@ -40,6 +42,8 @@ def extract_entities_from_doc(nlp, text: str) -> Dict[str, List]:
     Noise is NOT extracted - it's not an entity.
     """
     doc = nlp(text)
+
+    tokens = [t.text for t in doc]
 
     result = {
         "services": [],  # Kept for compatibility - contains SERVICE_FAMILY entities
@@ -74,10 +78,13 @@ def extract_entities_from_doc(nlp, text: str) -> Dict[str, List]:
             add_entity(result, "durations", ent.text, ent.start, span_len)
         # Noise is NOT extracted - it's not an entity
 
+    # Store tokens in result for logging
+    result["_tokens"] = tokens
+
     return result, doc
 
 
-def build_parameterized_sentence(doc, entities: Dict[str, List]) -> str:
+def build_parameterized_sentence(doc, entities: Dict[str, List]) -> tuple[str, List[Dict[str, Any]]]:
     """
     Build parameterized sentence by replacing entities with tokens.
 
@@ -88,9 +95,13 @@ def build_parameterized_sentence(doc, entities: Dict[str, List]) -> str:
     - Replacements are applied from end-to-start (backwards) to avoid index shifting
     - Multiple entities of same type are allowed (e.g., multiple timetoken)
     - No re-scanning or re-tokenization occurs during replacement
+
+    Returns:
+        tuple: (parameterized_sentence, list of replacement info for logging)
     """
     tokens = [t.text.lower() for t in doc]
     replacements = []
+    phase2_replacements = []  # Track replacements for logging
 
     placeholders = {
         "services": "servicefamilytoken",  # Updated to reflect SERVICE_FAMILY
@@ -111,7 +122,21 @@ def build_parameterized_sentence(doc, entities: Dict[str, List]) -> str:
         for e in ents:
             start = e["position"]
             end = start + e.get("length", 1)
+            entity_text = e.get("text", "")
             replacements.append((start, end, placeholder))
+            # Track for logging
+            if entity_type in ("dates", "dates_absolute"):
+                phase2_replacements.append({
+                    "type": "date",
+                    "span": entity_text,
+                    "replaced_with": placeholder
+                })
+            elif entity_type in ("times", "time_windows"):
+                phase2_replacements.append({
+                    "type": "time",
+                    "span": entity_text,
+                    "replaced_with": placeholder
+                })
 
     # Sort by END position descending, then by START descending
     # This ensures we replace from right-to-left, preventing index shifts
@@ -137,7 +162,9 @@ def build_parameterized_sentence(doc, entities: Dict[str, List]) -> str:
             merged.append(parts[i])
             i += 1
     post_guarded = " ".join(merged)
-    return post_normalize_parameterized_text(post_guarded)
+    final_psentence = post_normalize_parameterized_text(post_guarded)
+
+    return final_psentence, phase2_replacements
 
 
 def canonicalize_services(

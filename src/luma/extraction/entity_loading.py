@@ -10,8 +10,11 @@ Handles:
 import os
 import json
 import re
+import logging
 from typing import List, Dict, Any, Set
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # Optional spaCy dependency
 try:
@@ -814,6 +817,9 @@ def build_time_patterns(entity_types: Dict[str, Any]) -> List[Dict[str, Any]]:
     patterns = []
     time_config = entity_types.get("time", {})
 
+    # Diagnostic: Log entry
+    logger.info("[time-extract]: building time patterns")
+
     # Add regex patterns - convert to token-based REGEX patterns
     # These represent precise clock times (9 am, 12:30 pm, etc.)
     time_patterns = time_config.get("patterns", [])
@@ -826,7 +832,7 @@ def build_time_patterns(entity_types: Dict[str, Any]) -> List[Dict[str, Any]]:
                 # Enforces that the whole time, with meridiem, is captured as a single TIME entity.
                 # - "5pm", "5 pm", "5:30pm", "5:30 pm", "5.30pm", "5.30 pm"
                 # Pattern 1: Split (space-separated, due to pre-normalizer):
-                patterns.append({
+                pattern_1 = {
                     "label": "TIME",
                     "pattern": [
                         {"TEXT": {"REGEX": "^(1[0-2]|0?[1-9])$"}},
@@ -834,12 +840,18 @@ def build_time_patterns(entity_types: Dict[str, Any]) -> List[Dict[str, Any]]:
                         {"OP": "?", "IS_SPACE": True},
                         {"LOWER": {"REGEX": "^(am|pm)$"}}
                     ]
-                })
+                }
+                logger.info(
+                    "[time-extract]: built pattern=\"time_12h_pattern_1\" (hour + optional minutes + optional space + am/pm)")
+                patterns.append(pattern_1)
                 # Pattern 2: Single-token, greedy match for everything (handles "5.30pm", "5:30pm"):
-                patterns.append({
+                pattern_2 = {
                     "label": "TIME",
                     "pattern": [{"TEXT": {"REGEX": "^(1[0-2]|0?[1-9])([:.][0-5][0-9])?(am|pm)$"}}]
-                })
+                }
+                logger.info(
+                    "[time-extract]: built pattern=\"time_12h_pattern_2\" (single token: hour + optional minutes + am/pm)")
+                patterns.append(pattern_2)
                 # Pattern 2b: Multi-token with dot separator and pm attached (handles "5.30pm" tokenized as ["5", ".", "30pm"]):
                 patterns.append({
                     "label": "TIME",
@@ -870,11 +882,36 @@ def build_time_patterns(entity_types: Dict[str, Any]) -> List[Dict[str, Any]]:
                         {"TEXT": {"REGEX": "^(am|pm)$"}}
                     ]
                 })
+                # Pattern 5: Multi-token with colon and spaces around it (handles "9 : 30 am", "12 : 00 pm"):
+                patterns.append({
+                    "label": "TIME",
+                    "pattern": [
+                        {"TEXT": {"REGEX": "^(1[0-2]|0?[1-9])$"}},
+                        {"OP": "?", "IS_SPACE": True},
+                        {"TEXT": {"REGEX": "^:$"}},
+                        {"OP": "?", "IS_SPACE": True},
+                        {"TEXT": {"REGEX": "^[0-5][0-9]$"}},
+                        {"OP": "?", "IS_SPACE": True},
+                        {"LOWER": {"REGEX": "^(am|pm)$"}}
+                    ]
+                })
             elif pattern_id == "time_24h":
-                # Pattern: HH:MM format (single token)
+                # Pattern: HH:MM format (single token) - handles "14:00", "18:30"
                 patterns.append({
                     "label": "TIME",
                     "pattern": [{"TEXT": {"REGEX": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$"}}]
+                })
+                # Pattern: HH : MM format (multi-token with spaces around colon) - handles "14 : 00", "18 : 30"
+                # After tokenization, "14 : 00" becomes ["14", ":", "00"] or ["14", " ", ":", " ", "00"]
+                patterns.append({
+                    "label": "TIME",
+                    "pattern": [
+                        {"TEXT": {"REGEX": "^([01]?[0-9]|2[0-3])$"}},
+                        {"OP": "?", "IS_SPACE": True},
+                        {"TEXT": {"REGEX": "^:$"}},
+                        {"OP": "?", "IS_SPACE": True},
+                        {"TEXT": {"REGEX": "^[0-5][0-9]$"}}
+                    ]
                 })
                 # Pattern: HH.MM format (dot separator, e.g., "10.30")
                 # This handles cases like "at 10.30" where dot is used instead of colon
@@ -893,26 +930,41 @@ def build_time_patterns(entity_types: Dict[str, Any]) -> List[Dict[str, Any]]:
                     ]
                 })
             elif pattern_id == "time_bare_hour":
-                # Pattern for bare hours (e.g., "at 2", "at 9") - hour only without am/pm
+                # Pattern for bare hours (e.g., "at 2", "at 9", "at 10") - hour only without am/pm
+                # Supports 24-hour format (0-23)
                 # These will be flagged as ambiguous in semantic resolution
-                patterns.append({
+                # Pattern 1: "at 9", "at 10", "around 7", etc.
+                pattern_bare_1 = {
                     "label": "TIME",
                     "pattern": [
                         {"LOWER": {"IN": ["at", "around", "about"]}},
-                        {"TEXT": {"REGEX": "^(1[0-2]|0?[1-9])$"}},
+                        # 0-23 hour range
+                        {"TEXT": {"REGEX": "^([01]?[0-9]|2[0-3])$"}},
                         {"OP": "?", "TEXT": {"REGEX": "^(ish|'ish)$"}}
                     ]
-                })
-                # Also match standalone hour after "at" (in case "at" is not captured)
-                patterns.append({
+                }
+                logger.info(
+                    "[time-extract]: built pattern=\"time_bare_hour_pattern_1\" (at/around/about + hour 0-23 + optional ish)")
+                patterns.append(pattern_bare_1)
+                # Pattern 2: Standalone hour after "at" (in case "at" is not captured)
+                # Matches hour 0-23 without am/pm
+                pattern_bare_2 = {
                     "label": "TIME",
                     "pattern": [
-                        {"TEXT": {"REGEX": "^(1[0-2]|0?[1-9])$"}},
+                        # 0-23 hour range
+                        {"TEXT": {"REGEX": "^([01]?[0-9]|2[0-3])$"}},
                         {"OP": "?", "TEXT": {"REGEX": "^(ish|'ish)$"}},
                         {"OP": "?", "TEXT": {
+                            # Negative lookahead for am/pm
                             "REGEX": "^(?!am|pm|a\\.m\\.|p\\.m\\.)"}}
                     ]
-                })
+                }
+                logger.info(
+                    "[time-extract]: built pattern=\"time_bare_hour_pattern_2\" (standalone hour 0-23 + optional ish + negative lookahead for am/pm)")
+                patterns.append(pattern_bare_2)
+
+    # Diagnostic: Log total patterns built
+    logger.info("[time-extract]: built %d time patterns total", len(patterns))
 
     return patterns
 
@@ -1223,6 +1275,24 @@ def load_time_window_bounds(global_json_path: Path) -> Dict[str, Dict[str, str]]
             }
 
     return bounds
+
+
+def load_booking_policy(global_json_path: Path) -> Dict[str, bool]:
+    """
+    Load booking policy configuration from global JSON.
+
+    Returns dict with policy flags:
+    - allow_time_windows: Whether time windows (e.g., "morning") are allowed
+    - allow_constraint_only_time: Whether constraint-only times (e.g., "by 4pm") are acceptable as exact
+    """
+    with open(global_json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    policy = data.get("booking_policy", {})
+    return {
+        "allow_time_windows": policy.get("allow_time_windows", True),
+        "allow_constraint_only_time": policy.get("allow_constraint_only_time", True)
+    }
 
 
 def load_month_names(global_json_path: Path) -> Dict[str, int]:

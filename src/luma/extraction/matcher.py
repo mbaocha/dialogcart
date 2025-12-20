@@ -6,8 +6,9 @@ Service and reservation entity matcher for DialogCart.
 Extracts and parameterizes entities for service-based appointment booking
 and reservation systems.
 """
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
+import re
 
 from luma.config import debug_print
 
@@ -98,6 +99,160 @@ def _build_natural_language_variant_map_from_service_families(
                     variant_map[synonym.lower()] = preferred_form
 
     return variant_map
+
+
+def detect_tenant_alias_spans(
+    normalized_text: str, tenant_aliases: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    """
+    Detect tenant alias spans on normalized text BEFORE spaCy extraction.
+
+    Returns list of dicts:
+    [
+        {
+            "start_char": int,
+            "end_char": int,
+            "text": str,
+            "canonical": str,
+        }
+    ]
+
+    - Exact phrase match (case-insensitive) on normalized text
+    - Longest-match wins (sort by phrase length desc)
+    - Word-boundary safe
+    """
+    if not tenant_aliases:
+        return []
+
+    text_lower = normalized_text.lower()
+    spans: List[Dict[str, Any]] = []
+
+    # Sort aliases by token length desc, then char length desc for deterministic longest-first
+    sorted_aliases = sorted(
+        tenant_aliases.items(),
+        key=lambda kv: (len(kv[0].split()), len(kv[0])),
+        reverse=True,
+    )
+
+    used_ranges: List[Tuple[int, int]] = []
+
+    for alias, canonical in sorted_aliases:
+        if not isinstance(alias, str) or not isinstance(canonical, str):
+            continue
+        alias_lower = alias.lower().strip()
+        if not alias_lower:
+            continue
+
+        pattern = r"\b" + re.escape(alias_lower) + r"\b"
+        for match in re.finditer(pattern, text_lower):
+            start_char, end_char = match.span()
+
+            # Skip if overlaps an already-matched longer alias
+            overlap = any(
+                not (end_char <= u_start or start_char >= u_end)
+                for u_start, u_end in used_ranges
+            )
+            if overlap:
+                continue
+
+            spans.append(
+                {
+                    "start_char": start_char,
+                    "end_char": end_char,
+                    "text": normalized_text[start_char:end_char],
+                    "canonical": canonical,
+                }
+            )
+            used_ranges.append((start_char, end_char))
+
+    return spans
+
+
+def _map_char_span_to_token_span(
+    doc, start_char: int, end_char: int
+) -> Optional[Tuple[int, int]]:
+    """
+    Map a character span to token start/end (exclusive) using spaCy doc.
+    Returns None if no token overlaps span.
+    """
+    start_token = None
+    end_token = None
+    for i, tok in enumerate(doc):
+        if tok.idx >= end_char:
+            break
+        if tok.idx + len(tok) <= start_char:
+            continue
+        # token overlaps
+        if start_token is None:
+            start_token = i
+        end_token = i + 1
+    if start_token is None or end_token is None:
+        return None
+    return start_token, end_token
+
+
+def merge_alias_spans_into_services(
+    raw_result: Dict[str, Any], doc, alias_spans: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Insert tenant alias spans as service entities and remove overlapping generic services.
+
+    - Converts char spans to token spans against the spaCy doc
+    - Adds services with full alias text + canonical
+    - Removes generic services that overlap alias spans
+    """
+    services = raw_result.get("services", []) or []
+    alias_services: List[Dict[str, Any]] = []
+    alias_token_ranges: List[Tuple[int, int]] = []
+
+    for span in alias_spans:
+        mapped = _map_char_span_to_token_span(
+            doc, span["start_char"], span["end_char"]
+        )
+        if not mapped:
+            continue
+        start_tok, end_tok = mapped
+        alias_services.append(
+            {
+                "text": span["text"],
+                "position": start_tok,
+                "length": end_tok - start_tok,
+                "canonical": span["canonical"],
+            }
+        )
+        alias_token_ranges.append((start_tok, end_tok))
+
+    # Filter out generic services that overlap alias spans
+    filtered_services = []
+    for svc in services:
+        start = svc.get("position", 0)
+        length = svc.get("length", 1)
+        end = start + length
+        overlaps = any(
+            not (end <= a_start or start >= a_end)
+            for a_start, a_end in alias_token_ranges
+        )
+        if overlaps:
+            continue
+        filtered_services.append(svc)
+
+    # Merge alias services (ensure deterministic order: existing + alias)
+    merged_services = filtered_services + alias_services
+    raw_result["services"] = merged_services
+
+    # Store spans for downstream context/debugging
+    if alias_services:
+        raw_result["_tenant_alias_spans"] = [
+            {
+                "text": svc["text"],
+                "canonical": svc["canonical"],
+                "start": svc["position"],
+                "end": svc["position"] + svc["length"],
+            }
+            for svc in alias_services
+        ]
+
+    return raw_result
 
 
 class EntityMatcher:
@@ -196,7 +351,9 @@ class EntityMatcher:
     def extract_with_parameterization(
         self,
         text: str,
-        debug_units: bool = False
+        debug_units: bool = False,
+        request_id: Optional[str] = None,
+        tenant_aliases: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """
         Main extraction entry point.
@@ -222,12 +379,24 @@ class EntityMatcher:
         normalized, normalized_from_correction = normalize_vocabularies(
             normalized, self.synonym_map, self.typo_map
         )
+
+        # 1.5️⃣ Pre-extraction tenant alias span detection (on normalized text BEFORE service-family reduction)
+        alias_spans = detect_tenant_alias_spans(
+            normalized, tenant_aliases or {})
+
         # Apply natural language variant normalization (synonym mapping for services)
-        normalized = normalize_natural_language_variants(
-            normalized, self.variant_map)
+        # ONLY if no tenant alias spans were found, to avoid collapsing aliases
+        if not alias_spans:
+            normalized = normalize_natural_language_variants(
+                normalized, self.variant_map)
 
         # 2️⃣ Extract entities from spaCy doc
         raw_result, doc = extract_entities_from_doc(self.nlp, normalized)
+
+        # Protect alias spans from being collapsed to generic service families
+        if alias_spans:
+            raw_result = merge_alias_spans_into_services(
+                raw_result, doc, alias_spans)
 
         # 3️⃣ Map SERVICE_FAMILY entities to canonical service family IDs
         service_families = []
@@ -236,7 +405,7 @@ class EntityMatcher:
             for entity in raw_result["services"]:
                 entity_text = entity.get("text", "").lower()
                 # Map to canonical service family ID (e.g., "beauty_and_wellness.haircut")
-                canonical_id = self.service_family_map.get(entity_text)
+                canonical_id = entity.get("canonical") or self.service_family_map.get(entity_text)
 
                 # Convert position/length to start/end token indices
                 position = entity.get("position", 0)
@@ -261,7 +430,20 @@ class EntityMatcher:
                     })
 
         # 4️⃣ Build parameterized sentence
-        psentence = build_parameterized_sentence(doc, raw_result)
+        # Phase 1: Service/tenant alias replacement (already done in normalization)
+        # Track what was replaced for logging
+        phase1_replacements = []
+        for entity in raw_result.get("services", []):
+            entity_text = entity.get("text", "").lower()
+            canonical_id = self.service_family_map.get(entity_text)
+            if canonical_id:
+                phase1_replacements.append({
+                    "span": entity_text,
+                    "rule": "global_service_family",
+                    "replaced_with": "servicefamilytoken"
+                })
+        
+        psentence, phase2_replacements = build_parameterized_sentence(doc, raw_result)
         # Noise is preserved in psentence (not removed)
 
         osentence = normalized
@@ -302,11 +484,18 @@ class EntityMatcher:
         for time_window_ent in raw_result.get("time_windows", []):
             position = time_window_ent.get("position", 0)
             length = time_window_ent.get("length", 1)
-            time_windows.append({
+            time_window_text = time_window_ent.get("text", "").lower()
+            
+            # Build time window entity with symbolic label only
+            # Numeric expansion is handled by calendar binding using configurable mapping
+            time_window_obj = {
                 "text": time_window_ent.get("text", ""),
                 "start": position,
-                "end": position + length
-            })
+                "end": position + length,
+                "time_window": time_window_text  # Symbolic semantic field only
+            }
+            
+            time_windows.append(time_window_obj)
 
         durations = []
         for duration_ent in raw_result.get("durations", []):
@@ -354,6 +543,10 @@ class EntityMatcher:
             "durations": durations,
             "normalized_from_correction": normalized_from_correction,
             "date_modifiers_vocab": self.vocabularies.get("date_modifiers", []),
+            # Store parameterization info for logging (will be included in final_result)
+            "_phase1_replacements": phase1_replacements,
+            "_phase2_replacements": phase2_replacements,
+            "_tokens": raw_result.get("_tokens", []),
         }
 
         if needs_clarification:
@@ -364,7 +557,7 @@ class EntityMatcher:
         allowed_keys = DOMAIN_ENTITY_WHITELIST[self.domain]
         final_result = {
             k: v for k, v in result.items()
-            if k in allowed_keys or k in {"osentence", "psentence", "service_families", "date_modifiers_vocab"}
+            if k in allowed_keys or k in {"osentence", "psentence", "service_families", "date_modifiers_vocab", "_phase1_replacements", "_phase2_replacements", "_tokens"}
         }
 
         if debug_units:
