@@ -1347,6 +1347,12 @@ def test_invariant_api_complete_booking_always_resolved():
     print("INVARIANT TEST: Complete booking must always be RESOLVED (API-level)")
     print("="*70)
 
+    # CRITICAL: Clear memory for all test users at the BEGINNING to ensure clean state
+    # This prevents stale memory from previous test runs from affecting results
+    clear_user_memory(USER_ID_INVARIANT_API, "service")
+    clear_user_memory("test_user_invariant_api_025", "service")
+    clear_user_memory("test_user_invariant_api_026", "service")
+
     # Test Case 1: Complete booking via PARTIAL → RESOLVED transition
     # Turn 1: Create PARTIAL booking (date only)
     response1 = make_request(USER_ID_INVARIANT_API,
@@ -1748,6 +1754,9 @@ def clear_all_test_users_memory():
         USER_ID_MULTI_TURN_3, USER_ID_RESOLVED_MOD_1, USER_ID_RESOLVED_MOD_2,
         USER_ID_RESOLVED_MOD_3, USER_ID_GUARDRAIL_2, USER_ID_GUARDRAIL_3,
         USER_ID_GUARDRAIL_4, USER_ID_INVARIANT_API,
+        # Add the invariant test user IDs that are defined inside the test function
+        "test_user_invariant_api_025",  # USER_ID_INVARIANT_API_2
+        "test_user_invariant_api_026",  # USER_ID_INVARIANT_API_3
         USER_ID_ALIAS_1, USER_ID_ALIAS_2, USER_ID_ALIAS_3, USER_ID_ALIAS_4, USER_ID_ALIAS_5
     ]
 
