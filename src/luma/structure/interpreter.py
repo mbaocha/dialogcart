@@ -29,7 +29,7 @@ def interpret_structure(
     Args:
         psentence: Parameterized sentence (e.g., "book servicefamilytoken datetoken")
         entities: Raw extraction output from EntityMatcher.extract_with_parameterization()
-                 Must contain keys: service_families, dates, dates_absolute, times,
+                 Must contain keys: business_categories, dates, dates_absolute, times,
                  time_windows, durations
                  
     Returns:
@@ -38,7 +38,7 @@ def interpret_structure(
     Example:
         >>> psentence = "book servicefamilytoken and servicefamilytoken datetoken timetoken"
         >>> entities = {
-        ...     "service_families": [{"text": "haircut"}, {"text": "beard trim"}],
+        ...     "business_categories": [{"text": "haircut"}, {"text": "beard trim"}],
         ...     "dates": [{"text": "tomorrow"}],
         ...     "times": [{"text": "9am"}]
         ... }

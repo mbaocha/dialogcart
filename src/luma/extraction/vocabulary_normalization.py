@@ -152,13 +152,13 @@ def normalize_vocabularies(
 def validate_vocabularies(
     vocabularies: Dict[str, Dict[str, Dict[str, Any]]],
     entity_types: Dict[str, Any],
-    service_families: Dict[str, Any]
+    business_categories: Dict[str, Any]
 ) -> None:
     """
-    Validate vocabulary structure and ensure canonicals exist in entity_types or service_families.
+    Validate vocabulary structure and ensure canonicals exist in entity_types or business_categories.
     
     Rules:
-    1. Canonicals must exist in entity_types or service_families
+    1. Canonicals must exist in entity_types or business_categories
     2. No value may appear in both synonyms and typos
     3. typos must never introduce new semantic values
     
@@ -189,13 +189,13 @@ def validate_vocabularies(
         if value:
             valid_time_windows.add(value.lower())
     
-    # Build sets of valid canonicals from service_families
-    valid_service_families = set()
-    for family_id, family_data in service_families.items():
-        if isinstance(family_data, dict):
-            for service_id, service_data in family_data.items():
+    # Build sets of valid canonicals from business_categories
+    valid_business_categories = set()
+    for category_id, category_data in business_categories.items():
+        if isinstance(category_data, dict):
+            for service_id, service_data in category_data.items():
                 if isinstance(service_data, dict):
-                    valid_service_families.add(service_id.lower())
+                    valid_business_categories.add(service_id.lower())
     
     # Track all variants to detect duplicates
     all_variants: Dict[str, Tuple[str, str]] = {}  # variant -> (category, type: synonym|typo)
@@ -214,7 +214,7 @@ def validate_vocabularies(
             
             canonical_lower = canonical.lower()
             
-            # Validate canonical exists in entity_types or service_families
+            # Validate canonical exists in entity_types or business_categories
             if category == "weekdays":
                 if canonical_lower not in valid_weekdays:
                     errors.append(

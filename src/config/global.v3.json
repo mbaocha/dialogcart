@@ -1,0 +1,133 @@
+{
+  "version": "v1",
+  "scope": "global",
+  "business_categories": {
+    "_comment": "GLOBAL semantic business categories. Stable, bounded concepts. Tenants MUST map their services to exactly one business category. Variants and pricing belong to tenant configs.",
+    "beauty_and_wellness": {
+      "display_name": "beauty & wellness",
+      "business_type": "services",
+      "families": {
+        "haircut": {
+          "token": "servicefamilytoken",
+          "display_name": "Haircut",
+          "description": "Hair cutting and styling services for head hair",
+          "synonym": [
+            "haircut",
+            "hair trim",
+            "fade",
+            "layered cut"
+          ]
+        },
+        "beard_grooming": {
+          "token": "servicefamilytoken",
+          "display_name": "Beard Grooming",
+          "description": "Beard trimming, shaping, and grooming services",
+          "synonym": [
+            "beard trim",
+            "beard grooming",
+            "beard shaping"
+          ]
+        },
+        "shaving": {
+          "token": "servicefamilytoken",
+          "display_name": "Shaving",
+          "description": "Facial shaving services",
+          "synonym": [
+            "clean shave",
+            "razor shave"
+          ]
+        },
+        "hair_coloring": {
+          "token": "servicefamilytoken",
+          "display_name": "Hair Coloring",
+          "description": "Hair dyeing and coloring services",
+          "synonym": [
+            "hair colouring",
+            "hair coloring",
+            "hair dye",
+            "coloring",
+            "highlights"
+          ]
+        },
+        "massage": {
+          "token": "servicefamilytoken",
+          "display_name": "Massage",
+          "description": "Therapeutic and relaxation massage services",
+          "synonym": [
+            "massage",
+            "full body massage",
+            "body massage",
+            "swedish massage",
+            "deep tissue massage"
+          ]
+        },
+        "facial": {
+          "token": "servicefamilytoken",
+          "display_name": "Facial",
+          "description": "Facial skin treatment services",
+          "synonym": [
+            "facial",
+            "skin treatment"
+          ]
+        },
+        "manicure_pedicure": {
+          "token": "servicefamilytoken",
+          "display_name": "Manicure & Pedicure",
+          "description": "Combined hand and foot grooming services",
+          "synonym": [
+            "mani pedi",
+            "manicure and pedicure",
+            "mani-pedi",
+            "manicure & pedicure"
+          ]
+        },
+        "manicure": {
+          "token": "servicefamilytoken",
+          "display_name": "Manicure",
+          "description": "Hand and nail grooming services",
+          "synonym": [
+            "manicure",
+            "nail care"
+          ]
+        },
+        "pedicure": {
+          "token": "servicefamilytoken",
+          "display_name": "Pedicure",
+          "description": "Foot and toenail grooming services",
+          "synonym": [
+            "pedicure",
+            "foot care"
+          ]
+        },
+        "waxing": {
+          "token": "servicefamilytoken",
+          "display_name": "Waxing",
+          "description": "Hair removal services using wax",
+          "synonym": [
+            "waxing",
+            "hair removal"
+          ]
+        },
+        "threading": {
+          "token": "servicefamilytoken",
+          "display_name": "Threading",
+          "description": "Hair removal using thread, usually for eyebrows or facial hair",
+          "synonym": [
+            "eyebrow threading",
+            "eyebrows threading",
+            "threading"
+          ]
+        },
+        "spa_treatment": {
+          "token": "servicefamilytoken",
+          "display_name": "Spa Treatment",
+          "description": "General spa and wellness treatments",
+          "synonym": [
+            "spa treatment",
+            "body treatment"
+          ]
+        }
+      }
+    }
+  }
+}

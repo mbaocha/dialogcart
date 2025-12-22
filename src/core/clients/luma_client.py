@@ -5,7 +5,7 @@ Thin HTTP client for calling Luma /resolve endpoint.
 """
 
 import os
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional 
 import httpx
 
 from core.errors.exceptions import UpstreamError
@@ -41,7 +41,8 @@ class LumaClient:
         user_id: str,
         text: str,
         domain: str = "service",
-        timezone: str = "UTC"
+        timezone: str = "UTC", 
+        tenant_context: Optional[Dict[str, Any]] = None 
     ) -> Dict[str, Any]:
         """
         Call Luma /resolve endpoint.
@@ -60,12 +61,14 @@ class LumaClient:
         """
         url = f"{self.base_url}/resolve"
 
-        payload = {
-            "user_id": user_id,
-            "text": text,
-            "domain": domain,
-            "timezone": timezone
-        }
+        payload = { 
+            "user_id": user_id, 
+            "text": text, 
+            "domain": domain, 
+            "timezone": timezone 
+        } 
+        if tenant_context: 
+            payload["tenant_context"] = tenant_context 
 
         try:
             response = self._client.post(url, json=payload)

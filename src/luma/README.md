@@ -19,7 +19,7 @@ Luma is an **NLP-based service/reservation booking pipeline** that processes nat
 {
   "stages": {
     "extraction": {
-      "service_families": [{"text": "haircut", "canonical": "haircut"}],
+      "business_categories": [{"text": "haircut", "canonical": "haircut"}],
       "dates": [{"text": "tomorrow"}],
       "times": [{"text": "2pm"}]
     },

@@ -94,7 +94,7 @@ def determine_service_scope(psentence: str, entities: Dict[str, List]) -> str:
     Returns:
         "shared" or "separate"
     """
-    service_count = len(entities.get("service_families", []))
+    service_count = len(entities.get("business_categories") or entities.get("service_families", []))
     
     if service_count <= 1:
         return "separate"

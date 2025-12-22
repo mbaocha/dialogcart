@@ -124,7 +124,7 @@ pytest core/tests/test_orchestrator_flow.py -v
 
 When Luma returns a RESOLVED booking:
 - Orchestrator calls:
-  1. `OrganizationClient.get_details(organization_id=1)`
+  1. `OrganizationClient.get_details(organization_id=<ORG_ID from env, default 1>)` 
   2. `CustomerClient.get_customer(...)` or `CustomerClient.create_customer(...)`
   3. `BookingClient.create_booking(...)`
 - Returns:
@@ -168,10 +168,10 @@ When Luma returns `needs_clarification=true`:
    - Ensure Luma service is running on port 9001
    - Check `LUMA_BASE_URL` environment variable
 
-2. **"Organization not found"**
-   - Ensure internal API is running
-   - Check `INTERNAL_API_BASE_URL` environment variable
-   - Note: Currently hardcoded to `organization_id=1` for testing
+2. **"Organization not found"** 
+   - Ensure internal API is running 
+   - Check `INTERNAL_API_BASE_URL` environment variable 
+   - Check `ORG_ID` environment variable (defaults to `1`) 
 
 3. **"customer email or phone is required"**
    - Luma booking payload doesn't include customer info

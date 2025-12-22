@@ -1,11 +1,14 @@
-"""
-Stateless Conversation Orchestrator
-
-Pure stateless function that orchestrates conversation flow.
-No persistence, no memory, no NLP logic.
+""" 
+Stateless Conversation Orchestrator 
+ 
+Pure stateless function that orchestrates conversation flow. 
+No persistence, no memory, no NLP logic. 
 """
 
 import logging
+import json
+import os
+from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
 from core.clients.luma_client import LumaClient
@@ -13,24 +16,42 @@ from core.contracts.luma_contracts import assert_luma_contract
 from core.errors.exceptions import ContractViolation, UpstreamError, UnsupportedIntentError
 from core.orchestration.router import get_template_key, get_action_name
 from core.clients.booking_client import BookingClient
-from core.clients.organization_client import OrganizationClient
 from core.clients.customer_client import CustomerClient
+from core.clients.catalog_client import CatalogClient
+from core.clients.organization_client import OrganizationClient
+from core.cache.catalog_cache import catalog_cache
+from core.cache.org_domain_cache import org_domain_cache
 
 logger = logging.getLogger(__name__)
+
+
+def _get_org_id_from_env() -> int:
+    """Return organization_id from ORG_ID env var with safe default."""
+    value = os.getenv("ORG_ID", "1")
+    try:
+        org_id = int(value)
+        if org_id <= 0:
+            raise ValueError("ORG_ID must be positive")
+        return org_id
+    except Exception:  # noqa: BLE001
+        logger.warning("Invalid ORG_ID env value '%s', defaulting to 1", value)
+        return 1
 
 
 def handle_message(
     user_id: str,
     text: str,
-    domain: str = "service",
+    domain: str = "service",  # caller-provided; will be overridden by org domain
     timezone: str = "UTC",
     phone_number: Optional[str] = None,
     email: Optional[str] = None,
     customer_id: Optional[int] = None,
+    organization_id: Optional[int] = None,
     luma_client: Optional[LumaClient] = None,
     booking_client: Optional[BookingClient] = None,
-    organization_client: Optional[OrganizationClient] = None,
-    customer_client: Optional[CustomerClient] = None
+    customer_client: Optional[CustomerClient] = None,
+    catalog_client: Optional[CatalogClient] = None,
+    organization_client: Optional[OrganizationClient] = None
 ) -> Dict[str, Any]:
     """
     Handle a user message - stateless orchestration.
@@ -54,10 +75,11 @@ def handle_message(
         phone_number: Customer phone number (optional, for customer lookup/creation)
         email: Customer email (optional, for customer lookup/creation)
         customer_id: Customer ID (optional, if provided skips lookup/creation)
+        organization_id: Organization ID (optional, defaults to ORG_ID env or 1) 
         luma_client: Luma client instance (creates default if None)
         booking_client: Booking client instance (creates default if None)
-        organization_client: Organization client instance (creates default if None)
         customer_client: Customer client instance (creates default if None)
+        catalog_client: Catalog discovery client (creates default if None) 
 
     Returns:
         Response dictionary with success and outcome
@@ -67,18 +89,92 @@ def handle_message(
         luma_client = LumaClient()
     if booking_client is None:
         booking_client = BookingClient()
-    if organization_client is None:
-        organization_client = OrganizationClient()
     if customer_client is None:
         customer_client = CustomerClient()
+    if catalog_client is None:
+        catalog_client = CatalogClient()
+    if organization_client is None:
+        organization_client = OrganizationClient()
 
-    # Step 1: Call Luma
+    # TODO: Replace env-based organization_id with channel/auth-derived organization_id
+    resolved_org_id = organization_id if organization_id is not None else _get_org_id_from_env()
+
+    # Derive domain from organization details (cached, long TTL)
+    derived_domain, _ = org_domain_cache.get_domain(
+        resolved_org_id, organization_client, force_refresh=False
+    )
+
+    # Step 1: Prepare tenant_context aliases (service/reservation)
+    catalog_data_for_alias: Optional[Dict[str, Any]] = None
+    tenant_context = None
+    if derived_domain in ("service", "reservation"):
+        catalog_data_for_alias = catalog_cache.get_catalog(
+            resolved_org_id, catalog_client, domain=derived_domain)
+        alias_map: Dict[str, Any] = {}
+        if derived_domain == "service":
+            services_for_alias = catalog_data_for_alias.get(
+                "services", []) if isinstance(catalog_data_for_alias, dict) else []
+            for svc in services_for_alias:
+                if not isinstance(svc, dict) or svc.get("is_active") is False:
+                    continue
+                name = svc.get("name")
+                if not name:
+                    continue
+                canonical_key = svc.get("service_family_id") or svc.get(
+                    "canonical") or svc.get("slug") or name.lower().replace(" ", "_")
+                if not canonical_key:
+                    continue
+                alias_map[name.lower()] = canonical_key
+        else:
+            rooms_for_alias = catalog_data_for_alias.get(
+                "rooms", []) if isinstance(catalog_data_for_alias, dict) else []
+            for rt in rooms_for_alias:
+                if not isinstance(rt, dict) or rt.get("is_active") is False:
+                    continue
+                name = rt.get("name")
+                if not name:
+                    continue
+                canonical_key = rt.get("canonical_key") or rt.get("canonical") or rt.get(
+                    "slug") or name.lower().replace(" ", "_")
+                if not canonical_key:
+                    continue
+                alias_map[name.lower()] = canonical_key
+            extras_for_alias = catalog_data_for_alias.get(
+                "extras", []) if isinstance(catalog_data_for_alias, dict) else []
+            for ex in extras_for_alias:
+                if not isinstance(ex, dict) or ex.get("is_active") is False:
+                    continue
+                name = ex.get("name")
+                if not name:
+                    continue
+                canonical_key = ex.get("canonical") or ex.get(
+                    "slug") or name.lower().replace(" ", "_")
+                if not canonical_key:
+                    continue
+                alias_map[name.lower()] = canonical_key
+        if alias_map:
+            tenant_context = {"aliases": alias_map}
+
+    # Step 2: Call Luma
+    # Build and log Luma payload
+    luma_payload = {
+        "user_id": user_id,
+        "text": text,
+        "domain": derived_domain,
+        "timezone": timezone,
+    }
+    if tenant_context:
+        luma_payload["tenant_context"] = tenant_context
+    logger.info("Luma request payload: %s", json.dumps(
+        luma_payload, ensure_ascii=False))
+
     try:
         luma_response = luma_client.resolve(
             user_id=user_id,
             text=text,
-            domain=domain,
-            timezone=timezone
+            domain=derived_domain,
+            timezone=timezone,
+            tenant_context=tenant_context
         )
     except UpstreamError as e:
         logger.error(f"Luma API error for user {user_id}: {str(e)}")
@@ -114,7 +210,7 @@ def handle_message(
     if luma_response.get("needs_clarification", False):
         clarification = luma_response.get("clarification", {})
         reason = clarification.get("reason", "")
-        template_key = get_template_key(reason, domain)
+        template_key = get_template_key(reason, derived_domain)
 
         logger.info(
             f"Clarification needed for user {user_id}: {reason} -> {template_key}"
@@ -144,35 +240,341 @@ def handle_message(
         }
 
     booking = luma_response.get("booking", {})
+    booking_type = booking.get("booking_type", "service")
+
+    # Resolve service item_id using catalog discovery (no org details scanning)
+    def _resolve_service_id(services_from_luma: list, catalog_services_list: list[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Resolve service item_id deterministically.
+
+        Rules:
+        - If services[].text provided: exact name match (case-insensitive) → service ID
+        - Else, use canonical if exactly one active service matches
+        - If multiple matches for canonical → clarification
+        - If no match → clarification
+        """
+        if not catalog_services_list:
+            return {"item_id": None, "clarification": True, "reason": "MISSING_SERVICE"}
+
+        active_services = [
+            s for s in catalog_services_list
+            if isinstance(s, dict) and s.get("is_active", True) is not False
+        ]
+
+        if not services_from_luma:
+            return {"item_id": None, "clarification": True, "reason": "MISSING_SERVICE"}
+
+        svc = services_from_luma[0] if isinstance(
+            services_from_luma, list) else services_from_luma
+        if not isinstance(svc, dict):
+            return {"item_id": None, "clarification": True, "reason": "MISSING_SERVICE"}
+
+        text_name = svc.get("text")
+        canonical = svc.get("canonical") or svc.get(
+            "service_family_id") or svc.get("slug")
+
+        # Name match
+        if text_name:
+            name_lower = str(text_name).lower()
+            matches = [s for s in active_services if str(
+                s.get("name", "")).lower() == name_lower]
+            if len(matches) == 1:
+                return {"item_id": matches[0].get("id"), "clarification": False}
+            if len(matches) > 1:
+                return {"item_id": None, "clarification": True, "reason": "SERVICE_VARIANT_AMBIGUITY"}
+
+        # Canonical match (only if exactly one)
+        if canonical:
+            canonical_lower = str(canonical).lower()
+            matches = [
+                s for s in active_services
+                if str(s.get("canonical") or s.get("slug") or "").lower() == canonical_lower
+            ]
+            if len(matches) == 1:
+                return {"item_id": matches[0].get("id"), "clarification": False}
+            if len(matches) > 1:
+                return {"item_id": None, "clarification": True, "reason": "SERVICE_VARIANT_AMBIGUITY"}
+
+        return {"item_id": None, "clarification": True, "reason": "MISSING_SERVICE"}
 
     try:
         if action_name == "booking.create":
+            resolved_item_id = None
+            if booking_type == "service" and derived_domain != "reservation":
+                # Use cached catalog data to resolve ID
+                if catalog_data_for_alias is None:
+                    catalog_data_for_alias = catalog_cache.get_catalog(
+                        resolved_org_id, catalog_client, domain="service")
+                catalog_services_for_resolution = catalog_data_for_alias.get(
+                    "services", []) if isinstance(catalog_data_for_alias, dict) else []
+                resolution = _resolve_service_id(booking.get(
+                    "services", []), catalog_services_for_resolution)
+                if resolution.get("clarification"):
+                    reason = resolution.get("reason", "MISSING_SERVICE")
+                    template_key = get_template_key("MISSING_SERVICE", domain)
+                    return {
+                        "success": True,
+                        "outcome": {
+                            "type": "CLARIFY",
+                            "template_key": template_key,
+                            "data": {"reason": reason},
+                            "booking": booking
+                        }
+                    }
+                resolved_item_id = resolution.get("item_id")
+                # Inject resolved id back into booking for downstream usage
+                services_list = booking.get("services")
+                if services_list and isinstance(services_list, list) and isinstance(services_list[0], dict):
+                    services_list[0]["id"] = resolved_item_id
+                booking["_resolved_item_id"] = resolved_item_id
+            elif booking_type == "reservation" or derived_domain == "reservation":
+                if catalog_data_for_alias is None:
+                    catalog_data_for_alias = catalog_cache.get_catalog(
+                        resolved_org_id, catalog_client, domain="reservation")
+                rooms_catalog = catalog_data_for_alias.get(
+                    "rooms", []) if isinstance(catalog_data_for_alias, dict) else []
+                catalog_extras = catalog_data_for_alias.get(
+                    "extras", []) if isinstance(catalog_data_for_alias, dict) else []
+
+                def _resolve_room_type(room_from_luma: Dict[str, Any], rooms: list[Dict[str, Any]]) -> Dict[str, Any]:
+                    if not rooms:
+                        return {"room_type_id": None, "clarification": True, "reason": "MISSING_ROOM_TYPE"}
+                    active_rooms = [r for r in rooms if isinstance(
+                        r, dict) and r.get("is_active", True) is not False]
+                    if not room_from_luma or not isinstance(room_from_luma, dict):
+                        return {"room_type_id": None, "clarification": True, "reason": "MISSING_ROOM_TYPE"}
+                    text_name = room_from_luma.get("text")
+                    canonical = room_from_luma.get("canonical_key") or room_from_luma.get(
+                        "canonical") or room_from_luma.get("slug")
+                    if text_name:
+                        name_lower = str(text_name).lower()
+                        matches = [r for r in active_rooms if str(
+                            r.get("name", "")).lower() == name_lower]
+                        if len(matches) == 1:
+                            return {"room_type_id": matches[0].get("id"), "clarification": False}
+                        if len(matches) > 1:
+                            return {"room_type_id": None, "clarification": True, "reason": "ROOM_VARIANT_AMBIGUITY"}
+                    if canonical:
+                        canonical_lower = str(canonical).lower()
+                        matches = [
+                            r for r in active_rooms
+                            if str(r.get("canonical_key") or r.get("canonical") or r.get("slug") or "").lower() == canonical_lower
+                        ]
+                        if len(matches) == 1:
+                            return {"room_type_id": matches[0].get("id"), "clarification": False}
+                        if len(matches) > 1:
+                            return {"room_type_id": None, "clarification": True, "reason": "ROOM_VARIANT_AMBIGUITY"}
+                    return {"room_type_id": None, "clarification": True, "reason": "MISSING_ROOM_TYPE"}
+
+                def _resolve_extras(extras_from_luma: list, extras_catalog: list[Dict[str, Any]], room_type_id: Optional[int]) -> Dict[str, Any]:
+                    if not extras_from_luma:
+                        return {"extras": [], "clarification": False}
+                    active_extras = [e for e in extras_catalog if isinstance(
+                        e, dict) and e.get("is_active", True) is not False]
+                    resolved_extras = []
+                    for ex in extras_from_luma:
+                        if not isinstance(ex, dict):
+                            return {"extras": None, "clarification": True, "reason": "INVALID_EXTRA"}
+                        text_name = ex.get("text")
+                        canonical = ex.get("canonical") or ex.get("slug")
+                        match = None
+                        if text_name:
+                            name_lower = str(text_name).lower()
+                            name_matches = [e for e in active_extras if str(
+                                e.get("name", "")).lower() == name_lower]
+                            if len(name_matches) == 1:
+                                match = name_matches[0]
+                            elif len(name_matches) > 1:
+                                return {"extras": None, "clarification": True, "reason": "EXTRA_VARIANT_AMBIGUITY"}
+                        if match is None and canonical:
+                            canonical_lower = str(canonical).lower()
+                            canonical_matches = [e for e in active_extras if str(
+                                e.get("canonical") or e.get("slug") or "").lower() == canonical_lower]
+                            if len(canonical_matches) == 1:
+                                match = canonical_matches[0]
+                            elif len(canonical_matches) > 1:
+                                return {"extras": None, "clarification": True, "reason": "EXTRA_VARIANT_AMBIGUITY"}
+                        if match is None:
+                            return {"extras": None, "clarification": True, "reason": "INVALID_EXTRA"}
+
+                        applies_all = match.get("applies_to_all", False)
+                        applicable_room_types = match.get(
+                            "applicable_room_types") or match.get("room_types") or []
+                        if not applies_all and room_type_id is not None and applicable_room_types:
+                            if room_type_id not in applicable_room_types:
+                                return {"extras": None, "clarification": True, "reason": "EXTRA_NOT_APPLICABLE"}
+                        resolved_extras.append({"id": match.get("id")})
+                    return {"extras": resolved_extras, "clarification": False}
+
+                room_candidates = booking.get(
+                    "rooms") or booking.get("services") or []
+                room_svc = room_candidates[0] if isinstance(
+                    room_candidates, list) else room_candidates
+                room_resolution = _resolve_room_type(
+                    room_svc, rooms_catalog)
+                if room_resolution.get("clarification"):
+                    reason = room_resolution.get("reason", "MISSING_ROOM_TYPE")
+                    template_key = get_template_key("MISSING_SERVICE", domain)
+                    return {
+                        "success": True,
+                        "outcome": {
+                            "type": "CLARIFY",
+                            "template_key": template_key,
+                            "data": {"reason": reason},
+                            "booking": booking
+                        }
+                    }
+                resolved_room_id = room_resolution.get("room_type_id")
+                booking["_resolved_room_type_id"] = resolved_room_id
+                extras_resolution = _resolve_extras(booking.get(
+                    "extras", []), catalog_extras, resolved_room_id)
+                if extras_resolution.get("clarification"):
+                    reason = extras_resolution.get("reason", "INVALID_EXTRA")
+                    template_key = get_template_key("MISSING_SERVICE", domain)
+                    return {
+                        "success": True,
+                        "outcome": {
+                            "type": "CLARIFY",
+                            "template_key": template_key,
+                            "data": {"reason": reason},
+                            "booking": booking
+                        }
+                    }
+                resolved_extras = extras_resolution.get("extras", [])
+                if resolved_extras is not None:
+                    booking["_resolved_extras"] = resolved_extras
+                    if isinstance(booking.get("extras"), list):
+                        for idx, ex in enumerate(booking["extras"]):
+                            if isinstance(ex, dict) and idx < len(resolved_extras):
+                                booking["extras"][idx]["id"] = resolved_extras[idx].get(
+                                    "id")
+
             # Execute full booking creation flow
             result = _execute_booking_creation(
                 user_id=user_id,
                 booking=booking,
-                organization_client=organization_client,
                 customer_client=customer_client,
                 booking_client=booking_client,
+                catalog_client=catalog_client,
+                organization_id=resolved_org_id,
+                catalog_data=catalog_data_for_alias,
                 phone_number=phone_number,
                 email=email,
                 customer_id=customer_id
             )
 
             logger.info(f"Successfully created booking for user {user_id}")
+
+            def _extract_booking_code(resp: Dict[str, Any]) -> Optional[Any]:
+                candidates = [
+                    resp.get("booking_code"),
+                    resp.get("code"),
+                ]
+                booking_obj = resp.get("booking") if isinstance(
+                    resp.get("booking"), dict) else None
+                if booking_obj:
+                    candidates.append(booking_obj.get("booking_code"))
+                    candidates.append(booking_obj.get("code"))
+                data_obj = resp.get("data") if isinstance(
+                    resp.get("data"), dict) else None
+                if data_obj:
+                    booking_data = data_obj.get("booking") if isinstance(
+                        data_obj.get("booking"), dict) else None
+                    if booking_data:
+                        candidates.append(booking_data.get("booking_code"))
+                        candidates.append(booking_data.get("code"))
+                        candidates.append(booking_data.get("id"))
+                # Fallback to top-level id if present
+                candidates.append(resp.get("id"))
+                for c in candidates:
+                    if c:
+                        return c
+                return None
+
+            booking_code_extracted = _extract_booking_code(result)
+            booking_data = None
+            if isinstance(result, dict):
+                booking_data = result.get("booking")
+                if isinstance(result.get("data"), dict) and isinstance(result["data"].get("booking"), dict):
+                    booking_data = result["data"]["booking"]
+
+            status_extracted = (
+                result.get("status")
+                or (booking_data.get("status") if isinstance(booking_data, dict) else None)
+                or "pending"
+            )
+
+            starts_at = booking_data.get("starts_at") if isinstance(
+                booking_data, dict) else None
+            ends_at = booking_data.get("ends_at") if isinstance(
+                booking_data, dict) else None
+            total_amount = booking_data.get("total_amount") if isinstance(
+                booking_data, dict) else None
+            reservation_fee = booking_data.get(
+                "reservation_fee") if isinstance(booking_data, dict) else None
+            booking_type_resp = booking_data.get(
+                "type") if isinstance(booking_data, dict) else None
+
             return {
                 "success": True,
                 "outcome": {
                     "type": "BOOKING_CREATED",
-                    "booking_code": result.get("booking_code") or result.get("code"),
-                    "status": result.get("status", "pending")
+                    "booking_code": booking_code_extracted,
+                    "status": status_extracted,
+                    "starts_at": starts_at,
+                    "ends_at": ends_at,
+                    "total_amount": total_amount,
+                    "reservation_fee": reservation_fee,
+                    "booking_type": booking_type_resp,
                 }
             }
 
         elif action_name == "booking.modify":
-            # MODIFY_BOOKING intent is not supported (no endpoint exists)
-            raise UnsupportedIntentError(
-                "MODIFY_BOOKING intent is not supported")
+            # Expect a booking reference and updates
+            booking_code = booking.get("booking_code") or booking.get("code")
+            if not booking_code:
+                raise ValueError("booking_code is required for modification")
+
+            updates = booking.get("updates") or {}
+            # Fallback: build updates from datetime_range if present
+            datetime_range = booking.get("datetime_range")
+            if datetime_range and isinstance(datetime_range, dict):
+                start = datetime_range.get("start")
+                end = datetime_range.get("end")
+                if start:
+                    updates.setdefault("starts_at", start)
+                if end:
+                    updates.setdefault("ends_at", end)
+
+            if not updates:
+                raise ValueError(
+                    "No updates supplied for booking modification")
+
+            api_response = booking_client.update_booking(
+                booking_code=booking_code,
+                organization_id=resolved_org_id,
+                updates=updates,
+            )
+
+            booking_data = api_response.get("booking")
+            if isinstance(api_response.get("data"), dict) and isinstance(api_response["data"].get("booking"), dict):
+                booking_data = api_response["data"]["booking"]
+
+            status_extracted = (
+                api_response.get("status")
+                or (booking_data.get("status") if isinstance(booking_data, dict) else None)
+                or "updated"
+            )
+
+            return {
+                "success": True,
+                "outcome": {
+                    "type": "BOOKING_MODIFIED",
+                    "booking_code": booking_code,
+                    "status": status_extracted,
+                    "booking": booking_data,
+                },
+            }
 
         elif action_name == "booking.cancel":
             # Extract booking_code from booking payload
@@ -188,12 +590,9 @@ def handle_message(
             refund_method = booking.get("refund_method")
             notify_customer = booking.get("notify_customer")
 
-            # TODO: For testing - hardcode organization_id. Should be passed as parameter or derived from context.
-            organization_id = 1
-
             api_response = booking_client.cancel_booking(
                 booking_code=booking_code,
-                organization_id=organization_id,
+                organization_id=resolved_org_id,
                 cancellation_type=cancellation_type,
                 reason=reason,
                 notes=notes,
@@ -210,6 +609,25 @@ def handle_message(
                     "booking_code": booking_code,
                     "status": api_response.get("status", "cancelled")
                 }
+            }
+        elif action_name == "booking.inquiry":
+            booking_code = booking.get("booking_code") or booking.get("code")
+            if not booking_code:
+                raise ValueError(
+                    "booking_code is required for booking inquiry")
+
+            api_response = booking_client.get_booking(booking_code)
+            booking_data = api_response.get("booking")
+            if isinstance(api_response.get("data"), dict) and isinstance(api_response["data"].get("booking"), dict):
+                booking_data = api_response["data"]["booking"]
+
+            return {
+                "success": True,
+                "outcome": {
+                    "type": "BOOKING_INQUIRY",
+                    "booking_code": booking_code,
+                    "booking": booking_data or api_response,
+                },
             }
         else:
             raise UnsupportedIntentError(
@@ -238,9 +656,11 @@ def handle_message(
 def _execute_booking_creation(
     user_id: str,
     booking: Dict[str, Any],
-    organization_client: OrganizationClient,
     customer_client: CustomerClient,
     booking_client: BookingClient,
+    catalog_client: CatalogClient,
+    organization_id: int,
+    catalog_data: Optional[Dict[str, Any]] = None,
     phone_number: Optional[str] = None,
     email: Optional[str] = None,
     customer_id: Optional[int] = None
@@ -256,9 +676,11 @@ def _execute_booking_creation(
     Args:
         user_id: User identifier
         booking: Booking payload from Luma
-        organization_client: Organization client instance
         customer_client: Customer client instance
         booking_client: Booking client instance
+        catalog_client: Catalog discovery client instance 
+        organization_id: Organization identifier (from env by default) 
+        catalog_data: Optional pre-fetched catalog data (to avoid re-fetch) 
         phone_number: Customer phone number from context (optional, used as fallback)
         email: Customer email from context (optional, used as fallback)
         customer_id: Customer ID (optional, if provided skips lookup/creation)
@@ -270,23 +692,15 @@ def _execute_booking_creation(
         ValueError: If required fields are missing
         UpstreamError: On API failures
     """
-    # TODO: For testing - hardcode organization_id. Should be passed as parameter or derived from context.
-    organization_id = 1
-
-    # Step 1: Get organization details (includes catalog for service lookup)
-    org_details = organization_client.get_details(organization_id)
-    catalog = org_details.get("catalog", {})
-    # Catalog structure: { services: [...], room_types: [...], extras: [...] }
-    catalog_services = catalog.get(
-        "services", []) if isinstance(catalog, dict) else []
-    catalog_room_types = catalog.get(
-        "room_types", []) if isinstance(catalog, dict) else []
-
-    logger.info(
-        f"Catalog structure: services={len(catalog_services)}, room_types={len(catalog_room_types)}")
-    if catalog_services:
-        logger.debug(
-            f"Sample services: {[s.get('name') for s in catalog_services[:3]]}")
+    # Step 1: Fetch catalog via catalog cache (read-only discovery)
+    # TODO: Replace env-based organization_id with channel/auth-derived organization_id
+    if catalog_data is None:
+        catalog_data = catalog_cache.get_catalog(
+            organization_id, catalog_client, domain=booking.get("booking_type", "service"))
+    catalog_services = catalog_data.get(
+        "services", []) if isinstance(catalog_data, dict) else []
+    rooms_catalog = catalog_data.get(
+        "rooms", []) if isinstance(catalog_data, dict) else []
 
     # Step 2: Get or create customer (skip if customer_id provided)
     logger.info(
@@ -348,63 +762,39 @@ def _execute_booking_creation(
     services = booking.get("services", [])
     item_id = None
     service_canonical = None
+    room_type_id = booking.get("_resolved_room_type_id")
+    resolved_extras = booking.get("_resolved_extras")
 
     if services:
         # Take first service if multiple provided
         first_service = services[0] if isinstance(services, list) else services
         if isinstance(first_service, dict):
-            # Try to get numeric ID first, fallback to canonical/text
-            item_id = first_service.get("id")
+            # Expect item_id resolved earlier; fall back to canonical/text
+            item_id = first_service.get(
+                "id") or booking.get("_resolved_item_id")
             service_canonical = first_service.get(
                 "canonical") or first_service.get("text")
 
-    # If item_id is not numeric, try to look it up in the catalog by canonical name
-    if item_id is None and service_canonical:
-        logger.info(f"Looking up service '{service_canonical}' in catalog")
-        # Use appropriate catalog based on booking type
-        catalog_items = catalog_services if booking_type == "service" else catalog_room_types
-
-        for item in catalog_items:
-            # Check if item matches by canonical, name, or slug
-            item_canonical = item.get("canonical") or item.get(
-                "slug") or item.get("name", "").lower().replace(" ", "_")
-            item_name = item.get("name", "").lower()
-            service_canonical_lower = service_canonical.lower()
-
-            # Try multiple matching strategies
-            if (item_canonical == service_canonical or
-                item_canonical == service_canonical_lower or
-                item_name == service_canonical_lower or
-                item.get("canonical", "").endswith(service_canonical) or
-                service_canonical.endswith(item_canonical) or
-                    item_name.replace(" ", "_") == service_canonical_lower):
-                item_id = item.get("id")
-                logger.info(
-                    f"Found service '{service_canonical}' with id={item_id} (name: {item.get('name')})")
-                break
-
-        if item_id is None:
-            available_names = [item.get("name") for item in catalog_items[:5]]
-            logger.warning(
-                f"Service '{service_canonical}' not found in catalog. Available {booking_type} items: {available_names}")
-
-    if not item_id:
+    # If service booking and still missing item_id, fail-safe clarification should have already occurred.
+    # Retain guardrail error for non-service flows.
+    if booking_type == "service" and not item_id:
         raise ValueError(
-            f"item_id is required for booking creation. Service '{service_canonical}' not found in catalog or no numeric ID provided.")
+            f"item_id is required for booking creation. Service '{service_canonical}' could not be resolved.")
 
     # Convert item_id to int if it's a string that looks like a number
     # The API requires item_id to be a positive integer
-    original_item_id = item_id
-    try:
-        item_id = int(item_id)
-        if item_id <= 0:
+    if item_id is not None:
+        original_item_id = item_id
+        try:
+            item_id = int(item_id)
+            if item_id <= 0:
+                raise ValueError(
+                    f"item_id must be a positive integer, got: {item_id}")
+        except (ValueError, TypeError) as e:
+            logger.error(
+                f"item_id '{original_item_id}' is not a valid positive integer: {e}")
             raise ValueError(
-                f"item_id must be a positive integer, got: {item_id}")
-    except (ValueError, TypeError) as e:
-        logger.error(
-            f"item_id '{original_item_id}' is not a valid positive integer: {e}")
-        raise ValueError(
-            f"item_id must be a positive integer, but got: {original_item_id} (type: {type(original_item_id).__name__})")
+                f"item_id must be a positive integer, but got: {original_item_id} (type: {type(original_item_id).__name__})")
 
     # Extract datetime_range
     datetime_range = booking.get("datetime_range")
@@ -415,17 +805,43 @@ def _execute_booking_creation(
             raise ValueError("datetime_range is required for service bookings")
 
         start_time = datetime_range.get("start")
-        end_time = datetime_range.get("end")
-        if not start_time or not end_time:
+        if not start_time:
+            raise ValueError("start time is required for service bookings")
+
+        # Compute end_time from catalog duration (ignore incoming end_time)
+        matched_service = None
+        for svc in catalog_services:
+            if isinstance(svc, dict) and svc.get("id") == item_id:
+                matched_service = svc
+                break
+
+        duration_minutes = None
+        if matched_service is not None:
+            duration_val = matched_service.get("duration")
+            if duration_val is not None:
+                try:
+                    duration_minutes = int(duration_val)
+                except Exception:
+                    duration_minutes = None
+
+        if duration_minutes is None:
             raise ValueError(
-                "start and end times are required for service bookings")
+                "duration is required for service bookings and was not found in catalog")
+
+        try:
+            start_dt = datetime.fromisoformat(start_time)
+        except Exception as e:
+            raise ValueError(f"Invalid start_time format: {start_time}") from e
+
+        end_dt = start_dt + timedelta(minutes=duration_minutes)
+        end_time = end_dt.isoformat()
 
         # Extract optional service booking fields
         staff_id = booking.get("staff_id")
         addons = booking.get("addons")
 
         logger.info(
-            f"Creating service booking: org_id={organization_id}, customer_id={customer_id}, item_id={item_id}, start={start_time}, end={end_time}")
+            f"Creating service booking: org_id={organization_id}, customer_id={customer_id}, item_id={item_id}, start={start_time}, end={end_time}, duration={duration_minutes}m")
 
         return booking_client.create_booking(
             organization_id=organization_id,
@@ -437,26 +853,28 @@ def _execute_booking_creation(
             staff_id=staff_id,
             addons=addons
         )
-    elif booking_type in ("room", "lodging"):
-        # Room booking
+    elif booking_type == "reservation":
+        # Reservation booking
         if not datetime_range or not isinstance(datetime_range, dict):
-            raise ValueError("datetime_range is required for room bookings")
+            raise ValueError(
+                "datetime_range is required for reservation bookings")
 
         check_in = datetime_range.get("start")
         check_out = datetime_range.get("end")
         if not check_in or not check_out:
             raise ValueError(
-                "check_in and check_out are required for room bookings")
+                "check_in and check_out are required for reservation bookings")
 
-        # Extract optional room booking fields
+        # Extract optional reservation booking fields
         guests = booking.get("guests", 1)
-        extras = booking.get("extras")
+        extras = resolved_extras if resolved_extras is not None else booking.get(
+            "extras")
 
         return booking_client.create_booking(
             organization_id=organization_id,
             customer_id=customer_id,
-            booking_type=booking_type,
-            item_id=item_id,
+            booking_type="reservation",
+            item_id=room_type_id or item_id,
             check_in=check_in,
             check_out=check_out,
             guests=guests,

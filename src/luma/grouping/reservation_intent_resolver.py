@@ -224,7 +224,7 @@ class ReservationIntentResolver:
         osentence_lower = osentence.lower().strip()
 
         # Extract entity counts (entity-driven rules first)
-        service_families = entities.get("service_families", [])
+        service_families = entities.get("business_categories") or entities.get("service_families", [])
         dates = entities.get("dates", [])
         dates_absolute = entities.get("dates_absolute", [])
         times = entities.get("times", [])

@@ -20,13 +20,17 @@ from luma.grouping.appointment_grouper import group_appointment
 from luma.structure.interpreter import interpret_structure
 from luma.grouping.reservation_intent_resolver import ReservationIntentResolver
 from luma.extraction.matcher import EntityMatcher
+import argparse
 import types
+import contextlib
+import io
 import sys
 import json
 import importlib.util
 from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
+import requests
 
 # CRITICAL: Import spaCy BEFORE setting up luma module structure
 # The issue: Python searches the script's directory (src/luma/) first when importing
@@ -181,7 +185,9 @@ def _localize_datetime(dt: datetime, tz_str: str) -> datetime:
 
 
 def find_normalization_dir() -> Path:
-    """Find the normalization directory containing global.v2.json."""
+    """Find the normalization directory containing global JSON file."""
+    from luma.extraction.entity_loading import get_global_json_path
+
     # Try multiple locations
     possible_paths = [
         script_dir.parent.parent / "store" / "normalization",
@@ -190,12 +196,18 @@ def find_normalization_dir() -> Path:
     ]
 
     for path in possible_paths:
-        if path.exists() and (path / "global.v2.json").exists():
-            return path
+        if path.exists():
+            try:
+                # This will raise FileNotFoundError if the configured version doesn't exist
+                get_global_json_path(path)
+                return path
+            except FileNotFoundError:
+                continue
 
     # If not found, raise error with helpful message
+    from luma.config import config
     raise FileNotFoundError(
-        f"Could not find normalization directory with global.v2.json. "
+        f"Could not find normalization directory with global.{config.GLOBAL_JSON_VERSION}.json. "
         f"Tried: {[str(p) for p in possible_paths]}"
     )
 
@@ -251,8 +263,10 @@ def run_full_pipeline(
 
         print(f"\nExtracted Entities:")
         print(
-            f"  Services: {len(extraction_result.get('service_families', []))}")
-        for svc in extraction_result.get('service_families', []):
+            f"  Services: {len(extraction_result.get('business_categories') or extraction_result.get('service_families', []))}")
+        business_categories = extraction_result.get(
+            'business_categories') or extraction_result.get('service_families', [])
+        for svc in business_categories:
             print(f"    - {svc.get('text')} ({svc.get('canonical')})")
 
         print(f"  Dates: {len(extraction_result.get('dates', []))}")
@@ -346,7 +360,7 @@ def run_full_pipeline(
         intent_result = {
             "intent": intent,
             "booking": {
-                "services": extraction_result.get('service_families', []),
+                "services": extraction_result.get('business_categories') or extraction_result.get('service_families', []),
                 "date_ref": None,
                 "time_ref": None,
                 "duration": None
@@ -453,6 +467,47 @@ def run_full_pipeline(
     return results
 
 
+def call_api(
+    sentence: str,
+    domain: str = "service",
+    timezone: str = "UTC",
+    api_base: str = "http://localhost:9001/resolve",
+    tenant_domain: Optional[str] = None,
+    tenant_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """
+    Call Luma HTTP API (/resolve) instead of running locally.
+    """
+    payload: Dict[str, Any] = {
+        "user_id": "cli-user",
+        "text": sentence,
+        "domain": domain,
+        "timezone": timezone,
+    }
+    if tenant_domain:
+        payload["tenant_domain"] = tenant_domain
+    if tenant_context:
+        payload["tenant_context"] = tenant_context
+
+    response = requests.post(
+        api_base,
+        headers={"Content-Type": "application/json"},
+        json=payload,
+        timeout=15,
+    )
+    try:
+        body = response.json()
+    except Exception:
+        body = {"success": False, "error": "Non-JSON response",
+                "text": response.text}
+
+    return {
+        "http_status": response.status_code,
+        "request": payload,
+        "response": body,
+    }
+
+
 def print_json_summary(results: Dict[str, Any]):
     """Print a JSON summary of the results."""
     print("\n" + "="*70)
@@ -531,38 +586,193 @@ def interactive_mode():
 
 
 def example_tests():
-    """Run example test cases."""
+    """
+    Run example test cases (50) covering supported intents.
+
+    Prints only failures; summarizes total/pass/fail.
+    """
     test_cases = [
-        "Book me in for a haircut tomorrow night at 10.30",
-        "I want to book a full body massage this Friday at 4pm",
-        "Can you schedule a mani pedi for next monday morning?",
-        "Book facial treatmant for me tomorow at 2",
-        "Need a beard trim today around 6ish",
-        "pls book me for hair colouring on saturday at 11am",
-        "I’d like to book eyebrows threading next week tuesday evening",
-        "Book me in for a massage tomrw nite at 9",
-        "Can I get a haircut and beard trim tomorrow at 1pm?",
-        "hair cut booking for today 5.30pm",
+        {"text": "book premium haircut tomorrow at 9am", "expected_intent": "CREATE_BOOKING",
+            "require_service": True, "require_datetime": True, "expected_services": ["beauty_and_wellness.haircut"]},
+        {"text": "need a massage this friday at 5pm", "expected_intent": "CREATE_BOOKING",
+            "require_service": True, "expected_services": ["beauty_and_wellness.massage"]},
+        {"text": "schedule a spa treatment next monday afternoon", "expected_intent": "CREATE_BOOKING",
+            "require_service": True, "expected_services": ["beauty_and_wellness.spa_treatment"]},
+        {"text": "book manicure next week morning", "expected_intent": "CREATE_BOOKING",
+            "require_service": True, "expected_services": ["beauty_and_wellness.manicure"]},
+        {"text": "book beard trim today at 3pm", "expected_intent": "CREATE_BOOKING", "require_service": True,
+            "require_datetime": True, "expected_services": ["beauty_and_wellness.beard_grooming"]},
+        {"text": "can I book premium haircut at 2pm tomorrow", "expected_intent": "CREATE_BOOKING",
+            "require_service": True, "expected_services": ["beauty_and_wellness.haircut"]},
+        {"text": "want an appointment on wednesday at 10am",
+            "expected_intent": "CREATE_BOOKING"},
+        {"text": "book two services for tomorrow evening",
+            "expected_intent": "CREATE_BOOKING"},
+        {"text": "I want to reserve a room for July 4 to July 6", "expected_intent": "CREATE_BOOKING",
+            "domain": "reservation", "require_datetime": True, "expected_services": ["hospitality.room"]},
+        {"text": "need a hotel room next weekend", "expected_intent": "CREATE_BOOKING",
+            "domain": "reservation", "expected_services": ["hospitality.room"]},
+        {"text": "find availability for haircut tomorrow morning", "expected_intent": "AVAILABILITY",
+            "require_service": True, "require_datetime": True, "expected_services": ["beauty_and_wellness.haircut"]},
+        {"text": "what times are open for massage on friday", "expected_intent": "AVAILABILITY",
+            "require_service": True, "expected_services": ["beauty_and_wellness.massage"]},
+        {"text": "do you have slots for nail service today",
+            "expected_intent": "AVAILABILITY", "require_service": True},
+        {"text": "what services do you offer", "expected_intent": "DISCOVERY"},
+        {"text": "list your rooms", "expected_intent": "DISCOVERY",
+            "domain": "reservation"},
+        {"text": "how much is premium haircut", "expected_intent": "QUOTE",
+            "require_service": True, "expected_services": ["beauty_and_wellness.haircut"]},
+        {"text": "price for massage please", "expected_intent": "QUOTE",
+            "require_service": True, "expected_services": ["beauty_and_wellness.massage"]},
+        {"text": "recommend a spa treatment", "expected_intent": "RECOMMENDATION"},
+        {"text": "suggest a good room type for 2 adults",
+            "expected_intent": "RECOMMENDATION", "domain": "reservation"},
+        {"text": "tell me more about premium haircut", "expected_intent": "DETAILS",
+            "require_service": True, "expected_services": ["beauty_and_wellness.haircut"]},
+        {"text": "I want to cancel booking ORG1-000123",
+            "expected_intent": "CANCEL_BOOKING"},
+        {"text": "cancel my booking ORG1-000124 now",
+            "expected_intent": "CANCEL_BOOKING"},
+        {"text": "update booking ORG1-000125 to 5pm",
+            "expected_intent": "MODIFY_BOOKING"},
+        {"text": "reschedule booking ORG1-000126 to tomorrow 9am",
+            "expected_intent": "MODIFY_BOOKING"},
+        {"text": "change my reservation ORG1-000127 to next weekend",
+            "expected_intent": "MODIFY_BOOKING", "domain": "reservation"},
+        {"text": "what's the status of booking ORG1-000128",
+            "expected_intent": "BOOKING_INQUIRY"},
+        {"text": "show booking ORG1-000129 details",
+            "expected_intent": "BOOKING_INQUIRY"},
+        {"text": "payment for booking ORG1-000130", "expected_intent": "PAYMENT"},
+        {"text": "pay for my booking ORG1-000131", "expected_intent": "PAYMENT"},
+        {"text": "confirm my booking ORG1-000132", "expected_intent": "UNKNOWN"},
+        {"text": "I want to move it later", "expected_intent": "MODIFY_BOOKING"},
+        {"text": "do I need to pay deposit", "expected_intent": "PAYMENT"},
+        {"text": "what is the cancellation policy", "expected_intent": "DETAILS"},
+        {"text": "can I add breakfast to my stay",
+            "expected_intent": "MODIFY_BOOKING", "domain": "reservation"},
+        {"text": "I want to change guest count on my reservation",
+            "expected_intent": "MODIFY_BOOKING", "domain": "reservation"},
+        {"text": "can I book another slot tomorrow",
+            "expected_intent": "CREATE_BOOKING"},
+        {"text": "is there availability for facial today evening", "expected_intent": "AVAILABILITY",
+            "require_service": True, "expected_services": ["beauty_and_wellness.facial"]},
+        {"text": "book haircut at 6ish tonight", "expected_intent": "CREATE_BOOKING",
+            "require_service": True, "expected_services": ["beauty_and_wellness.haircut"]},
+        {"text": "need a room with two beds", "expected_intent": "CREATE_BOOKING",
+            "domain": "reservation", "expected_services": ["hospitality.room"]},
+        {"text": "how late are you open", "expected_intent": "DETAILS"},
+        {"text": "do you support refunds", "expected_intent": "DETAILS"},
+        {"text": "I want to book on the 25th at noon",
+            "expected_intent": "CREATE_BOOKING"},
+        {"text": "schedule beard trim at 11am saturday", "expected_intent": "CREATE_BOOKING",
+            "require_service": True, "expected_services": ["beauty_and_wellness.beard_grooming"]},
+        {"text": "move my appointment earlier",
+            "expected_intent": "MODIFY_BOOKING"},
+        {"text": "cancel reservation code ORG1-000200",
+            "expected_intent": "CANCEL_BOOKING", "domain": "reservation"},
+        {"text": "show me my reservation ORG1-000201",
+            "expected_intent": "BOOKING_INQUIRY", "domain": "reservation"},
+        {"text": "pay balance for ORG1-000202", "expected_intent": "PAYMENT"},
+        {"text": "what is the payment status for ORG1-000203",
+            "expected_intent": "PAYMENT"},
+        {"text": "I need a quote for deep tissue massage",
+            "expected_intent": "QUOTE", "require_service": True},
+        {"text": "recommend something relaxing",
+            "expected_intent": "RECOMMENDATION"},
+        {"text": "what's available tomorrow afternoon",
+            "expected_intent": "AVAILABILITY"},
+        {"text": "is any room free for tonight",
+            "expected_intent": "AVAILABILITY", "domain": "reservation"},
     ]
 
-    print("="*70)
-    print("LUMA PIPELINE - EXAMPLE TESTS")
-    print("="*70)
+    total = len(test_cases)
+    failures = []
+    passes = []
 
-    for i, sentence in enumerate(test_cases, 1):
-        print(f"\n\n{'='*70}")
-        print(f"TEST CASE {i}/{len(test_cases)}")
-        print(f"{'='*70}")
-        run_full_pipeline(sentence, domain="service", timezone="UTC")
-        print("\n")
+    for i, tc in enumerate(test_cases, 1):
+        sentence = tc["text"]
+        expected_intent = tc["expected_intent"]
+        require_service = tc.get("require_service", False)
+        require_datetime = tc.get("require_datetime", False)
+        expected_services = set(tc.get("expected_services", []))
+
+        # Domain: explicit override or heuristic
+        if tc.get("domain"):
+            domain = tc["domain"]
+        else:
+            lower = sentence.lower()
+            domain = "reservation" if any(
+                key in lower for key in ["room", "hotel", "reservation", "stay", "bed"]
+            ) else "service"
+
+        try:
+            # Suppress verbose pipeline output; keep only our summary
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                results = run_full_pipeline(
+                    sentence, domain=domain, timezone="UTC")
+            stages = results.get("stages", {}) if results else {}
+            intent = stages.get("intent", {}).get("intent")
+            grouping_booking = stages.get("grouping", {}).get(
+                "booking", {}) if isinstance(stages.get("grouping"), dict) else {}
+            calendar_booking = stages.get("calendar", {}).get(
+                "calendar_booking", {}) if isinstance(stages.get("calendar"), dict) else {}
+            services = []
+            for svc in grouping_booking.get("services", []) or []:
+                if isinstance(svc, dict):
+                    services.append(svc.get("canonical") or svc.get("text"))
+            datetime_range = calendar_booking.get(
+                "datetime_range") or grouping_booking.get("datetime_range")
+
+            errors = []
+            if intent != expected_intent:
+                errors.append(
+                    f"intent mismatch: expected={expected_intent}, got={intent}")
+            if require_service and not services:
+                errors.append("expected at least one service, got none")
+            if require_datetime and not datetime_range:
+                errors.append("expected datetime_range, got none")
+            if expected_services:
+                normalized = {str(s) for s in services if s}
+                missing = set(expected_services) - normalized
+                if missing:
+                    errors.append(
+                        f"expected services {expected_services}, got {normalized or 'none'}")
+
+            if errors:
+                raise AssertionError("; ".join(errors))
+
+            passes.append((i, sentence, intent, services, datetime_range))
+        except Exception as exc:  # noqa: BLE001
+            failures.append((i, sentence, str(exc)))
+
+    passed = total - len(failures)
+
+    print("=" * 70)
+    print(
+        f"EXAMPLE TESTS SUMMARY: total={total}, passed={passed}, failed={len(failures)}")
+    print("=" * 70)
+
+    if passes:
+        print("\nPasses (intent + slots):")
+        for idx, sent, intent, services, dtr in passes:
+            svc_str = ", ".join([s for s in services if s]
+                                ) if services else "-"
+            dtr_str = dtr if dtr else "-"
+            print(
+                f"- {idx}: intent={intent or '-'} | services={svc_str} | datetime_range={dtr_str}")
+
+    if failures:
+        print("\nFailures (index: sentence -> error):")
+        for idx, sent, err in failures:
+            print(f"- {idx}: {sent} -> {err}")
 
 
 def main():
     """Main entry point."""
-    import argparse
-
     parser = argparse.ArgumentParser(
-        description="Test Luma pipeline interactively")
+        description="Test Luma pipeline interactively or via HTTP API")
     parser.add_argument(
         '--examples',
         action='store_true',
@@ -591,23 +801,63 @@ def main():
         action='store_true',
         help='Output JSON summary'
     )
+    parser.add_argument(
+        '--api',
+        action='store_true',
+        help='Call HTTP API /resolve instead of running locally'
+    )
+    parser.add_argument(
+        '--api-base',
+        type=str,
+        default='http://localhost:9001/resolve',
+        help='API base URL for /resolve (default: http://localhost:9001/resolve)'
+    )
+    parser.add_argument(
+        '--tenant-domain',
+        type=str,
+        help='Optional tenant_domain to include in API request'
+    )
+    parser.add_argument(
+        '-t', '--tenant-context',
+        type=str,
+        help='Optional tenant_context JSON string (e.g., \'{"aliases":{"premium haircut":"haircut"}}\')'
+    )
 
     args = parser.parse_args()
 
     if args.examples:
         example_tests()
     elif args.sentence:
-        results = run_full_pipeline(
-            args.sentence,
-            domain=args.domain,
-            timezone=args.timezone
-        )
-        # Return only the final calendar binding result
-        final_result = {
-            "input": results["input"],
-            "result": results["stages"]["calendar"]
-        }
-        print_json_summary(final_result)
+        if args.api:
+            tenant_ctx = None
+            if args.tenant_context:
+                try:
+                    tenant_ctx = json.loads(args.tenant_context)
+                except Exception as exc:  # noqa: BLE001
+                    print(f"Invalid tenant_context JSON: {exc}")
+                    sys.exit(1)
+
+            api_result = call_api(
+                sentence=args.sentence,
+                domain=args.domain,
+                timezone=args.timezone,
+                api_base=args.api_base,
+                tenant_domain=args.tenant_domain,
+                tenant_context=tenant_ctx,
+            )
+            print_json_summary(api_result)
+        else:
+            results = run_full_pipeline(
+                args.sentence,
+                domain=args.domain,
+                timezone=args.timezone
+            )
+            # Return only the final calendar binding result
+            final_result = {
+                "input": results["input"],
+                "result": results["stages"]["calendar"]
+            }
+            print_json_summary(final_result)
     else:
         interactive_mode()
 

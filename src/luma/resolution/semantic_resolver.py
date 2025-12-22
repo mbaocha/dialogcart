@@ -30,19 +30,9 @@ from dataclasses import dataclass
 
 def _get_global_config_path() -> Path:
     """Get path to global normalization config JSON."""
-    # Try multiple possible locations
-    # From semantic_resolver.py: parent.parent = luma/, so luma/store/normalization/
-    possible_paths = [
-        Path(__file__).parent.parent / "store" /
-        "normalization" / "global.v2.json",
-        Path(__file__).parent.parent / "store" /
-        "normalization" / "global.v1.json",
-    ]
-    for path in possible_paths:
-        if path.exists():
-            return path
-    # Fallback - assume standard location
-    return Path(__file__).parent.parent / "store" / "normalization" / "global.v2.json"
+    from ..extraction.entity_loading import get_global_json_path
+    # Use standard location based on configured version
+    return get_global_json_path()
 
 
 # Lazy-loaded config (loaded on first use)
@@ -211,7 +201,7 @@ def _check_service_variant_ambiguity(
     Args:
         services: List of resolved service dictionaries from booking
                   Each service dict has "text" (natural language) and "canonical" (service family ID)
-        entities: Raw extraction output containing service_families
+        entities: Raw extraction output containing business_categories
         variants_by_family: Dictionary mapping service_family -> list of tenant alias strings
 
     Returns:
@@ -1328,7 +1318,7 @@ def _check_ambiguity(
     # Check for multiple times without range
     times = entities.get("times", [])
     time_windows = entities.get("time_windows", [])
-    services = entities.get("service_families", [])
+    services = entities.get("business_categories") or entities.get("service_families", [])
     total_dates = len(dates) + len(dates_absolute)
 
     # BUG 3 FIX: Check for bare hours (without am/pm or time window)

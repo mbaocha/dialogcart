@@ -106,7 +106,7 @@ def test_create_booking_intent():
         (
             "book me a haircut tomorrow",
             {
-                "service_families": [{"text": "haircut"}],
+                "business_categories": [{"text": "haircut"}],
                 "dates": [{"text": "tomorrow"}],
                 "times": [],
                 "time_windows": [],
@@ -117,7 +117,7 @@ def test_create_booking_intent():
         (
             "schedule beard trim at 9am",
             {
-                "service_families": [{"text": "beard trim"}],
+                "business_categories": [{"text": "beard trim"}],
                 "dates": [],
                 "times": [{"text": "9am"}],
                 "time_windows": [],
@@ -128,7 +128,7 @@ def test_create_booking_intent():
         (
             "reserve haircut for one hour",
             {
-                "service_families": [{"text": "haircut"}],
+                "business_categories": [{"text": "haircut"}],
                 "dates": [],
                 "times": [],
                 "time_windows": [],
@@ -140,7 +140,7 @@ def test_create_booking_intent():
         (
             "I want to book a full body massage this Friday at 4pm",
             {
-                "service_families": [],  # Service extraction failed
+                "business_categories": [],  # Service extraction failed
                 "dates": [{"text": "this Friday"}],
                 "times": [{"text": "4pm"}],
                 "time_windows": [],
@@ -152,7 +152,7 @@ def test_create_booking_intent():
         (
             "Schedule appointment for about 6ish",
             {
-                "service_families": [],
+                "business_categories": [],
                 "dates": [],
                 "times": [{"text": "6ish"}],  # Not exact, but still triggers fallback
                 "time_windows": [],
@@ -235,13 +235,13 @@ def test_details_intent():
         (
             "does standard room include breakfast",
             {
-                "service_families": [{"text": "standard room"}]
+                "business_categories": [{"text": "standard room"}]
             }
         ),
         (
             "how long does a haircut take",
             {
-                "service_families": [{"text": "haircut"}]
+                "business_categories": [{"text": "haircut"}]
             }
         ),
         (
@@ -272,13 +272,13 @@ def test_quote_intent():
         (
             "how much does a haircut cost",
             {
-                "service_families": [{"text": "haircut"}]
+                "business_categories": [{"text": "haircut"}]
             }
         ),
         (
             "what's the price for standard room",
             {
-                "service_families": [{"text": "standard room"}]
+                "business_categories": [{"text": "standard room"}]
             }
         ),
         (
@@ -305,7 +305,7 @@ def test_discovery_intent():
         (
             "what services do you offer",
             {
-                "service_families": [{"text": "haircut"}],
+                "business_categories": [{"text": "haircut"}],
                 "dates": [],
                 "times": [],
                 "time_windows": [],
@@ -315,7 +315,7 @@ def test_discovery_intent():
         (
             "what rooms do you have",
             {
-                "service_families": [{"text": "standard room"}],
+                "business_categories": [{"text": "standard room"}],
                 "dates": [],
                 "times": [],
                 "time_windows": [],
@@ -325,7 +325,7 @@ def test_discovery_intent():
         (
             "tell me about your services",
             {
-                "service_families": [{"text": "haircut"}],
+                "business_categories": [{"text": "haircut"}],
                 "dates": [],
                 "times": [],
                 "time_windows": [],
@@ -380,7 +380,7 @@ def test_rule_priority():
     # Payment should win over everything
     sentence = "i want to pay for my booking"
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}],
     }
     intent, _ = resolve_intent(sentence, entities)
@@ -389,7 +389,7 @@ def test_rule_priority():
     # Cancel should win over booking
     sentence = "cancel my haircut appointment"
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}],
     }
     intent, _ = resolve_intent(sentence, entities)
@@ -398,7 +398,7 @@ def test_rule_priority():
     # Modify should win over booking
     sentence = "reschedule my haircut appointment"
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}],
     }
     intent, _ = resolve_intent(sentence, entities)

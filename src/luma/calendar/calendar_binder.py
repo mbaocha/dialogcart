@@ -43,19 +43,9 @@ from ..extraction.entity_loading import (
 
 def _get_global_config_path() -> Path:
     """Get path to global normalization config JSON."""
-    # Try multiple possible locations
-    # From calendar_binder.py: parent = calendar/, parent.parent = luma/, so luma/store/normalization/
-    possible_paths = [
-        Path(__file__).parent.parent / "store" /
-        "normalization" / "global.v2.json",
-        Path(__file__).parent.parent / "store" /
-        "normalization" / "global.v1.json",
-    ]
-    for path in possible_paths:
-        if path.exists():
-            return path
-    # Fallback - assume standard location
-    return Path(__file__).parent.parent / "store" / "normalization" / "global.v2.json"
+    from ..extraction.entity_loading import get_global_json_path
+    # Use standard location based on configured version
+    return get_global_json_path()
 
 
 # Lazy-loaded config (loaded on first use)

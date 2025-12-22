@@ -27,12 +27,13 @@ from .vocabulary_normalization import (
 )
 
 from .entity_loading import (
-    init_nlp_with_service_families,
+    init_nlp_with_business_categories,
     load_global_noise_set,
     load_global_orthography_rules,
-    load_global_service_families,
-    build_service_family_synonym_map,
+    load_global_business_categories,
+    build_business_category_synonym_map,
     load_global_entity_types,
+    get_global_json_path,
 )
 
 from .entity_processing import (
@@ -47,28 +48,28 @@ from .entity_processing import (
 
 DOMAIN_ENTITY_WHITELIST = {
     "service": {
-        "service_families", "dates", "dates_absolute", "times", "time_windows", "durations"
+        "business_categories", "dates", "dates_absolute", "times", "time_windows", "durations"
     },
     "reservation": {
-        "service_families", "dates", "dates_absolute", "times", "time_windows", "durations"
+        "business_categories", "dates", "dates_absolute", "times", "time_windows", "durations"
     }
 }
 
 
-def _build_natural_language_variant_map_from_service_families(
-    service_families: Dict[str, Dict[str, Any]]
+def _build_natural_language_variant_map_from_business_categories(
+    business_categories: Dict[str, Dict[str, Any]]
 ) -> Dict[str, str]:
     """
-    Build natural language variant map from service families.
+    Build natural language variant map from business categories.
 
-    Maps service family synonyms to a preferred natural language form (first synonym).
+    Maps business category synonyms to a preferred natural language form (first synonym).
     This map is used to normalize variants like "hair cut" → "haircut".
 
     CRITICAL: This map MUST NOT contain canonical IDs (e.g., "beauty_and_wellness.haircut").
     It only maps natural language variants to other natural language forms.
 
     Example:
-        service_families: {
+        business_categories: {
             "beauty_and_wellness": {
                 "haircut": {"synonym": ["haircut", "hair trim"]}
             }
@@ -78,7 +79,7 @@ def _build_natural_language_variant_map_from_service_families(
     """
     variant_map = {}
 
-    for _category, families in service_families.items():
+    for _category, families in business_categories.items():
         if not isinstance(families, dict):
             continue
 
@@ -281,38 +282,31 @@ class EntityMatcher:
 
         self.domain = domain
 
-        # Find global JSON file (required for service families)
+        # Find global JSON file (required for business categories)
         entity_path = Path(entity_file).resolve() if entity_file else None
         if entity_path:
-            # Look for global.v2.json in same directory
-            global_json_path = entity_path.parent / "global.v2.json"
+            # Look for global JSON in same directory as entity_file
+            base_dir = entity_path.parent
         else:
-            # Try to find global.v2.json in standard location
-            # This is a fallback - ideally entity_file should point to a file in the normalization directory
-            # From matcher.py: parent = extraction/, parent.parent = luma/, so luma/store/normalization/
-            script_dir = Path(__file__).parent
-            global_json_path = script_dir.parent / \
-                "store" / "normalization" / "global.v2.json"
-            if not global_json_path.exists():
-                global_json_path = None
+            # Use standard location
+            base_dir = None
 
-        if not global_json_path or not global_json_path.exists():
-            raise ValueError(
-                "global.v2.json not found. Please provide entity_file pointing to a file in the normalization directory.")
+        global_json_path = get_global_json_path(base_dir)
 
-        # Load global service families (GLOBAL semantic concepts)
-        self.service_families = load_global_service_families(global_json_path)
+        # Load global business categories (GLOBAL semantic concepts)
+        self.business_categories = load_global_business_categories(
+            global_json_path)
         debug_print(
-            "[EntityMatcher] Loaded service families from global JSON 2")
+            "[EntityMatcher] Loaded business categories from global JSON")
 
-        # Build natural language variant map from service families
+        # Build natural language variant map from business categories
         # This maps variants to preferred natural language forms (NOT canonical IDs)
-        self.variant_map = _build_natural_language_variant_map_from_service_families(
-            self.service_families)
+        self.variant_map = _build_natural_language_variant_map_from_business_categories(
+            self.business_categories)
 
-        # Build service family synonym map (for canonicalization)
-        self.service_family_map = build_service_family_synonym_map(
-            self.service_families)
+        # Build business category synonym map (for canonicalization)
+        self.business_category_map = build_business_category_synonym_map(
+            self.business_categories)
 
         # Load global normalization (orthography, noise, vocabularies)
         self.noise_set = load_global_noise_set(global_json_path)
@@ -323,10 +317,10 @@ class EntityMatcher:
         vocabularies = load_vocabularies(global_json_path)
         self.vocabularies = vocabularies
         entity_types = load_global_entity_types(global_json_path)
-        service_families = load_global_service_families(global_json_path)
+        business_categories = load_global_business_categories(global_json_path)
 
         # Validate vocabularies
-        validate_vocabularies(vocabularies, entity_types, service_families)
+        validate_vocabularies(vocabularies, entity_types, business_categories)
 
         # Compile vocabulary maps
         self.synonym_map, self.typo_map, self.all_canonicals = compile_vocabulary_maps(
@@ -337,12 +331,12 @@ class EntityMatcher:
 
         # Tenant entities are unused (kept for backward compatibility)
         self.entities = []
-        self.service_map = {}  # Empty - service families use service_family_map instead
+        self.service_map = {}  # Empty - business categories use business_category_map instead
 
-        # spaCy init with service families
+        # spaCy init with business categories
         self.nlp = None
         if not lazy_load_spacy:
-            self.nlp, _ = init_nlp_with_service_families(global_json_path)
+            self.nlp, _ = init_nlp_with_business_categories(global_json_path)
 
     # ------------------------------------------------------------------
     # Public API
@@ -398,14 +392,15 @@ class EntityMatcher:
             raw_result = merge_alias_spans_into_services(
                 raw_result, doc, alias_spans)
 
-        # 3️⃣ Map SERVICE_FAMILY entities to canonical service family IDs
-        service_families = []
+        # 3️⃣ Map SERVICE_FAMILY entities to canonical business category IDs
+        business_categories = []
         if "services" in raw_result:
             # spaCy extracts SERVICE_FAMILY entities as "services" in raw_result
             for entity in raw_result["services"]:
                 entity_text = entity.get("text", "").lower()
-                # Map to canonical service family ID (e.g., "beauty_and_wellness.haircut")
-                canonical_id = entity.get("canonical") or self.service_family_map.get(entity_text)
+                # Map to canonical business category ID (e.g., "beauty_and_wellness.haircut")
+                canonical_id = entity.get(
+                    "canonical") or self.business_category_map.get(entity_text)
 
                 # Convert position/length to start/end token indices
                 position = entity.get("position", 0)
@@ -414,7 +409,7 @@ class EntityMatcher:
                 end = position + length
 
                 if canonical_id:
-                    service_families.append({
+                    business_categories.append({
                         "text": entity_text,
                         "canonical": canonical_id,
                         "start": start,
@@ -422,7 +417,7 @@ class EntityMatcher:
                     })
                 else:
                     # Fallback: use original text if mapping not found
-                    service_families.append({
+                    business_categories.append({
                         "text": entity_text,
                         "canonical": None,
                         "start": start,
@@ -435,20 +430,21 @@ class EntityMatcher:
         phase1_replacements = []
         for entity in raw_result.get("services", []):
             entity_text = entity.get("text", "").lower()
-            canonical_id = self.service_family_map.get(entity_text)
+            canonical_id = self.business_category_map.get(entity_text)
             if canonical_id:
                 phase1_replacements.append({
                     "span": entity_text,
                     "rule": "global_service_family",
                     "replaced_with": "servicefamilytoken"
                 })
-        
-        psentence, phase2_replacements = build_parameterized_sentence(doc, raw_result)
+
+        psentence, phase2_replacements = build_parameterized_sentence(
+            doc, raw_result)
         # Noise is preserved in psentence (not removed)
 
         osentence = normalized
 
-        # 5️⃣ Build domain-native result with service_families
+        # 5️⃣ Build domain-native result with business_categories
         # Convert dates, times, durations to include start/end spans
         dates = []
         for date_ent in raw_result.get("dates", []):
@@ -485,7 +481,7 @@ class EntityMatcher:
             position = time_window_ent.get("position", 0)
             length = time_window_ent.get("length", 1)
             time_window_text = time_window_ent.get("text", "").lower()
-            
+
             # Build time window entity with symbolic label only
             # Numeric expansion is handled by calendar binding using configurable mapping
             time_window_obj = {
@@ -494,7 +490,7 @@ class EntityMatcher:
                 "end": position + length,
                 "time_window": time_window_text  # Symbolic semantic field only
             }
-            
+
             time_windows.append(time_window_obj)
 
         durations = []
@@ -535,7 +531,7 @@ class EntityMatcher:
         result = {
             "osentence": osentence,
             "psentence": psentence,
-            "service_families": service_families,
+            "business_categories": business_categories,
             "dates": dates,
             "dates_absolute": dates_absolute,
             "times": times,
@@ -557,7 +553,7 @@ class EntityMatcher:
         allowed_keys = DOMAIN_ENTITY_WHITELIST[self.domain]
         final_result = {
             k: v for k, v in result.items()
-            if k in allowed_keys or k in {"osentence", "psentence", "service_families", "date_modifiers_vocab", "_phase1_replacements", "_phase2_replacements", "_tokens"}
+            if k in allowed_keys or k in {"osentence", "psentence", "business_categories", "date_modifiers_vocab", "_phase1_replacements", "_phase2_replacements", "_tokens"}
         }
 
         if debug_units:

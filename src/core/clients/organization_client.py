@@ -40,3 +40,30 @@ class OrganizationClient(BaseClient):
         """
         path = f"/api/internal/organizations/{organization_id}/details"
         return self._request("GET", path)
+
+    def get_hours(self, organization_id: int) -> Dict[str, Any]:
+        """
+        Get organization hours.
+
+        Args:
+            organization_id: Organization identifier
+        """
+        path = f"/api/internal/organizations/{organization_id}/hours"
+        return self._request("GET", path)
+
+    def get_faqs(self, organization_id: int, query: Optional[str] = None, limit: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Get organization FAQs.
+
+        Args:
+            organization_id: Organization identifier
+            query: Optional search query
+            limit: Optional limit
+        """
+        params: Dict[str, Any] = {}
+        if query:
+            params["query"] = query
+        if limit is not None:
+            params["limit"] = limit
+        path = f"/api/internal/organizations/{organization_id}/faqs"
+        return self._request("GET", path, params=params)

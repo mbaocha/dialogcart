@@ -36,6 +36,46 @@ def debug_print(*args):
 
 
 # -------------------------------------------------------------------
+# Global JSON Path Resolution
+# -------------------------------------------------------------------
+
+def get_global_json_path(base_dir: Path = None) -> Path:
+    """
+    Get the path to the global normalization JSON file based on configured version.
+    
+    The version is determined by config.GLOBAL_JSON_VERSION (default: "v3").
+    If the file doesn't exist, raises FileNotFoundError.
+    
+    Args:
+        base_dir: Base directory to search in. If None, uses standard location
+                  (luma/store/normalization relative to this file)
+    
+    Returns:
+        Path to global JSON file (e.g., global.v3.json)
+    
+    Raises:
+        FileNotFoundError: If the configured version file doesn't exist
+    """
+    from ..config import config
+    
+    if base_dir is None:
+        # Standard location: from entity_loading.py, go to luma/store/normalization/
+        base_dir = Path(__file__).parent.parent / "store" / "normalization"
+    
+    version = config.GLOBAL_JSON_VERSION
+    json_path = base_dir / f"global.{version}.json"
+    
+    if not json_path.exists():
+        raise FileNotFoundError(
+            f"Global JSON file not found: {json_path}\n"
+            f"Configured version: {version}\n"
+            f"Please ensure global.{version}.json exists in {base_dir}"
+        )
+    
+    return json_path
+
+
+# -------------------------------------------------------------------
 # Loading
 # -------------------------------------------------------------------
 
@@ -49,7 +89,7 @@ def load_normalization_entities(json_path: Path) -> List[Dict[str, Any]]:
     Returns empty list to indicate tenant files are not used.
     """
     # Tenant files are currently EMPTY and MUST NOT be used at runtime
-    # Service families are loaded from global JSON via load_global_service_families()
+    # Business categories are loaded from global JSON via load_global_business_categories()
     debug_print(
         "[WARNING] load_normalization_entities() called - tenant files are unused")
     _ = json_path  # Unused but kept for signature compatibility
@@ -543,24 +583,28 @@ def load_global_orthography_rules(global_json_path: Path) -> Dict[str, str]:
 # Service Families (GLOBAL)
 # -------------------------------------------------------------------
 
-def load_global_service_families(global_json_path: Path) -> Dict[str, Dict[str, Any]]:
+def load_global_business_categories(global_json_path: Path) -> Dict[str, Dict[str, Any]]:
     """
-    Load global service families from global JSON.
+    Load global business categories from global JSON.
 
-    Service families are GLOBAL semantic concepts, not tenant-specific.
+    Business categories are GLOBAL semantic concepts, not tenant-specific.
     They are stable, bounded, and long-lived.
 
-    Structure:
+    Structure (v3):
         {
-            "service_families": {
+            "business_categories": {
                 "beauty_and_wellness": {
-                    "haircut": {
-                        "token": "servicefamilytoken",
-                        "display_name": "Haircut",
-                        "description": "...",
-                        "synonym": ["haircut", "hair trim", ...]
-                    },
-                    ...
+                    "display_name": "beauty & wellness",
+                    "business_type": "services",
+                    "families": {
+                        "haircut": {
+                            "token": "servicefamilytoken",
+                            "display_name": "Haircut",
+                            "description": "...",
+                            "synonym": ["haircut", "hair trim", ...]
+                        },
+                        ...
+                    }
                 }
             }
         }
@@ -576,19 +620,40 @@ def load_global_service_families(global_json_path: Path) -> Dict[str, Dict[str, 
     with open(global_json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    service_families = data.get("service_families", {})
+    # Support both new name (business_categories) and legacy name (service_families) for backward compatibility
+    business_categories = data.get("business_categories") or data.get("service_families", {})
 
     # Remove metadata keys
-    if "_comment" in service_families:
-        service_families = {
-            k: v for k, v in service_families.items() if not k.startswith("_")}
+    if "_comment" in business_categories:
+        business_categories = {
+            k: v for k, v in business_categories.items() if not k.startswith("_")}
 
-    return service_families
+    # Extract families from each category if using v3 structure
+    result = {}
+    for category, category_data in business_categories.items():
+        if not isinstance(category_data, dict):
+            continue
+        
+        # Check if this is v3 structure (has "families" key)
+        if "families" in category_data:
+            # Extract the families dict
+            result[category] = category_data["families"]
+        else:
+            # Legacy v2 structure: families are directly in category_data
+            result[category] = category_data
+
+    return result
 
 
-def build_service_family_synonym_map(service_families: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
+# Backward compatibility alias
+def load_global_service_families(global_json_path: Path) -> Dict[str, Dict[str, Any]]:
+    """Deprecated: Use load_global_business_categories instead."""
+    return load_global_business_categories(global_json_path)
+
+
+def build_business_category_synonym_map(business_categories: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
     """
-    Build a map from service family synonyms to their canonical service family IDs.
+    Build a map from business category synonyms to their canonical business category IDs.
 
     Example:
         Input: {
@@ -608,7 +673,7 @@ def build_service_family_synonym_map(service_families: Dict[str, Dict[str, Any]]
     """
     synonym_map = {}
 
-    for category, families in service_families.items():
+    for category, families in business_categories.items():
         if not isinstance(families, dict):
             continue
 
@@ -632,18 +697,24 @@ def build_service_family_synonym_map(service_families: Dict[str, Dict[str, Any]]
     return synonym_map
 
 
-def build_service_family_patterns(service_families: Dict[str, Dict[str, Any]]) -> List[Dict[str, str]]:
-    """
-    Build spaCy EntityRuler patterns for service families.
+# Backward compatibility alias
+def build_service_family_synonym_map(service_families: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
+    """Deprecated: Use build_business_category_synonym_map instead."""
+    return build_business_category_synonym_map(service_families)
 
-    Creates patterns from all synonyms in service_families.
+
+def build_business_category_patterns(business_categories: Dict[str, Dict[str, Any]]) -> List[Dict[str, str]]:
+    """
+    Build spaCy EntityRuler patterns for business categories.
+
+    Creates patterns from all synonyms in business_categories.
     All patterns are labeled as "SERVICE_FAMILY".
 
     Returns list of patterns for spaCy EntityRuler.
     """
     patterns = []
 
-    for category, families in service_families.items():
+    for category, families in business_categories.items():
         if not isinstance(families, dict):
             continue
 
@@ -664,6 +735,12 @@ def build_service_family_patterns(service_families: Dict[str, Dict[str, Any]]) -
                     })
 
     return patterns
+
+
+# Backward compatibility alias
+def build_service_family_patterns(service_families: Dict[str, Dict[str, Any]]) -> List[Dict[str, str]]:
+    """Deprecated: Use build_business_category_patterns instead."""
+    return build_business_category_patterns(service_families)
 
 
 # -------------------------------------------------------------------
@@ -1132,17 +1209,17 @@ def customize_tokenizer(nlp):
 # Init
 # -------------------------------------------------------------------
 
-def init_nlp_with_service_families(global_json_path: Path):
+def init_nlp_with_business_categories(global_json_path: Path):
     """
-    Initialize spaCy with entity ruler for service families, dates, times, and durations.
+    Initialize spaCy with entity ruler for business categories, dates, times, and durations.
 
     Extraction order (mandatory):
     1. Date extraction
     2. Time extraction (strict - must not swallow duration)
     3. Duration extraction
-    4. Service family extraction
+    4. Business category extraction
 
-    Updated to use global service_families and entity_types instead of tenant entities.
+    Updated to use global business_categories and entity_types instead of tenant entities.
     """
     if not SPACY_AVAILABLE:
         raise ImportError(
@@ -1152,9 +1229,9 @@ def init_nlp_with_service_families(global_json_path: Path):
     nlp = spacy.load("en_core_web_sm")
     nlp.tokenizer = customize_tokenizer(nlp)
 
-    # Load entity types and service families from global JSON
+    # Load entity types and business categories from global JSON
     entity_types = load_global_entity_types(global_json_path)
-    service_families = load_global_service_families(global_json_path)
+    business_categories = load_global_business_categories(global_json_path)
 
     # Build patterns in extraction order (date_absolute → date → time_window → time → duration → service_family)
     all_patterns = []
@@ -1179,19 +1256,25 @@ def init_nlp_with_service_families(global_json_path: Path):
     # 4. Duration patterns
     all_patterns.extend(build_duration_patterns(entity_types))
 
-    # 5. Service family patterns (last - lowest priority)
-    all_patterns.extend(build_service_family_patterns(service_families))
+    # 5. Business category patterns (last - lowest priority)
+    all_patterns.extend(build_business_category_patterns(business_categories))
 
     ruler = nlp.add_pipe("entity_ruler", before="ner",
                          config={"overwrite_ents": True})
     ruler.add_patterns(all_patterns)
 
-    return nlp, service_families
+    return nlp, business_categories
+
+
+# Backward compatibility alias
+def init_nlp_with_service_families(global_json_path: Path):
+    """Deprecated: Use init_nlp_with_business_categories instead."""
+    return init_nlp_with_business_categories(global_json_path)
 
 
 def init_nlp_with_entities(json_path: Path):
     """
-    DEPRECATED: Use init_nlp_with_service_families() instead.
+    DEPRECATED: Use init_nlp_with_business_categories() instead.
 
     Kept for backward compatibility but tenant files are unused.
     """

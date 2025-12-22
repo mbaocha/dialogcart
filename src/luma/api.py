@@ -33,7 +33,7 @@ if __name__ == "__main__":
         sys.path.insert(0, str(src_path))
 
 import time  # noqa: E402
-from typing import Dict, Any, Optional  # noqa: E402
+from typing import Dict, Any, Optional, List  # noqa: E402
 from datetime import datetime, timezone as dt_timezone  # noqa: E402
 from flask import Flask, request, jsonify, g  # noqa: E402
 from luma.calendar.calendar_binder import bind_calendar, _bind_times, _combine_datetime_range, _get_timezone, _get_booking_policy  # noqa: E402
@@ -173,6 +173,14 @@ def _format_service_for_response(service: Dict[str, Any]) -> Dict[str, Any]:
         "text": service.get("text", ""),
         "canonical": service.get("canonical", "")
     }
+
+
+def _get_business_categories(extraction_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """
+    Get business_categories from extraction result with backward compatibility.
+    Supports both new 'business_categories' key and legacy 'service_families' key.
+    """
+    return extraction_result.get("business_categories") or extraction_result.get("service_families", [])
 
 
 def _count_mutable_slots_modified(
@@ -633,7 +641,7 @@ def resolve():
             
             # Stage 3: ENTITY EXTRACTION - Log extracted entities grouped by type
             entities_by_type = {
-                "services": extraction_result.get("service_families", []),
+                "services": _get_business_categories(extraction_result),
                 "dates": extraction_result.get("dates", []) + extraction_result.get("dates_absolute", []),
                 "times": extraction_result.get("times", []),
                 "durations": extraction_result.get("durations", [])
@@ -1370,8 +1378,7 @@ def resolve():
                 # If no services in resolved_booking, try extraction_result
                 # CRITICAL: For service-only bookings, services MUST be extracted and persisted
                 if not services:
-                    service_families = extraction_result.get(
-                        "service_families", [])
+                    service_families = _get_business_categories(extraction_result)
                     services = [
                         {
                             "text": service.get("text", ""),
@@ -1617,8 +1624,7 @@ def resolve():
                     merged_semantic_result, extraction_result
                 )
                 # Check if no service or booking verb is present
-                has_service = len(extraction_result.get(
-                    "service_families", [])) > 0
+                has_service = len(_get_business_categories(extraction_result)) > 0
                 has_booking_verb = _has_booking_verb(text)
 
                 # Safety: No booking_id, no service, no booking verb, and at least one mutable slot
@@ -1959,8 +1965,7 @@ def resolve():
         existing_clarification = merged_memory.get("clarification")
         if not existing_clarification:
             # Check if any slots were extracted
-            has_services = len(extraction_result.get(
-                "service_families", [])) > 0
+            has_services = len(_get_business_categories(extraction_result)) > 0
             has_dates = (len(extraction_result.get("dates", [])) > 0 or
                          len(extraction_result.get("dates_absolute", [])) > 0)
             has_times = (len(extraction_result.get("times", [])) > 0 or
@@ -2105,8 +2110,7 @@ def resolve():
 
             # If no services in resolved_booking, try extraction_result
             if not services:
-                service_families = extraction_result.get(
-                    "service_families", [])
+                service_families = _get_business_categories(extraction_result)
                 services = [
                     _format_service_for_response(service)
                     for service in service_families
@@ -2137,8 +2141,7 @@ def resolve():
             resolved_booking = merged_semantic_result.resolved_booking
             services = resolved_booking.get("services", [])
             if not services:
-                service_families = extraction_result.get(
-                    "service_families", [])
+                service_families = _get_business_categories(extraction_result)
                 services = [
                     _format_service_for_response(service)
                     for service in service_families
@@ -2163,7 +2166,7 @@ def resolve():
         is_modify_booking = intent == "MODIFY_BOOKING"
         if not is_booking_intent and not is_modify_booking:
             # Extract services from extraction result
-            service_families = extraction_result.get("service_families", [])
+            service_families = _get_business_categories(extraction_result)
             # Always include entities field for non-booking intents
             entities_payload = {}
             if service_families:
@@ -2188,8 +2191,7 @@ def resolve():
                 resolved_booking = merged_semantic_result.resolved_booking
                 has_time_refs = len(resolved_booking.get("time_refs", [])) > 0
                 has_date_refs = len(resolved_booking.get("date_refs", [])) > 0
-                has_services = len(extraction_result.get(
-                    "service_families", [])) > 0
+                has_services = len(_get_business_categories(extraction_result)) > 0
                 has_duration = len(extraction_result.get("durations", [])) > 0
 
                 has_extracted_slots = has_time_refs or has_date_refs or has_services or has_duration
@@ -2230,8 +2232,7 @@ def resolve():
 
                         # If no services in resolved_booking, try extraction_result
                         if not services:
-                            service_families = extraction_result.get(
-                                "service_families", [])
+                            service_families = _get_business_categories(extraction_result)
                             services = [
                                 {
                                     "text": service.get("text", ""),
@@ -2270,8 +2271,7 @@ def resolve():
             resolved_booking = merged_semantic_result.resolved_booking
             services = resolved_booking.get("services", [])
             if not services:
-                service_families = extraction_result.get(
-                    "service_families", [])
+                service_families = _get_business_categories(extraction_result)
                 services = [
                     {
                         "text": service.get("text", ""),

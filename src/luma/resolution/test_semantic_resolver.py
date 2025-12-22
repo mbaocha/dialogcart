@@ -48,7 +48,7 @@ def test_exact_time():
     }
     
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}],
         "dates_absolute": [],
         "times": [{"text": "9am"}],
@@ -83,7 +83,7 @@ def test_time_window():
     }
     
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}],
         "dates_absolute": [],
         "times": [],
@@ -117,7 +117,7 @@ def test_time_range():
     }
     
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}],
         "dates_absolute": [],
         "times": [{"text": "9am"}, {"text": "5pm"}],
@@ -153,7 +153,7 @@ def test_window_plus_exact_time():
     }
     
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}],
         "dates_absolute": [],
         "times": [{"text": "9am"}],
@@ -189,7 +189,7 @@ def test_exact_time_with_dot_separator():
     }
     
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}],
         "dates_absolute": [],
         "times": [{"text": "10.30"}],
@@ -225,7 +225,7 @@ def test_absolute_date_precedence():
     }
     
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}],
         "dates_absolute": [{"text": "15th dec"}],
         "times": [{"text": "9am"}],
@@ -259,7 +259,7 @@ def test_conflicting_dates():
     }
     
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}, {"text": "next week"}],
         "dates_absolute": [],
         "times": [],
@@ -293,7 +293,7 @@ def test_multiple_times_without_range():
     }
     
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}],
         "dates_absolute": [],
         "times": [{"text": "9am"}, {"text": "5pm"}],
@@ -327,7 +327,7 @@ def test_date_range():
     }
     
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [],
         "dates_absolute": [{"text": "8th dec"}, {"text": "15th dec"}],
         "times": [],
@@ -362,7 +362,7 @@ def test_duration_preservation():
     }
     
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}],
         "dates_absolute": [],
         "times": [{"text": "9am"}],
@@ -395,7 +395,7 @@ def test_no_time_no_date():
     }
     
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [],
         "dates_absolute": [],
         "times": [],
@@ -432,7 +432,7 @@ def test_simple_relative_days():
             "structure": {"needs_clarification": False}
         }
         entities = {
-            "service_families": [{"text": "haircut"}],
+            "business_categories": [{"text": "haircut"}],
             "dates": [{"text": date_text}],
             "dates_absolute": [],
             "times": [],
@@ -457,7 +457,7 @@ def test_week_based():
             "structure": {"needs_clarification": False}
         }
         entities = {
-            "service_families": [{"text": "haircut"}],
+            "business_categories": [{"text": "haircut"}],
             "dates": [{"text": date_text}],
             "dates_absolute": [],
             "times": [],
@@ -482,7 +482,7 @@ def test_weekend_references():
             "structure": {"needs_clarification": False}
         }
         entities = {
-            "service_families": [{"text": "haircut"}],
+            "business_categories": [{"text": "haircut"}],
             "dates": [{"text": date_text}],
             "dates_absolute": [],
             "times": [],
@@ -507,7 +507,7 @@ def test_specific_weekdays():
             "structure": {"needs_clarification": False}
         }
         entities = {
-            "service_families": [{"text": "haircut"}],
+            "business_categories": [{"text": "haircut"}],
             "dates": [{"text": date_text}],
             "dates_absolute": [],
             "times": [],
@@ -532,7 +532,7 @@ def test_month_relative():
             "structure": {"needs_clarification": False}
         }
         entities = {
-            "service_families": [{"text": "haircut"}],
+            "business_categories": [{"text": "haircut"}],
             "dates": [{"text": date_text}],
             "dates_absolute": [],
             "times": [],
@@ -557,7 +557,7 @@ def test_calendar_dates():
             "structure": {"needs_clarification": False}
         }
         entities = {
-            "service_families": [{"text": "haircut"}],
+            "business_categories": [{"text": "haircut"}],
             "dates": [],
             "dates_absolute": [{"text": date_text}],
             "times": [],
@@ -579,7 +579,7 @@ def test_locale_ambiguous_date():
         "structure": {"needs_clarification": False}
     }
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [],
         "dates_absolute": [{"text": "07/12"}],  # Could be July 12 or Dec 7
         "times": [],
@@ -602,7 +602,7 @@ def test_plural_weekday():
         "structure": {"needs_clarification": False}
     }
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "next Mondays"}],
         "dates_absolute": [],
         "times": [],
@@ -628,7 +628,7 @@ def test_vague_date_reference():
             "structure": {"needs_clarification": False}
         }
         entities = {
-            "service_families": [{"text": "haircut"}],
+            "business_categories": [{"text": "haircut"}],
             "dates": [{"text": date_text}],
             "dates_absolute": [],
             "times": [],
@@ -651,7 +651,7 @@ def test_context_dependent_date():
         "structure": {"needs_clarification": False}
     }
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "Thursday just gone"}],
         "dates_absolute": [],
         "times": [],
@@ -684,7 +684,7 @@ def test_fine_grained_modifiers():
             "structure": {"needs_clarification": False}
         }
         entities = {
-            "service_families": [{"text": "haircut"}],
+            "business_categories": [{"text": "haircut"}],
             "dates": [{"text": date_text}],
             "dates_absolute": [],
             "times": [],
@@ -706,7 +706,7 @@ def test_simple_date_ranges():
         "structure": {"date_type": "range", "needs_clarification": False}
     }
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "Monday"}, {"text": "Wednesday"}],
         "dates_absolute": [],
         "times": [],
@@ -736,7 +736,7 @@ def test_misspellings():
             "structure": {"needs_clarification": False}
         }
         entities = {
-            "service_families": [{"text": "haircut"}],
+            "business_categories": [{"text": "haircut"}],
             "dates": [{"text": date_text}],
             "dates_absolute": [],
             "times": [],
