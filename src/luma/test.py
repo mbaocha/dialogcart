@@ -472,7 +472,6 @@ def call_api(
     domain: str = "service",
     timezone: str = "UTC",
     api_base: str = "http://localhost:9001/resolve",
-    tenant_domain: Optional[str] = None,
     tenant_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
@@ -484,8 +483,6 @@ def call_api(
         "domain": domain,
         "timezone": timezone,
     }
-    if tenant_domain:
-        payload["tenant_domain"] = tenant_domain
     if tenant_context:
         payload["tenant_context"] = tenant_context
 
@@ -815,7 +812,7 @@ def main():
     parser.add_argument(
         '--tenant-domain',
         type=str,
-        help='Optional tenant_domain to include in API request'
+        help='DEPRECATED: Not used by API. Use --tenant-context instead.'
     )
     parser.add_argument(
         '-t', '--tenant-context',
@@ -842,7 +839,6 @@ def main():
                 domain=args.domain,
                 timezone=args.timezone,
                 api_base=args.api_base,
-                tenant_domain=args.tenant_domain,
                 tenant_context=tenant_ctx,
             )
             print_json_summary(api_result)

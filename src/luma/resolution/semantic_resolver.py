@@ -8,6 +8,9 @@ This layer answers: "What does the user mean?"
 NOT: "What actual dates does this correspond to?"
 """
 # Provenance marker to verify loaded module version
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Dict, Any, Optional, Tuple, Set, List
 from ..extraction.vocabulary_normalization import (
     load_vocabularies,
     compile_vocabulary_maps,
@@ -19,13 +22,19 @@ from ..extraction.entity_loading import (
 )
 from ..clarification import Clarification, ClarificationReason
 from ..config import debug_print
+from ..config.temporal import (
+    ALLOW_BARE_WEEKDAY_BINDING,
+    APPOINTMENT_TEMPORAL_TYPE,
+    DateMode,
+    INTENT_TEMPORAL_SHAPE,
+    RESERVATION_TEMPORAL_TYPE,
+    TimeMode,
+)
+from ..config.temporal_rules import TEMPORAL_RULES
 import logging
 import re
 
 logger = logging.getLogger(__name__)
-from typing import Dict, Any, Optional, Tuple, Set, List
-from pathlib import Path
-from dataclasses import dataclass
 
 
 def _get_global_config_path() -> Path:
@@ -114,7 +123,8 @@ def _build_variants_by_family(tenant_context: Optional[Dict[str, Any]]) -> Dict[
         logger.debug(f"[semantic] aliases is not a dict: {type(aliases)}")
         return variants_by_family
 
-    logger.info(f"[semantic] building variants_by_family from {len(aliases)} aliases")
+    logger.info(
+        f"[semantic] building variants_by_family from {len(aliases)} aliases")
 
     # Build reverse mapping: service_family -> list of aliases
     for alias, service_family in aliases.items():
@@ -123,7 +133,8 @@ def _build_variants_by_family(tenant_context: Optional[Dict[str, Any]]) -> Dict[
         if service_family not in variants_by_family:
             variants_by_family[service_family] = []
         variants_by_family[service_family].append(alias)
-        logger.debug(f"[semantic] mapped alias '{alias}' -> service_family '{service_family}'")
+        logger.debug(
+            f"[semantic] mapped alias '{alias}' -> service_family '{service_family}'")
 
     # Sort aliases for deterministic output
     for service_family in variants_by_family:
@@ -139,11 +150,15 @@ def _track_explicit_alias_match(
     variants_by_family: Dict[str, List[str]]
 ) -> None:
     """
-    Track explicit tenant alias matches and store in service dicts.
-    
-    When a tenant alias is explicitly matched in the input, store it in the service
+    Track tenant alias matches and store in service dicts.
+
+    Rules:
+    - If exactly ONE alias exists for canonical → always use it (even if not explicitly mentioned)
+    - If MULTIPLE aliases exist → only use if explicitly matched in input
+
+    When a tenant alias is matched (explicitly or by default), store it in the service
     dict so it can be preserved in the final output.
-    
+
     Args:
         services: List of service dictionaries (modified in place)
         entities: Raw extraction output containing osentence
@@ -151,24 +166,24 @@ def _track_explicit_alias_match(
     """
     if not variants_by_family or not services:
         return
-    
+
     osentence = entities.get("osentence", "").lower()
     if not osentence:
         return
-    
-    # For each service, check if an explicit alias was matched
+
+    # For each service, check alias matching
     for service in services:
         if not isinstance(service, dict):
             continue
-        
+
         canonical = service.get("canonical")
         if not canonical or not isinstance(canonical, str) or "." not in canonical:
             continue
-        
+
         variants = variants_by_family.get(canonical, [])
         if not variants:
             continue
-        
+
         # Check if any variant (tenant alias) appears in the original sentence
         matched_alias = None
         for variant in variants:
@@ -177,9 +192,16 @@ def _track_explicit_alias_match(
             pattern = r'\b' + re.escape(variant_lower) + r'\b'
             if re.search(pattern, osentence):
                 matched_alias = variant  # Store original case-preserved alias
-                logger.info(f"[semantic] resolved service via tenant alias: {matched_alias} → {canonical}")
+                logger.info(
+                    f"[semantic] explicit alias match: '{matched_alias}' → {canonical}")
                 break
-        
+
+        # NEW: If no explicit match but exactly one alias exists, use it by default
+        if not matched_alias and len(variants) == 1:
+            matched_alias = variants[0]  # Use the single alias
+            logger.info(
+                f"[semantic] single alias default: '{matched_alias}' → {canonical} (not explicitly mentioned)")
+
         # Store matched alias in service dict for later use
         if matched_alias:
             service["resolved_alias"] = matched_alias
@@ -208,14 +230,17 @@ def _check_service_variant_ambiguity(
         Clarification object if ambiguity detected, None otherwise
     """
     if not variants_by_family:
-        logger.debug("[semantic] no variants_by_family, skipping service variant ambiguity check")
+        logger.debug(
+            "[semantic] no variants_by_family, skipping service variant ambiguity check")
         return None
 
     if not services:
-        logger.debug("[semantic] no services, skipping service variant ambiguity check")
+        logger.debug(
+            "[semantic] no services, skipping service variant ambiguity check")
         return None
 
-    logger.info(f"[semantic] checking service variant ambiguity: {len(services)} services, {len(variants_by_family)} families with variants")
+    logger.info(
+        f"[semantic] checking service variant ambiguity: {len(services)} services, {len(variants_by_family)} families with variants")
 
     # Get service families from resolved services
     # Services are dicts with "canonical" field containing service family ID (e.g., "beauty_and_wellness.haircut")
@@ -226,11 +251,13 @@ def _check_service_variant_ambiguity(
             canonical = service.get("canonical")
             if canonical and isinstance(canonical, str) and "." in canonical:
                 service_families.append(canonical)
-                logger.debug(f"[semantic] found service family from canonical: {canonical}")
+                logger.debug(
+                    f"[semantic] found service family from canonical: {canonical}")
             # Fallback: check if text field contains canonical format
             elif service.get("text") and "." in str(service.get("text", "")):
                 service_families.append(str(service.get("text", "")))
-                logger.debug(f"[semantic] found service family from text: {service.get('text')}")
+                logger.debug(
+                    f"[semantic] found service family from text: {service.get('text')}")
 
     if not service_families:
         logger.debug("[semantic] no service families extracted from services")
@@ -239,16 +266,19 @@ def _check_service_variant_ambiguity(
     # Check each resolved service family for ambiguity
     for service_family in service_families:
         variants = variants_by_family.get(service_family, [])
-        logger.info(f"[semantic] service_family={service_family}, variants={variants}, count={len(variants)}")
-        
+        logger.info(
+            f"[semantic] service_family={service_family}, variants={variants}, count={len(variants)}")
+
         if len(variants) <= 1:
-            logger.debug(f"[semantic] skipping {service_family}: {len(variants)} variants (no ambiguity)")
+            logger.debug(
+                f"[semantic] skipping {service_family}: {len(variants)} variants (no ambiguity)")
             continue  # No ambiguity if 0 or 1 variant
 
         # Check if user input explicitly matched one of the aliases
         # Check the original sentence to see if any variant (tenant alias) appears in it
         osentence = entities.get("osentence", "").lower()
-        logger.info(f"[semantic] checking osentence for explicit alias match: '{osentence}'")
+        logger.info(
+            f"[semantic] checking osentence for explicit alias match: '{osentence}'")
         explicit_alias_match = False
 
         if osentence:
@@ -261,10 +291,12 @@ def _check_service_variant_ambiguity(
                 pattern = r'\b' + re.escape(variant_lower) + r'\b'
                 if re.search(pattern, osentence):
                     explicit_alias_match = True
-                    logger.info(f"[semantic] explicit alias match found: '{variant_lower}' in '{osentence}'")
+                    logger.info(
+                        f"[semantic] explicit alias match found: '{variant_lower}' in '{osentence}'")
                     break
                 else:
-                    logger.debug(f"[semantic] no match for variant '{variant_lower}' in '{osentence}'")
+                    logger.debug(
+                        f"[semantic] no match for variant '{variant_lower}' in '{osentence}'")
 
         # If no explicit alias match, ambiguity exists
         if not explicit_alias_match:
@@ -284,11 +316,87 @@ def _check_service_variant_ambiguity(
     return None
 
 
+def _validate_temporal_shape_completeness(
+    intent_name: Optional[str],
+    resolved_booking: Dict[str, Any],
+    date_resolution: Dict[str, Any]
+) -> Optional[Clarification]:
+    """
+    Validate that resolved booking satisfies temporal shape requirements from config.
+
+    Returns:
+        Clarification if temporal shape incomplete, None if complete.
+    """
+    if not intent_name:
+        return None
+
+    temporal_shape = INTENT_TEMPORAL_SHAPE.get(intent_name)
+    if not temporal_shape:
+        # No temporal shape requirement for this intent
+        return None
+
+    date_mode = resolved_booking.get("date_mode")
+    time_mode = resolved_booking.get("time_mode")
+    date_refs = resolved_booking.get("date_refs", [])
+    time_constraint = resolved_booking.get("time_constraint")
+
+    if temporal_shape == APPOINTMENT_TEMPORAL_TYPE:
+        # Require date_mode != None and time_mode in {"exact", "range", "window"}
+        # Also accept fuzzy time_constraint (will be bound via FUZZY_TIME_WINDOWS)
+        has_valid_date = date_mode is not None and date_mode != DateMode.FLEXIBLE.value and len(
+            date_refs) > 0
+        has_valid_time = (
+            time_mode in {TimeMode.EXACT.value,
+                          TimeMode.RANGE.value, TimeMode.WINDOW.value}
+            or (time_constraint and time_constraint.get("mode") in {TimeMode.EXACT.value, TimeMode.WINDOW.value, TimeMode.FUZZY.value})
+        )
+
+        missing_slots = []
+        if not has_valid_date:
+            missing_slots.append("date")
+        if not has_valid_time:
+            missing_slots.append("time")
+
+        if missing_slots:
+            return Clarification(
+                reason=ClarificationReason.MISSING_TIME if "time" in missing_slots else ClarificationReason.MISSING_DATE,
+                data={
+                    "missing_slots": missing_slots
+                }
+            )
+
+    elif temporal_shape == RESERVATION_TEMPORAL_TYPE:
+        # Require start_date AND end_date (two date_refs or date_mode == range)
+        has_start = len(date_refs) >= 1 or date_mode == DateMode.RANGE.value
+        has_end = (
+            len(date_refs) >= 2
+            or date_mode == DateMode.RANGE.value
+            or (date_resolution.get("mode") == DateMode.RANGE.value and len(date_refs) >= 2)
+        )
+
+        if not has_start:
+            return Clarification(
+                reason=ClarificationReason.MISSING_DATE,
+                data={
+                    "missing_slots": ["start_date"]
+                }
+            )
+        if not has_end:
+            return Clarification(
+                reason=ClarificationReason.MISSING_DATE,
+                data={
+                    "missing_slots": ["end_date"]
+                }
+            )
+
+    return None
+
+
 def resolve_semantics(
     intent_result: Dict[str, Any],
     entities: Dict[str, Any],
     tenant_context: Optional[Dict[str, Any]] = None
-) -> SemanticResolutionResult:
+) -> Tuple[SemanticResolutionResult, Dict[str, Any]]:
     """
     Resolve semantic meaning from intent result and entities.
 
@@ -322,16 +430,27 @@ def resolve_semantics(
     services = booking.get("services", [])
 
     # Detect time constraints BEFORE time resolution (to exclude them from binding)
-    time_constraint = _detect_time_constraint(entities)
+    booking_time_constraint = booking.get("time_constraint")
+    time_constraint = booking_time_constraint or _detect_time_constraint(
+        entities)
 
     # Filter out constraint times from entities for regular time resolution
     filtered_entities = _filter_constraint_times(entities, time_constraint)
 
     # Resolve time semantics (excluding constraint times)
-    time_resolution = _resolve_time_semantics(filtered_entities, structure)
+    time_resolution, time_extraction_trace, time_issues = _resolve_time_semantics(
+        filtered_entities, structure, entities)
+
+    # Store time_extraction_trace for later use in trace
+    if not time_constraint:
+        inferred_constraint = _build_time_constraint_from_resolution(
+            time_resolution)
+        if inferred_constraint:
+            time_constraint = inferred_constraint
 
     # Resolve date semantics
-    date_resolution = _resolve_date_semantics(entities, structure)
+    date_resolution = _resolve_date_semantics(
+        entities, structure, intent_result.get("intent"))
 
     # Guard: modifier + relative date is invalid (e.g., "next tomorrow")
     date_refs = date_resolution.get("refs", [])
@@ -363,18 +482,31 @@ def resolve_semantics(
                 "time_refs": time_resolution["refs"],
                 "duration": booking.get("duration"),
             }
-            return SemanticResolutionResult(
+            result = SemanticResolutionResult(
                 resolved_booking=resolved_booking,
                 needs_clarification=True,
                 clarification=clarification,
             )
+            trace = {
+                "semantic": {
+                    "service_ids": [s.get("text", "") if isinstance(s, dict) else str(s) for s in booking.get("services", [])],
+                    "date_mode": resolved_booking.get("date_mode", "none"),
+                    "time_mode": resolved_booking.get("time_mode", "none"),
+                    "time_refs": resolved_booking.get("time_refs", []),
+                    "time_constraint": None,
+                    "needs_clarification": True,
+                    "clarification_reason": clarification.reason.value if clarification else None,
+                    "time_extraction_trace": time_extraction_trace
+                }
+            }
+            return result, trace
 
     # Extract duration
     duration = booking.get("duration")
 
     # Build variants_by_family from tenant_context (if provided)
     variants_by_family = _build_variants_by_family(tenant_context)
-    logger.info(f"[semantic] resolve_semantics called with tenant_context={bool(tenant_context)}, variants_by_family keys={list(variants_by_family.keys())}")
+    # Removed per-stage logging - trace data returned instead
 
     # Track explicit alias matches (before ambiguity check)
     # This stores matched aliases in service dicts for later use
@@ -406,14 +538,46 @@ def resolve_semantics(
         "time_mode": time_resolution["mode"],
         "time_refs": time_resolution["refs"],
         "duration": duration,
-        "time_constraint": time_constraint
+        "time_constraint": time_constraint,
+        # Optional: list of time parsing issues (e.g., ambiguous meridiem)
+        "time_issues": time_issues
     }
 
-    return SemanticResolutionResult(
+    # Validate temporal shape completeness (authoritative - must pass for RESOLVED)
+    # This runs after all ambiguity checks but before finalizing status
+    intent_name = intent_result.get("intent")
+    temporal_clarification = _validate_temporal_shape_completeness(
+        intent_name, resolved_booking, date_resolution
+    )
+    if temporal_clarification:
+        # Temporal shape incomplete - force needs_clarification
+        # This overrides any prior RESOLVED decision
+        clarification = temporal_clarification
+
+    result = SemanticResolutionResult(
         resolved_booking=resolved_booking,
         needs_clarification=clarification is not None,
         clarification=clarification
     )
+
+    # Build trace fragment
+    trace = {
+        "semantic": {
+            "service_ids": [s.get("text", "") if isinstance(s, dict) else str(s) for s in services],
+            "date_mode": resolved_booking.get("date_mode", "none"),
+            "date_refs": resolved_booking.get("date_refs", []),
+            "time_mode": resolved_booking.get("time_mode", "none"),
+            "time_refs": resolved_booking.get("time_refs", []),
+            "time_constraint": resolved_booking.get("time_constraint"),
+            # Time parsing issues (e.g., ambiguous meridiem)
+            "time_issues": time_issues,
+            "needs_clarification": clarification is not None,
+            "clarification_reason": clarification.reason.value if clarification else None,
+            "time_extraction_trace": time_extraction_trace
+        }
+    }
+
+    return result, trace
 
 
 def _is_fuzzy_hour(time_text: str) -> bool:
@@ -510,37 +674,44 @@ def _extract_hour_only_time(entities: Dict[str, Any]) -> Optional[Dict[str, Any]
 
 def _resolve_time_semantics(
     entities: Dict[str, Any],
-    structure: Dict[str, Any]
-) -> Dict[str, Any]:
+    structure: Dict[str, Any],
+    original_entities: Optional[Dict[str, Any]] = None
+) -> Tuple[Dict[str, Any], Dict[str, Any], List[Dict[str, Any]]]:
     """
     Resolve time semantics following precedence rules.
 
     Precedence: exact > range > window > none
 
     Args:
-        entities: Raw extraction output
+        entities: Raw extraction output (filtered)
         structure: Structure interpretation result
+        original_entities: Original entities before filtering (for trace)
 
     Returns:
-        Dict with "mode" and "refs" keys
+        Tuple of (Dict with "mode" and "refs" keys, time_extraction_trace, time_issues)
     """
     times = entities.get("times", [])
     time_windows = entities.get("time_windows", [])
-    time_type = structure.get("time_type", "none")
+    time_type = structure.get("time_type", TimeMode.NONE.value)
+
+    # Now compute the actual time resolution first
+    time_resolution = None
+    # Track time parsing issues (e.g., ambiguous meridiem)
+    time_issues: List[Dict[str, Any]] = []
 
     # Rule 1: Window + exact time - exact time wins, window is discarded
     # Example: "tomorrow morning at 9am" → resolves to 9am, not morning window
     # Exact time always overrides time windows for appointment booking
     if time_windows and times:
         # Discard windows, use only exact time
-        return {
-            "mode": "exact",
+        time_resolution = {
+            "mode": TimeMode.EXACT.value,
             "refs": [times[0].get("text")]  # Only exact time, no windows
         }
 
     # Rule 1.5: Fuzzy hours (6ish, around 6) → treat as range ONLY if time window exists
     # If no time window, flag as ambiguous (consistent with bare hour policy)
-    if times:
+    if not time_resolution and times:
         for time_entity in times:
             time_text = time_entity.get("text", "")
             if _is_fuzzy_hour(time_text):
@@ -549,44 +720,91 @@ def _resolve_time_semantics(
                 if hour_match and time_windows:
                     # Time window provides context, treat as range
                     hour = int(hour_match.group(1))
-                    return {
-                        "mode": "range",
+                    time_resolution = {
+                        "mode": TimeMode.RANGE.value,
                         "refs": [f"{hour}:00", f"{hour+1}:00"]
                     }
+                    break
                 # If no time window, will be flagged as ambiguous in _check_ambiguity
 
-    # Rule 2: Range (between X and Y) - check before single exact time
-    if time_type == "range" and times:
-        return {
-            "mode": "range",
-            "refs": [t.get("text") for t in times[:2]]
-        }
+    # Rule 2: Detect ambiguous meridiem patterns FIRST (before range resolution)
+    # Check original sentence for "between X and Y" patterns where X and Y are numeric hours
+    # This must run regardless of time_type because numbers without AM/PM may not be extracted as TIME entities
+    osentence = entities.get("osentence", "")
+    if osentence and TEMPORAL_RULES.require_explicit_meridiem:
+        # Check for ambiguous meridiem pattern: "between X and Y" where X and Y are numeric hours without AM/PM
+        range_pattern = re.compile(
+            r'\b(between|from)\s+(\d{1,2})\s+(and|to|-)\s+(\d{1,2})\b',
+            re.IGNORECASE
+        )
+        match = range_pattern.search(osentence.lower())
+
+        if match:
+            start_hour = int(match.group(2))
+            end_hour = int(match.group(4))
+
+            # Check if times were extracted and if they have AM/PM
+            has_am_pm = False
+            if times:
+                has_am_pm = any(
+                    "am" in str(t.get("text", "")).lower() or "pm" in str(
+                        t.get("text", "")).lower()
+                    for t in times
+                )
+
+            # If no AM/PM found, create ambiguity issue
+            if not has_am_pm:
+                # Extract the raw text for the range
+                raw_range = match.group(0)
+                time_issue = {
+                    "kind": "ambiguous_meridiem",
+                    "raw": raw_range,
+                    "start_hour": start_hour,
+                    "end_hour": end_hour,
+                    "reason": "missing_am_pm",
+                    "candidates": ["am", "pm"]
+                }
+                time_issues.append(time_issue)
+                # Do not output time_refs - set to NONE
+                time_resolution = {
+                    "mode": TimeMode.NONE.value,
+                    "refs": []
+                }
+
+    # Rule 2b: Range (between X and Y) - check before single exact time
+    # Only proceed if we haven't already set time_resolution due to ambiguous meridiem
+    if not time_resolution and (time_type == TimeMode.RANGE or time_type == TimeMode.RANGE.value):
+        if times:
+            time_resolution = {
+                "mode": TimeMode.RANGE.value,
+                "refs": [t.get("text") for t in times[:2]]
+            }
 
     # Rule 3: Exact time wins (if present, single or multiple)
-    if times:
+    if not time_resolution and times:
         if len(times) == 1:
-            return {
-                "mode": "exact",
+            time_resolution = {
+                "mode": TimeMode.EXACT.value,
                 "refs": [times[0].get("text")]
             }
         elif len(times) >= 2:
             # Multiple times without range marker → ambiguity
-            return {
-                "mode": "exact",  # Default to exact, but flag ambiguity later
+            time_resolution = {
+                "mode": TimeMode.EXACT.value,  # Default to exact, but flag ambiguity later
                 "refs": [t.get("text") for t in times]
             }
 
     # Rule 4: Window (coarse time ranges) - only if no exact time
-    if time_windows:
-        return {
-            "mode": "window",
+    if not time_resolution and time_windows:
+        time_resolution = {
+            "mode": TimeMode.WINDOW.value,
             "refs": [tw.get("text") for tw in time_windows]
         }
 
     # Rule 5: Hour-only fallback - extract hour-only patterns if no times/windows extracted
     # CRITICAL: Only trigger if no TIME tokens exist (prevents fallback from overriding parsed times)
     # Also skip if time_constraint exists (constraints are handled separately)
-    if not times and not time_windows:
+    if not time_resolution and not times and not time_windows:
         # Check if there's a time constraint - if so, don't use fallback
         # (time constraints are handled separately and should not trigger hour-only fallback)
         osentence = entities.get("osentence", "")
@@ -602,17 +820,136 @@ def _resolve_time_semantics(
                 time_ref = f"{hour:02d}:00"
                 print(
                     f"[time-extract]: extracted hour-only time from semantic fallback: {hour_only_match['text']} → {time_ref}")
-                return {
-                    "mode": "exact",
+                time_resolution = {
+                    "mode": TimeMode.EXACT.value,
                     "refs": [time_ref],
                     "precision": "hour"  # Mark as hour-only precision
                 }
 
-    # Rule 6: None
-    return {
-        "mode": "none",
-        "refs": []
+    # Rule 6: None (only if no resolution found yet)
+    if not time_resolution:
+        time_resolution = {
+            "mode": TimeMode.NONE.value,
+            "refs": []
+        }
+
+    # Now build time extraction trace based on the resolution
+    osentence = (original_entities or entities).get("osentence", "")
+
+    # Detect time-like tokens in original sentence
+    time_like_tokens = []
+    if osentence:
+        # Extract tokens that might be time-related
+        tokens = osentence.lower().split()
+        time_keywords = ["between", "and", "at", "by", "before",
+                         "after", "morning", "afternoon", "evening", "night"]
+        time_patterns = re.findall(r'\b\d{1,2}\b', osentence)  # Numbers
+        for token in tokens:
+            if token in time_keywords or any(char.isdigit() for char in token):
+                time_like_tokens.append(token)
+        # Add standalone numbers
+        time_like_tokens.extend(
+            [t for t in time_patterns if t not in time_like_tokens])
+
+    # Build authoritative time extraction trace with mandatory schema
+    time_language_present = bool(time_like_tokens or times or time_windows)
+
+    # Initialize trace with mandatory schema
+    time_extraction_trace = {
+        "time_language_present": time_language_present,
+        "raw_tokens": time_like_tokens if time_like_tokens else [],
+        "detected_pattern": "none",
+        "normalization_attempted": False,
+        "normalization_result": "rejected",
+        "rejection_reason": None
     }
+
+    # If time-like tokens exist, populate trace
+    if time_language_present:
+        time_extraction_trace["normalization_attempted"] = True
+
+        # Detect pattern - MUST NOT be "none" if raw_tokens exist
+        detected_pattern = "none"
+
+        # Check for constraint patterns first (after, before, by)
+        osentence_lower = osentence.lower() if osentence else ""
+        if re.search(r'\b(after|before|by)\s+\d+', osentence_lower):
+            if "after" in osentence_lower:
+                detected_pattern = "after"
+            elif "before" in osentence_lower:
+                detected_pattern = "before"
+            else:
+                detected_pattern = "after"  # "by" treated as "after"
+        elif time_type == TimeMode.RANGE or time_type == TimeMode.RANGE.value:
+            detected_pattern = "between_range"
+        elif times:
+            # Check if times have AM/PM
+            has_am_pm = any("am" in str(t.get("text", "")).lower() or "pm" in str(
+                t.get("text", "")).lower() for t in times)
+            if has_am_pm:
+                detected_pattern = "exact_time"
+            else:
+                detected_pattern = "exact_time"  # Still exact_time, just missing meridiem
+        elif time_windows:
+            detected_pattern = "window"
+        elif any(_is_fuzzy_hour(str(t.get("text", ""))) for t in times):
+            detected_pattern = "fuzzy"
+
+        # ENFORCEMENT: If raw_tokens exist, pattern must NOT be "none"
+        if time_extraction_trace["raw_tokens"] and detected_pattern == "none":
+            # Fallback: if we have tokens but couldn't detect pattern, mark as detected
+            detected_pattern = "exact_time"  # Default assumption
+
+        time_extraction_trace["detected_pattern"] = detected_pattern
+
+        # Determine normalization result based on actual resolution
+        normalization_result = "rejected"
+        rejection_reason = None
+
+        if time_resolution["mode"] != TimeMode.NONE.value:
+            normalization_result = "accepted"
+            rejection_reason = None
+        else:
+            # Determine why it was rejected - use normalized enum values only
+            if detected_pattern == "between_range":
+                # Check if times have AM/PM
+                if times:
+                    has_am_pm = any("am" in str(t.get("text", "")).lower() or "pm" in str(
+                        t.get("text", "")).lower() for t in times)
+                    if not has_am_pm:
+                        rejection_reason = "missing_am_pm"
+                    elif len(times) < 2:
+                        rejection_reason = "zero_length_window"
+                    else:
+                        rejection_reason = "missing_am_pm"  # Default for between_range rejection
+                else:
+                    rejection_reason = "missing_am_pm"  # No time tokens in range
+            elif detected_pattern == "exact_time":
+                # Check if it's missing AM/PM
+                if times:
+                    has_am_pm = any("am" in str(t.get("text", "")).lower() or "pm" in str(
+                        t.get("text", "")).lower() for t in times)
+                    if not has_am_pm:
+                        rejection_reason = "missing_am_pm"
+                    else:
+                        rejection_reason = "ambiguous_time"  # Has AM/PM but still rejected
+                else:
+                    rejection_reason = "missing_am_pm"
+            elif detected_pattern == "fuzzy":
+                rejection_reason = "fuzzy_not_allowed_for_intent"
+            elif detected_pattern in ["after", "before"]:
+                rejection_reason = "time_without_date"  # Constraints need date context
+            elif detected_pattern == "window":
+                # Windows are generally accepted, but if resolution is NONE, something went wrong
+                rejection_reason = "contradictory_window"
+            else:
+                # Should not happen if pattern detection is correct
+                rejection_reason = "ambiguous_time"
+
+        time_extraction_trace["normalization_result"] = normalization_result
+        time_extraction_trace["rejection_reason"] = rejection_reason
+
+    return time_resolution, time_extraction_trace, time_issues
 
 
 def _detect_time_constraint(
@@ -992,9 +1329,145 @@ def _has_fine_grained_modifier(text: str) -> bool:
     return _is_fine_grained_modifier(text)
 
 
+def _build_time_constraint_from_resolution(time_resolution: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """
+    Build a canonical time_constraint object from time resolution output.
+    """
+    mode = time_resolution.get("mode")
+    refs = time_resolution.get("refs") or []
+    if mode == TimeMode.EXACT.value and refs:
+        start = _convert_time_to_24h(str(refs[0])) or refs[0]
+        return {"mode": TimeMode.EXACT.value, "start": start, "end": start, "label": None}
+    if mode == TimeMode.WINDOW.value and len(refs) >= 2:
+        start = _convert_time_to_24h(str(refs[0])) or refs[0]
+        end = _convert_time_to_24h(str(refs[1])) or refs[1]
+        return {"mode": TimeMode.WINDOW.value, "start": start, "end": end, "label": None}
+    if mode == TimeMode.RANGE.value and len(refs) >= 2:
+        start = _convert_time_to_24h(str(refs[0])) or refs[0]
+        end = _convert_time_to_24h(str(refs[1])) or refs[1]
+        return {"mode": TimeMode.WINDOW.value, "start": start, "end": end, "label": None}
+    return None
+
+
+def _parse_month_year(date_text: str) -> tuple[Optional[str], Optional[str]]:
+    """Extract month token and optional year from a date text."""
+    month_pattern = re.compile(
+        r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b"
+    )
+    year_pattern = re.compile(r"\b(20\d{2}|19\d{2})\b")
+    lower = str(date_text).lower()
+    m = month_pattern.search(lower)
+    y = year_pattern.search(lower)
+    return (m.group(0) if m else None, y.group(0) if y else None)
+
+
+def _get_next_month(month_token: str) -> str:
+    """
+    Get the next month name from a given month token.
+
+    Args:
+        month_token: Month name (e.g., "oct", "october")
+
+    Returns:
+        Next month name in same format (short or long)
+    """
+    month_map = {
+        "jan": "feb", "january": "february",
+        "feb": "mar", "february": "march",
+        "mar": "apr", "march": "april",
+        "apr": "may", "april": "may",
+        "may": "jun",  # May has no abbreviation variation
+        "jun": "jul", "june": "july",
+        "jul": "aug", "july": "august",
+        "aug": "sep", "august": "september",
+        "sep": "oct", "september": "october",
+        "oct": "nov", "october": "november",
+        "nov": "dec", "november": "december",
+        "dec": "jan", "december": "january"  # Wrap around
+    }
+    month_lower = month_token.lower()
+    # Fallback to same if not found
+    return month_map.get(month_lower, month_token)
+
+
+def _extract_day_number(date_text: str) -> Optional[int]:
+    """
+    Extract day number from date text.
+
+    Examples:
+        "oct 29th" -> 29
+        "15th dec" -> 15
+        "2nd" -> 2
+    """
+    day_match = re.search(r'\b(\d{1,2})(?:st|nd|rd|th)?\b', date_text.lower())
+    if day_match:
+        return int(day_match.group(1))
+    return None
+
+
+def _maybe_complete_shorthand_date_range(
+    osentence: str,
+    normalized_absolute: List[str],
+    intent_name: Optional[str]
+) -> Optional[List[str]]:
+    """
+    Complete shorthand date ranges for reservations when only day is provided for end.
+
+    Examples:
+        "oct 5th to 9th" -> ["oct 5th", "oct 9th"]  # Same month
+        "oct 29th to 2nd" -> ["oct 29th", "nov 2nd"]  # Next month (smart inference)
+    """
+    if INTENT_TEMPORAL_SHAPE.get(intent_name) != RESERVATION_TEMPORAL_TYPE:
+        return None
+
+    if len(normalized_absolute) != 1:
+        return None
+
+    # Only apply when exactly one absolute date exists and no second absolute date
+    start_text = normalized_absolute[0]
+    month_token, year_token = _parse_month_year(start_text)
+    if not month_token:
+        return None
+
+    sentence_lower = str(osentence or "").lower()
+    # Require a range connector
+    connector_match = re.search(
+        r"\b(to|until|till|through)\b|[-–—]", sentence_lower)
+    if not connector_match:
+        return None
+
+    after = sentence_lower[connector_match.end():]
+    # If another month appears after connector, do nothing (already explicit or cross-month)
+    if re.search(r"\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t)?(?:ember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\b", after):
+        return None
+
+    # Look for day-only token
+    day_match = re.search(r"\b(\d{1,2})(st|nd|rd|th)?\b", after)
+    if not day_match:
+        return None
+
+    day_token = day_match.group(0)
+
+    # Extract day numbers for smart month inference
+    start_day = _extract_day_number(start_text)
+    end_day = _extract_day_number(day_token)
+
+    # Smart month inference: if end_day < start_day, infer next month
+    inferred_month = month_token
+    if start_day is not None and end_day is not None and end_day < start_day:
+        inferred_month = _get_next_month(month_token)
+
+    end_text = f"{inferred_month} {day_token}"
+    if year_token:
+        end_text = f"{end_text} {year_token}"
+
+    return [start_text, end_text]
+
+
 def _resolve_date_semantics(
     entities: Dict[str, Any],
-    structure: Dict[str, Any]
+    structure: Dict[str, Any],
+    intent_name: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Resolve date semantics with hardened, production-safe subset.
@@ -1062,6 +1535,19 @@ def _resolve_date_semantics(
             # Will be flagged in _check_ambiguity
             pass
 
+    # Shorthand range completion for reservation temporal shape
+    shorthand_refs = _maybe_complete_shorthand_date_range(
+        entities.get("osentence", ""),
+        normalized_absolute,
+        intent_name
+    )
+    if shorthand_refs:
+        return {
+            "mode": DateMode.RANGE.value,
+            "refs": shorthand_refs,
+            "modifiers": date_modifiers
+        }
+
     # Rule 2: Absolute dates take precedence
     if dates_absolute:
         if len(dates_absolute) == 1:
@@ -1076,22 +1562,22 @@ def _resolve_date_semantics(
                 f"date_modifiers={date_modifiers}"
             )
             return {
-                "mode": "single_day",
+                "mode": DateMode.SINGLE.value,
                 "refs": [normalized_absolute[0]],  # Use normalized text
                 "modifiers": date_modifiers
             }
         elif len(dates_absolute) >= 2:
             # Multiple absolute dates → check for range marker
-            if structure.get("date_type") == "range" or "between" in str(structure).lower() or "from" in str(structure).lower():
+            if structure.get("date_type") == DateMode.RANGE.value or structure.get("date_type") == DateMode.RANGE or "between" in str(structure).lower() or "from" in str(structure).lower():
                 return {
-                    "mode": "range",
+                    "mode": DateMode.RANGE.value,
                     "refs": normalized_absolute[:2],  # Use normalized text
                     "modifiers": date_modifiers
                 }
             else:
                 # Ambiguous - will be flagged
                 return {
-                    "mode": "range",  # Default to range, but flag ambiguity
+                    "mode": DateMode.RANGE.value,  # Default to range, but flag ambiguity
                     "refs": normalized_absolute[:2],  # Use normalized text
                     "modifiers": date_modifiers
                 }
@@ -1104,7 +1590,7 @@ def _resolve_date_semantics(
             # Check for fine-grained modifiers (early/mid/end) → always range
             if _has_fine_grained_modifier(date_text):
                 return {
-                    "mode": "range",
+                    "mode": DateMode.RANGE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
                     "modifiers": date_modifiers
                 }
@@ -1112,7 +1598,7 @@ def _resolve_date_semantics(
             # Simple relative days → single_day
             if _is_simple_relative_day(date_text):
                 return {
-                    "mode": "single_day",
+                    "mode": DateMode.SINGLE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
                     "modifiers": date_modifiers
                 }
@@ -1120,7 +1606,7 @@ def _resolve_date_semantics(
             # Week-based → range
             if _is_week_based(date_text):
                 return {
-                    "mode": "range",
+                    "mode": DateMode.RANGE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
                     "modifiers": date_modifiers
                 }
@@ -1128,7 +1614,7 @@ def _resolve_date_semantics(
             # Weekend → range
             if _is_weekend_reference(date_text):
                 return {
-                    "mode": "range",
+                    "mode": DateMode.RANGE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
                     "modifiers": date_modifiers
                 }
@@ -1136,7 +1622,7 @@ def _resolve_date_semantics(
             # Specific weekday → single_day
             if _is_specific_weekday(date_text):
                 return {
-                    "mode": "single_day",
+                    "mode": DateMode.SINGLE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
                     "modifiers": date_modifiers
                 }
@@ -1144,29 +1630,29 @@ def _resolve_date_semantics(
             # Month-relative → range (full month)
             if _is_month_relative(date_text):
                 return {
-                    "mode": "range",
+                    "mode": DateMode.RANGE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
                     "modifiers": date_modifiers
                 }
 
             # Default: single_day
             return {
-                "mode": "single_day",
+                "mode": DateMode.SINGLE.value,
                 "refs": [normalized_dates[0]],  # Use normalized text
                 "modifiers": date_modifiers
             }
         elif len(dates) >= 2:
             # Multiple relative dates → check for range marker
-            if structure.get("date_type") == "range" or "between" in str(structure).lower() or "from" in str(structure).lower():
+            if structure.get("date_type") == DateMode.RANGE.value or structure.get("date_type") == DateMode.RANGE or "between" in str(structure).lower() or "from" in str(structure).lower():
                 return {
-                    "mode": "range",
+                    "mode": DateMode.RANGE.value,
                     "refs": normalized_dates[:2],  # Use normalized text
                     "modifiers": date_modifiers
                 }
             else:
                 # Ambiguous - will be flagged
                 return {
-                    "mode": "range",  # Default to range, but flag ambiguity
+                    "mode": DateMode.RANGE.value,  # Default to range, but flag ambiguity
                     "refs": normalized_dates[:2],  # Use normalized text
                     "modifiers": date_modifiers
                 }
@@ -1175,14 +1661,14 @@ def _resolve_date_semantics(
     if dates_absolute and dates:
         # Absolute takes precedence
         return {
-            "mode": "single_day",
+            "mode": DateMode.SINGLE.value,
             "refs": [normalized_absolute[0]],  # Use normalized text
             "modifiers": date_modifiers
         }
 
     # Rule 5: No dates
     return {
-        "mode": "flexible",
+        "mode": DateMode.FLEXIBLE.value,
         "refs": [],
         "modifiers": date_modifiers
     }
@@ -1253,23 +1739,31 @@ def _check_ambiguity(
         if _is_vague_date_reference(date_text):
             return Clarification(
                 reason=ClarificationReason.VAGUE_DATE_REFERENCE,
-                data={"date_text": date_entity.get("text")}
+                data={
+                    "date_text": date_entity.get("text")
+                }
             )
         if _is_plural_weekday(date_text):
             return Clarification(
                 reason=ClarificationReason.AMBIGUOUS_PLURAL_WEEKDAY,
-                data={"date_text": date_entity.get("text")}
+                data={
+                    "date_text": date_entity.get("text")
+                }
             )
         if _is_context_dependent(date_text):
             return Clarification(
                 reason=ClarificationReason.CONTEXT_DEPENDENT_DATE,
-                data={"date_text": date_entity.get("text")}
+                data={
+                    "date_text": date_entity.get("text")
+                }
             )
         # Bare weekday (no modifier) is context-dependent, not conflicting
-        if _is_bare_weekday(date_text):
+        if _is_bare_weekday(date_text) and not ALLOW_BARE_WEEKDAY_BINDING:
             return Clarification(
                 reason=ClarificationReason.CONTEXT_DEPENDENT_DATE,
-                data={"weekday": date_text}
+                data={
+                    "weekday": date_text
+                }
             )
 
     # Check for locale-ambiguous dates
@@ -1278,7 +1772,9 @@ def _check_ambiguity(
         if _is_locale_ambiguous(date_text):
             return Clarification(
                 reason=ClarificationReason.LOCALE_AMBIGUOUS_DATE,
-                data={"date_text": date_entity.get("text")}
+                data={
+                    "date_text": date_entity.get("text")
+                }
             )
 
     # Check structure-level ambiguity flag
@@ -1294,31 +1790,36 @@ def _check_ambiguity(
         pass
     elif len(dates_absolute) > 1:
         # Multiple absolute dates
-        if date_resolution["mode"] == "range" and not structure.get("needs_clarification"):
+        if date_resolution["mode"] == DateMode.RANGE.value and not structure.get("needs_clarification"):
             # Valid range, no ambiguity
             pass
         else:
             return Clarification(
                 reason=ClarificationReason.AMBIGUOUS_DATE_MULTIPLE,
-                data={"date_count": len(dates_absolute), "dates": [
-                    d.get("text") for d in dates_absolute]}
+                data={
+                    "date_count": len(dates_absolute),
+                    "dates": [d.get("text") for d in dates_absolute]
+                }
             )
     elif len(dates) > 1:
         # Multiple relative dates
-        if date_resolution["mode"] == "range" and not structure.get("needs_clarification"):
+        if date_resolution["mode"] == DateMode.RANGE.value and not structure.get("needs_clarification"):
             # Valid range, no ambiguity
             pass
         else:
             return Clarification(
                 reason=ClarificationReason.AMBIGUOUS_DATE_MULTIPLE,
-                data={"date_count": len(dates), "dates": [
-                    d.get("text") for d in dates]}
+                data={
+                    "date_count": len(dates),
+                    "dates": [d.get("text") for d in dates]
+                }
             )
 
     # Check for multiple times without range
     times = entities.get("times", [])
     time_windows = entities.get("time_windows", [])
-    services = entities.get("business_categories") or entities.get("service_families", [])
+    services = entities.get("business_categories") or entities.get(
+        "service_families", [])
     total_dates = len(dates) + len(dates_absolute)
 
     # BUG 3 FIX: Check for bare hours (without am/pm or time window)
@@ -1332,13 +1833,17 @@ def _check_ambiguity(
             if not time_windows:
                 return Clarification(
                     reason=ClarificationReason.AMBIGUOUS_TIME_NO_WINDOW,
-                    data={"time": time_text}
+                    data={
+                        "time": time_text
+                    }
                 )
         # Check for bare hours (just digits, no am/pm)
         elif _is_bare_hour(time_text) and not time_windows:
             return Clarification(
                 reason=ClarificationReason.AMBIGUOUS_TIME_NO_WINDOW,
-                data={"time": time_text}
+                data={
+                    "time": time_text
+                }
             )
 
     # Rule: Do NOT trigger clarification when:
@@ -1350,12 +1855,14 @@ def _check_ambiguity(
         # Exact time exists and is not bare (bare hours already handled above), so no clarification needed
         pass
     elif len(times) > 1:
-        if time_resolution["mode"] != "range":
+        if time_resolution["mode"] != TimeMode.RANGE.value:
             # Use first time for template rendering
             first_time = times[0].get("text", "") if times else ""
             return Clarification(
                 reason=ClarificationReason.AMBIGUOUS_TIME_NO_WINDOW,
-                data={"time": first_time}
+                data={
+                    "time": first_time
+                }
             )
 
     # No clarification needed
@@ -1380,7 +1887,7 @@ def _check_unresolved_weekday_patterns(
     Do NOT attempt to guess the date.
     """
     intent = intent_result.get("intent")
-    if intent != "CREATE_BOOKING":
+    if intent not in INTENT_TEMPORAL_SHAPE:
         return None
 
     # Check if date_refs is empty
@@ -1389,8 +1896,8 @@ def _check_unresolved_weekday_patterns(
         return None  # Date was resolved, no issue
 
     # Check if date_mode is flexible (meaning no dates were found)
-    date_mode = date_resolution.get("mode", "flexible")
-    if date_mode != "flexible":
+    date_mode = date_resolution.get("mode", DateMode.FLEXIBLE.value)
+    if date_mode != DateMode.FLEXIBLE.value:
         return None  # Date mode was set, so something was found
 
     # Get date entities
@@ -1435,8 +1942,10 @@ def _check_unresolved_weekday_patterns(
                 if is_weekday_like:
                     return Clarification(
                         reason=ClarificationReason.CONTEXT_DEPENDENT_DATE,
-                        data={"date_text": date_entity.get(
-                            "text"), "reason": "unresolved_weekday_typo"}
+                        data={
+                            "date_text": date_entity.get("text"),
+                            "reason": "unresolved_weekday_typo"
+                        }
                     )
 
     return None

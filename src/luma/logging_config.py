@@ -24,6 +24,7 @@ class JSONFormatter(logging.Formatter):
     - Consistent across environments
     """
     
+    
     def format(self, record: logging.LogRecord) -> str:
         """Format log record as JSON."""
         log_data: Dict[str, Any] = {
@@ -38,14 +39,14 @@ class JSONFormatter(logging.Formatter):
             'request_id', 'method', 'path', 'status_code', 
             'duration_ms', 'text_length', 'groups_count', 
             'route', 'processing_time_ms', 'error_type',
-            'stage', 'input', 'output', 'notes'
+            'stage', 'input', 'output', 'notes', 'trace', 'final_response', 'sentence_trace'
         ]
         
         for field in optional_fields:
             if hasattr(record, field):
                 value = getattr(record, field)
-                if value is not None:
-                    log_data[field] = value
+                # Include all values, including empty dicts/lists (they're valid data)
+                log_data[field] = value
         
         # Add exception info if present
         if record.exc_info:
@@ -55,7 +56,24 @@ class JSONFormatter(logging.Formatter):
         if hasattr(record, 'extra_data'):
             log_data.update(record.extra_data)
         
-        return json.dumps(log_data)
+        # Include all non-standard attributes from extra parameter
+        # This catches any fields passed via extra={} that aren't in optional_fields
+        standard_attrs = {
+            'name', 'msg', 'args', 'created', 'filename', 'funcName',
+            'levelname', 'levelno', 'lineno', 'module', 'msecs',
+            'message', 'pathname', 'process', 'processName', 'relativeCreated',
+            'thread', 'threadName', 'exc_info', 'exc_text', 'stack_info',
+            'extra_data', 'getMessage'
+        }
+        # Check record.__dict__ for attributes set via extra={}
+        if hasattr(record, '__dict__'):
+            for attr_name, attr_value in record.__dict__.items():
+                if attr_name not in standard_attrs and attr_name not in log_data:
+                    # Only include serializable types
+                    if isinstance(attr_value, (str, int, float, bool, type(None), dict, list)):
+                        log_data[attr_name] = attr_value
+        
+        return json.dumps(log_data, ensure_ascii=False)
 
 
 class PrettyJSONFormatter(logging.Formatter):
