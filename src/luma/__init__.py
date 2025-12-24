@@ -30,6 +30,9 @@ from luma.grouping.appointment_grouper import group_appointment
 from luma.resolution.semantic_resolver import resolve_semantics
 from luma.calendar.calendar_binder import bind_calendar
 
+# Export pipeline orchestrator
+from luma.pipeline import LumaPipeline
+
 # Note: Legacy data_types.py has been removed (e-commerce specific)
 # Service/reservation workflow uses its own types in structure/, resolution/, calendar/
 

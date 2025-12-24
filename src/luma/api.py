@@ -56,6 +56,9 @@ from luma.memory import RedisMemoryStore  # noqa: E402
 from luma.memory.merger import merge_booking_state, extract_memory_state_for_response  # noqa: E402
 from luma.decision import decide_booking_status  # noqa: E402
 from luma.clarification import ClarificationReason  # noqa: E402
+from luma.pipeline import LumaPipeline  # noqa: E402
+from luma.trace_contract import validate_stable_fields, TRACE_VERSION  # noqa: E402
+from luma.perf import StageTimer  # noqa: E402
 
 # Cache for intent metadata (required_slots, etc.)
 _INTENT_META_CACHE = {}
@@ -814,9 +817,14 @@ def resolve():
 
         # Load memory state
         memory_state = None
+        # Initialize execution_trace early for memory timing
+        execution_trace = {"timings": {}}
+
         if memory_store:
             try:
-                memory_state = memory_store.get(user_id, domain)
+                # Time memory read operation
+                with StageTimer(execution_trace, "memory", request_id=request_id):
+                    memory_state = memory_store.get(user_id, domain)
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"Failed to load memory: {e}", extra={
                                'request_id': request_id})
@@ -862,86 +870,74 @@ def resolve():
             "stages": {}
         }
 
-        # Stage 2: TOKENIZATION & ENTITY EXTRACTION
+        # Execute pipeline to get execution_trace
         try:
-            stage_start = time.time()
-            matcher = EntityMatcher(domain=domain, entity_file=entity_file)
-            extraction_result = matcher.extract_with_parameterization(
-                text, request_id=request_id, tenant_aliases=tenant_context.get(
-                    "aliases") if tenant_context else None
-            )
-            stage_duration = round((time.time() - stage_start) * 1000, 2)
-            results["stages"]["extraction"] = extraction_result
-
-            # Removed per-stage logging - consolidated trace emitted at end
-        except Exception as e:
-            results["stages"]["extraction"] = {"error": str(e)}
-            return jsonify({"success": False, "data": results}), 500
-
-        # Stage 2: Intent Resolution
-        try:
-            booking_mode = "service"
+            pipeline = LumaPipeline(
+                domain=domain, entity_file=entity_file, intent_resolver=intent_resolver)
+            booking_mode_for_pipeline = "service"
             if tenant_context and isinstance(tenant_context, dict):
-                booking_mode = tenant_context.get(
+                booking_mode_for_pipeline = tenant_context.get(
                     "booking_mode", "service") or "service"
-            intent, confidence = intent_resolver.resolve_intent(
-                text, extraction_result, booking_mode=booking_mode)
-            # Build resolver response for status/missing/template
-            intent_resp = intent_resolver._build_response(
-                intent, confidence, extraction_result)
+
+            # Determine debug mode for pipeline contract validation
+            debug_flag = str(request.args.get("debug", "0")).lower()
+            pipeline_debug_mode = debug_flag in {"1", "true", "yes"}
+
+            # Initialize execution_trace with timings dict for stage-level timing
+            execution_trace = {"timings": {}}
+
+            pipeline_results = pipeline.run(
+                text=text,
+                now=now,
+                timezone=timezone,
+                tenant_context=tenant_context,
+                booking_mode=booking_mode_for_pipeline,
+                request_id=request_id,
+                debug_mode=pipeline_debug_mode
+            )
+
+            # Extract stage results and execution_trace from pipeline
+            extraction_result = pipeline_results["stages"]["extraction"]
+            intent_resp = pipeline_results["stages"]["intent"]
+            structure_dict = pipeline_results["stages"]["structure"]
+            grouped_result = pipeline_results["stages"]["grouping"]
+            semantic_result = pipeline_results["stages"]["semantic"]
+            # Merge pipeline's execution_trace into our trace (preserves timings)
+            pipeline_trace = pipeline_results["execution_trace"]
+            execution_trace.update(pipeline_trace)
+
+            # Store stage results
+            results["stages"]["extraction"] = extraction_result
             results["stages"]["intent"] = intent_resp
+            results["stages"]["structure"] = structure_dict
+            results["stages"]["grouping"] = grouped_result
+            results["stages"]["semantic"] = semantic_result.to_dict()
+
             # Expose backward-compatible fields
             intent = intent_resp["intent"]
             confidence = intent_resp["confidence"]
+
+            external_intent = intent
+            if intent in {"CREATE_APPOINTMENT", "CREATE_RESERVATION"}:
+                results["stages"]["intent"]["external_intent"] = intent
+                intent = "CREATE_BOOKING"
+
+            # CRITICAL: Normalize intent for active booking continuations (PARTIAL or RESOLVED)
+            # If an active booking exists, force intent to CREATE_BOOKING regardless of raw classification
+            # This ensures merge logic always runs for continuations like "at 10" or "make it 10"
+            if _has_active_booking(memory_state):
+                original_intent = intent
+                intent = "CREATE_BOOKING"
+                # Update results to reflect normalization
+                results["stages"]["intent"]["original_intent"] = original_intent
+                results["stages"]["intent"]["intent"] = intent
+                results["stages"]["intent"]["normalized_for_active_booking"] = True
+
         except Exception as e:
-            results["stages"]["intent"] = {"error": str(e)}
-            return jsonify({"success": False, "data": results}), 500
-
-        external_intent = intent
-        if intent in {"CREATE_APPOINTMENT", "CREATE_RESERVATION"}:
-            results["stages"]["intent"]["external_intent"] = intent
-            intent = "CREATE_BOOKING"
-
-        # CRITICAL: Normalize intent for active booking continuations (PARTIAL or RESOLVED)
-        # If an active booking exists, force intent to CREATE_BOOKING regardless of raw classification
-        # This ensures merge logic always runs for continuations like "at 10" or "make it 10"
-        if _has_active_booking(memory_state):
-            original_intent = intent
-            intent = "CREATE_BOOKING"
-            # Removed per-stage logging - consolidated trace emitted at end
-            # Update results to reflect normalization
-            results["stages"]["intent"]["original_intent"] = original_intent
-            results["stages"]["intent"]["intent"] = intent
-            results["stages"]["intent"]["normalized_for_active_booking"] = True
-
-        # Stage 3: Structural Interpretation
-        try:
-            psentence = extraction_result.get('psentence', '')
-            structure = interpret_structure(psentence, extraction_result)
-            results["stages"]["structure"] = structure.to_dict()["structure"]
-        except Exception as e:
-            results["stages"]["structure"] = {"error": str(e)}
-            return jsonify({"success": False, "data": results}), 500
-
-        # Stage 4: Appointment Grouping
-        try:
-            grouped_result = group_appointment(extraction_result, structure)
-            results["stages"]["grouping"] = grouped_result
-        except Exception as e:
-            results["stages"]["grouping"] = {"error": str(e)}
-            return jsonify({"success": False, "data": results}), 500
-
-        # Stage 6: Semantic Resolution
-        execution_trace = {}
-        try:
-            stage_start = time.time()
-            semantic_result, semantic_trace = resolve_semantics(
-                grouped_result, extraction_result, tenant_context=tenant_context)
-            stage_duration = round((time.time() - stage_start) * 1000, 2)
-            results["stages"]["semantic"] = semantic_result.to_dict()
-            execution_trace.update(semantic_trace)
-        except Exception as e:
-            results["stages"]["semantic"] = {"error": str(e)}
+            # Fallback to individual stage execution on pipeline error
+            logger.error(f"Pipeline execution failed: {e}", extra={
+                         'request_id': request_id}, exc_info=True)
+            results["stages"]["extraction"] = {"error": str(e)}
             return jsonify({"success": False, "data": results}), 500
 
         # Check for PARTIAL booking continuation
@@ -1075,12 +1071,14 @@ def resolve():
                         )
                         memory_state["last_updated"] = datetime.now(
                             dt_timezone.utc).isoformat()
-                        memory_store.set(
-                            user_id=user_id,
-                            domain=domain,
-                            state=memory_state,
-                            ttl=config.MEMORY_TTL
-                        )
+                        # Time memory write operation
+                        with StageTimer(execution_trace, "memory", request_id=request_id):
+                            memory_store.set(
+                                user_id=user_id,
+                                domain=domain,
+                                state=memory_state,
+                                ttl=config.MEMORY_TTL
+                            )
                         logger.debug(
                             "Persisted service-only booking draft to memory store",
                             extra={
@@ -1162,12 +1160,14 @@ def resolve():
                         )
                         memory_state["last_updated"] = datetime.now(
                             dt_timezone.utc).isoformat()
-                        memory_store.set(
-                            user_id=user_id,
-                            domain=domain,
-                            state=memory_state,
-                            ttl=config.MEMORY_TTL
-                        )
+                        # Time memory write operation
+                        with StageTimer(execution_trace, "memory", request_id=request_id):
+                            memory_store.set(
+                                user_id=user_id,
+                                domain=domain,
+                                state=memory_state,
+                                ttl=config.MEMORY_TTL
+                            )
                         logger.debug(
                             "Persisted service+date booking draft to memory store",
                             extra={
@@ -1465,14 +1465,14 @@ def resolve():
                 "external_intent"
             ) or intent
 
-            stage_start = time.time()
-            decision_result, decision_trace = decide_booking_status(
-                semantic_for_decision,
-                entities=extraction_result,
-                policy=booking_policy,
-                intent_name=intent_name_for_decision
-            )
-            stage_duration = round((time.time() - stage_start) * 1000, 2)
+            # Time decision re-run (with merged semantic result)
+            with StageTimer(execution_trace, "decision", request_id=request_id):
+                decision_result, decision_trace = decide_booking_status(
+                    semantic_for_decision,
+                    entities=extraction_result,
+                    policy=booking_policy,
+                    intent_name=intent_name_for_decision
+                )
 
             # Store decision result in results
             results["stages"]["decision"] = {
@@ -1480,6 +1480,7 @@ def resolve():
                 "reason": decision_result.reason,
                 "effective_time": decision_result.effective_time
             }
+            # Update execution_trace with decision trace (overwrites pipeline's trace with merged semantic result)
             execution_trace.update(decision_trace)
 
             # Fail fast guardrail: If temporal_shape == datetime_range and missing slots, ensure binder is skipped
@@ -1613,15 +1614,18 @@ def resolve():
                             'reason': reason_str
                         }
                     )
-                    calendar_result, binder_trace = bind_calendar(
-                        merged_semantic_result,
-                        now,
-                        timezone,
-                        intent=binding_intent,
-                        entities=extraction_result,
-                        external_intent=external_intent
-                    )
+                    # Time calendar binding re-run (with merged semantic result)
+                    with StageTimer(execution_trace, "binder", request_id=request_id):
+                        calendar_result, binder_trace = bind_calendar(
+                            merged_semantic_result,
+                            now,
+                            timezone,
+                            intent=binding_intent,
+                            entities=extraction_result,
+                            external_intent=external_intent
+                        )
                     results["stages"]["calendar"] = calendar_result.to_dict()
+                    # Update execution_trace with binder trace (overwrites pipeline's trace with merged semantic result)
                     execution_trace.update(binder_trace)
                 except Exception as e:
                     results["stages"]["calendar"] = {"error": str(e)}
@@ -1982,15 +1986,14 @@ def resolve():
             # Only persist if we have a valid booking state (RESOLVED or PARTIAL)
             if memory_store:
                 try:
-                    stage_start = time.time()
-                    memory_store.set(
-                        user_id=user_id,
-                        domain=domain,
-                        state=merged_memory,
-                        ttl=config.MEMORY_TTL
-                    )
-                    stage_duration = round(
-                        (time.time() - stage_start) * 1000, 2)
+                    # Time memory write operation
+                    with StageTimer(execution_trace, "memory", request_id=request_id):
+                        memory_store.set(
+                            user_id=user_id,
+                            domain=domain,
+                            state=merged_memory,
+                            ttl=config.MEMORY_TTL
+                        )
 
                     # Stage 8: STATE PERSIST - Log what was stored
                     storage_backend = "redis" if hasattr(
@@ -2006,8 +2009,7 @@ def resolve():
                                 "has_datetime_range": bool(merged_memory.get("booking_state", {}).get("datetime_range") if isinstance(merged_memory.get("booking_state"), dict) else False)
                             },
                             "storage_backend": storage_backend
-                        },
-                        duration_ms=stage_duration
+                        }
                     )
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"Failed to persist memory: {e}", extra={
@@ -2024,12 +2026,14 @@ def resolve():
             # Persist MODIFY_BOOKING state
             if memory_store:
                 try:
-                    memory_store.set(
-                        user_id=user_id,
-                        domain=domain,
-                        state=merged_memory,
-                        ttl=config.MEMORY_TTL
-                    )
+                    # Time memory write operation
+                    with StageTimer(execution_trace, "memory", request_id=request_id):
+                        memory_store.set(
+                            user_id=user_id,
+                            domain=domain,
+                            state=merged_memory,
+                            ttl=config.MEMORY_TTL
+                        )
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"Failed to persist memory: {e}", extra={
                                    'request_id': request_id})
@@ -2296,7 +2300,25 @@ def resolve():
             if tenant_context_for_trace:
                 input_payload['tenant_context'] = tenant_context_for_trace
 
+        # Validate stable fields in debug mode only (non-breaking enforcement)
+        # This ensures stable fields are present and have expected types
+        # Debug fields are not validated and may change freely
+        if debug_mode:
+            trace_data = {
+                'request_id': request_id,
+                'input': input_payload,
+                'trace': execution_trace,
+                'final_response': final_response
+            }
+            validate_stable_fields(trace_data, debug_mode=True)
+
         # Emit single consolidated execution trace log
+        # Field classification: See luma/trace_contract.py
+        # - STABLE fields (request_id, input, final_response, trace.response.*, trace.semantic.*, trace.decision.state/reason/missing_slots)
+        #   require versioning to change and are relied upon by downstream systems.
+        # - DEBUG fields (sentence_trace, processing_time_ms, trace.entity.*, trace.binder.*, trace.*.rule_enforced, etc.)
+        #   are internal diagnostics and may change without notice.
+        # Trace version: v{TRACE_VERSION} (see luma/trace_contract.py)
         logger.info(
             "EXECUTION_TRACE",
             extra={
