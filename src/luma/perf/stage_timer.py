@@ -7,7 +7,6 @@ warn when soft performance budgets are exceeded.
 
 import time
 from typing import Dict, Any, Optional
-from contextlib import contextmanager
 import logging
 
 logger = logging.getLogger(__name__)
@@ -60,22 +59,29 @@ class StageTimer:
     
     def __enter__(self):
         """Start timing."""
+        # Zero side effects if trace is missing or invalid
+        if not isinstance(self.trace, dict):
+            return self
+        
         # Initialize timings dict if needed
         if "timings" not in self.trace:
             self.trace["timings"] = {}
         
-        self.start_time = time.perf_counter()
+        self.start_time = time.monotonic()
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Stop timing and record duration."""
-        if self.start_time is None:
-            return  # Context manager not properly entered
+        # Zero side effects if trace is missing or invalid
+        if not isinstance(self.trace, dict) or self.start_time is None:
+            return False  # Never suppress exceptions
         
-        end_time = time.perf_counter()
+        end_time = time.monotonic()
         self.duration_ms = (end_time - self.start_time) * 1000.0
         
-        # Store duration in trace
+        # Store duration in trace (safe - we checked trace is dict)
+        if "timings" not in self.trace:
+            self.trace["timings"] = {}
         self.trace["timings"][self.stage_name] = round(self.duration_ms, 2)
         
         # Warn if budget exceeded (soft check - never raise)

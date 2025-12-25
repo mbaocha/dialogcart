@@ -88,7 +88,7 @@ def _get_time_window_bounds() -> Dict[str, Dict[str, str]]:
     return _load_config()["time_window_bounds"]
 
 
-def _get_booking_policy() -> Dict[str, bool]:
+def get_booking_policy() -> Dict[str, bool]:
     """Get booking policy from config."""
     return _load_config()["booking_policy"]
 
@@ -239,7 +239,7 @@ class CalendarBindingResult:
             # Convert to ISO-8601 string, ensure timezone-aware
             if value.tzinfo is None:
                 # Naive datetime - assume UTC
-                value = value.replace(tzinfo=_get_timezone("UTC"))
+                value = value.replace(tzinfo=get_timezone("UTC"))
             return value.isoformat()
 
         # Handle lists first (to normalize services in lists)
@@ -270,7 +270,7 @@ class CalendarBindingResult:
 # These constants are removed - use _get_relative_date_offsets(), _get_time_window_bounds(), etc.
 
 
-def _get_timezone(timezone_str: str):
+def get_timezone(timezone_str: str):
     """Get timezone object, supporting zoneinfo and pytz."""
     if ZONEINFO_AVAILABLE:
         try:
@@ -465,7 +465,7 @@ def bind_calendar(
         return result, trace
 
     # Get timezone object
-    tz = _get_timezone(timezone)
+    tz = get_timezone(timezone)
 
     # Ensure now is timezone-aware
     now = _localize_datetime(now, tz)
@@ -607,7 +607,7 @@ def bind_calendar(
     # NOTE: If date_range is None, datetime_range will also be None (no fallback to today)
     # NOTE: If only time_constraint exists (no regular time), datetime_range will be None
     # For reservations, ignore time_range and use full-day logic
-    datetime_range = _combine_datetime_range(
+    datetime_range = combine_datetime_range(
         date_range, time_range, now, tz, external_intent=external_intent)
 
     # Apply duration if present
@@ -877,7 +877,7 @@ def _time_in_window(time_hhmm: str, window_name: str) -> bool:
     return start_minutes <= time_minutes <= end_minutes
 
 
-def _bind_times(
+def bind_times(
     time_refs: list,
     time_mode: str,
     now: datetime,
@@ -1120,7 +1120,7 @@ def _parse_time(time_str: str) -> tuple[Optional[datetime], bool]:
     return None, False
 
 
-def _combine_datetime_range(
+def combine_datetime_range(
     date_range: Optional[Dict[str, str]],
     time_range: Optional[Dict[str, str]],
     now: datetime,

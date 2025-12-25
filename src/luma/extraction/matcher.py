@@ -137,6 +137,36 @@ def detect_tenant_alias_spans(
     - Exact phrase match (case-insensitive) on normalized text
     - Longest-match wins (sort by phrase length desc)
     - Word-boundary safe
+    
+    Uses compiled alias structure for performance (with fallback to slow path).
+    """
+    if not tenant_aliases:
+        return []
+
+    # Try optimized compiled version first
+    try:
+        from luma.normalization.alias_compiler import detect_tenant_alias_spans_compiled
+        result = detect_tenant_alias_spans_compiled(normalized_text, tenant_aliases)
+        # If result is not None, use it (empty list means no aliases, which is valid)
+        # If result is None, it means compilation failed - fall back to slow path
+        if result is not None:
+            return result
+    except Exception:
+        # Fallback to slow path if import or call fails
+        pass
+
+    # Fallback: original implementation (slow path)
+    # Only called if aliases exist but compilation failed
+    return _detect_tenant_alias_spans_slow(normalized_text, tenant_aliases)
+
+
+def _detect_tenant_alias_spans_slow(
+    normalized_text: str, tenant_aliases: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    """
+    Slow-path implementation of alias span detection.
+    
+    Used as fallback when compiled version is unavailable.
     """
     if not tenant_aliases:
         return []

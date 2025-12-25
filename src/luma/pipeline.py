@@ -17,13 +17,13 @@ Pipeline stages:
 from typing import Dict, Any, Optional, Tuple, Set
 from datetime import datetime
 
-from luma.extraction.matcher import EntityMatcher
+from luma.cache.entity_matcher import get_entity_matcher
 from luma.grouping.reservation_intent_resolver import ReservationIntentResolver
 from luma.structure.interpreter import interpret_structure
 from luma.grouping.appointment_grouper import group_appointment
 from luma.resolution.semantic_resolver import resolve_semantics, SemanticResolutionResult
 from luma.decision import decide_booking_status, DecisionResult
-from luma.calendar.calendar_binder import bind_calendar, CalendarBindingResult, _get_booking_policy
+from luma.calendar.calendar_binder import bind_calendar, CalendarBindingResult, get_booking_policy
 from luma.perf import StageTimer
 
 # Pipeline Stage Contracts
@@ -311,7 +311,7 @@ class LumaPipeline:
 
         # Stage 1: Entity Extraction
         with StageTimer(results["execution_trace"], "extraction", request_id=request_id):
-            matcher = EntityMatcher(domain=self.domain, entity_file=self.entity_file)
+            matcher = get_entity_matcher(domain=self.domain, entity_file=self.entity_file)
             extraction_result = matcher.extract_with_parameterization(
                 text,
                 request_id=request_id,
@@ -406,7 +406,7 @@ class LumaPipeline:
         semantic_for_decision = semantic_result.resolved_booking.copy()
         semantic_for_decision["booking_mode"] = self.domain
 
-        booking_policy = _get_booking_policy()
+        booking_policy = get_booking_policy()
         with StageTimer(results["execution_trace"], "decision", request_id=request_id):
             decision_result, decision_trace = decide_booking_status(
                 semantic_for_decision,
