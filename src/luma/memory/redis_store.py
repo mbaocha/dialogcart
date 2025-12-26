@@ -58,18 +58,28 @@ class RedisMemoryStore(MemoryStore):
                     "Install with: pip install redis"
                 )
             except Exception as e:
-                # Redis not available - fail gracefully
+                # Redis connection failed - raise exception to fail fast at startup
                 import logging
                 logger = logging.getLogger(__name__)
-                logger.warning(f"Redis not available: {e}. Memory will not persist.")
-                self._redis_available = False
+                error_msg = (
+                    f"Redis connection failed: {e}. "
+                    f"Redis is required for memory persistence. "
+                    f"Check connection to {redis_host}:{redis_port}"
+                )
+                logger.error(error_msg)
+                raise ConnectionError(error_msg) from e
         else:
             # Test provided client
             try:
                 self._client.ping()
                 self._redis_available = True
-            except Exception:
-                self._redis_available = False
+            except Exception as e:
+                # Provided redis client connection failed - raise exception
+                import logging
+                logger = logging.getLogger(__name__)
+                error_msg = f"Provided Redis client connection failed: {e}. Redis is required."
+                logger.error(error_msg)
+                raise ConnectionError(error_msg) from e
     
     def _make_key(self, user_id: str, domain: str) -> str:
         """Generate Redis key for user memory."""

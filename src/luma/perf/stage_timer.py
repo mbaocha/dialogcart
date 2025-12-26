@@ -3,10 +3,12 @@ Stage-level timing utility for Luma pipeline.
 
 Provides a context manager to measure stage execution time and optionally
 warn when soft performance budgets are exceeded.
+
+Also supports stage snapshot capture for tracing (see StageTimerWithSnapshot).
 """
 
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Callable
 import logging
 
 logger = logging.getLogger(__name__)
@@ -53,7 +55,26 @@ class StageTimer:
         self.trace = trace
         self.stage_name = stage_name
         self.request_id = request_id
-        self.budget_ms = budget_ms or STAGE_BUDGETS_MS.get(stage_name)
+        
+        # Get budget from override or default
+        base_budget = budget_ms or STAGE_BUDGETS_MS.get(stage_name)
+        
+        # In non-production mode, disable budget warnings for extraction and semantic stages
+        # (these stages often take longer in development due to model loading, debug logging, etc.)
+        if base_budget is not None and stage_name in ("extraction", "semantic"):
+            # Lazy import to avoid circular dependencies
+            try:
+                from ..config import config
+                if config.API_DEBUG:
+                    self.budget_ms = None  # Disable warnings in non-production
+                else:
+                    self.budget_ms = base_budget
+            except (ImportError, AttributeError):
+                # Fallback: use default budget if config not available
+                self.budget_ms = base_budget
+        else:
+            self.budget_ms = base_budget
+        
         self.start_time: Optional[float] = None
         self.duration_ms: Optional[float] = None
     
@@ -67,7 +88,7 @@ class StageTimer:
         if "timings" not in self.trace:
             self.trace["timings"] = {}
         
-        self.start_time = time.monotonic()
+        self.start_time = time.perf_counter()
         return self
     
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -76,7 +97,7 @@ class StageTimer:
         if not isinstance(self.trace, dict) or self.start_time is None:
             return False  # Never suppress exceptions
         
-        end_time = time.monotonic()
+        end_time = time.perf_counter()
         self.duration_ms = (end_time - self.start_time) * 1000.0
         
         # Store duration in trace (safe - we checked trace is dict)

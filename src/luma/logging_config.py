@@ -332,10 +332,10 @@ def log_function_call(
                 logger.debug(f"{func_name}() input", extra=debug_info)
             
             # Execute function with timing
-            start_time = time.time()
+            start_time = time.perf_counter()
             try:
                 result = func(*args, **kwargs)
-                duration = (time.time() - start_time) * 1000
+                duration = (time.perf_counter() - start_time) * 1000
                 
                 # Prepare result summary
                 result_info = _prepare_result_summary(result, truncate_at)
@@ -354,7 +354,7 @@ def log_function_call(
                 return result
                 
             except Exception as e:
-                duration = (time.time() - start_time) * 1000
+                duration = (time.perf_counter() - start_time) * 1000
                 logger.error(
                     f"{func_name}() failed after {round(duration, 2)}ms",
                     extra={

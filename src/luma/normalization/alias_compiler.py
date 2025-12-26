@@ -28,10 +28,10 @@ class CompiledAliasStructure:
     - Canonical mappings
     """
     
-    def __init__(self, aliases: List[Tuple[str, str, re.Pattern]]):
+    def __init__(self, aliases: List[Tuple[str, str, str, re.Pattern]]):
         """
         Args:
-            aliases: List of (alias_lower, canonical, compiled_pattern) tuples,
+            aliases: List of (alias_key, alias_lower, canonical, compiled_pattern) tuples,
                      sorted by token length desc, then char length desc
         """
         self.aliases = aliases
@@ -44,7 +44,7 @@ class CompiledAliasStructure:
             normalized_text: Already normalized (lowercase) text
         
         Returns:
-            List of span dicts with start_char, end_char, text, canonical
+            List of span dicts with start_char, end_char, text, canonical, alias_key
         """
         # Text should already be lowercase from pre_normalization, but lowercase
         # again defensively to ensure case-insensitive matching
@@ -53,7 +53,7 @@ class CompiledAliasStructure:
         used_ranges: List[Tuple[int, int]] = []
         
         # Iterate through pre-sorted, pre-compiled aliases
-        for alias_lower, canonical, pattern in self.aliases:
+        for alias_key, alias_lower, canonical, pattern in self.aliases:
             for match in pattern.finditer(text_lower):
                 start_char, end_char = match.span()
                 
@@ -69,7 +69,8 @@ class CompiledAliasStructure:
                     "start_char": start_char,
                     "end_char": end_char,
                     "text": normalized_text[start_char:end_char],
-                    "canonical": canonical,
+                    "canonical": canonical,  # alias value (canonical_family)
+                    "alias_key": alias_key,  # alias key (tenant_service_id)
                 })
                 used_ranges.append((start_char, end_char))
         
@@ -99,12 +100,12 @@ def _compile_aliases(aliases: Dict[str, str]) -> CompiledAliasStructure:
     Compile aliases into efficient structure.
     
     Args:
-        aliases: Dict mapping alias -> canonical
+        aliases: Dict mapping alias_key -> canonical_family (alias value)
     
     Returns:
         CompiledAliasStructure with pre-sorted, pre-compiled patterns
     """
-    compiled: List[Tuple[str, str, re.Pattern]] = []
+    compiled: List[Tuple[str, str, str, re.Pattern]] = []
     
     # Sort aliases by token length desc, then char length desc for deterministic longest-first
     sorted_aliases = sorted(
@@ -113,16 +114,16 @@ def _compile_aliases(aliases: Dict[str, str]) -> CompiledAliasStructure:
         reverse=True,
     )
     
-    for alias, canonical in sorted_aliases:
-        if not isinstance(alias, str) or not isinstance(canonical, str):
+    for alias_key, canonical_family in sorted_aliases:
+        if not isinstance(alias_key, str) or not isinstance(canonical_family, str):
             continue
-        alias_lower = alias.lower().strip()
+        alias_lower = alias_key.lower().strip()
         if not alias_lower:
             continue
         
         # Pre-compile regex pattern
         pattern = re.compile(r"\b" + re.escape(alias_lower) + r"\b")
-        compiled.append((alias_lower, canonical, pattern))
+        compiled.append((alias_key, alias_lower, canonical_family, pattern))
     
     return CompiledAliasStructure(compiled)
 

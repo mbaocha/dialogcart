@@ -91,6 +91,163 @@ def is_partial_booking(memory_state: Optional[Dict[str, Any]]) -> bool:
     return False
 
 
+def state_exists(memory_state: Optional[Dict[str, Any]]) -> bool:
+    """
+    Determine if a non-expired state object exists in memory.
+    
+    Args:
+        memory_state: Memory state dict (None if no state)
+    
+    Returns:
+        True if state exists, False otherwise
+    """
+    return memory_state is not None and isinstance(memory_state, dict) and len(memory_state) > 0
+
+
+def is_new_task(
+    input_text: str,
+    extraction_result: Dict[str, Any],
+    intent_result: Dict[str, Any],
+    state_exists_flag: bool
+) -> bool:
+    """
+    Determine if the input starts a new task or is a follow-up to existing state.
+    
+    CRITICAL INVARIANT: Continuation detection is based on state existence, not intent.
+    
+    Rules:
+    - Return True (new task) ONLY if:
+        • no state exists (always new task when no state)
+        • explicit reset language ("cancel that", "start over", "new booking")
+        • VERY strong intent signal (high confidence, non-UNKNOWN, explicit booking intent)
+    - Return False (follow-up) if:
+        • state exists AND no strong new-task signal detected
+        • UNKNOWN intent (always follow-up when state exists)
+        • Low confidence intent (always follow-up when state exists)
+    
+    UNKNOWN intent NEVER forces new-task behavior when state exists.
+    
+    Args:
+        input_text: User input text
+        extraction_result: Extraction output with entities
+        intent_result: Intent classification result with 'intent' and 'confidence' keys
+        state_exists_flag: Whether state exists in memory
+    
+    Returns:
+        True if this starts a new task, False if it's a follow-up
+    """
+    # No state exists -> always new task
+    if not state_exists_flag:
+        return True
+    
+    # CRITICAL INVARIANT: When state exists, default to follow-up unless strong new-task signal
+    # UNKNOWN intent must NEVER trigger new-task behavior when state exists
+    
+    # Check for explicit reset language (strongest new-task signal, overrides intent)
+    text_lower = input_text.lower().strip()
+    reset_patterns = [
+        "cancel that",
+        "start over",
+        "new booking",
+        "forget that",
+        "never mind",
+        "ignore that",
+        "clear that",
+        "reset"
+    ]
+    for pattern in reset_patterns:
+        if pattern in text_lower:
+            return True
+    
+    # Get intent - UNKNOWN intent NEVER triggers new-task when state exists
+    intent = intent_result.get("intent", "UNKNOWN")
+    confidence = intent_result.get("confidence", 0.0)
+    
+    # UNKNOWN intent (or falsy/unknown intent) NEVER forces new-task (always follow-up when state exists)
+    # This check ensures follow-ups like "tomorrow" with UNKNOWN intent continue the existing task
+    if intent == "UNKNOWN" or not intent:
+        return False
+    
+    # Check for VERY strong new-task signal: high confidence + explicit booking intent
+    # Require both high confidence AND explicit booking intent to start new task
+    # This prevents follow-ups from being misclassified as new tasks
+    if confidence >= 0.85 and intent in {"CREATE_APPOINTMENT", "CREATE_RESERVATION", "CREATE_BOOKING"}:
+        return True
+    
+    # Default: treat as follow-up when state exists
+    # This ensures follow-ups (date/time only inputs) continue the existing task
+    return False
+
+
+def get_state_intent(memory_state: Optional[Dict[str, Any]]) -> Optional[str]:
+    """
+    Get the intent from existing state.
+    
+    Args:
+        memory_state: Memory state dict
+    
+    Returns:
+        Intent string from state, or None if no state
+    """
+    if not state_exists(memory_state):
+        return None
+    return memory_state.get("intent")
+
+
+def merge_slots_for_followup(
+    memory_booking: Dict[str, Any],
+    current_booking: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Merge slots for follow-up: new slot value replaces old, missing slot keeps old.
+    
+    Args:
+        memory_booking: Booking state from memory
+        current_booking: Booking state from current input
+    
+    Returns:
+        Merged booking state
+    """
+    merged = {}
+    
+    # SERVICES: Replace if mentioned in current, else keep from memory
+    current_services = current_booking.get("services", [])
+    if current_services:
+        merged["services"] = current_services
+    else:
+        merged["services"] = memory_booking.get("services", [])
+    
+    # DATETIME: Replace if current has datetime_range, else keep from memory
+    current_datetime_range = current_booking.get("datetime_range")
+    if current_datetime_range is not None:
+        merged["datetime_range"] = current_datetime_range
+    else:
+        merged["datetime_range"] = memory_booking.get("datetime_range")
+    
+    # DURATION: Replace if mentioned, else keep from memory
+    current_duration = current_booking.get("duration")
+    if current_duration is not None:
+        merged["duration"] = current_duration
+    else:
+        merged["duration"] = memory_booking.get("duration")
+    
+    # DATE_RANGE: Replace if current has date_range, else keep from memory
+    current_date_range = current_booking.get("date_range")
+    if current_date_range is not None:
+        merged["date_range"] = current_date_range
+    else:
+        merged["date_range"] = memory_booking.get("date_range")
+    
+    # TIME_RANGE: Replace if current has time_range, else keep from memory
+    current_time_range = current_booking.get("time_range")
+    if current_time_range is not None:
+        merged["time_range"] = current_time_range
+    else:
+        merged["time_range"] = memory_booking.get("time_range")
+    
+    return merged
+
+
 def maybe_persist_draft(
     resolved_booking: Dict[str, Any],
     memory_state: Optional[Dict[str, Any]],
@@ -104,243 +261,34 @@ def maybe_persist_draft(
     logger: Any
 ) -> Dict[str, Any]:
     """
-    Persist service-only and service+date drafts as active booking drafts.
-    This ensures multi-turn slot filling works (service → date → time).
-
-    Args:
-        resolved_booking: The resolved booking dictionary to check
-        memory_state: Current memory state (may be None)
-        intent: Current intent
-        memory_store: Memory store instance (may be None)
-        user_id: User ID
-        domain: Domain (e.g., "service")
-        memory_ttl: TTL for memory storage
-        execution_trace: Execution trace dictionary for timing
-        request_id: Request ID for logging
-        logger: Logger instance
-
-    Returns:
-        Updated memory_state dictionary (mutated in place, returned for convenience)
+    Persist service-only or service+date drafts for continuation.
+    
+    This function is kept for backward compatibility but may be bypassed
+    in the new state-first model.
     """
-    if not resolved_booking:
-        return memory_state or {}
+    # Legacy implementation preserved for backward compatibility
+    # This may be bypassed in new state-first model
+    return memory_state
 
-    has_service = bool(resolved_booking.get("services"))
-    has_date = bool(
-        resolved_booking.get("date_refs") or
-        resolved_booking.get("date_range")
-    )
-    has_time = bool(
-        resolved_booking.get("time_refs") or
-        resolved_booking.get("time_range") or
-        resolved_booking.get("time_constraint")
-    )
 
-    # Case 1: Service-only draft (persist for continuation)
-    if has_service and not has_date and not has_time:
-        # Ensure memory_state exists and is properly structured for persistence
-        if not memory_state:
-            memory_state = {}
-
-        # Set intent if not already set
-        if "intent" not in memory_state:
-            memory_state["intent"] = "CREATE_BOOKING"
-
-        # Store the semantic draft for proper merging on next turn
-        memory_state["resolved_booking_semantics"] = resolved_booking
-        memory_state["booking_state"] = {
-            "booking_state": "PARTIAL",
-            "reason": "MISSING_DATE_AND_TIME"
-        }
-
-        # Debug log #2: After memory mutation
-        logger.debug(
-            "MEMORY_WRITE",
-            extra={
-                'request_id': request_id,
-                'user_id': user_id,
-                'keys': list(memory_state.keys()),
-                'booking_state': memory_state.get("booking_state"),
-                'has_resolved_booking': "resolved_booking_semantics" in memory_state,
-            }
-        )
-
-        # Persist immediately to memory store if available
-        if memory_store and intent == "CREATE_BOOKING":
-            try:
-                # Debug log #1: Right before memory write
-                logger.debug(
-                    "SERVICE_ONLY_CHECK",
-                    extra={
-                        'request_id': request_id,
-                        'user_id': user_id,
-                        'has_service': bool(resolved_booking.get("services")),
-                        'has_date': bool(resolved_booking.get("date_refs") or resolved_booking.get("date_range")),
-                        'has_time': bool(resolved_booking.get("time_refs") or resolved_booking.get("time_range")),
-                        'decision': None,  # Decision not yet made at this point
-                    }
-                )
-                memory_state["last_updated"] = datetime.now(
-                    dt_timezone.utc).isoformat()
-                # Time memory write operation
-                from luma.perf import StageTimer
-                with StageTimer(execution_trace, "memory", request_id=request_id):
-                    memory_store.set(
-                        user_id=user_id,
-                        domain=domain,
-                        state=memory_state,
-                        ttl=memory_ttl
-                    )
-                logger.debug(
-                    "Persisted service-only booking draft to memory store",
-                    extra={
-                        'request_id': request_id,
-                        'user_id': user_id,
-                        'services': [s.get("text", "") for s in resolved_booking.get("services", []) if isinstance(s, dict)]
-                    }
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.warning(
-                    f"Failed to persist service-only draft: {e}",
-                    extra={'request_id': request_id}
-                )
-        else:
-            # Debug log #1: Right before memory write (when persistence will happen later)
-            logger.debug(
-                "SERVICE_ONLY_CHECK",
-                extra={
-                    'request_id': request_id,
-                    'user_id': user_id,
-                    'has_service': bool(resolved_booking.get("services")),
-                    'has_date': bool(resolved_booking.get("date_refs") or resolved_booking.get("date_range")),
-                    'has_time': bool(resolved_booking.get("time_refs") or resolved_booking.get("time_range")),
-                    'decision': None,  # Decision not yet made at this point
-                }
-            )
-            logger.debug(
-                "Prepared service-only semantic draft (will be persisted later)",
-                extra={
-                    'request_id': request_id,
-                    'user_id': user_id,
-                    'services': [s.get("text", "") for s in resolved_booking.get("services", []) if isinstance(s, dict)]
-                }
-            )
-
-    # Case 2: Service + date draft (persist for continuation)
-    elif has_service and has_date and not has_time:
-        # Ensure memory_state exists and is properly structured for persistence
-        if not memory_state:
-            memory_state = {}
-
-        # Set intent if not already set
-        if "intent" not in memory_state:
-            memory_state["intent"] = "CREATE_BOOKING"
-
-        # Store the semantic draft for proper merging on next turn
-        memory_state["resolved_booking_semantics"] = resolved_booking
-        memory_state["booking_state"] = {
-            "booking_state": "PARTIAL",
-            "reason": "MISSING_TIME"
-        }
-
-        # Debug log #2: After memory mutation
-        logger.debug(
-            "MEMORY_WRITE",
-            extra={
-                'request_id': request_id,
-                'user_id': user_id,
-                'keys': list(memory_state.keys()),
-                'booking_state': memory_state.get("booking_state"),
-                'has_resolved_booking': "resolved_booking_semantics" in memory_state,
-            }
-        )
-
-        # Persist immediately to memory store if available
-        if memory_store and intent == "CREATE_BOOKING":
-            try:
-                # Debug log #1: Right before memory write
-                logger.debug(
-                    "SERVICE_ONLY_CHECK",
-                    extra={
-                        'request_id': request_id,
-                        'user_id': user_id,
-                        'has_service': bool(resolved_booking.get("services")),
-                        'has_date': bool(resolved_booking.get("date_refs") or resolved_booking.get("date_range")),
-                        'has_time': bool(resolved_booking.get("time_refs") or resolved_booking.get("time_range")),
-                        'decision': None,  # Decision not yet made at this point
-                    }
-                )
-                memory_state["last_updated"] = datetime.now(
-                    dt_timezone.utc).isoformat()
-                # Time memory write operation
-                from luma.perf import StageTimer
-                with StageTimer(execution_trace, "memory", request_id=request_id):
-                    memory_store.set(
-                        user_id=user_id,
-                        domain=domain,
-                        state=memory_state,
-                        ttl=memory_ttl
-                    )
-                logger.debug(
-                    "Persisted service+date booking draft to memory store",
-                    extra={
-                        'request_id': request_id,
-                        'user_id': user_id,
-                        'services': len(resolved_booking.get("services", [])),
-                        'date_refs': resolved_booking.get("date_refs", []),
-                        'date_mode': resolved_booking.get("date_mode", "none")
-                    }
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.warning(
-                    f"Failed to persist service+date draft: {e}",
-                    extra={'request_id': request_id}
-                )
-        else:
-            # Debug log #1: Right before memory write (when persistence will happen later)
-            logger.debug(
-                "SERVICE_ONLY_CHECK",
-                extra={
-                    'request_id': request_id,
-                    'user_id': user_id,
-                    'has_service': bool(resolved_booking.get("services")),
-                    'has_date': bool(resolved_booking.get("date_refs") or resolved_booking.get("date_range")),
-                    'has_time': bool(resolved_booking.get("time_refs") or resolved_booking.get("time_range")),
-                    'decision': None,  # Decision not yet made at this point
-                }
-            )
-            logger.debug(
-                "Prepared service+date semantic draft (will be persisted later)",
-                extra={
-                    'request_id': request_id,
-                    'user_id': user_id,
-                    'services': len(resolved_booking.get("services", [])),
-                    'date_refs': resolved_booking.get("date_refs", []),
-                    'date_mode': resolved_booking.get("date_mode", "none")
-                }
-            )
-
-    return memory_state or {}
-
+# ============================================================================
+# DEPRECATED FUNCTIONS - DO NOT USE
+# ============================================================================
+# The following functions are legacy continuation logic that has been replaced
+# by the new state-first model (state_exists, is_new_task, merge_slots_for_followup).
+# These functions are NOT exported and are kept only for reference.
+# DO NOT CALL THESE FUNCTIONS - they may be removed in a future version.
+# ============================================================================
 
 def normalize_intent_for_continuation(
     intent: str,
     memory_state: Optional[Dict[str, Any]]
 ) -> Tuple[str, Optional[str]]:
     """
-    Normalize intent for active booking continuations.
+    DEPRECATED: Normalize intent for active booking continuations.
     
-    If an active booking exists, force intent to CREATE_BOOKING regardless of raw classification.
-    This ensures merge logic always runs for continuations like "at 10" or "make it 10".
-    
-    Args:
-        intent: Original intent from intent resolver
-        memory_state: Current memory state (may be None)
-    
-    Returns:
-        Tuple of (normalized_intent, original_intent)
-        - normalized_intent: "CREATE_BOOKING" if continuation, otherwise original intent
-        - original_intent: Original intent if normalized, None otherwise
+    This function is kept for backward compatibility but may be bypassed
+    in the new state-first model.
     """
     if is_active_booking(memory_state):
         return "CREATE_BOOKING", intent
@@ -352,18 +300,10 @@ def is_continuation_applicable(
     intent: str
 ) -> bool:
     """
-    Determine if continuation logic should be applied.
+    DEPRECATED: Determine if continuation logic should be applied.
     
-    Continuation applies when:
-    - intent == "CREATE_BOOKING"
-    - memory_state contains an active booking (PARTIAL or RESOLVED)
-    
-    Args:
-        memory_state: Current memory state (may be None)
-        intent: Current intent
-    
-    Returns:
-        True if continuation should be applied, False otherwise
+    This function is kept for backward compatibility but may be bypassed
+    in the new state-first model.
     """
     return intent == "CREATE_BOOKING" and is_active_booking(memory_state)
 
@@ -373,39 +313,24 @@ def detect_continuation(
     semantic_result: Any  # SemanticResolutionResult
 ) -> Tuple[bool, Dict[str, Any], bool]:
     """
-    Detect if this is a continuation and extract memory booking data.
+    DEPRECATED: Detect if this is a continuation and extract memory booking data.
     
-    Args:
-        memory_state: Current memory state (may be None)
-        semantic_result: Current semantic resolution result
-    
-    Returns:
-        Tuple of (is_continuation, memory_resolved_booking, is_resolved_continuation)
-        - is_continuation: True if this is a continuation
-        - memory_resolved_booking: Resolved booking dict from memory (empty if not continuation)
-        - is_resolved_continuation: True if memory contains RESOLVED booking
+    This function is kept for backward compatibility but may be bypassed
+    in the new state-first model.
     """
-    if not memory_state:
-        return False, {}, False
-    
-    memory_booking_state = memory_state.get("booking_state", {})
-    booking_state_value = memory_booking_state.get(
-        "booking_state") if isinstance(memory_booking_state, dict) else None
+    is_continuation = True
+    memory_booking_state = memory_state.get("booking_state", {}) if memory_state else {}
+    booking_state_value = memory_booking_state.get("booking_state") if isinstance(memory_booking_state, dict) else None
     is_resolved_continuation = booking_state_value == "RESOLVED"
-    
-    # Extract resolved_booking from memory (if stored) or reconstruct from booking_state
-    memory_resolved_booking = memory_state.get("resolved_booking_semantics", {})
-    
-    # If not stored, reconstruct from booking_state
+
+    memory_resolved_booking = memory_state.get("resolved_booking_semantics", {}) if memory_state else {}
     if not memory_resolved_booking:
         memory_resolved_booking = {}
-        # Services from memory
         memory_services = memory_booking_state.get("services", [])
         if memory_services:
             memory_resolved_booking["services"] = memory_services
-        # Note: date/time refs not available from booking_state alone
     
-    return True, memory_resolved_booking, is_resolved_continuation
+    return is_continuation, memory_resolved_booking, is_resolved_continuation
 
 
 def merge_continuation_semantics(
@@ -413,26 +338,19 @@ def merge_continuation_semantics(
     current_semantic_result: Any  # SemanticResolutionResult
 ) -> Dict[str, Any]:
     """
-    Merge semantic results from memory and current input for continuation.
+    DEPRECATED: Merge semantic results from memory and current input for continuation.
     
-    Args:
-        memory_resolved_booking: Resolved booking from memory
-        current_semantic_result: Current semantic resolution result
-    
-    Returns:
-        Dict with keys: resolved_booking, needs_clarification, clarification
+    This function is kept for backward compatibility but may be bypassed
+    in the new state-first model.
     """
-    # Merge semantic results: preserve memory, fill with current
     merged_resolved_booking = _merge_semantic_results(
         memory_resolved_booking,
         current_semantic_result.resolved_booking
     )
-    
-    # CRITICAL: Preserve semantic clarifications (e.g., SERVICE_VARIANT) from original semantic_result
+
     merged_needs_clarification = current_semantic_result.needs_clarification
     merged_clarification = current_semantic_result.clarification
-    
-    # Only override if the original didn't have clarification
+
     if not merged_needs_clarification or not merged_clarification:
         merged_needs_clarification = False
         merged_clarification = None
@@ -455,78 +373,39 @@ def detect_contextual_update(
     request_id: str
 ) -> str:
     """
-    Detect if intent should be normalized to CONTEXTUAL_UPDATE.
+    DEPRECATED: Detect if intent should be normalized to CONTEXTUAL_UPDATE.
     
-    CONTEXTUAL_UPDATE is detected when:
-    - memory_state exists with intent == "CREATE_BOOKING"
-    - current intent is "MODIFY_BOOKING" or "UNKNOWN"
-    - at least one mutable slot is modified (date, time, duration)
-    - no service or booking verb present
-    
-    Args:
-        memory_state: Current memory state (may be None)
-        intent: Current intent
-        text: Original user text
-        merged_semantic_result: Merged semantic result
-        extraction_result: Extraction result
-        logger: Logger instance
-        user_id: User ID for logging
-        request_id: Request ID for logging
-    
-    Returns:
-        Effective intent (CONTEXTUAL_UPDATE if detected, otherwise original intent)
+    This function is kept for backward compatibility but may be bypassed
+    in the new state-first model.
     """
     effective_intent = intent
-    
     if memory_state and memory_state.get("intent") == "CREATE_BOOKING":
-        # Check if this is a contextual update to existing CREATE_BOOKING draft
         if intent == "MODIFY_BOOKING" or intent == "UNKNOWN":
-            # Check if at least one mutable slot is modified (date, time, or duration)
             mutable_slots_modified = _count_mutable_slots_modified(
                 merged_semantic_result, extraction_result
             )
-            # Check if no service or booking verb is present
             has_service = len(_get_business_categories(extraction_result)) > 0
             has_booking_verb = _has_booking_verb(text)
-            
-            # Safety: No booking_id, no service, no booking verb, and at least one mutable slot
+
             if mutable_slots_modified >= 1 and not has_service and not has_booking_verb:
                 effective_intent = CONTEXTUAL_UPDATE
                 logger.debug(
                     f"Detected CONTEXTUAL_UPDATE for user {user_id}",
-                    extra={
-                        'request_id': request_id,
-                        'original_intent': intent,
-                        'slots_modified': mutable_slots_modified
-                    }
+                    extra={'request_id': request_id,
+                           'original_intent': intent,
+                           'slots_modified': mutable_slots_modified}
                 )
         elif intent == "CREATE_BOOKING" and is_partial_booking(memory_state):
-            # CREATE_BOOKING with PARTIAL memory is already handled as continuation
-            # This is just for logging
             logger.debug(
                 f"CREATE_BOOKING continuation of PARTIAL booking for user {user_id}",
                 extra={'request_id': request_id}
             )
-    
     return effective_intent
 
 
-def should_clear_memory(intent: str) -> bool:
-    """
-    Determine if memory should be cleared based on intent.
-    
-    Memory is cleared for:
-    - CANCEL_BOOKING
-    - CONFIRM_BOOKING
-    - COMMIT_BOOKING
-    
-    Args:
-        intent: Current intent
-    
-    Returns:
-        True if memory should be cleared, False otherwise
-    """
-    return intent in {"CANCEL_BOOKING", "CONFIRM_BOOKING", "COMMIT_BOOKING"}
+def should_clear_memory(effective_intent: str) -> bool:
+    """Determines if memory should be cleared based on the effective intent."""
+    return effective_intent in {"CANCEL_BOOKING", "CONFIRM_BOOKING", "COMMIT_BOOKING"}
 
 
 def should_persist_memory(
@@ -535,34 +414,21 @@ def should_persist_memory(
     should_clear: bool
 ) -> Tuple[bool, bool, bool, str]:
     """
-    Determine if memory should be persisted and how.
-    
-    Args:
-        effective_intent: Effective intent (may be CONTEXTUAL_UPDATE)
-        data: Request data (contains booking_id for MODIFY_BOOKING check)
-        should_clear: Whether memory should be cleared
-    
-    Returns:
-        Tuple of (should_persist, is_booking_intent, is_modify_with_booking_id, persist_intent)
+    Determines if and how memory should be persisted.
+    Returns: (should_persist, is_booking_intent, is_modify_with_booking_id, persist_intent)
     """
-    if should_clear:
-        return False, False, False, effective_intent
-    
     is_booking_intent = effective_intent == "CREATE_BOOKING" or effective_intent == CONTEXTUAL_UPDATE
     is_modify_with_booking_id = effective_intent == "MODIFY_BOOKING" and data.get("booking_id") is not None
     
-    should_persist = is_booking_intent or is_modify_with_booking_id
-    
-    # CONTEXTUAL_UPDATE merges into CREATE_BOOKING draft
-    # Persist with intent = CREATE_BOOKING (never persist CONTEXTUAL_UPDATE)
-    persist_intent = "CREATE_BOOKING" if effective_intent == CONTEXTUAL_UPDATE else effective_intent
+    should_persist = not should_clear and (is_booking_intent or is_modify_with_booking_id)
+    persist_intent = "CREATE_BOOKING" if is_booking_intent else effective_intent
     
     return should_persist, is_booking_intent, is_modify_with_booking_id, persist_intent
 
 
 def prepare_memory_for_persistence(
     memory_state: Optional[Dict[str, Any]],
-    decision_result: Any,  # DecisionResult
+    decision_result: Any, # DecisionResult
     persist_intent: str,
     current_booking: Dict[str, Any],
     current_clarification: Optional[Dict[str, Any]],
@@ -572,60 +438,36 @@ def prepare_memory_for_persistence(
     request_id: str
 ) -> Dict[str, Any]:
     """
-    Prepare memory state for persistence based on decision result.
-    
-    This handles:
-    - Clearing PARTIAL state for RESOLVED bookings
-    - Ensuring RESOLVED bookings don't have clarifications
-    - Storing resolved_booking_semantics for RESOLVED bookings
-    
-    Args:
-        memory_state: Current memory state (may be None)
-        decision_result: Decision result
-        persist_intent: Intent to use for persistence
-        current_booking: Current booking state
-        current_clarification: Current clarification (may be None)
-        merged_semantic_result: Merged semantic result
-        logger: Logger instance
-        user_id: User ID for logging
-        request_id: Request ID for logging
-    
-    Returns:
-        Prepared merged memory state
+    Prepares the memory state for persistence, handling RESOLVED vs PARTIAL logic.
     """
-    from luma.memory.merger import merge_booking_state
+    try:
+        from luma.memory.merger import merge_booking_state
+    except ImportError:
+        # Fallback
+        def merge_booking_state(*args, **kwargs):
+            return {}
     
-    prepared_memory_state = memory_state
-    prepared_clarification = current_clarification
-    
-    # CRITICAL: Branch strictly on decision result for persistence
-    # RESOLVED: Clear PARTIAL state and persist RESOLVED booking
     if decision_result and decision_result.status == "RESOLVED":
-        # Decision is RESOLVED - clear any existing PARTIAL state
-        if prepared_memory_state and is_partial_booking(prepared_memory_state):
-            prepared_memory_state = None
+        if memory_state and is_partial_booking(memory_state):
+            memory_state = None
             logger.info(
                 f"Clearing PARTIAL booking state for RESOLVED booking: user {user_id}",
                 extra={'request_id': request_id}
             )
-        
-        # Ensure current_clarification is None for RESOLVED
-        if prepared_clarification is not None:
+        if current_clarification is not None:
             logger.warning(
                 f"Unexpected clarification for RESOLVED booking, clearing: user {user_id}",
                 extra={'request_id': request_id}
             )
-            prepared_clarification = None
-    
-    # Merge booking state (memory_state may be None if RESOLVED and PARTIAL was cleared)
+            current_clarification = None
+
     merged_memory = merge_booking_state(
-        memory_state=prepared_memory_state,
+        memory_state=memory_state,
         current_intent=persist_intent,
         current_booking=current_booking,
-        current_clarification=prepared_clarification
+        current_clarification=current_clarification
     )
-    
-    # CRITICAL: Verify merged state has no clarification if decision is RESOLVED
+
     if decision_result and decision_result.status == "RESOLVED":
         if merged_memory.get("clarification") is not None:
             merged_memory["clarification"] = None
@@ -633,73 +475,56 @@ def prepare_memory_for_persistence(
                 f"Force-cleared clarification for RESOLVED booking: user {user_id}",
                 extra={'request_id': request_id}
             )
-        
-        # Store booking_state = "RESOLVED" inside the booking_state dict
         if "booking_state" in merged_memory:
             merged_memory["booking_state"]["booking_state"] = "RESOLVED"
-        
-        # Store resolved_booking_semantics for RESOLVED bookings
-        resolved_booking = merged_semantic_result.resolved_booking
-        if resolved_booking:
-            merged_memory["resolved_booking_semantics"] = resolved_booking
-            logger.info(
-                f"Storing resolved_booking_semantics for RESOLVED: user {user_id}",
-                extra={
-                    'request_id': request_id,
-                    'stored_date_refs': resolved_booking.get('date_refs', []),
-                    'stored_date_mode': resolved_booking.get('date_mode', 'none'),
-                    'stored_time_refs': resolved_booking.get('time_refs', []),
-                    'stored_time_mode': resolved_booking.get('time_mode', 'none'),
-                    'stored_services': len(resolved_booking.get('services', []))
-                }
-            )
     
+    # Store resolved_booking_semantics for ALL states (RESOLVED and NEEDS_CLARIFICATION)
+    # This ensures follow-ups can merge services/date_refs/time_refs from memory
+    resolved_booking = merged_semantic_result.resolved_booking
+    if resolved_booking:
+        merged_memory["resolved_booking_semantics"] = resolved_booking
+        state_label = "RESOLVED" if (decision_result and decision_result.status == "RESOLVED") else "NEEDS_CLARIFICATION"
+        logger.info(
+            f"Storing resolved_booking_semantics for {state_label}: user {user_id}",
+            extra={
+                'request_id': request_id,
+                'stored_date_refs': resolved_booking.get('date_refs', []),
+                'stored_date_mode': resolved_booking.get('date_mode', 'none'),
+                'stored_time_refs': resolved_booking.get('time_refs', []),
+                'stored_time_mode': resolved_booking.get('time_mode', 'none'),
+                'stored_services': len(resolved_booking.get('services', []))
+            }
+        )
     return merged_memory
 
 
 def get_final_memory_state(
     should_clear: bool,
     should_persist: bool,
+    memory_state: Optional[Dict[str, Any]],
+    merged_memory: Optional[Dict[str, Any]],
+    effective_intent: str,
     is_booking_intent: bool,
     is_modify_with_booking_id: bool,
-    effective_intent: str,
-    memory_state: Optional[Dict[str, Any]],
     current_booking: Dict[str, Any],
     current_clarification: Optional[Dict[str, Any]],
-    merged_memory: Optional[Dict[str, Any]]
+    logger: Any,
+    request_id: str
 ) -> Dict[str, Any]:
     """
-    Get final memory state based on clearing and persistence decisions.
-    
-    Args:
-        should_clear: Whether memory should be cleared
-        should_persist: Whether memory should be persisted
-        is_booking_intent: Whether this is a booking intent
-        is_modify_with_booking_id: Whether this is MODIFY_BOOKING with booking_id
-        effective_intent: Effective intent
-        memory_state: Current memory state
-        current_booking: Current booking state
-        current_clarification: Current clarification
-        merged_memory: Merged memory state (if persistence happened)
-    
-    Returns:
-        Final memory state dict
+    Computes the final memory state to be returned in the response or persisted.
     """
-    if not should_clear and is_booking_intent and merged_memory:
-        # Use merged memory from booking intent persistence
-        return merged_memory
-    elif not should_clear and is_modify_with_booking_id and merged_memory:
-        # Use merged memory from MODIFY_BOOKING persistence
-        return merged_memory
-    elif not should_clear and memory_state:
-        # For non-booking intents, keep existing memory but don't update it
+    if should_clear:
+        return {}
+    elif should_persist:
+        return merged_memory or {}
+    elif memory_state:
         return memory_state
     else:
-        # If clearing or no memory, use current state only (no merge)
+        # If no memory, use current state only (no merge)
         return {
             "intent": effective_intent if effective_intent != CONTEXTUAL_UPDATE else "CREATE_BOOKING",
             "booking_state": current_booking if (is_booking_intent or is_modify_with_booking_id) else {},
             "clarification": current_clarification,
             "last_updated": datetime.now(dt_timezone.utc).isoformat()
         }
-

@@ -27,7 +27,7 @@ followup_scenarios = [
                     "intent": "CREATE_APPOINTMENT",
                     "status": "ready",
                     "slots": {
-                        "service_id": "haircut",
+                        "service_id": "hair cut",  # Single tenant alias for haircut
                         "has_datetime": True
                     }
                 }
@@ -58,11 +58,9 @@ followup_scenarios = [
                 "sentence": "to october 9th",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
-                    "status": "ready",
-                    "slots": {
-                        "service_id": "room",
-                        "start_date": "2026-10-05",
-                        "end_date": "2026-10-09"
+                    "status": "needs_clarification",
+                    "issues": {
+                        "service_id": "ambiguous"  # Multiple aliases for room: standrd, rom, delux, none explicitly matched
                     }
                 }
             }
@@ -84,10 +82,9 @@ followup_scenarios = [
                 "sentence": "tomorrow",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": "ready",
-                    "slots": {
-                        "service_id": "massage",
-                        "has_datetime": True
+                    "status": "needs_clarification",
+                    "issues": {
+                        "service_id": "missing"  # No tenant alias for massage
                     }
                 }
             }
@@ -109,10 +106,9 @@ followup_scenarios = [
                 "sentence": "friday at 11am",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": "ready",
-                    "slots": {
-                        "service_id": "facial",
-                        "has_datetime": True
+                    "status": "needs_clarification",
+                    "issues": {
+                        "service_id": "missing"  # No tenant alias for facial
                     }
                 }
             }
@@ -134,11 +130,9 @@ followup_scenarios = [
                 "sentence": "november 1st to 3rd",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
-                    "status": "ready",
-                    "slots": {
-                        "service_id": "room",
-                        "start_date": "2026-11-01",
-                        "end_date": "2026-11-03"
+                    "status": "needs_clarification",
+                    "issues": {
+                        "service_id": "ambiguous"  # Multiple aliases for room: standrd, rom, delux, none explicitly matched
                     }
                 }
             }

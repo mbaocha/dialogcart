@@ -72,6 +72,10 @@ def validate_required_slots(intent_name: str, resolved_slots: Dict[str, Any], en
         return False
 
     for slot in required_slots:
+        # Fix 2: For reservations, exclude service_id from required slots
+        # Reservations can proceed with just dates (service is optional/implicit)
+        if intent_name == "CREATE_RESERVATION" and slot == "service_id":
+            continue
         if not _slot_present(slot):
             missing.append(slot)
 

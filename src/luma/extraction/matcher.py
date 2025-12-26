@@ -9,6 +9,9 @@ and reservation systems.
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 try:
     from luma.config import debug_print
@@ -55,6 +58,10 @@ from .entity_loading import (
 from .entity_processing import (
     extract_entities_from_doc,
     build_parameterized_sentence,
+)
+from .service_annotation import (
+    annotate_service_tokens,
+    consume_service_annotations,
 )
 
 
@@ -207,7 +214,8 @@ def _detect_tenant_alias_spans_slow(
                     "start_char": start_char,
                     "end_char": end_char,
                     "text": normalized_text[start_char:end_char],
-                    "canonical": canonical,
+                    "canonical": canonical,  # alias value (canonical_family)
+                    "alias_key": alias,  # alias key (tenant_service_id)
                 }
             )
             used_ranges.append((start_char, end_char))
@@ -445,66 +453,161 @@ class EntityMatcher:
             raw_result = self._infer_meridiem_from_time_window(
                 normalized, raw_result, doc)
 
-        # Protect alias spans from being collapsed to generic service families
-        if alias_spans:
-            raw_result = merge_alias_spans_into_services(
-                raw_result, doc, alias_spans)
-
         # Detect range tails like "oct 5th to 9th" where only the first absolute
         # date is extracted. If safe, synthesize a second absolute date using the
         # same month/year. If unsafe (tail < start), mark ambiguity for downstream
         # clarification.
         self._maybe_expand_absolute_date_range_tail(raw_result)
 
-        # 3️⃣ Map SERVICE_FAMILY entities to canonical business category IDs
+        # 3️⃣ TWO-STEP SERVICE RESOLUTION PIPELINE
+        # Step 1: Non-destructive annotation (mark ALIAS/FAMILY/MODIFIER tokens without removing them)
+        service_annotations = annotate_service_tokens(
+            doc=doc,
+            alias_spans=alias_spans,
+            services=raw_result.get("services", []),
+            business_category_map=self.business_category_map,
+            tenant_aliases=tenant_aliases
+        )
+        
+        # Log annotated sentence (Step 1 output)
+        if request_id:
+            logger.debug(
+                f"[annotation] Step 1 annotated sentence for request {request_id}",
+                extra={
+                    'request_id': request_id,
+                    'alias_count': len(service_annotations.get("alias_annotations", [])),
+                    'family_count': len(service_annotations.get("family_annotations", []))
+                }
+            )
+
+        # Step 2: Deterministic consumption pass (replace ALIAS with servicetenanttoken, FAMILY with servicefamilytoken)
+        psentence_services, consumption_metadata = consume_service_annotations(
+            doc=doc,
+            annotations=service_annotations,
+            logger_instance=logger
+        )
+        
+        # Log consumed sentence (Step 2 output)
+        if request_id:
+            logger.debug(
+                f"[consumption] Step 2 consumed sentence for request {request_id}",
+                extra={
+                    'request_id': request_id,
+                    'has_alias': consumption_metadata.get("has_alias", False),
+                    'parameterized_sentence': psentence_services
+                }
+            )
+
+        # Rebuild full parameterized sentence: services from consumption + other entities from build_parameterized_sentence
+        final_tokens = [t.text.lower() for t in doc]
+        all_replacements = []
+        
+        # Add service replacements from consumption (servicetenanttoken or servicefamilytoken)
+        alias_ranges = service_annotations.get("alias_token_ranges", [])
+        
+        if consumption_metadata.get("has_alias"):
+            # Aliases present: use servicetenanttoken
+            for alias_ann in service_annotations.get("alias_annotations", []):
+                start = alias_ann["start_token"]
+                end = alias_ann["end_token"]
+                all_replacements.append((start, end, "servicetenanttoken"))
+        else:
+            # No aliases: use servicefamilytoken for non-suppressed families
+            for family_ann in service_annotations.get("family_annotations", []):
+                start = family_ann["start_token"]
+                end = family_ann["end_token"]
+                # Check if not suppressed by alias
+                suppressed = any(
+                    not (end <= a_start or start >= a_end)
+                    for a_start, a_end in alias_ranges
+                )
+                if not suppressed:
+                    all_replacements.append((start, end, "servicefamilytoken"))
+        
+        # Add other entity replacements (dates, times, durations)
+        placeholder_map = {
+            "dates": "datetoken",
+            "dates_absolute": "datetoken",
+            "times": "timetoken",
+            "time_windows": "timewindowtoken",
+            "durations": "durationtoken"
+        }
+        for entity_type, ents in raw_result.items():
+            if entity_type == "services" or entity_type.startswith("_"):
+                continue
+            placeholder = placeholder_map.get(entity_type)
+            if placeholder:
+                for e in ents:
+                    start = e.get("position", 0)
+                    end = start + e.get("length", 1)
+                    all_replacements.append((start, end, placeholder))
+        
+        # Apply all replacements backwards (end-to-start) to avoid index shifting
+        all_replacements.sort(key=lambda x: (x[1], x[0]), reverse=True)
+        for start, end, placeholder in all_replacements:
+            final_tokens[start:end] = [placeholder]
+        
+        psentence = " ".join(final_tokens)
+        
+        # Post-normalize parameterized text
+        from .normalization import post_normalize_parameterized_text
+        psentence = post_normalize_parameterized_text(psentence)
+        
+        # Build business_categories from annotations (for downstream use)
+        # MODIFIER annotations are NOT included in business_categories (modifiers are not services)
         business_categories = []
-        if "services" in raw_result:
-            # spaCy extracts SERVICE_FAMILY entities as "services" in raw_result
-            for entity in raw_result["services"]:
-                entity_text = entity.get("text", "").lower()
-                # Map to canonical business category ID (e.g., "beauty_and_wellness.haircut")
-                canonical_id = entity.get(
-                    "canonical") or self.business_category_map.get(entity_text)
-
-                # Convert position/length to start/end token indices
-                position = entity.get("position", 0)
-                length = entity.get("length", 1)
-                start = position
-                end = position + length
-
-                if canonical_id:
-                    business_categories.append({
-                        "text": entity_text,
-                        "canonical": canonical_id,
-                        "start": start,
-                        "end": end
-                    })
-                else:
-                    # Fallback: use original text if mapping not found
-                    business_categories.append({
-                        "text": entity_text,
-                        "canonical": None,
-                        "start": start,
-                        "end": end
-                    })
-
-        # 4️⃣ Build parameterized sentence
-        # Phase 1: Service/tenant alias replacement (already done in normalization)
-        # Track what was replaced for logging
-        phase1_replacements = []
-        for entity in raw_result.get("services", []):
-            entity_text = entity.get("text", "").lower()
-            canonical_id = self.business_category_map.get(entity_text)
-            if canonical_id:
-                phase1_replacements.append({
-                    "span": entity_text,
-                    "rule": "global_service_family",
-                    "replaced_with": "servicefamilytoken"
+        # Add aliases as business categories with tenant_service_id and canonical_family
+        for alias_ann in service_annotations.get("alias_annotations", []):
+            business_categories.append({
+                "text": alias_ann["text"],
+                "canonical": alias_ann.get("canonical_family"),  # alias value = canonical_family
+                "tenant_service_id": alias_ann["tenant_service_id"],  # alias key = tenant_service_id
+                "start": alias_ann["start_token"],
+                "end": alias_ann["end_token"],
+                "annotation_type": "ALIAS"
+            })
+        # Add families as business categories (only if not suppressed)
+        # Note: MODIFIER annotations are excluded - modifiers are not services
+        for family_ann in service_annotations.get("family_annotations", []):
+            start = family_ann["start_token"]
+            end = family_ann["end_token"]
+            suppressed = any(
+                not (end <= a_start or start >= a_end)
+                for a_start, a_end in alias_ranges
+            )
+            if not suppressed:
+                business_categories.append({
+                    "text": family_ann["text"],
+                    "canonical": family_ann["canonical_family"],
+                    "start": start,
+                    "end": end,
+                    "annotation_type": "FAMILY"
                 })
-
-        psentence, phase2_replacements = build_parameterized_sentence(
-            doc, raw_result)
-        # Noise is preserved in psentence (not removed)
+        
+        # Store consumption metadata and annotations for decision layer
+        raw_result["_service_consumption_metadata"] = consumption_metadata
+        raw_result["_service_annotations"] = service_annotations
+        
+        # Build phase1_replacements for backward compatibility (empty - replaced by consumption_metadata)
+        phase1_replacements = []
+        
+        # Build phase2_replacements for logging (non-service entities)
+        phase2_replacements = []
+        for entity_type, ents in raw_result.items():
+            if entity_type in ("dates", "dates_absolute"):
+                for e in ents:
+                    phase2_replacements.append({
+                        "type": "date",
+                        "span": e.get("text", ""),
+                        "replaced_with": "datetoken"
+                    })
+            elif entity_type in ("times", "time_windows"):
+                for e in ents:
+                    phase2_replacements.append({
+                        "type": "time",
+                        "span": e.get("text", ""),
+                        "replaced_with": "timetoken" if entity_type == "times" else "timewindowtoken"
+                    })
 
         osentence = normalized
 

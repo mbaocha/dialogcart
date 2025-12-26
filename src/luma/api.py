@@ -113,7 +113,7 @@ def _log_stage(logger, request_id: str, stage: str, input_data=None, output_data
 @app.before_request
 def before_request():
     """Track request start time and generate request ID."""
-    g.start_time = time.time()
+    g.start_time = time.perf_counter()
     g.request_id = request.headers.get('X-Request-ID', generate_request_id())
 
 
@@ -121,7 +121,7 @@ def before_request():
 def after_request(response):
     """Log request completion with timing and status."""
     if hasattr(g, 'start_time') and config.ENABLE_REQUEST_LOGGING:
-        duration_ms = round((time.time() - g.start_time) * 1000, 2)
+        duration_ms = round((time.perf_counter() - g.start_time) * 1000, 2)
 
         # Create structured log
         log_record = logger.makeRecord(
@@ -508,14 +508,9 @@ def init_pipeline():
         # Initialize intent resolver (lightweight, no file I/O)
         intent_resolver = ReservationIntentResolver()
 
-        # Initialize memory store
-        try:
-            memory_store = RedisMemoryStore()
-            logger.info("Memory store initialized successfully")
-        except Exception as e:  # noqa: BLE001
-            logger.warning(
-                f"Memory store initialization failed: {e}. Memory will not persist.")
-            memory_store = None
+        # Initialize memory store (required for multi-turn conversations)
+        memory_store = RedisMemoryStore()
+        logger.info("Memory store initialized successfully")
 
         # Entity matcher will be initialized per-request with entity file
         logger.info("Pipeline components initialized successfully")
@@ -616,7 +611,6 @@ def resolve():
         memory_store=memory_store,
         logger=logger,
         # Constants
-        CONTEXTUAL_UPDATE_CONST=CONTEXTUAL_UPDATE,
         APPOINTMENT_TEMPORAL_TYPE_CONST=APPOINTMENT_TEMPORAL_TYPE,
         INTENT_TEMPORAL_SHAPE_CONST=INTENT_TEMPORAL_SHAPE,
         MEMORY_TTL=config.MEMORY_TTL,
@@ -671,6 +665,20 @@ def main():
     logger.info("Luma Service/Reservation Booking API")
     logger.info(f"Starting server on http://localhost:{PORT}")
     logger.info("=" * 60)
+    
+    # TEMPORARY: Log Redis configuration at startup
+    redis_password_masked = "***" if config.REDIS_PASSWORD else None
+    logger.info(
+        f"Redis Config: host={config.REDIS_HOST}, port={config.REDIS_PORT}, "
+        f"db={config.REDIS_DB}, password={redis_password_masked}, ttl={config.MEMORY_TTL}s",
+        extra={
+            "redis_host": config.REDIS_HOST,
+            "redis_port": config.REDIS_PORT,
+            "redis_db": config.REDIS_DB,
+            "redis_password": redis_password_masked,
+            "memory_ttl": config.MEMORY_TTL
+        }
+    )
 
     # Initialize pipeline
     if not init_pipeline():
