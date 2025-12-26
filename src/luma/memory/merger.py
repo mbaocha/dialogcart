@@ -37,12 +37,12 @@ def merge_booking_state(
     
     Args:
         memory_state: Existing memory state (None if no memory)
-        current_intent: Intent from current input
+        current_intent: Intent from current input (real intent: CREATE_APPOINTMENT or CREATE_RESERVATION)
         current_booking: Booking state from current input (from calendar binding)
         current_clarification: Clarification from current input (if any)
         
     Returns:
-        Merged memory state dict
+        Merged memory state dict with real intent stored
     """
     # If intent changes, clear memory
     if memory_state and memory_state.get("intent") != current_intent:

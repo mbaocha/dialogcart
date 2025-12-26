@@ -244,3 +244,4 @@ class StageSnapshot:
             self.trace["stages"].append(snapshot)
 
         return False  # Never suppress exceptions
+

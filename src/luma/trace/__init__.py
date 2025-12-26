@@ -3,3 +3,4 @@
 from luma.trace.stage_snapshot import capture_stage_snapshot, StageSnapshot
 
 __all__ = ["capture_stage_snapshot", "StageSnapshot"]
+

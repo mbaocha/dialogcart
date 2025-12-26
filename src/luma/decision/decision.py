@@ -336,12 +336,39 @@ def decide_booking_status(
     time_range = resolved_booking.get("time_range")
     booking_mode = resolved_booking.get("booking_mode", "service")
 
-    # TENANT-AUTHORITATIVE SERVICE RESOLUTION GATE
-    # A request is READY only if a tenant_service_id is resolved.
-    # Canonical-only services must be treated as unresolved.
+    # SERVICE RESOLUTION GATE
+    # Policy differs by intent:
+    # - CREATE_APPOINTMENT: Accept any extracted service (ALIAS or FAMILY) as sufficient
+    # - CREATE_RESERVATION: Require strict tenant-authoritative resolution
     resolved_tenant_service_id = None
     service_resolution_reason = None
     service_resolution_metadata = {}
+    
+    is_appointment = intent_name == "CREATE_APPOINTMENT"
+    is_reservation = intent_name == "CREATE_RESERVATION"
+    
+    if not services:
+        # No services extracted - always MISSING_SERVICE
+        effective_time = _determine_effective_time(
+            time_mode, time_refs, time_constraint
+        )
+        result = DecisionResult(
+            status="NEEDS_CLARIFICATION",
+            reason="MISSING_SERVICE",
+            effective_time=effective_time
+        )
+        trace = {
+            "decision": {
+                "state": result.status,
+                "reason": result.reason,
+                "service_resolution": {
+                    "resolved_tenant_service_id": None,
+                    "clarification_reason": "MISSING_SERVICE",
+                    "metadata": {"resolution_strategy": "no_services"}
+                }
+            }
+        }
+        return result, trace
     
     if services:
         # Attempt to resolve services to tenant_service_id
@@ -352,37 +379,103 @@ def decide_booking_status(
             booking_mode=booking_mode
         )
         
-        # If canonical family exists but no tenant_service_id is resolved → needs_clarification
+        # POLICY: For CREATE_APPOINTMENT, extracted services (ALIAS or FAMILY) are sufficient
+        # For CREATE_RESERVATION, strict tenant-authoritative resolution is required
         if not resolved_tenant_service_id:
-            # Canonical services exist but cannot be resolved to tenant service
-            # This is an unresolved state - require clarification
-            effective_time = _determine_effective_time(
-                time_mode, time_refs, time_constraint
-            )
-            result = DecisionResult(
-                status="NEEDS_CLARIFICATION",
-                reason=service_resolution_reason or "MISSING_SERVICE",
-                effective_time=effective_time
-            )
-            
-            # Build trace with service resolution metadata
-            trace = {
-                "decision": {
-                    "state": result.status,
-                    "reason": result.reason,
-                    "service_resolution": {
-                        "resolved_tenant_service_id": None,
-                        "clarification_reason": service_resolution_reason,
-                        "metadata": service_resolution_metadata
-                    },
-                    "rule_enforced": "tenant_authoritative_service_resolution"
+            if is_reservation:
+                # CREATE_RESERVATION: Strict tenant-authoritative - require tenant_service_id
+                # Canonical services exist but cannot be resolved to tenant service
+                effective_time = _determine_effective_time(
+                    time_mode, time_refs, time_constraint
+                )
+                result = DecisionResult(
+                    status="NEEDS_CLARIFICATION",
+                    reason=service_resolution_reason or "MISSING_SERVICE",
+                    effective_time=effective_time
+                )
+                
+                # Build trace with service resolution metadata
+                trace = {
+                    "decision": {
+                        "state": result.status,
+                        "reason": result.reason,
+                        "service_resolution": {
+                            "resolved_tenant_service_id": None,
+                            "clarification_reason": service_resolution_reason,
+                            "metadata": service_resolution_metadata
+                        },
+                        "rule_enforced": "tenant_authoritative_service_resolution"
+                    }
                 }
-            }
-            logger.info(
-                f"[decision] Service resolution failed: canonical services exist but no tenant_service_id resolved. "
-                f"Reason: {service_resolution_reason}"
-            )
-            return result, trace
+                logger.info(
+                    f"[decision] Service resolution failed: canonical services exist but no tenant_service_id resolved. "
+                    f"Reason: {service_resolution_reason}"
+                )
+                return result, trace
+            elif is_appointment:
+                # CREATE_APPOINTMENT: Check if service was extracted but not resolved
+                # If services exist but resolved_tenant_service_id is None, this is UNSUPPORTED_SERVICE
+                # This must be checked BEFORE temporal shape validation to prevent datetime completeness from overriding
+                if services and resolved_tenant_service_id is None:
+                    effective_time = _determine_effective_time(
+                        time_mode, time_refs, time_constraint
+                    )
+                    result = DecisionResult(
+                        status="NEEDS_CLARIFICATION",
+                        reason="UNSUPPORTED_SERVICE",
+                        effective_time=effective_time
+                    )
+                    
+                    trace = {
+                        "decision": {
+                            "state": result.status,
+                            "reason": result.reason,
+                            "expected_temporal_shape": INTENT_TEMPORAL_SHAPE.get(intent_name) if intent_name else None,
+                            "actual_temporal_shape": "none",
+                            "missing_slots": [],
+                            "temporal_shape_satisfied": False,
+                            "rule_enforced": "service_resolution_required_for_appointments",
+                            "service_resolution": {
+                                "resolved_tenant_service_id": None,
+                                "clarification_reason": "UNSUPPORTED_SERVICE",
+                                "metadata": service_resolution_metadata
+                            }
+                        }
+                    }
+                    logger.info(
+                        f"[decision] CREATE_APPOINTMENT: Service extracted but not resolved (cardinality=0). "
+                        f"Marking as NEEDS_CLARIFICATION with UNSUPPORTED_SERVICE"
+                    )
+                    return result, trace
+                # CREATE_APPOINTMENT: Accept extracted services as sufficient (don't require tenant resolution)
+                # Services were extracted and resolved, so service_id is treated as PRESENT
+                logger.debug(
+                    f"[decision] CREATE_APPOINTMENT: Accepting extracted services without tenant resolution. "
+                    f"Service count: {len(services)}"
+                )
+            else:
+                # Unknown intent - default to strict behavior
+                effective_time = _determine_effective_time(
+                    time_mode, time_refs, time_constraint
+                )
+                result = DecisionResult(
+                    status="NEEDS_CLARIFICATION",
+                    reason=service_resolution_reason or "MISSING_SERVICE",
+                    effective_time=effective_time
+                )
+                
+                trace = {
+                    "decision": {
+                        "state": result.status,
+                        "reason": result.reason,
+                        "service_resolution": {
+                            "resolved_tenant_service_id": None,
+                            "clarification_reason": service_resolution_reason,
+                            "metadata": service_resolution_metadata
+                        }
+                    }
+                }
+                return result, trace
     
     # Service resolution successful - proceed with temporal shape validation
     # Store resolved tenant_service_id in trace for downstream use
@@ -460,10 +553,49 @@ def decide_booking_status(
         }
         return result, trace
 
+    # GUARD: For CREATE_APPOINTMENT, service resolution must succeed before RESOLVED
+    # Do not allow datetime completeness to override service validity
+    if is_appointment and services and resolved_tenant_service_id is None:
+        effective_time = _determine_effective_time(
+            time_mode, time_refs, time_constraint
+        )
+        result = DecisionResult(
+            status="NEEDS_CLARIFICATION",
+            reason="UNSUPPORTED_SERVICE",
+            effective_time=effective_time
+        )
+        
+        # Build temporal shape derivation
+        temporal_shape_derivation = {
+            "date_present": bool(date_refs and date_mode != "none"),
+            "time_present": bool(time_refs and time_mode != "none") or (time_constraint is not None),
+            "derived_shape": expected_temporal_shape or "datetime_range"
+        }
+        
+        trace = {
+            "decision": {
+                "state": result.status,
+                "reason": result.reason,
+                "expected_temporal_shape": expected_temporal_shape,
+                "actual_temporal_shape": expected_temporal_shape,
+                "missing_slots": [],
+                "temporal_shape_satisfied": False,
+                "rule_enforced": "service_resolution_required_for_appointments",
+                "temporal_shape_derivation": temporal_shape_derivation,
+                "service_resolution": service_resolution_trace
+            }
+        }
+        logger.info(
+            f"[decision] CREATE_APPOINTMENT: Service resolution guard - preventing RESOLVED despite datetime completeness. "
+            f"Service extracted but not resolved (cardinality=0)"
+        )
+        return result, trace
+
     # SYSTEM INVARIANT:
     # A booking with resolved date + time must always be RESOLVED
     # This overrides all other logic paths to prevent regressions
     # NOTE: Temporal shape validation above ensures this only applies to valid shapes
+    # NOTE: Service resolution guard above prevents this from overriding service validity for appointments
     has_resolved_date = (
         (date_refs and date_mode != "none") or
         (date_range is not None)

@@ -36,18 +36,31 @@ except ImportError:
         raise ImportError("_get_business_categories not available")
 
 
+def is_booking_intent(intent: str) -> bool:
+    """
+    Check if intent is a booking intent (CREATE_APPOINTMENT or CREATE_RESERVATION).
+    
+    Args:
+        intent: Intent string to check
+        
+    Returns:
+        True if intent is CREATE_APPOINTMENT or CREATE_RESERVATION, False otherwise
+    """
+    return intent in {"CREATE_APPOINTMENT", "CREATE_RESERVATION"}
+
+
 def is_active_booking(memory_state: Optional[Dict[str, Any]]) -> bool:
     """
     Check if memory contains an active booking (PARTIAL or RESOLVED).
 
     An active booking is one that:
-    - Has intent == "CREATE_BOOKING"
+    - Has intent == CREATE_APPOINTMENT or CREATE_RESERVATION
     - Has booking_state == "PARTIAL" or "RESOLVED" OR has clarification (PARTIAL)
     """
     if not memory_state:
         return False
 
-    if memory_state.get("intent") != "CREATE_BOOKING":
+    if not is_booking_intent(memory_state.get("intent", "")):
         return False
 
     # Check for clarification (indicates PARTIAL)
@@ -68,13 +81,13 @@ def is_partial_booking(memory_state: Optional[Dict[str, Any]]) -> bool:
     """
     Check if memory contains a PARTIAL booking.
     A partial booking is one that:
-    - Has intent == "CREATE_BOOKING"
+    - Has intent == CREATE_APPOINTMENT or CREATE_RESERVATION
     - Has booking_state == "PARTIAL" OR has clarification
     """
     if not memory_state:
         return False
 
-    if memory_state.get("intent") != "CREATE_BOOKING":
+    if not is_booking_intent(memory_state.get("intent", "")):
         return False
 
     # Check for clarification (indicates PARTIAL)
@@ -171,7 +184,7 @@ def is_new_task(
     # Check for VERY strong new-task signal: high confidence + explicit booking intent
     # Require both high confidence AND explicit booking intent to start new task
     # This prevents follow-ups from being misclassified as new tasks
-    if confidence >= 0.85 and intent in {"CREATE_APPOINTMENT", "CREATE_RESERVATION", "CREATE_BOOKING"}:
+    if confidence >= 0.85 and is_booking_intent(intent):
         return True
     
     # Default: treat as follow-up when state exists
@@ -291,7 +304,8 @@ def normalize_intent_for_continuation(
     in the new state-first model.
     """
     if is_active_booking(memory_state):
-        return "CREATE_BOOKING", intent
+        # Return the stored intent from memory (already real intent)
+        return memory_state.get("intent", intent), intent
     return intent, None
 
 
@@ -305,7 +319,7 @@ def is_continuation_applicable(
     This function is kept for backward compatibility but may be bypassed
     in the new state-first model.
     """
-    return intent == "CREATE_BOOKING" and is_active_booking(memory_state)
+    return is_booking_intent(intent) and is_active_booking(memory_state)
 
 
 def detect_continuation(
@@ -379,7 +393,7 @@ def detect_contextual_update(
     in the new state-first model.
     """
     effective_intent = intent
-    if memory_state and memory_state.get("intent") == "CREATE_BOOKING":
+    if memory_state and is_booking_intent(memory_state.get("intent", "")):
         if intent == "MODIFY_BOOKING" or intent == "UNKNOWN":
             mutable_slots_modified = _count_mutable_slots_modified(
                 merged_semantic_result, extraction_result
@@ -395,9 +409,9 @@ def detect_contextual_update(
                            'original_intent': intent,
                            'slots_modified': mutable_slots_modified}
                 )
-        elif intent == "CREATE_BOOKING" and is_partial_booking(memory_state):
+        elif is_booking_intent(intent) and is_partial_booking(memory_state):
             logger.debug(
-                f"CREATE_BOOKING continuation of PARTIAL booking for user {user_id}",
+                f"Booking intent continuation of PARTIAL booking for user {user_id}",
                 extra={'request_id': request_id}
             )
     return effective_intent
@@ -417,13 +431,14 @@ def should_persist_memory(
     Determines if and how memory should be persisted.
     Returns: (should_persist, is_booking_intent, is_modify_with_booking_id, persist_intent)
     """
-    is_booking_intent = effective_intent == "CREATE_BOOKING" or effective_intent == CONTEXTUAL_UPDATE
+    is_booking_intent_flag = is_booking_intent(effective_intent) or effective_intent == CONTEXTUAL_UPDATE
     is_modify_with_booking_id = effective_intent == "MODIFY_BOOKING" and data.get("booking_id") is not None
     
-    should_persist = not should_clear and (is_booking_intent or is_modify_with_booking_id)
-    persist_intent = "CREATE_BOOKING" if is_booking_intent else effective_intent
+    should_persist = not should_clear and (is_booking_intent_flag or is_modify_with_booking_id)
+    # Store real intent (CREATE_APPOINTMENT or CREATE_RESERVATION)
+    persist_intent = effective_intent
     
-    return should_persist, is_booking_intent, is_modify_with_booking_id, persist_intent
+    return should_persist, is_booking_intent_flag, is_modify_with_booking_id, persist_intent
 
 
 def prepare_memory_for_persistence(
@@ -439,6 +454,9 @@ def prepare_memory_for_persistence(
 ) -> Dict[str, Any]:
     """
     Prepares the memory state for persistence, handling RESOLVED vs PARTIAL logic.
+    
+    Args:
+        persist_intent: Real intent to store (CREATE_APPOINTMENT or CREATE_RESERVATION)
     """
     try:
         from luma.memory.merger import merge_booking_state
@@ -523,7 +541,7 @@ def get_final_memory_state(
     else:
         # If no memory, use current state only (no merge)
         return {
-            "intent": effective_intent if effective_intent != CONTEXTUAL_UPDATE else "CREATE_BOOKING",
+            "intent": effective_intent if effective_intent != CONTEXTUAL_UPDATE else (memory_state.get("intent") if memory_state else effective_intent),
             "booking_state": current_booking if (is_booking_intent or is_modify_with_booking_id) else {},
             "clarification": current_clarification,
             "last_updated": datetime.now(dt_timezone.utc).isoformat()

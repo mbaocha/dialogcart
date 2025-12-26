@@ -443,8 +443,9 @@ class LumaPipeline:
 
         if decision_result.status == "RESOLVED" or missing_only_time:
             # Proceed with calendar binding
-            binding_intent = intent_name if intent_name != "CONTEXTUAL_UPDATE" else "CREATE_BOOKING"
-            external_intent = intent_resp.get("external_intent")
+            # Use intent_name directly (already real intent: CREATE_APPOINTMENT or CREATE_RESERVATION)
+            binding_intent = intent_name
+            external_intent = None  # Not needed - intent_name is already the real intent
             
             with StageTimer(results["execution_trace"], "binder", request_id=request_id):
                 calendar_result, binder_trace = bind_calendar(
