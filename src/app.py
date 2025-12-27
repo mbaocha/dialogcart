@@ -7,8 +7,6 @@ from router import route_event
 VERIFY_TOKEN = os.environ.get("VERIFY_TOKEN")
 
 
-
-
 def lambda_handler(event, context):
     print("Lambda invoked! Event:", json.dumps(event))
     try:
@@ -28,10 +26,9 @@ def lambda_handler(event, context):
 
         # Handle incoming messages
         elif method == "POST":
-            #body = json.loads(event.get("body", "{}"))
+            # body = json.loads(event.get("body", "{}"))
             return route_event(event)
 
-           
         else:
             return {"statusCode": 405, "body": "Method Not Allowed"}
 
@@ -41,4 +38,3 @@ def lambda_handler(event, context):
             "statusCode": 500,
             "body": json.dumps({"error": str(e)})
         }
-

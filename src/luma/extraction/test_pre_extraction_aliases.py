@@ -47,7 +47,7 @@ def test_alias_phrase_creates_service_entity():
     )
     
     # Should have service_family entity from alias
-    service_families = result.get("service_families", [])
+    service_families = result.get("business_categories") or result.get("service_families", [])
     assert len(service_families) > 0, "Should have at least one service_family entity"
     
     # Find the alias-based entity
@@ -100,7 +100,7 @@ def test_alias_no_match_when_phrase_absent():
     )
     
     # Should NOT have service_family entity from alias (phrase "premium haircut" not present)
-    service_families = result.get("service_families", [])
+    service_families = result.get("business_categories") or result.get("service_families", [])
     
     # Check if any service_family has the alias canonical
     alias_entity_found = False
@@ -149,7 +149,7 @@ def test_explicit_service_overrides_alias():
     )
     
     # Should have service_family entity
-    service_families = result.get("service_families", [])
+    service_families = result.get("business_categories") or result.get("service_families", [])
     assert len(service_families) > 0, "Should have at least one service_family entity"
     
     # Check that explicit canonical "haircut" is used (not just alias)

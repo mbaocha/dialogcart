@@ -93,3 +93,22 @@ class CustomerClient(BaseClient):
 
         path = "/api/internal/customers"
         return self._request("POST", path, json=payload)
+
+    def list_customer_bookings(
+        self,
+        organization_id: int,
+        customer_id: int,
+        *,
+        booking_type: Optional[str] = None,
+        extra_params: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """
+        List bookings for a customer within an organization.
+        """
+        params: Dict[str, Any] = {}
+        if booking_type:
+            params["booking_type"] = booking_type
+        if extra_params:
+            params.update(extra_params)
+        path = f"/api/internal/organizations/{organization_id}/customers/{customer_id}/bookings"
+        return self._request("GET", path, params=params)

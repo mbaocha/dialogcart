@@ -15,6 +15,7 @@ Assumptions:
 from typing import Dict, Any, Optional
 
 from luma.structure.structure_types import StructureResult
+from .time_constraints import resolve_time_constraint
 
 
 # Default intent for all appointment/reservation requests
@@ -93,13 +94,14 @@ def _build_booking_dict(
         Booking dictionary with services, date_ref, time_ref, duration
     """
     # Extract services
-    services = entities.get("service_families", [])
+    services = entities.get("business_categories") or entities.get(
+        "service_families", [])
 
     # Extract date reference (prefer absolute over relative)
     date_ref = _extract_date_reference(entities)
 
-    # Extract time reference based on time_type
-    time_ref = _extract_time_reference(entities, structure)
+    # Extract time constraint based on time_type
+    time_constraint = _extract_time_constraint(entities, structure)
 
     # Extract duration (if present)
     duration = _extract_duration(entities)
@@ -107,7 +109,8 @@ def _build_booking_dict(
     return {
         "services": services,
         "date_ref": date_ref,
-        "time_ref": time_ref,
+        "time_ref": None,  # deprecated; no fallback if time_constraint is None
+        "time_constraint": time_constraint,
         "duration": duration
     }
 
@@ -138,50 +141,16 @@ def _extract_date_reference(entities: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _extract_time_reference(
+def _extract_time_constraint(
     entities: Dict[str, Any],
     structure: StructureResult
-) -> Optional[str]:
-    """
-    Extract time reference based on structure.time_type.
-
-    Args:
-        entities: Entity extraction result
-        structure: Structural interpretation result
-
-    Returns:
-        Time reference string or None
-    """
-    time_type = structure.time_type
-
-    if time_type == "exact":
-        # Use precise times
-        times = entities.get("times", [])
-        if times:
-            # If multiple times and time_scope is shared, might be a range
-            # For now, return first time
-            # TODO: Handle time ranges properly
-            if len(times) > 1 and structure.time_scope == "shared":
-                # Could be a range - return both times
-                return f"{times[0].get('text')} to {times[1].get('text')}"
-            return times[0].get("text")
-
-    elif time_type == "window":
-        # Use time windows
-        time_windows = entities.get("time_windows", [])
-        if time_windows:
-            return time_windows[0].get("text")
-
-    elif time_type == "range":
-        # Extract range from times
-        times = entities.get("times", [])
-        if len(times) >= 2:
-            return f"{times[0].get('text')} to {times[1].get('text')}"
-        elif times:
-            return times[0].get("text")
-
-    # time_type == "none" or no time entities
-    return None
+) -> Optional[Dict[str, Any]]:
+    """Delegate time normalization to canonical resolver."""
+    return resolve_time_constraint(
+        entities.get("times", []) or [],
+        entities.get("time_windows", []) or [],
+        structure.time_type
+    )
 
 
 def _extract_duration(entities: Dict[str, Any]) -> Optional[Dict[str, Any]]:

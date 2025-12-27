@@ -82,28 +82,36 @@ import json
 
 # ---------------------------- helpers ----------------------------
 
+
 def now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
 
 def pk_tenant(tenant_id: str) -> str:
     return f"TENANT#{tenant_id}"
 
+
 def sk_catalog(catalog_id: str) -> str:
     return f"CATALOG#{catalog_id}"
+
 
 def sk_variant(variant_id: str) -> str:
     return f"VARIANT#{variant_id}"
 
+
 def zero_pad_price(price: float, width: int = 11, decimals: int = 2) -> str:
     return f"{float(price):0{width}.{decimals}f}"
+
 
 def to_decimal_or_none(value) -> Optional[Decimal]:
     if value is None:
         return None
     return Decimal(str(value))
 
+
 def norm_title(s: str) -> str:
     return " ".join(str(s).lower().split())
+
 
 def compute_content_hash(payload: Dict[str, Any]) -> str:
     safe_copy = {k: v for k, v in payload.items() if k not in ("updated_at",)}
@@ -112,12 +120,13 @@ def compute_content_hash(payload: Dict[str, Any]) -> str:
 
 # ---------------------------- DAL ----------------------------
 
+
 class CatalogDB:
     def __init__(self, table_name: str = "catalog", region_name: str = "eu-west-2"):
-        self.table = boto3.resource("dynamodb", region_name=region_name).Table(table_name)
+        self.table = boto3.resource(
+            "dynamodb", region_name=region_name).Table(table_name)
 
     # ... (rest of the methods: put_product, put_variant, upsert_from_source, etc.)
-
 
     # ----------- Product CRUD -----------
 
@@ -146,7 +155,8 @@ class CatalogDB:
         self.table.put_item(Item=item)
 
     def get_catalog_item(self, tenant_id: str, catalog_id: str) -> Optional[Dict[str, Any]]:
-        resp = self.table.get_item(Key={"PK": pk_tenant(tenant_id), "SK": sk_catalog(catalog_id)})
+        resp = self.table.get_item(
+            Key={"PK": pk_tenant(tenant_id), "SK": sk_catalog(catalog_id)})
         return resp.get("Item")
 
     # ----------- Variant CRUD -----------
@@ -199,7 +209,8 @@ class CatalogDB:
         self.table.put_item(Item=it)
 
     def get_variant(self, tenant_id: str, variant_id: str) -> Optional[Dict[str, Any]]:
-        resp = self.table.get_item(Key={"PK": pk_tenant(tenant_id), "SK": sk_variant(variant_id)})
+        resp = self.table.get_item(
+            Key={"PK": pk_tenant(tenant_id), "SK": sk_variant(variant_id)})
         return resp.get("Item")
 
     def delete_catalog_item_and_variants(self, tenant_id: str, catalog_id: str) -> int:
@@ -252,7 +263,8 @@ class CatalogDB:
 
         tracked = bool(it.get("inventory_tracked", True))
         policy = (inventory_policy or it.get("inventory_policy") or "deny")
-        in_stock = True if not tracked else (available_qty > 0 or policy == "continue")
+        in_stock = True if not tracked else (
+            available_qty > 0 or policy == "continue")
 
         # Build SET and REMOVE parts separately
         set_names = {}
@@ -261,19 +273,22 @@ class CatalogDB:
             ":ins": in_stock,
             ":u": now_iso()
         }
-        set_parts = ["available_qty = :aq", "in_stock = :ins", "updated_at = :u"]
+        set_parts = ["available_qty = :aq",
+                     "in_stock = :ins", "updated_at = :u"]
         remove_names = []
 
         # sparse GSIs
         if in_stock:
             # ensure we attach
-            self._gsi_set_for_variant(it, tenant_id, set_names, set_vals, set_parts)
+            self._gsi_set_for_variant(
+                it, tenant_id, set_names, set_vals, set_parts)
         else:
             # ensure we remove
-            for k in ("GSI1PK","GSI1SK","GSI2PK","GSI2SK","GSI3PK","GSI3SK"):
+            for k in ("GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK", "GSI3PK", "GSI3SK"):
                 remove_names.append(k)
 
-        update_expr = self._compose_update_expression(set_parts, remove_names, set_names)
+        update_expr = self._compose_update_expression(
+            set_parts, remove_names, set_names)
 
         resp = self.table.update_item(
             Key={"PK": pk_tenant(tenant_id), "SK": sk_variant(variant_id)},
@@ -313,9 +328,11 @@ class CatalogDB:
             # Temporarily override price_sort on local copy for key build
             it_local = dict(it)
             it_local["price_sort"] = price_sort
-            self._gsi_set_for_variant(it_local, tenant_id, set_names, set_vals, set_parts)
+            self._gsi_set_for_variant(
+                it_local, tenant_id, set_names, set_vals, set_parts)
 
-        update_expr = self._compose_update_expression(set_parts, remove_names, set_names)
+        update_expr = self._compose_update_expression(
+            set_parts, remove_names, set_names)
 
         resp = self.table.update_item(
             Key={"PK": pk_tenant(tenant_id), "SK": sk_variant(variant_id)},
@@ -349,7 +366,8 @@ class CatalogDB:
                          last_key: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
         resp = self.table.query(
             IndexName="GSI1_CategoryPrice",
-            KeyConditionExpression=Key("GSI1PK").eq(f"TENANT#{tenant_id}#CATEGORY#{category}"),
+            KeyConditionExpression=Key("GSI1PK").eq(
+                f"TENANT#{tenant_id}#CATEGORY#{category}"),
             Limit=limit,
             ScanIndexForward=True,
             **({"ExclusiveStartKey": last_key} if last_key else {})
@@ -360,7 +378,8 @@ class CatalogDB:
                     last_key: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
         resp = self.table.query(
             IndexName="GSI2_TagPrice",
-            KeyConditionExpression=Key("GSI2PK").eq(f"TENANT#{tenant_id}#TAG#{tag}"),
+            KeyConditionExpression=Key("GSI2PK").eq(
+                f"TENANT#{tenant_id}#TAG#{tag}"),
             Limit=limit,
             ScanIndexForward=True,
             **({"ExclusiveStartKey": last_key} if last_key else {})
@@ -371,7 +390,8 @@ class CatalogDB:
                            last_key: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
         resp = self.table.query(
             IndexName="GSI3_CollectionPrice",
-            KeyConditionExpression=Key("GSI3PK").eq(f"TENANT#{tenant_id}#COLLECTION#{collection}"),
+            KeyConditionExpression=Key("GSI3PK").eq(
+                f"TENANT#{tenant_id}#COLLECTION#{collection}"),
             Limit=limit,
             ScanIndexForward=True,
             **({"ExclusiveStartKey": last_key} if last_key else {})
@@ -382,7 +402,8 @@ class CatalogDB:
                             last_key: Optional[Dict[str, Any]] = None) -> Tuple[List[Dict[str, Any]], Optional[Dict[str, Any]]]:
         resp = self.table.query(
             IndexName="GSI4_TitlePrefix",
-            KeyConditionExpression=Key("GSI4PK").eq(f"TENANT#{tenant_id}#TITLE") & Key("GSI4SK").begins_with(norm_title(prefix)),
+            KeyConditionExpression=Key("GSI4PK").eq(f"TENANT#{tenant_id}#TITLE") & Key(
+                "GSI4SK").begins_with(norm_title(prefix)),
             Limit=limit,
             **({"ExclusiveStartKey": last_key} if last_key else {})
         )

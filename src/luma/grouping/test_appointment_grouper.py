@@ -47,7 +47,7 @@ StructureResult = structure_types_module.StructureResult
 def test_shared_services_shared_time():
     """Test: shared services, shared time"""
     entities = {
-        "service_families": [
+        "business_categories": [
             {"text": "haircut", "canonical": "beauty_and_wellness.haircut", "start": 2, "end": 3},
             {"text": "beard trim", "canonical": "beauty_and_wellness.beard_trim", "start": 4, "end": 5}
         ],
@@ -83,7 +83,7 @@ def test_shared_services_shared_time():
 def test_separate_services_per_service_time():
     """Test: separate services, per-service time"""
     entities = {
-        "service_families": [
+        "business_categories": [
             {"text": "haircut", "canonical": "beauty_and_wellness.haircut", "start": 1, "end": 2},
             {"text": "beard trim", "canonical": "beauty_and_wellness.beard_trim", "start": 5, "end": 6}
         ],
@@ -112,7 +112,7 @@ def test_separate_services_per_service_time():
     assert result["intent"] == BOOK_APPOINTMENT_INTENT
     assert result["status"] == STATUS_OK
     assert len(result["booking"]["services"]) == 2
-    assert len(result["booking"]["services"]) == len(entities["service_families"])
+    assert len(result["booking"]["services"]) == len(entities.get("business_categories") or entities.get("service_families", []))
     assert result["booking"]["date_ref"] == "tomorrow"
     # Note: per-service time handling may need enhancement
     assert result["booking"]["time_ref"] is not None
@@ -123,7 +123,7 @@ def test_separate_services_per_service_time():
 def test_ambiguous_input_needs_clarification():
     """Test: ambiguous input → NEEDS_CLARIFICATION"""
     entities = {
-        "service_families": [
+        "business_categories": [
             {"text": "haircut", "canonical": "beauty_and_wellness.haircut", "start": 1, "end": 2}
         ],
         "dates": [
@@ -162,7 +162,7 @@ def test_ambiguous_input_needs_clarification():
 def test_time_window():
     """Test: time window (morning, afternoon, etc.)"""
     entities = {
-        "service_families": [
+        "business_categories": [
             {"text": "haircut", "canonical": "beauty_and_wellness.haircut", "start": 1, "end": 2}
         ],
         "dates": [{"text": "tomorrow", "start": 2, "end": 3}],
@@ -194,7 +194,7 @@ def test_time_window():
 def test_time_range():
     """Test: time range (between X and Y)"""
     entities = {
-        "service_families": [
+        "business_categories": [
             {"text": "haircut", "canonical": "beauty_and_wellness.haircut", "start": 1, "end": 2}
         ],
         "dates": [{"text": "tomorrow", "start": 2, "end": 3}],
@@ -231,7 +231,7 @@ def test_time_range():
 def test_with_duration():
     """Test: booking with duration"""
     entities = {
-        "service_families": [
+        "business_categories": [
             {"text": "haircut", "canonical": "beauty_and_wellness.haircut", "start": 1, "end": 2}
         ],
         "dates": [{"text": "tomorrow", "start": 2, "end": 3}],
@@ -264,7 +264,7 @@ def test_with_duration():
 def test_absolute_date():
     """Test: absolute date preference"""
     entities = {
-        "service_families": [
+        "business_categories": [
             {"text": "haircut", "canonical": "beauty_and_wellness.haircut", "start": 1, "end": 2}
         ],
         "dates": [{"text": "tomorrow", "start": 2, "end": 3}],

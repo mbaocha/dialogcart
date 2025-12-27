@@ -145,8 +145,9 @@ def print_pipeline_result(result: Dict[str, Any], verbose: bool = False):
     psentence = extraction.get("psentence")
     if psentence:
         print(f"Psentence: {psentence}")
-    print(f"Services: {len(extraction.get('service_families', []))}")
-    for svc in extraction.get('service_families', []):
+    business_categories = extraction.get('business_categories') or extraction.get('service_families', [])
+    print(f"Services: {len(business_categories)}")
+    for svc in business_categories:
         print(f"  - {svc.get('text')} ({svc.get('canonical')})")
     print(
         f"Dates: {len(extraction.get('dates', [])) + len(extraction.get('dates_absolute', []))}")

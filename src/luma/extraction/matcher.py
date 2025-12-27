@@ -9,8 +9,27 @@ and reservation systems.
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 import re
+import logging
 
-from luma.config import debug_print
+logger = logging.getLogger(__name__)
+
+try:
+    from luma.config import debug_print
+    from luma.clarification import Clarification, ClarificationReason
+except ImportError:  # pragma: no cover - fallback for static analysis
+    def debug_print(*args, **kwargs):
+        return None
+
+    class Clarification:  # type: ignore
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def to_dict(self):
+            return {}
+
+    class ClarificationReason:  # type: ignore
+        CONFLICTING_SIGNALS = "CONFLICTING_SIGNALS"
+        CONTEXT_DEPENDENT_VALUE = "CONTEXT_DEPENDENT_VALUE"
 
 from .normalization import (
     normalize_hyphens,
@@ -27,17 +46,22 @@ from .vocabulary_normalization import (
 )
 
 from .entity_loading import (
-    init_nlp_with_service_families,
+    init_nlp_with_business_categories,
     load_global_noise_set,
     load_global_orthography_rules,
-    load_global_service_families,
-    build_service_family_synonym_map,
+    load_global_business_categories,
+    build_business_category_synonym_map,
     load_global_entity_types,
+    get_global_json_path,
 )
 
 from .entity_processing import (
     extract_entities_from_doc,
     build_parameterized_sentence,
+)
+from .service_annotation import (
+    annotate_service_tokens,
+    consume_service_annotations,
 )
 
 
@@ -47,28 +71,28 @@ from .entity_processing import (
 
 DOMAIN_ENTITY_WHITELIST = {
     "service": {
-        "service_families", "dates", "dates_absolute", "times", "time_windows", "durations"
+        "business_categories", "dates", "dates_absolute", "times", "time_windows", "durations"
     },
     "reservation": {
-        "service_families", "dates", "dates_absolute", "times", "time_windows", "durations"
+        "business_categories", "dates", "dates_absolute", "times", "time_windows", "durations"
     }
 }
 
 
-def _build_natural_language_variant_map_from_service_families(
-    service_families: Dict[str, Dict[str, Any]]
+def _build_natural_language_variant_map_from_business_categories(
+    business_categories: Dict[str, Dict[str, Any]]
 ) -> Dict[str, str]:
     """
-    Build natural language variant map from service families.
+    Build natural language variant map from business categories.
 
-    Maps service family synonyms to a preferred natural language form (first synonym).
+    Maps business category synonyms to a preferred natural language form (first synonym).
     This map is used to normalize variants like "hair cut" → "haircut".
 
     CRITICAL: This map MUST NOT contain canonical IDs (e.g., "beauty_and_wellness.haircut").
     It only maps natural language variants to other natural language forms.
 
     Example:
-        service_families: {
+        business_categories: {
             "beauty_and_wellness": {
                 "haircut": {"synonym": ["haircut", "hair trim"]}
             }
@@ -78,7 +102,7 @@ def _build_natural_language_variant_map_from_service_families(
     """
     variant_map = {}
 
-    for _category, families in service_families.items():
+    for _category, families in business_categories.items():
         if not isinstance(families, dict):
             continue
 
@@ -120,6 +144,36 @@ def detect_tenant_alias_spans(
     - Exact phrase match (case-insensitive) on normalized text
     - Longest-match wins (sort by phrase length desc)
     - Word-boundary safe
+    
+    Uses compiled alias structure for performance (with fallback to slow path).
+    """
+    if not tenant_aliases:
+        return []
+
+    # Try optimized compiled version first
+    try:
+        from luma.normalization.alias_compiler import detect_tenant_alias_spans_compiled
+        result = detect_tenant_alias_spans_compiled(normalized_text, tenant_aliases)
+        # If result is not None, use it (empty list means no aliases, which is valid)
+        # If result is None, it means compilation failed - fall back to slow path
+        if result is not None:
+            return result
+    except Exception:
+        # Fallback to slow path if import or call fails
+        pass
+
+    # Fallback: original implementation (slow path)
+    # Only called if aliases exist but compilation failed
+    return _detect_tenant_alias_spans_slow(normalized_text, tenant_aliases)
+
+
+def _detect_tenant_alias_spans_slow(
+    normalized_text: str, tenant_aliases: Dict[str, str]
+) -> List[Dict[str, Any]]:
+    """
+    Slow-path implementation of alias span detection.
+    
+    Used as fallback when compiled version is unavailable.
     """
     if not tenant_aliases:
         return []
@@ -160,7 +214,8 @@ def detect_tenant_alias_spans(
                     "start_char": start_char,
                     "end_char": end_char,
                     "text": normalized_text[start_char:end_char],
-                    "canonical": canonical,
+                    "canonical": canonical,  # alias value (canonical_family)
+                    "alias_key": alias,  # alias key (tenant_service_id)
                 }
             )
             used_ranges.append((start_char, end_char))
@@ -281,38 +336,31 @@ class EntityMatcher:
 
         self.domain = domain
 
-        # Find global JSON file (required for service families)
+        # Find global JSON file (required for business categories)
         entity_path = Path(entity_file).resolve() if entity_file else None
         if entity_path:
-            # Look for global.v2.json in same directory
-            global_json_path = entity_path.parent / "global.v2.json"
+            # Look for global JSON in same directory as entity_file
+            base_dir = entity_path.parent
         else:
-            # Try to find global.v2.json in standard location
-            # This is a fallback - ideally entity_file should point to a file in the normalization directory
-            # From matcher.py: parent = extraction/, parent.parent = luma/, so luma/store/normalization/
-            script_dir = Path(__file__).parent
-            global_json_path = script_dir.parent / \
-                "store" / "normalization" / "global.v2.json"
-            if not global_json_path.exists():
-                global_json_path = None
+            # Use standard location
+            base_dir = None
 
-        if not global_json_path or not global_json_path.exists():
-            raise ValueError(
-                "global.v2.json not found. Please provide entity_file pointing to a file in the normalization directory.")
+        global_json_path = get_global_json_path(base_dir)
 
-        # Load global service families (GLOBAL semantic concepts)
-        self.service_families = load_global_service_families(global_json_path)
+        # Load global business categories (GLOBAL semantic concepts)
+        self.business_categories = load_global_business_categories(
+            global_json_path)
         debug_print(
-            "[EntityMatcher] Loaded service families from global JSON 2")
+            "[EntityMatcher] Loaded business categories from global JSON")
 
-        # Build natural language variant map from service families
+        # Build natural language variant map from business categories
         # This maps variants to preferred natural language forms (NOT canonical IDs)
-        self.variant_map = _build_natural_language_variant_map_from_service_families(
-            self.service_families)
+        self.variant_map = _build_natural_language_variant_map_from_business_categories(
+            self.business_categories)
 
-        # Build service family synonym map (for canonicalization)
-        self.service_family_map = build_service_family_synonym_map(
-            self.service_families)
+        # Build business category synonym map (for canonicalization)
+        self.business_category_map = build_business_category_synonym_map(
+            self.business_categories)
 
         # Load global normalization (orthography, noise, vocabularies)
         self.noise_set = load_global_noise_set(global_json_path)
@@ -323,10 +371,10 @@ class EntityMatcher:
         vocabularies = load_vocabularies(global_json_path)
         self.vocabularies = vocabularies
         entity_types = load_global_entity_types(global_json_path)
-        service_families = load_global_service_families(global_json_path)
+        business_categories = load_global_business_categories(global_json_path)
 
         # Validate vocabularies
-        validate_vocabularies(vocabularies, entity_types, service_families)
+        validate_vocabularies(vocabularies, entity_types, business_categories)
 
         # Compile vocabulary maps
         self.synonym_map, self.typo_map, self.all_canonicals = compile_vocabulary_maps(
@@ -337,12 +385,12 @@ class EntityMatcher:
 
         # Tenant entities are unused (kept for backward compatibility)
         self.entities = []
-        self.service_map = {}  # Empty - service families use service_family_map instead
+        self.service_map = {}  # Empty - business categories use business_category_map instead
 
-        # spaCy init with service families
+        # spaCy init with business categories
         self.nlp = None
         if not lazy_load_spacy:
-            self.nlp, _ = init_nlp_with_service_families(global_json_path)
+            self.nlp, _ = init_nlp_with_business_categories(global_json_path)
 
     # ------------------------------------------------------------------
     # Public API
@@ -369,6 +417,9 @@ class EntityMatcher:
         if self.nlp is None:
             raise RuntimeError("spaCy not initialized")
 
+        # request_id is reserved for future logging/debug; unused for now
+        _ = request_id
+
         # 1️⃣ Normalize (natural language only - NO canonical IDs)
         # Pipeline order: lowercase → orthography → vocabulary (synonyms + typos) → noise removal
         text = normalize_hyphens(text)
@@ -393,62 +444,174 @@ class EntityMatcher:
         # 2️⃣ Extract entities from spaCy doc
         raw_result, doc = extract_entities_from_doc(self.nlp, normalized)
 
-        # Protect alias spans from being collapsed to generic service families
-        if alias_spans:
-            raw_result = merge_alias_spans_into_services(
-                raw_result, doc, alias_spans)
+        # 2.5️⃣ Apply temporal inference rules if enabled
+        from ..config.temporal_rules import TEMPORAL_RULES
+        if TEMPORAL_RULES.allow_partial_meridiem_propagation:
+            raw_result = self._propagate_meridiem_in_ranges(
+                normalized, raw_result, doc)
+        if TEMPORAL_RULES.allow_time_of_day_inference:
+            raw_result = self._infer_meridiem_from_time_window(
+                normalized, raw_result, doc)
 
-        # 3️⃣ Map SERVICE_FAMILY entities to canonical service family IDs
-        service_families = []
-        if "services" in raw_result:
-            # spaCy extracts SERVICE_FAMILY entities as "services" in raw_result
-            for entity in raw_result["services"]:
-                entity_text = entity.get("text", "").lower()
-                # Map to canonical service family ID (e.g., "beauty_and_wellness.haircut")
-                canonical_id = entity.get("canonical") or self.service_family_map.get(entity_text)
+        # Detect range tails like "oct 5th to 9th" where only the first absolute
+        # date is extracted. If safe, synthesize a second absolute date using the
+        # same month/year. If unsafe (tail < start), mark ambiguity for downstream
+        # clarification.
+        self._maybe_expand_absolute_date_range_tail(raw_result)
 
-                # Convert position/length to start/end token indices
-                position = entity.get("position", 0)
-                length = entity.get("length", 1)
-                start = position
-                end = position + length
+        # 3️⃣ TWO-STEP SERVICE RESOLUTION PIPELINE
+        # Step 1: Non-destructive annotation (mark ALIAS/FAMILY/MODIFIER tokens without removing them)
+        service_annotations = annotate_service_tokens(
+            doc=doc,
+            alias_spans=alias_spans,
+            services=raw_result.get("services", []),
+            business_category_map=self.business_category_map,
+            tenant_aliases=tenant_aliases
+        )
+        
+        # Log annotated sentence (Step 1 output)
+        if request_id:
+            logger.debug(
+                f"[annotation] Step 1 annotated sentence for request {request_id}",
+                extra={
+                    'request_id': request_id,
+                    'alias_count': len(service_annotations.get("alias_annotations", [])),
+                    'family_count': len(service_annotations.get("family_annotations", []))
+                }
+            )
 
-                if canonical_id:
-                    service_families.append({
-                        "text": entity_text,
-                        "canonical": canonical_id,
-                        "start": start,
-                        "end": end
-                    })
-                else:
-                    # Fallback: use original text if mapping not found
-                    service_families.append({
-                        "text": entity_text,
-                        "canonical": None,
-                        "start": start,
-                        "end": end
-                    })
+        # Step 2: Deterministic consumption pass (replace ALIAS with servicetenanttoken, FAMILY with servicefamilytoken)
+        psentence_services, consumption_metadata = consume_service_annotations(
+            doc=doc,
+            annotations=service_annotations,
+            logger_instance=logger
+        )
+        
+        # Log consumed sentence (Step 2 output)
+        if request_id:
+            logger.debug(
+                f"[consumption] Step 2 consumed sentence for request {request_id}",
+                extra={
+                    'request_id': request_id,
+                    'has_alias': consumption_metadata.get("has_alias", False),
+                    'parameterized_sentence': psentence_services
+                }
+            )
 
-        # 4️⃣ Build parameterized sentence
-        # Phase 1: Service/tenant alias replacement (already done in normalization)
-        # Track what was replaced for logging
-        phase1_replacements = []
-        for entity in raw_result.get("services", []):
-            entity_text = entity.get("text", "").lower()
-            canonical_id = self.service_family_map.get(entity_text)
-            if canonical_id:
-                phase1_replacements.append({
-                    "span": entity_text,
-                    "rule": "global_service_family",
-                    "replaced_with": "servicefamilytoken"
+        # Rebuild full parameterized sentence: services from consumption + other entities from build_parameterized_sentence
+        final_tokens = [t.text.lower() for t in doc]
+        all_replacements = []
+        
+        # Add service replacements from consumption (servicetenanttoken or servicefamilytoken)
+        alias_ranges = service_annotations.get("alias_token_ranges", [])
+        
+        if consumption_metadata.get("has_alias"):
+            # Aliases present: use servicetenanttoken
+            for alias_ann in service_annotations.get("alias_annotations", []):
+                start = alias_ann["start_token"]
+                end = alias_ann["end_token"]
+                all_replacements.append((start, end, "servicetenanttoken"))
+        else:
+            # No aliases: use servicefamilytoken for non-suppressed families
+            for family_ann in service_annotations.get("family_annotations", []):
+                start = family_ann["start_token"]
+                end = family_ann["end_token"]
+                # Check if not suppressed by alias
+                suppressed = any(
+                    not (end <= a_start or start >= a_end)
+                    for a_start, a_end in alias_ranges
+                )
+                if not suppressed:
+                    all_replacements.append((start, end, "servicefamilytoken"))
+        
+        # Add other entity replacements (dates, times, durations)
+        placeholder_map = {
+            "dates": "datetoken",
+            "dates_absolute": "datetoken",
+            "times": "timetoken",
+            "time_windows": "timewindowtoken",
+            "durations": "durationtoken"
+        }
+        for entity_type, ents in raw_result.items():
+            if entity_type == "services" or entity_type.startswith("_"):
+                continue
+            placeholder = placeholder_map.get(entity_type)
+            if placeholder:
+                for e in ents:
+                    start = e.get("position", 0)
+                    end = start + e.get("length", 1)
+                    all_replacements.append((start, end, placeholder))
+        
+        # Apply all replacements backwards (end-to-start) to avoid index shifting
+        all_replacements.sort(key=lambda x: (x[1], x[0]), reverse=True)
+        for start, end, placeholder in all_replacements:
+            final_tokens[start:end] = [placeholder]
+        
+        psentence = " ".join(final_tokens)
+        
+        # Post-normalize parameterized text
+        from .normalization import post_normalize_parameterized_text
+        psentence = post_normalize_parameterized_text(psentence)
+        
+        # Build business_categories from annotations (for downstream use)
+        # MODIFIER annotations are NOT included in business_categories (modifiers are not services)
+        business_categories = []
+        # Add aliases as business categories with tenant_service_id and canonical_family
+        for alias_ann in service_annotations.get("alias_annotations", []):
+            business_categories.append({
+                "text": alias_ann["text"],
+                "canonical": alias_ann.get("canonical_family"),  # alias value = canonical_family
+                "tenant_service_id": alias_ann["tenant_service_id"],  # alias key = tenant_service_id
+                "start": alias_ann["start_token"],
+                "end": alias_ann["end_token"],
+                "annotation_type": "ALIAS"
+            })
+        # Add families as business categories (only if not suppressed)
+        # Note: MODIFIER annotations are excluded - modifiers are not services
+        for family_ann in service_annotations.get("family_annotations", []):
+            start = family_ann["start_token"]
+            end = family_ann["end_token"]
+            suppressed = any(
+                not (end <= a_start or start >= a_end)
+                for a_start, a_end in alias_ranges
+            )
+            if not suppressed:
+                business_categories.append({
+                    "text": family_ann["text"],
+                    "canonical": family_ann["canonical_family"],
+                    "start": start,
+                    "end": end,
+                    "annotation_type": "FAMILY"
                 })
         
-        psentence, phase2_replacements = build_parameterized_sentence(doc, raw_result)
-        # Noise is preserved in psentence (not removed)
+        # Store consumption metadata and annotations for decision layer
+        raw_result["_service_consumption_metadata"] = consumption_metadata
+        raw_result["_service_annotations"] = service_annotations
+        
+        # Build phase1_replacements for backward compatibility (empty - replaced by consumption_metadata)
+        phase1_replacements = []
+        
+        # Build phase2_replacements for logging (non-service entities)
+        phase2_replacements = []
+        for entity_type, ents in raw_result.items():
+            if entity_type in ("dates", "dates_absolute"):
+                for e in ents:
+                    phase2_replacements.append({
+                        "type": "date",
+                        "span": e.get("text", ""),
+                        "replaced_with": "datetoken"
+                    })
+            elif entity_type in ("times", "time_windows"):
+                for e in ents:
+                    phase2_replacements.append({
+                        "type": "time",
+                        "span": e.get("text", ""),
+                        "replaced_with": "timetoken" if entity_type == "times" else "timewindowtoken"
+                    })
 
         osentence = normalized
 
-        # 5️⃣ Build domain-native result with service_families
+        # 5️⃣ Build domain-native result with business_categories
         # Convert dates, times, durations to include start/end spans
         dates = []
         for date_ent in raw_result.get("dates", []):
@@ -485,7 +648,7 @@ class EntityMatcher:
             position = time_window_ent.get("position", 0)
             length = time_window_ent.get("length", 1)
             time_window_text = time_window_ent.get("text", "").lower()
-            
+
             # Build time window entity with symbolic label only
             # Numeric expansion is handled by calendar binding using configurable mapping
             time_window_obj = {
@@ -494,7 +657,7 @@ class EntityMatcher:
                 "end": position + length,
                 "time_window": time_window_text  # Symbolic semantic field only
             }
-            
+
             time_windows.append(time_window_obj)
 
         durations = []
@@ -511,7 +674,15 @@ class EntityMatcher:
         # If vocabulary canonicals exist but no entities were extracted, require clarification
         needs_clarification = False
         clarification = None
-        if not dates and not dates_absolute and not times and not time_windows:
+        if raw_result.get("_date_range_ambiguous"):
+            needs_clarification = True
+            clarification = Clarification(
+                reason=ClarificationReason.CONFLICTING_SIGNALS,
+                data={"template": "ask_end_date",
+                      "error_type": "ambiguous_date_range"}
+            )
+
+        if not dates and not dates_absolute and not times and not time_windows and not needs_clarification:
             # Check if normalized text contains vocabulary canonicals that should have been extracted
             normalized_lower = normalized.lower()
             normalized_words = set(normalized_lower.split())
@@ -525,7 +696,6 @@ class EntityMatcher:
                     break
 
             if has_unresolved_vocab:
-                from ..clarification import Clarification, ClarificationReason
                 needs_clarification = True
                 clarification = Clarification(
                     reason=ClarificationReason.CONTEXT_DEPENDENT_VALUE,
@@ -535,7 +705,7 @@ class EntityMatcher:
         result = {
             "osentence": osentence,
             "psentence": psentence,
-            "service_families": service_families,
+            "business_categories": business_categories,
             "dates": dates,
             "dates_absolute": dates_absolute,
             "times": times,
@@ -557,7 +727,7 @@ class EntityMatcher:
         allowed_keys = DOMAIN_ENTITY_WHITELIST[self.domain]
         final_result = {
             k: v for k, v in result.items()
-            if k in allowed_keys or k in {"osentence", "psentence", "service_families", "date_modifiers_vocab", "_phase1_replacements", "_phase2_replacements", "_tokens"}
+            if k in allowed_keys or k in {"osentence", "psentence", "business_categories", "date_modifiers_vocab", "_phase1_replacements", "_phase2_replacements", "_tokens"}
         }
 
         if debug_units:
@@ -569,6 +739,319 @@ class EntityMatcher:
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
+
+    def _maybe_expand_absolute_date_range_tail(self, raw_result: Dict[str, Any]) -> None:
+        """
+        Detect patterns like "oct 5th to 9th" where spaCy only emits one DATE_ABSOLUTE.
+        Safe case: tail_day >= start_day -> add second absolute date (same month/year).
+        Unsafe case: tail_day < start_day -> mark ambiguity for downstream clarification.
+        """
+        dates_abs = raw_result.get("dates_absolute") or []
+        dates_rel = raw_result.get("dates") or []
+
+        # Work on a single date reference (absolute preferred, else relative)
+        source_list = None
+        if len(dates_abs) == 1:
+            source_list = dates_abs
+        elif len(dates_abs) == 0 and len(dates_rel) == 1:
+            source_list = dates_rel
+        else:
+            return
+
+        tokens: List[str] = raw_result.get("_tokens") or []
+        if not tokens:
+            return
+
+        start_ent = source_list[0]
+        start_pos = start_ent.get("position", 0)
+        start_len = start_ent.get("length", 1)
+        start_end = start_pos + start_len
+
+        # Need marker + day after the first date
+        if start_end + 1 >= len(tokens):
+            return
+
+        marker = tokens[start_end].lower()
+        if marker not in {"to", "-", "until", "through", "thru"}:
+            return
+
+        tail_idx = start_end + 1
+        tail_token = tokens[tail_idx]
+        tail_next = tokens[tail_idx + 1] if tail_idx + \
+            1 < len(tokens) else None
+
+        def _parse_day(token: str) -> Optional[int]:
+            m = re.match(r"^(\d{1,2})(?:st|nd|rd|th)?$", token)
+            return int(m.group(1)) if m else None
+
+        day_val = _parse_day(tail_token)
+        day_text = None
+
+        if day_val is not None:
+            day_text = tail_token
+        else:
+            # Try split ordinal: number token followed by suffix
+            num_val = _parse_day(tail_token)
+            if num_val is not None and tail_next and tail_next.lower() in {"st", "nd", "rd", "th"}:
+                day_val = num_val
+                day_text = f"{tail_token} {tail_next}"
+            elif num_val is not None:
+                day_val = num_val
+                day_text = tail_token
+            elif tail_next:
+                suf_val = _parse_day(tail_next)
+                if suf_val is not None:
+                    day_val = suf_val
+                    day_text = tail_next
+
+        if day_val is None:
+            return
+
+        start_text = start_ent.get("text", "")
+        month_match = re.search(
+            r"(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)",
+            start_text,
+            re.IGNORECASE,
+        )
+        if not month_match:
+            return
+        month_text = month_match.group(1)
+
+        start_day_match = re.search(r"(\d{1,2})", start_text)
+        if not start_day_match:
+            return
+        start_day_val = int(start_day_match.group(1))
+
+        # Unsafe rollover (tail before start) -> mark ambiguity, do not add end date
+        if day_val < start_day_val:
+            raw_result["_date_range_ambiguous"] = True
+            return
+
+        end_text = f"{month_text} {day_text}".strip()
+
+        # Compute length to cover the tail tokens
+        end_length = 1
+        if day_text and " " in day_text:
+            end_length = 2
+
+        # Append to whichever source list we augmented
+        source_list.append({
+            "text": end_text,
+            "position": tail_idx,
+            "length": end_length
+        })
+        # Also append to dates_absolute to improve absolute detection downstream
+        raw_result.setdefault("dates_absolute", []).append({
+            "text": end_text,
+            "position": tail_idx,
+            "length": end_length
+        })
+
+    def _propagate_meridiem_in_ranges(
+        self, normalized: str, raw_result: Dict[str, Any], doc: Any
+    ) -> Dict[str, Any]:
+        """
+        Propagate AM/PM from one time to another in range patterns.
+
+        Examples:
+        - "between 2pm and 5" → "between 2pm and 5pm" (add TIME entity for "5pm")
+        - "between 2 and 5pm" → "between 2pm and 5pm" (add TIME entity for "2pm")
+
+        This ensures both times become timetoken in the parameterized sentence.
+        """
+        tokens = [t.text for t in doc]  # Keep original case for matching
+        tokens_lower = [t.lower() for t in tokens]
+        normalized_lower = normalized.lower()
+
+        # Check for range patterns: "between X and Y" or "from X to Y"
+        range_pattern = re.compile(
+            r'\b(between|from)\s+(\d{1,2}(?:\s*(?:am|pm))?)\s+(and|to|-)\s+(\d{1,2}(?:\s*(?:am|pm))?)\b',
+            re.IGNORECASE
+        )
+
+        match = range_pattern.search(normalized_lower)
+        if not match:
+            return raw_result
+
+        start_part = match.group(2).strip()  # e.g., "2pm" or "2"
+        end_part = match.group(4).strip()   # e.g., "5" or "5pm"
+
+        # Extract meridiem from parts
+        start_has_meridiem = bool(
+            re.search(r'\b(am|pm)\b', start_part, re.IGNORECASE))
+        end_has_meridiem = bool(
+            re.search(r'\b(am|pm)\b', end_part, re.IGNORECASE))
+
+        # Only propagate if exactly one has meridiem
+        if start_has_meridiem == end_has_meridiem:
+            return raw_result  # Both have it or both don't - no propagation needed
+
+        # Extract the hour number and meridiem
+        start_hour_match = re.search(r'(\d{1,2})', start_part)
+        end_hour_match = re.search(r'(\d{1,2})', end_part)
+
+        if not start_hour_match or not end_hour_match:
+            return raw_result
+
+        # Determine which one needs meridiem and find its position
+        # Use smart propagation: if end hour > start hour, infer PM for end (same day)
+        missing_pos = None
+        missing_time_text = None
+
+        if start_has_meridiem and not end_has_meridiem:
+            # Propagate from start to end: "2pm and 5" → add "5pm"
+            start_meridiem = re.search(r'\b(am|pm)\b', start_part,
+                                       re.IGNORECASE).group(1).lower()
+            start_hour = int(start_hour_match.group(1))
+            end_hour = int(end_hour_match.group(1))
+            missing_hour = end_hour_match.group(1)
+
+            # Smart propagation: if end hour < start hour, infer opposite meridiem (same-day afternoon)
+            # Example: "11am and 2" → "2pm" (not "2am") because 2 < 11 suggests afternoon same day
+            # Example: "2pm and 5" → "5pm" (not "5am") because 5 > 2 suggests same period
+            if end_hour < start_hour:
+                # End hour is lower → likely same day afternoon, so use opposite meridiem
+                inferred_meridiem = "pm" if start_meridiem == "am" else "am"
+            else:
+                # End hour >= start hour → use same meridiem (same period)
+                inferred_meridiem = start_meridiem
+
+            missing_time_text = f"{missing_hour}{inferred_meridiem}"
+            # Find position of the missing hour in tokens
+            for i, token_lower in enumerate(tokens_lower):
+                if token_lower == missing_hour:
+                    missing_pos = i
+                    break
+        elif end_has_meridiem and not start_has_meridiem:
+            # Propagate from end to start: "2 and 5pm" → add "2pm"
+            end_meridiem = re.search(r'\b(am|pm)\b', end_part,
+                                     re.IGNORECASE).group(1).lower()
+            start_hour = int(start_hour_match.group(1))
+            end_hour = int(end_hour_match.group(1))
+            missing_hour = start_hour_match.group(1)
+
+            # Smart propagation: if start hour < end hour, infer same meridiem for same-day range
+            # Example: "2 and 5pm" → "2pm" (not "2am") because 2 < 5 suggests same period
+            if start_hour < end_hour:
+                # Start hour is lower → likely same day, so use same meridiem
+                inferred_meridiem = end_meridiem
+            else:
+                # Start hour >= end hour → use opposite meridiem (could be previous day or same period)
+                inferred_meridiem = "pm" if end_meridiem == "am" else "am"
+
+            missing_time_text = f"{missing_hour}{inferred_meridiem}"
+            # Find position of the missing hour in tokens
+            for i, token_lower in enumerate(tokens_lower):
+                if token_lower == missing_hour:
+                    missing_pos = i
+                    break
+
+        if missing_pos is None or missing_time_text is None:
+            return raw_result
+
+        # Check if a TIME entity already exists at this position
+        existing_times = raw_result.get("times", [])
+        for time_ent in existing_times:
+            if time_ent.get("position") == missing_pos:
+                # Already has a TIME entity here - don't add duplicate
+                return raw_result
+
+        # Add synthetic TIME entity
+        from .entity_processing import add_entity
+        add_entity(raw_result, "times", missing_time_text, missing_pos, 1)
+
+        return raw_result
+
+    def _infer_meridiem_from_time_window(
+        self, normalized: str, raw_result: Dict[str, Any], doc: Any
+    ) -> Dict[str, Any]:
+        """
+        Infer AM/PM for times without meridiem based on time window context.
+
+        Examples:
+        - "tomorrow morning between 2 and 5" → "2am and 5am" (both become timetoken)
+        - "tomorrow afternoon between 2 and 5" → "2pm and 5pm" (both become timetoken)
+        - "tomorrow evening between 2 and 5" → "2pm and 5pm" (both become timetoken)
+        - "tomorrow night between 2 and 5" → "2pm and 5pm" (both become timetoken)
+
+        This ensures both times become timetoken in the parameterized sentence when
+        a time window provides context for meridiem inference.
+        """
+        # Check if time windows are present
+        time_windows = raw_result.get("time_windows", [])
+        if not time_windows:
+            return raw_result  # No time window context available
+
+        # Get time window word and determine meridiem
+        time_window_text = time_windows[0].get("text", "").lower()
+        inferred_meridiem = None
+
+        if time_window_text in ["morning"]:
+            inferred_meridiem = "am"
+        elif time_window_text in ["afternoon", "evening", "night"]:
+            inferred_meridiem = "pm"
+        else:
+            return raw_result  # Unknown time window
+
+        # Check for times without AM/PM in range patterns
+        tokens = [t.text for t in doc]
+        tokens_lower = [t.lower() for t in tokens]
+        normalized_lower = normalized.lower()
+
+        # Check for range patterns: "between X and Y" or "from X to Y"
+        range_pattern = re.compile(
+            r'\b(between|from)\s+(\d{1,2}(?:\s*(?:am|pm))?)\s+(and|to|-)\s+(\d{1,2}(?:\s*(?:am|pm))?)\b',
+            re.IGNORECASE
+        )
+
+        match = range_pattern.search(normalized_lower)
+        if not match:
+            return raw_result
+
+        start_part = match.group(2).strip()  # e.g., "2pm" or "2"
+        end_part = match.group(4).strip()   # e.g., "5" or "5pm"
+
+        # Extract hour numbers
+        start_hour_match = re.search(r'(\d{1,2})', start_part)
+        end_hour_match = re.search(r'(\d{1,2})', end_part)
+
+        if not start_hour_match or not end_hour_match:
+            return raw_result
+
+        # Check if times have AM/PM
+        start_has_meridiem = bool(
+            re.search(r'\b(am|pm)\b', start_part, re.IGNORECASE))
+        end_has_meridiem = bool(
+            re.search(r'\b(am|pm)\b', end_part, re.IGNORECASE))
+
+        # Infer meridiem for times that don't have it
+        from .entity_processing import add_entity
+
+        if not start_has_meridiem:
+            start_hour = start_hour_match.group(1)
+            start_time_text = f"{start_hour}{inferred_meridiem}"
+            # Find position of start hour in tokens
+            for i, token_lower in enumerate(tokens_lower):
+                if token_lower == start_hour:
+                    # Check if TIME entity already exists at this position
+                    existing_times = raw_result.get("times", [])
+                    if not any(t.get("position") == i for t in existing_times):
+                        add_entity(raw_result, "times", start_time_text, i, 1)
+                    break
+
+        if not end_has_meridiem:
+            end_hour = end_hour_match.group(1)
+            end_time_text = f"{end_hour}{inferred_meridiem}"
+            # Find position of end hour in tokens
+            for i, token_lower in enumerate(tokens_lower):
+                if token_lower == end_hour:
+                    # Check if TIME entity already exists at this position
+                    existing_times = raw_result.get("times", [])
+                    if not any(t.get("position") == i for t in existing_times):
+                        add_entity(raw_result, "times", end_time_text, i, 1)
+                    break
+
+        return raw_result
 
     def _remove_noise_from_psentence(self, psentence: str) -> str:
         """

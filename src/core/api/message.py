@@ -24,6 +24,7 @@ class MessageRequest(BaseModel):
     text: str
     domain: Optional[str] = "service"
     timezone: Optional[str] = "UTC"
+    organization_id: Optional[int] = None 
 
 
 class MessageResponse(BaseModel):
@@ -50,7 +51,8 @@ async def post_message(request: MessageRequest):
             user_id=request.user_id,
             text=request.text,
             domain=request.domain,
-            timezone=request.timezone
+            timezone=request.timezone, 
+            organization_id=request.organization_id 
         )
         
         # Convert to response model

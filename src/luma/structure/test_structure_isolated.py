@@ -53,7 +53,7 @@ def test_shared_vs_separate_services():
     # Shared services: joined by "and"
     psentence1 = "book servicefamilytoken and servicefamilytoken datetoken"
     entities1 = {
-        "service_families": [
+        "business_categories": [
             {"text": "haircut", "start": 1, "end": 2},
             {"text": "beard trim", "start": 3, "end": 4}
         ],
@@ -69,7 +69,7 @@ def test_shared_vs_separate_services():
     # Separate services: verb between them
     psentence2 = "book servicefamilytoken then book servicefamilytoken"
     entities2 = {
-        "service_families": [
+        "business_categories": [
             {"text": "haircut", "start": 1, "end": 2},
             {"text": "beard trim", "start": 4, "end": 5}
         ],
@@ -92,7 +92,7 @@ def test_exact_vs_range_time():
     # Exact time
     psentence1 = "book servicefamilytoken at timetoken"
     entities1 = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [],
         "times": [{"text": "9am"}],
         "time_windows": [],
@@ -105,7 +105,7 @@ def test_exact_vs_range_time():
     # Time range
     psentence2 = "book servicefamilytoken between timetoken and timetoken"
     entities2 = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [],
         "times": [{"text": "9am"}, {"text": "5pm"}],
         "time_windows": [],
@@ -118,7 +118,7 @@ def test_exact_vs_range_time():
     # Time window
     psentence3 = "book servicefamilytoken timewindowtoken"
     entities3 = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [],
         "times": [],
         "time_windows": [{"text": "morning"}],
@@ -137,7 +137,7 @@ def test_shared_vs_per_service_time():
     # Shared time: comes after all services
     psentence1 = "book servicefamilytoken and servicefamilytoken at timetoken"
     entities1 = {
-        "service_families": [
+        "business_categories": [
             {"text": "haircut", "start": 1, "end": 2},
             {"text": "beard trim", "start": 3, "end": 4}
         ],
@@ -153,7 +153,7 @@ def test_shared_vs_per_service_time():
     # Per-service time: interleaved with services
     psentence2 = "book servicefamilytoken at timetoken and servicefamilytoken"
     entities2 = {
-        "service_families": [
+        "business_categories": [
             {"text": "haircut", "start": 1, "end": 2},
             {"text": "beard trim", "start": 5, "end": 6}
         ],
@@ -174,7 +174,7 @@ def test_duration_detection():
     
     psentence = "book servicefamilytoken for durationtoken"
     entities = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [],
         "times": [],
         "time_windows": [],
@@ -193,7 +193,7 @@ def test_clarification_needed():
     # Multiple dates without range marker
     psentence1 = "book servicefamilytoken datetoken datetoken"
     entities1 = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}, {"text": "next week"}],
         "times": [],
         "time_windows": [],
@@ -206,7 +206,7 @@ def test_clarification_needed():
     # Multiple times without range marker
     psentence2 = "book servicefamilytoken timetoken timetoken"
     entities2 = {
-        "service_families": [{"text": "haircut"}],
+        "business_categories": [{"text": "haircut"}],
         "dates": [],
         "times": [{"text": "9am"}, {"text": "5pm"}],
         "time_windows": [],

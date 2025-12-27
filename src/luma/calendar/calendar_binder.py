@@ -9,7 +9,7 @@ This layer answers: "What real dates/times does this correspond to?"
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Tuple
 import re
 
 # Try zoneinfo first (Python 3.9+), fallback to pytz
@@ -39,23 +39,22 @@ from ..extraction.entity_loading import (
     load_global_vocabularies,
     load_booking_policy,
 )
+from ..config.core import CREATE_RESERVATION, STATUS_READY
+from ..config.temporal import (
+    APPOINTMENT_TEMPORAL_TYPE,
+    DateMode,
+    RESERVATION_TEMPORAL_TYPE,
+    TimeMode,
+    FUZZY_TIME_WINDOWS,
+)
+from ..config.intent_meta import get_intent_registry
 
 
 def _get_global_config_path() -> Path:
     """Get path to global normalization config JSON."""
-    # Try multiple possible locations
-    # From calendar_binder.py: parent = calendar/, parent.parent = luma/, so luma/store/normalization/
-    possible_paths = [
-        Path(__file__).parent.parent / "store" /
-        "normalization" / "global.v2.json",
-        Path(__file__).parent.parent / "store" /
-        "normalization" / "global.v1.json",
-    ]
-    for path in possible_paths:
-        if path.exists():
-            return path
-    # Fallback - assume standard location
-    return Path(__file__).parent.parent / "store" / "normalization" / "global.v2.json"
+    from ..extraction.entity_loading import get_global_json_path
+    # Use standard location based on configured version
+    return get_global_json_path()
 
 
 # Lazy-loaded config (loaded on first use)
@@ -73,8 +72,9 @@ def _load_config() -> Dict[str, Any]:
         _CONFIG_CACHE["month_names"] = load_month_names(config_path)
         _CONFIG_CACHE["booking_policy"] = load_booking_policy(config_path)
         vocabularies = load_global_vocabularies(config_path)
-        _CONFIG_CACHE["weekday_to_number"] = vocabularies.get(
-            "weekdays", {}).get("to_number", {})
+        weekday_map = vocabularies.get("weekdays", {}).get("to_number")
+        if weekday_map:
+            _CONFIG_CACHE["weekday_to_number"] = weekday_map
     return _CONFIG_CACHE
 
 
@@ -88,7 +88,7 @@ def _get_time_window_bounds() -> Dict[str, Dict[str, str]]:
     return _load_config()["time_window_bounds"]
 
 
-def _get_booking_policy() -> Dict[str, bool]:
+def get_booking_policy() -> Dict[str, bool]:
     """Get booking policy from config."""
     return _load_config()["booking_policy"]
 
@@ -136,6 +136,48 @@ def _get_weekday_to_number() -> Dict[str, int]:
             "weekday", {}).get("to_number", {})
         config["weekday_to_number"] = weekday_to_number
     return config["weekday_to_number"]
+
+
+def _parse_time_token(hour_str: str, minute_str: Optional[str], meridiem: Optional[str]) -> Optional[str]:
+    """Convert simple time token to HH:MM 24h."""
+    try:
+        hour = int(hour_str)
+        minute = int(minute_str) if minute_str is not None else 0
+    except ValueError:
+        return None
+    if meridiem:
+        mer = meridiem.lower()
+        if mer == "pm" and hour != 12:
+            hour += 12
+        if mer == "am" and hour == 12:
+            hour = 0
+    if not (0 <= hour <= 23 and 0 <= minute <= 59):
+        return None
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _extract_time_range_from_entities(entities: Optional[Dict[str, Any]]) -> Optional[Dict[str, str]]:
+    """
+    Deterministic extraction of explicit time window phrasing: "between X and Y".
+    """
+    if not entities:
+        return None
+    text = str(entities.get("osentence")
+               or entities.get("psentence") or "").lower()
+    if "between" not in text or "and" not in text:
+        return None
+    match = re.search(
+        r"between\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:and|-)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?",
+        text
+    )
+    if not match:
+        return None
+    start_h, start_m, start_mer, end_h, end_m, end_mer = match.groups()
+    start_time = _parse_time_token(start_h, start_m, start_mer)
+    end_time = _parse_time_token(end_h, end_m, end_mer)
+    if not start_time or not end_time:
+        return None
+    return {"start_time": start_time, "end_time": end_time}
 
 
 @dataclass
@@ -197,7 +239,7 @@ class CalendarBindingResult:
             # Convert to ISO-8601 string, ensure timezone-aware
             if value.tzinfo is None:
                 # Naive datetime - assume UTC
-                value = value.replace(tzinfo=_get_timezone("UTC"))
+                value = value.replace(tzinfo=get_timezone("UTC"))
             return value.isoformat()
 
         # Handle lists first (to normalize services in lists)
@@ -228,7 +270,7 @@ class CalendarBindingResult:
 # These constants are removed - use _get_relative_date_offsets(), _get_time_window_bounds(), etc.
 
 
-def _get_timezone(timezone_str: str):
+def get_timezone(timezone_str: str):
     """Get timezone object, supporting zoneinfo and pytz."""
     if ZONEINFO_AVAILABLE:
         try:
@@ -258,13 +300,19 @@ def _localize_datetime(dt: datetime, tz: Any) -> datetime:
         return dt.replace(tzinfo=tz)
 
 
-# Intents that require calendar binding
-BINDING_INTENTS = {
-    "AVAILABILITY",
-    "CREATE_BOOKING",
-    "MODIFY_BOOKING",
-    "BOOKING_INQUIRY"
-}
+# Intents that require calendar binding (policy-driven)
+# CREATE_APPOINTMENT and CREATE_RESERVATION are included from IntentRegistry
+def _get_binding_intents() -> set:
+    """Get intents that require calendar binding from IntentRegistry."""
+    registry = get_intent_registry()
+    binding_intents = {"AVAILABILITY", "MODIFY_BOOKING", "BOOKING_INQUIRY"}
+    # Add intents with temporal_shape (CREATE_APPOINTMENT, CREATE_RESERVATION)
+    for intent_name, intent_meta in registry.all_intents().items():
+        if intent_meta.temporal_shape:
+            binding_intents.add(intent_name)
+    return binding_intents
+
+BINDING_INTENTS = _get_binding_intents()
 
 
 def _check_date_ambiguity(
@@ -298,7 +346,7 @@ def _check_date_ambiguity(
                 f"Day-of-week reference '{ref}' lacks explicit date context")
 
     # Check for ambiguous relative dates
-    if date_mode == "flexible" and date_refs:
+    if date_mode == DateMode.FLEXIBLE.value and date_refs:
         reasons.append(
             f"Date references '{', '.join(date_refs)}' are ambiguous without date context")
 
@@ -325,7 +373,7 @@ def _check_time_ambiguity(
         return reasons
 
     # Check for time windows without date context
-    if time_mode == "window" and len(time_refs) > 1:
+    if time_mode == TimeMode.WINDOW.value and len(time_refs) > 1:
         reasons.append(
             f"Multiple time windows '{', '.join(time_refs)}' without clear date context")
 
@@ -337,8 +385,9 @@ def bind_calendar(
     now: datetime,
     timezone: str = "UTC",
     intent: Optional[str] = None,
-    entities: Optional[Dict[str, Any]] = None
-) -> CalendarBindingResult:
+    entities: Optional[Dict[str, Any]] = None,
+    external_intent: Optional[str] = None
+) -> Tuple[CalendarBindingResult, Dict[str, Any]]:
     """
     Bind semantic meaning to actual calendar dates and times.
 
@@ -349,8 +398,8 @@ def bind_calendar(
         semantic_result: SemanticResolutionResult from semantic resolver
         now: Current datetime (injected, not read from system)
         timezone: Timezone string (e.g., "America/New_York", "UTC")
-        intent: User intent (e.g., "CREATE_BOOKING", "AVAILABILITY")
-                Only binds dates/times for: AVAILABILITY, CREATE_BOOKING,
+        intent: User intent (e.g., "CREATE_APPOINTMENT", "CREATE_RESERVATION", "AVAILABILITY")
+                Only binds dates/times for: AVAILABILITY, CREATE_APPOINTMENT, CREATE_RESERVATION,
                 MODIFY_BOOKING, BOOKING_INQUIRY. Otherwise returns null.
         entities: Optional original extraction entities (for time-window bias rule)
 
@@ -367,26 +416,65 @@ def bind_calendar(
     7. Validation → end must be >= start, reject duration + multi-day ranges
     8. Ambiguity → detect and flag, don't guess
     """
+    # Extract input for trace
+    resolved_booking = semantic_result.resolved_booking
+    intent_name = external_intent or intent
+    
+    # Get temporal shape from IntentRegistry (sole policy source)
+    registry = get_intent_registry()
+    intent_meta = registry.get(intent_name) if intent_name else None
+    temporal_shape = intent_meta.temporal_shape if intent_meta else None
+
+    binder_input = {
+        "intent": intent,
+        "external_intent": external_intent,
+        "temporal_shape": temporal_shape,
+        "date_mode": resolved_booking.get("date_mode", "none"),
+        "date_refs": resolved_booking.get("date_refs", []),
+        "time_mode": resolved_booking.get("time_mode", "none"),
+        "time_refs": resolved_booking.get("time_refs", []),
+        "time_constraint": resolved_booking.get("time_constraint"),
+        "timezone": timezone
+    }
+
     # Intent-guarded binding: only bind for specific intents
     if intent is not None and intent not in BINDING_INTENTS:
-        # Debug: Log intent guard failure
-        import sys
-        print(
-            f"DEBUG: Intent guard failed - intent='{intent}', BINDING_INTENTS={BINDING_INTENTS}", file=sys.stderr)
-        return CalendarBindingResult(
-            calendar_booking={
-                "services": semantic_result.resolved_booking.get("services", []),
-                "date_range": None,
-                "time_range": None,
-                "datetime_range": None,
-                "duration": None
-            },
+        result = CalendarBindingResult(
+            calendar_booking={},
             needs_clarification=False,
             clarification=None
         )
+        trace = {
+            "binder": {
+                "called": False,
+                "input": binder_input,
+                "output": {},
+                "decision_reason": f"intent_not_in_binding_intents: {intent}"
+            }
+        }
+        return result, trace
+
+    # Status guard: bind only when upstream marked booking as ready
+    status = resolved_booking.get("status") if isinstance(
+        resolved_booking, dict) else None
+    if status is not None and status != STATUS_READY:
+        result = CalendarBindingResult(
+            calendar_booking=resolved_booking,
+            needs_clarification=False,
+            clarification=None
+        )
+        trace = {
+            "binder": {
+                "called": False,
+                "input": binder_input,
+                "output": {},
+                "decision_reason": f"status_not_ready: {status}"
+            }
+        }
+        return result, trace
 
     # Get timezone object
-    tz = _get_timezone(timezone)
+    tz = get_timezone(timezone)
 
     # Ensure now is timezone-aware
     now = _localize_datetime(now, tz)
@@ -398,98 +486,194 @@ def bind_calendar(
     # Guardrail: Do not reject binding if services == []
     # This enables downstream clarification if service is omitted in booking utterances
     services = resolved_booking.get("services", [])
-    date_mode = resolved_booking.get("date_mode", "flexible")
+    date_mode = resolved_booking.get("date_mode", DateMode.FLEXIBLE.value)
     date_refs = resolved_booking.get("date_refs", [])
-    time_mode = resolved_booking.get("time_mode", "none")
+    date_modifiers = resolved_booking.get("date_modifiers", []) or []
+    # Build a single normalized list for binding: combine modifier + weekday when applicable
+    weekdays = {"monday", "tuesday", "wednesday",
+                "thursday", "friday", "saturday", "sunday"}
+    modifiers = {"next", "this"}
+    date_refs_for_binding: list = []
+    for ref in date_refs:
+        ref_norm = str(ref).strip().lower()
+        if ref_norm in weekdays and any(m in modifiers for m in date_modifiers):
+            chosen_mod = next(
+                (m for m in date_modifiers if m in modifiers), None)
+            if chosen_mod:
+                date_refs_for_binding.append(f"{chosen_mod} {ref_norm}")
+                continue
+        date_refs_for_binding.append(ref)
+    time_mode = resolved_booking.get("time_mode", TimeMode.NONE.value)
     time_refs = resolved_booking.get("time_refs", [])
+    time_constraint = resolved_booking.get("time_constraint")
     duration = resolved_booking.get("duration")
 
     # Debug: Log binding inputs
     # Bind dates - assume inputs are approved, just bind what's provided
-    date_range = _bind_dates(date_refs, date_mode, now, tz)
+    date_range = _bind_dates(date_refs_for_binding, date_mode, now, tz)
 
-    # Extract time windows from entities for bias rule (if available)
-    time_windows = None
-    if entities:
-        time_windows = entities.get("time_windows", [])
+    # Time binding: use canonical TimeConstraint only (no language parsing here)
+    time_range = None
+    if time_constraint:
+        tc_mode = time_constraint.get("mode")
+        if tc_mode == TimeMode.FUZZY.value:
+            # Fuzzy handled explicitly below (requires mapping to window)
+            time_range = None
+        elif tc_mode in {TimeMode.EXACT.value, TimeMode.WINDOW.value}:
+            start = time_constraint.get("start")
+            end = time_constraint.get("end")
+            if tc_mode == TimeMode.EXACT.value:
+                time_range = {
+                    "start_time": start,
+                    "end_time": start
+                }
+            else:  # window
+                # Validate ordering if both present
+                if start and end and _time_greater(start, end):
+                    raise ValueError(
+                        "Invalid TimeConstraint: start_time must be before end_time")
+                time_range = {
+                    "start_time": start,
+                    "end_time": end
+                }
+        else:
+            raise ValueError(f"Unsupported TimeConstraint mode: {tc_mode}")
 
-    # Bind times (with optional window info for bias rule)
-    # Decision layer has already approved all time configurations
-    time_range = _bind_times(time_refs, time_mode, now,
-                             tz, time_windows=time_windows)
+    # Explicit time windows for services (between X and Y) should bind directly
+    if (
+        not time_range
+        and resolved_booking.get("booking_mode") == "service"
+        and resolved_booking.get("time_mode") == TimeMode.WINDOW.value
+    ):
+        refs = resolved_booking.get("time_refs") or []
+        if len(refs) >= 2:
+            time_range = {
+                "start_time": _convert_time_to_24h(str(refs[0])) or refs[0],
+                "end_time": _convert_time_to_24h(str(refs[1])) or refs[1],
+            }
+
+    # Fuzzy time handling for services → build datetime_range using FUZZY_TIME_WINDOWS
+    datetime_range = None
+    if (
+        resolved_booking.get("booking_mode") == "service"
+        and time_constraint
+        and time_constraint.get("mode") == TimeMode.FUZZY.value
+    ):
+        label = (time_constraint.get("label")
+                 or time_constraint.get("text") or "").lower()
+        if not date_range or not date_range.get("start_date"):
+            # No date → cannot bind fuzzy time
+            result = CalendarBindingResult(
+                calendar_booking={},
+                needs_clarification=True,
+                clarification=Clarification(
+                    reason=ClarificationReason.MISSING_DATE,
+                    data={"expected": "date"}
+                )
+            )
+            trace = {
+                "binder": {
+                    "called": True,
+                    "input": binder_input,
+                    "output": {"needs_clarification": True, "clarification_reason": "MISSING_DATE"},
+                    "decision_reason": "fuzzy_time_no_date"
+                }
+            }
+            return result, trace
+        if label not in FUZZY_TIME_WINDOWS:
+            result = CalendarBindingResult(
+                calendar_booking={},
+                needs_clarification=True,
+                clarification=Clarification(
+                    reason=ClarificationReason.MISSING_TIME,
+                    data={"expected": "time"}
+                )
+            )
+            trace = {
+                "binder": {
+                    "called": True,
+                    "input": binder_input,
+                    "output": {"needs_clarification": True, "clarification_reason": "MISSING_TIME"},
+                    "decision_reason": f"fuzzy_time_label_not_found: {label}"
+                }
+            }
+            return result, trace
+        window_start, window_end = FUZZY_TIME_WINDOWS[label]
+        start_date = date_range["start_date"]
+        datetime_range = {
+            "start": f"{start_date}T{window_start}Z",
+            "end": f"{start_date}T{window_end}Z",
+        }
+        time_range = {"start_time": window_start, "end_time": window_end}
+    else:
+        # If still no time_range and explicit window pattern exists, extract it
+        if not time_range:
+            tr = _extract_time_range_from_entities(entities)
+            if tr:
+                time_range = tr
 
     # Combine date + time into datetime range
     # NOTE: If date_range is None, datetime_range will also be None (no fallback to today)
     # NOTE: If only time_constraint exists (no regular time), datetime_range will be None
-    datetime_range = _combine_datetime_range(date_range, time_range, now, tz)
+    # For reservations, ignore time_range and use full-day logic
+    datetime_range = combine_datetime_range(
+        date_range, time_range, now, tz, external_intent=external_intent)
 
     # Apply duration if present
     if duration and datetime_range:
         datetime_range = _apply_duration(datetime_range, duration, tz)
 
-    # Validate ranges (includes conflict detection)
-    # NOTE: Only validation errors are checked here - all clarification decisions come from Decision layer
-    validation_needs_clarification, validation_reason = _validate_ranges(
-        date_range, time_range, datetime_range, semantic_result, duration
-    )
+    # Build calendar_booking dict - ensure all fields are included if present
+    # This is the single authoritative carrier of binder output for all intents
+    calendar_booking = {}
+    # Always include services if present (even if empty list)
+    if services is not None:
+        calendar_booking["services"] = services
+    # Include date_range if present (for reservations)
+    if date_range:
+        calendar_booking[RESERVATION_TEMPORAL_TYPE] = date_range
+    # Include time_range if present
+    if time_range:
+        calendar_booking["time_range"] = time_range
+    # Include datetime_range if present (for appointments)
+    if datetime_range:
+        calendar_booking[APPOINTMENT_TEMPORAL_TYPE] = datetime_range
+    # Include duration if present
+    if duration:
+        calendar_booking["duration"] = duration
+    # Surface time info when extracted from explicit window so downstream slot checks pass
+    if time_range:
+        calendar_booking["time_refs"] = [
+            time_range.get("start_time"),
+            time_range.get("end_time"),
+        ]
+        calendar_booking["time_constraint"] = {
+            "mode": TimeMode.WINDOW.value,
+            "start": time_range.get("start_time"),
+            "end": time_range.get("end_time"),
+        }
 
-    calendar_booking = {
-        "services": services,
-        "date_range": date_range,  # Bind what's provided
-        "time_range": time_range,
-        "datetime_range": datetime_range,
-        "duration": duration
-    }
+    # Reservation responses must expose start_date/end_date explicitly
+    if external_intent == CREATE_RESERVATION and date_range:
+        calendar_booking["start_date"] = date_range.get("start_date")
+        calendar_booking["end_date"] = date_range.get("end_date")
 
-    clarification_obj = None
-    needs_clarification = validation_needs_clarification
-    # Only set clarification for validation errors (range conflicts, duration issues, etc.)
-    # All other clarification decisions come from Decision layer
-    if needs_clarification:
-        # Map validation errors to structured clarifications
-        reason_enum = ClarificationReason.CONFLICTING_SIGNALS  # default fallback
-        data = {}
-
-        # Handle validation errors (range conflicts, duration issues, etc.)
-        if validation_reason:
-            validation_lower = validation_reason.lower()
-            if "end date" in validation_lower or "end datetime" in validation_lower or "after" in validation_lower:
-                reason_enum = ClarificationReason.CONFLICTING_SIGNALS
-                data = {
-                    "error_type": "end_before_start",
-                    "date_refs": date_refs
-                }
-            elif "duration" in validation_lower and "multi-day" in validation_lower:
-                reason_enum = ClarificationReason.CONFLICTING_SIGNALS
-                data = {
-                    "error_type": "duration_with_multi_day_range",
-                    "duration": duration,
-                    "date_refs": date_refs
-                }
-            elif "span midnight" in validation_lower:
-                reason_enum = ClarificationReason.CONFLICTING_SIGNALS
-                data = {
-                    "error_type": "time_range_spans_midnight"
-                }
-            elif "invalid" in validation_lower:
-                reason_enum = ClarificationReason.CONFLICTING_SIGNALS
-                data = {
-                    "error_type": "invalid_range_format"
-                }
-            else:
-                # Fallback for unknown validation errors
-                reason_enum = ClarificationReason.CONFLICTING_SIGNALS
-                data = {
-                    "error_type": "validation_error"
-                }
-
-        clarification_obj = Clarification(
-            reason=reason_enum, data=data)
-    return CalendarBindingResult(
+    result = CalendarBindingResult(
         calendar_booking=calendar_booking,
-        needs_clarification=needs_clarification,
-        clarification=clarification_obj
+        needs_clarification=False,
+        clarification=None
     )
+    
+    trace = {
+        "binder": {
+            "called": True,
+            "input": binder_input,
+            "output": calendar_booking,
+            "decision_reason": "success"
+        }
+    }
+    
+    return result, trace
 
 
 def _bind_dates(
@@ -513,7 +697,7 @@ def _bind_dates(
     if not date_refs:
         return None
 
-    if date_mode == "single_day":
+    if date_mode == DateMode.SINGLE.value:
         date_str = date_refs[0]
         bound_date = _bind_single_date(date_str, now, tz)
         if bound_date:
@@ -522,7 +706,7 @@ def _bind_dates(
                 "end_date": bound_date.strftime("%Y-%m-%d")
             }
 
-    elif date_mode == "range":
+    elif date_mode == DateMode.RANGE.value:
         if len(date_refs) >= 2:
             start_date = _bind_single_date(date_refs[0], now, tz)
             end_date = _bind_single_date(date_refs[1], now, tz)
@@ -553,29 +737,39 @@ def _bind_single_date(date_str: str, now: datetime, tz: Any) -> Optional[datetim
     Returns:
         Bound datetime or None
     """
+    # Handle YYYY-MM-DD format (resolved dates from memory rehydration)
+    # This format is used when rehydrating time-only follow-ups with resolved dates
+    # Check this BEFORE lowercasing to preserve the format
+    date_str_stripped = date_str.strip()
+    iso_date_pattern = r"^\d{4}-\d{2}-\d{2}$"
+    if re.match(iso_date_pattern, date_str_stripped):
+        try:
+            parsed_date = datetime.strptime(date_str_stripped, "%Y-%m-%d")
+            return _localize_datetime(parsed_date, tz)
+        except ValueError:
+            # Invalid date format, fall through to other parsers
+            pass
+
     date_str_lower = date_str.lower().strip()
 
-    # Handle "this <weekday>" and "next <weekday>"
+    # Handle "<weekday>" (bare), "this <weekday>", "next <weekday>"
     weekday_map = _get_weekday_to_number()
-    # Use search instead of match to handle any leading/trailing text
     match = re.search(
-        r"\b(this|next)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", date_str_lower)
+        r"\b(this|next)?\s*(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+        date_str_lower
+    )
     if match:
-        kind, weekday_str = match.group(1), match.group(2)
+        modifier, weekday_str = match.group(1), match.group(2)
         today_weekday = now.weekday()
-        target_weekday = weekday_map[weekday_str]
-        if kind == "this":
-            # "this <weekday>" → upcoming weekday in current week (or today if same day)
-            days_ahead = (target_weekday - today_weekday) % 7
-            # If today is the target weekday, use today; otherwise use the upcoming occurrence
-            if days_ahead == 0:
-                days_ahead = 0  # Today
-            # else: days_ahead is already the correct offset
-        else:  # "next"
-            # "next <weekday>" → weekday in the following week
-            days_ahead = (target_weekday - today_weekday) % 7 + 7
-        target_date = now + timedelta(days=days_ahead)
-        return target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+        target_weekday = weekday_map.get(weekday_str)
+        if target_weekday is not None:
+            if modifier == "next":
+                days_ahead = ((target_weekday - today_weekday) % 7) + 7
+            else:
+                # bare or "this" → upcoming occurrence (today if same)
+                days_ahead = (target_weekday - today_weekday) % 7
+            target_date = now + timedelta(days=days_ahead)
+            return target_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
     # Check relative dates first
     relative_offsets = _get_relative_date_offsets()
@@ -718,7 +912,7 @@ def _time_in_window(time_hhmm: str, window_name: str) -> bool:
     return start_minutes <= time_minutes <= end_minutes
 
 
-def _bind_times(
+def bind_times(
     time_refs: list,
     time_mode: str,
     now: datetime,
@@ -744,7 +938,7 @@ def _bind_times(
     if not time_refs:
         return None
 
-    if time_mode == "exact":
+    if time_mode == TimeMode.EXACT.value:
         # Extract first exact time (ignore windows if present)
         time_window_bounds = _get_time_window_bounds()
         exact_times = [t for t in time_refs if t not in time_window_bounds]
@@ -801,7 +995,7 @@ def _bind_times(
                     "end_time": time_hhmm
                 }
 
-    elif time_mode == "window":
+    elif time_mode == TimeMode.WINDOW.value:
         window_name = time_refs[0].lower()
         time_window_bounds = _get_time_window_bounds()
         if window_name in time_window_bounds:
@@ -811,7 +1005,7 @@ def _bind_times(
                 "end_time": bounds["end"]
             }
 
-    elif time_mode == "range":
+    elif time_mode == TimeMode.RANGE.value:
         if len(time_refs) >= 2:
             # Extract exact times (ignore windows)
             time_window_bounds = _get_time_window_bounds()
@@ -961,11 +1155,12 @@ def _parse_time(time_str: str) -> tuple[Optional[datetime], bool]:
     return None, False
 
 
-def _combine_datetime_range(
+def combine_datetime_range(
     date_range: Optional[Dict[str, str]],
     time_range: Optional[Dict[str, str]],
     now: datetime,
-    tz: Any
+    tz: Any,
+    external_intent: Optional[str] = None
 ) -> Optional[Dict[str, str]]:
     """
     Combine date range and time range into datetime range.
@@ -975,52 +1170,49 @@ def _combine_datetime_range(
         time_range: Dict with "start_time" and "end_time" (HH:MM)
         now: Current datetime
         tz: Timezone object
+        external_intent: External intent (CREATE_RESERVATION or CREATE_APPOINTMENT)
 
     Returns:
         Dict with "start" and "end" (ISO-8601) or None
     """
-    if not date_range and not time_range:
+    if not date_range or not time_range:
         return None
 
-    # If only date exists → full-day range
-    if date_range and not time_range:
-        start_date = datetime.strptime(date_range["start_date"], "%Y-%m-%d")
-        end_date = datetime.strptime(date_range["end_date"], "%Y-%m-%d")
-        start_dt = _localize_datetime(start_date.replace(hour=0, minute=0), tz)
-        end_dt = _localize_datetime(end_date.replace(hour=23, minute=59), tz)
-        return {
-            "start": start_dt.isoformat(),
-            "end": end_dt.isoformat()
-        }
+    start_date = datetime.strptime(date_range["start_date"], "%Y-%m-%d")
+    end_date = datetime.strptime(date_range["end_date"], "%Y-%m-%d")
 
-    # If only time exists → cannot create datetime without date
-    # Calendar binding must NEVER invent dates - return None
-    if time_range and not date_range:
+    if not time_range.get("start_time") and not time_range.get("end_time"):
         return None
 
-    # Both date and time exist → combine
-    if date_range and time_range:
-        start_date = datetime.strptime(date_range["start_date"], "%Y-%m-%d")
-        end_date = datetime.strptime(date_range["end_date"], "%Y-%m-%d")
+    def _parse_time(hhmm: Optional[str]) -> Optional[tuple[int, int]]:
+        if not hhmm:
+            return None
+        parts = hhmm.split(":")
+        return int(parts[0]), int(parts[1])
 
-        start_time_parts = time_range["start_time"].split(":")
-        end_time_parts = time_range["end_time"].split(":")
+    start_parts = _parse_time(time_range.get("start_time"))
+    end_parts = _parse_time(time_range.get("end_time")) or start_parts
 
+    if start_parts:
         start_dt = _localize_datetime(start_date.replace(
-            hour=int(start_time_parts[0]),
-            minute=int(start_time_parts[1])
+            hour=start_parts[0],
+            minute=start_parts[1]
         ), tz)
+    else:
+        return None
+
+    if end_parts:
         end_dt = _localize_datetime(end_date.replace(
-            hour=int(end_time_parts[0]),
-            minute=int(end_time_parts[1])
+            hour=end_parts[0],
+            minute=end_parts[1]
         ), tz)
+    else:
+        return None
 
-        return {
-            "start": start_dt.isoformat(),
-            "end": end_dt.isoformat()
-        }
-
-    return None
+    return {
+        "start": start_dt.isoformat(),
+        "end": end_dt.isoformat()
+    }
 
 
 def _apply_duration(

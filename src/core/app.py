@@ -14,7 +14,7 @@ try:
     project_root = Path(__file__).parent.parent.parent.parent  # dialogcart/
     env_file = project_root / ".env"
     env_local_file = project_root / ".env.local"
-    
+
     # Load .env first, then .env.local (which can override)
     if env_file.exists():
         load_dotenv(env_file, override=False)
@@ -28,4 +28,3 @@ from core.orchestration.orchestrator import handle_message
 
 # Re-export for backward compatibility
 process_message = handle_message
-

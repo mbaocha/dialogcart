@@ -32,6 +32,7 @@ INTENT_ACTIONS: Dict[str, str] = {
     "CREATE_BOOKING": "booking.create",
     "MODIFY_BOOKING": "booking.modify",
     "CANCEL_BOOKING": "booking.cancel",
+    "BOOKING_INQUIRY": "booking.inquiry",
 }
 
 
