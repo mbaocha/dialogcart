@@ -11,11 +11,6 @@ FUZZY_TIME_WINDOWS = {
     "night": ("21:00", "23:59"),
 }
 
-INTENT_REQUIRE_END_DATE = {
-    "CREATE_RESERVATION": True,
-}
-
-
 # ----------------------------
 # Temporal shapes
 # ----------------------------
@@ -85,26 +80,9 @@ DATE_ROLE_KEYWORDS = {
     },
 }
 
-# Intents that support date roles
-# Explicitly state which intents support date roles.
-# Appointments may still use roles later, but do not enable yet.
-# Keeps behavior explicit and safe.
-INTENTS_SUPPORTING_DATE_ROLES = {
-    "CREATE_RESERVATION",
-}
-
-
 # ----------------------------
 # Binding policy
 # ----------------------------
 # Bare weekday (e.g. "monday") without modifier ("this"/"next")
 # must never be resolved silently.
 ALLOW_BARE_WEEKDAY_BINDING = False
-
-# ----------------------------
-# Intent-level temporal shape mapping
-# ----------------------------
-INTENT_TEMPORAL_SHAPE = {
-    "CREATE_APPOINTMENT": APPOINTMENT_TEMPORAL_TYPE,
-    "CREATE_RESERVATION": RESERVATION_TEMPORAL_TYPE,
-}

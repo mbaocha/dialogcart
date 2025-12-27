@@ -19,6 +19,7 @@ if SRC_PATH not in sys.path:
 
 from luma.extraction.matcher import EntityMatcher  # noqa: E402
 from luma.grouping.reservation_intent_resolver import ReservationIntentResolver  # noqa: E402
+from luma.config.core import STATUS_READY
 
 
 class DateRangeTailTests(unittest.TestCase):
@@ -89,7 +90,7 @@ class DateRangeTailTests(unittest.TestCase):
             entities=result,
         )
         self.assertNotIn("end_date", resp.get("missing_slots", []))
-        self.assertEqual(resp.get("status"), "ready")
+        self.assertEqual(resp.get("status"), STATUS_READY)
 
 
 if __name__ == "__main__":

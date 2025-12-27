@@ -26,11 +26,11 @@ from ..config.temporal import (
     ALLOW_BARE_WEEKDAY_BINDING,
     APPOINTMENT_TEMPORAL_TYPE,
     DateMode,
-    INTENT_TEMPORAL_SHAPE,
     RESERVATION_TEMPORAL_TYPE,
     TimeMode,
 )
 from ..config.temporal_rules import TEMPORAL_RULES
+from ..config.intent_meta import get_intent_registry
 import logging
 import re
 
@@ -330,7 +330,11 @@ def _validate_temporal_shape_completeness(
     if not intent_name:
         return None
 
-    temporal_shape = INTENT_TEMPORAL_SHAPE.get(intent_name)
+    # Get temporal shape from IntentRegistry (sole policy source)
+    registry = get_intent_registry()
+    intent_meta = registry.get(intent_name)
+    temporal_shape = intent_meta.temporal_shape if intent_meta else None
+
     if not temporal_shape:
         # No temporal shape requirement for this intent
         return None
@@ -1434,7 +1438,12 @@ def _maybe_complete_shorthand_date_range(
         "oct 5th to 9th" -> ["oct 5th", "oct 9th"]  # Same month
         "oct 29th to 2nd" -> ["oct 29th", "nov 2nd"]  # Next month (smart inference)
     """
-    if INTENT_TEMPORAL_SHAPE.get(intent_name) != RESERVATION_TEMPORAL_TYPE:
+    # Get temporal shape from IntentRegistry (sole policy source)
+    registry = get_intent_registry()
+    intent_meta = registry.get(intent_name)
+    temporal_shape = intent_meta.temporal_shape if intent_meta else None
+
+    if temporal_shape != RESERVATION_TEMPORAL_TYPE:
         return None
 
     if len(normalized_absolute) != 1:
@@ -2144,7 +2153,13 @@ def _check_unresolved_weekday_patterns(
     Do NOT attempt to guess the date.
     """
     intent = intent_result.get("intent")
-    if intent not in INTENT_TEMPORAL_SHAPE:
+
+    # Check if intent has temporal shape from IntentRegistry (sole policy source)
+    registry = get_intent_registry()
+    intent_meta = registry.get(intent) if intent else None
+    has_temporal_shape = intent_meta and intent_meta.temporal_shape is not None
+
+    if not has_temporal_shape:
         return None
 
     # Check if date_refs is empty

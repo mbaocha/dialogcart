@@ -1,4 +1,6 @@
 # Booking intent scenarios (CREATE_APPOINTMENT, CREATE_RESERVATION)
+from luma.config.core import STATUS_READY, STATUS_NEEDS_CLARIFICATION
+
 booking_scenarios = [
     # ────────────────
     # RESERVATIONS — READY (DATE RANGE)
@@ -8,7 +10,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "delux",  # Explicitly mentioned tenant alias
                 "date_range": {
@@ -23,7 +25,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "standard",  # Explicit tenant alias key
                 "date_range": {
@@ -38,7 +40,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "delux",  # Explicit tenant alias key
                 "date_range": {
@@ -53,7 +55,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "room",  # Explicit tenant alias key
                 "date_range": {
@@ -68,7 +70,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "suite",  # Single tenant alias for suite
                 "date_range": {
@@ -83,7 +85,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "standard",  # Explicit tenant alias key
                 "date_range": {
@@ -98,7 +100,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "delux",  # Explicit tenant alias key
                 "date_range": {
@@ -113,7 +115,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "room",  # Explicit tenant alias key
                 "date_range": {
@@ -128,7 +130,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "suite",  # Single tenant alias for suite
                 "date_range": {
@@ -146,7 +148,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "hair cut",  # Tenant alias key explicitly mentioned
                 "has_datetime": True
@@ -158,7 +160,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "beerd",  # Tenant alias key explicitly mentioned
                 "has_datetime": True
@@ -170,7 +172,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "massage",  # Tenant alias key exists
                 "has_datetime": True
@@ -182,7 +184,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             # Canonical service not in tenant aliases
             "clarification_reason": "UNSUPPORTED_SERVICE"
         }
@@ -192,7 +194,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 # Single tenant alias for haircut (used by default)
                 "service_id": "haircut",
@@ -205,7 +207,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "massage",  # Tenant alias key exists
                 "has_datetime": True
@@ -217,7 +219,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 # Single tenant alias for beard grooming (used by default)
                 "service_id": "beard",
@@ -230,7 +232,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             # Canonical service not in tenant aliases
             "clarification_reason": "UNSUPPORTED_SERVICE"
         }
@@ -240,7 +242,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "massage",  # Tenant alias key exists
                 "has_datetime": True
@@ -252,7 +254,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 # Single tenant alias for haircut (used by default)
                 "service_id": "haircut",
@@ -265,7 +267,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "hair cut",  # Tenant alias key explicitly mentioned
                 "has_datetime": True
@@ -277,7 +279,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "beerd",  # Tenant alias key explicitly mentioned
                 "has_datetime": True
@@ -289,7 +291,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "massage",  # Tenant alias key exists
                 "has_datetime": True
@@ -301,7 +303,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             # Canonical service not in tenant aliases
             "clarification_reason": "UNSUPPORTED_SERVICE"
         }
@@ -311,7 +313,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "massage",  # Tenant alias key exists
                 "has_datetime": True
@@ -323,7 +325,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 # Single tenant alias for haircut (used by default)
                 "service_id": "haircut",
@@ -336,7 +338,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "massage",  # Tenant alias key exists
                 "has_datetime": True
@@ -348,7 +350,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             # Canonical service not in tenant aliases
             "clarification_reason": "UNSUPPORTED_SERVICE"
         }
@@ -358,7 +360,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 # Single tenant alias for haircut (used by default)
                 "service_id": "haircut",
@@ -371,7 +373,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "massage",  # Tenant alias key exists
                 "has_datetime": True
@@ -383,7 +385,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "delux",  # Explicit tenant alias key
                 "date_range": {
@@ -398,7 +400,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "standard",  # Explicit tenant alias key
                 "date_range": {
@@ -413,7 +415,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "suite",  # Single tenant alias for suite
                 "date_range": {
@@ -428,7 +430,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "room",  # Explicit tenant alias key
                 "date_range": {
@@ -443,7 +445,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 # Single tenant alias for haircut (used by default)
                 "service_id": "haircut",
@@ -456,7 +458,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "ready",
+            "status": STATUS_READY,
             "slots": {
                 "service_id": "massage",  # Tenant alias key exists
                 "has_datetime": True
@@ -471,7 +473,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             "missing_slots": ["start_date", "end_date"]
         }
     },
@@ -480,7 +482,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             "missing_slots": ["start_date", "end_date"]
         }
     },
@@ -489,7 +491,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             "missing_slots": ["date", "time"]
         }
     },
@@ -498,7 +500,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             "missing_slots": ["date", "time"]
         }
     },
@@ -507,7 +509,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             "missing_slots": ["date", "time"]
         }
     },
@@ -516,7 +518,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             "missing_slots": ["end_date"]
         }
     },
@@ -525,7 +527,7 @@ booking_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             "missing_slots": ["end_date"]
         }
     },
@@ -534,7 +536,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             "missing_slots": ["time"]
         }
     },
@@ -543,7 +545,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             "missing_slots": ["time"]
         }
     },
@@ -552,7 +554,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             "missing_slots": ["date"]
         }
     },
@@ -561,7 +563,7 @@ booking_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             "missing_slots": ["date"]
         }
     },

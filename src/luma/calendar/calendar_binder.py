@@ -44,10 +44,10 @@ from ..config.temporal import (
     APPOINTMENT_TEMPORAL_TYPE,
     DateMode,
     RESERVATION_TEMPORAL_TYPE,
-    INTENT_TEMPORAL_SHAPE,
     TimeMode,
     FUZZY_TIME_WINDOWS,
 )
+from ..config.intent_meta import get_intent_registry
 
 
 def _get_global_config_path() -> Path:
@@ -301,13 +301,18 @@ def _localize_datetime(dt: datetime, tz: Any) -> datetime:
 
 
 # Intents that require calendar binding (policy-driven)
-# CREATE_APPOINTMENT and CREATE_RESERVATION are included via INTENT_TEMPORAL_SHAPE.keys()
-BINDING_INTENTS = {
-    "AVAILABILITY",
-    "MODIFY_BOOKING",
-    "BOOKING_INQUIRY",
-    *INTENT_TEMPORAL_SHAPE.keys(),
-}
+# CREATE_APPOINTMENT and CREATE_RESERVATION are included from IntentRegistry
+def _get_binding_intents() -> set:
+    """Get intents that require calendar binding from IntentRegistry."""
+    registry = get_intent_registry()
+    binding_intents = {"AVAILABILITY", "MODIFY_BOOKING", "BOOKING_INQUIRY"}
+    # Add intents with temporal_shape (CREATE_APPOINTMENT, CREATE_RESERVATION)
+    for intent_name, intent_meta in registry.all_intents().items():
+        if intent_meta.temporal_shape:
+            binding_intents.add(intent_name)
+    return binding_intents
+
+BINDING_INTENTS = _get_binding_intents()
 
 
 def _check_date_ambiguity(
@@ -413,8 +418,12 @@ def bind_calendar(
     """
     # Extract input for trace
     resolved_booking = semantic_result.resolved_booking
-    temporal_shape = INTENT_TEMPORAL_SHAPE.get(
-        external_intent or intent) if (external_intent or intent) else None
+    intent_name = external_intent or intent
+    
+    # Get temporal shape from IntentRegistry (sole policy source)
+    registry = get_intent_registry()
+    intent_meta = registry.get(intent_name) if intent_name else None
+    temporal_shape = intent_meta.temporal_shape if intent_meta else None
 
     binder_input = {
         "intent": intent,

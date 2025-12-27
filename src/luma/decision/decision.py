@@ -13,10 +13,10 @@ from typing import Dict, Any, Optional, Literal, Tuple, List
 import logging
 from ..config.temporal import (
     APPOINTMENT_TEMPORAL_TYPE,
-    INTENT_TEMPORAL_SHAPE,
     RESERVATION_TEMPORAL_TYPE,
     TimeMode,
 )
+from ..config.intent_meta import get_intent_registry
 
 logger = logging.getLogger(__name__)
 
@@ -237,7 +237,11 @@ def _validate_temporal_shape_for_decision(
     if not intent_name:
         return None
 
-    temporal_shape = INTENT_TEMPORAL_SHAPE.get(intent_name)
+    # Get temporal shape from IntentRegistry (sole policy source)
+    registry = get_intent_registry()
+    intent_meta = registry.get(intent_name)
+    temporal_shape = intent_meta.temporal_shape if intent_meta else None
+    
     if not temporal_shape:
         # No temporal shape requirement for this intent
         return None
@@ -430,7 +434,11 @@ def decide_booking_status(
                         "decision": {
                             "state": result.status,
                             "reason": result.reason,
-                            "expected_temporal_shape": INTENT_TEMPORAL_SHAPE.get(intent_name) if intent_name else None,
+                            "expected_temporal_shape": (
+                                get_intent_registry().get(intent_name).temporal_shape
+                                if intent_name and get_intent_registry().get(intent_name)
+                                else None
+                            ),
                             "actual_temporal_shape": "none",
                             "missing_slots": [],
                             "temporal_shape_satisfied": False,
@@ -489,8 +497,11 @@ def decide_booking_status(
     # This is authoritative - config and YAML define what's required
     temporal_shape_reason = _validate_temporal_shape_for_decision(
         intent_name, resolved_booking)
-    expected_temporal_shape = INTENT_TEMPORAL_SHAPE.get(
-        intent_name) if intent_name else None
+    
+    # Get expected temporal shape from IntentRegistry (sole policy source)
+    registry = get_intent_registry()
+    intent_meta = registry.get(intent_name) if intent_name else None
+    expected_temporal_shape = intent_meta.temporal_shape if intent_meta else None
 
     # Fail-fast guardrail: If temporal_shape == datetime_range and missing slots, use specific reason
     if expected_temporal_shape == APPOINTMENT_TEMPORAL_TYPE and temporal_shape_reason:

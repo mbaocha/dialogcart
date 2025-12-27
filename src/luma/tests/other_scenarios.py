@@ -1,4 +1,6 @@
 # Other intent scenarios (MODIFY_BOOKING, CANCEL_BOOKING, etc.)
+from luma.config.core import STATUS_NEEDS_CLARIFICATION
+
 other_scenarios = [
     # ────────────────
     # MODIFY/CANCEL — NEEDS_CLARIFICATION (NO BOOKING_ID)
@@ -8,7 +10,7 @@ other_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "MODIFY_BOOKING",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             "missing_slots": ["booking_id"]
         }
     },
@@ -17,7 +19,7 @@ other_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "MODIFY_BOOKING",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             "missing_slots": ["booking_id"]
         }
     },
@@ -26,7 +28,7 @@ other_scenarios = [
         "booking_mode": "reservation",
         "expected": {
             "intent": "CANCEL_BOOKING",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             "missing_slots": ["booking_id"]
         }
     },
@@ -35,7 +37,7 @@ other_scenarios = [
         "booking_mode": "service",
         "expected": {
             "intent": "CANCEL_BOOKING",
-            "status": "needs_clarification",
+            "status": STATUS_NEEDS_CLARIFICATION,
             "missing_slots": ["booking_id"]
         }
     },

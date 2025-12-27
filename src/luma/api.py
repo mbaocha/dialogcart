@@ -51,8 +51,6 @@ from luma.config import config  # noqa: E402
 from luma.config.temporal import (  # noqa: E402
     APPOINTMENT_TEMPORAL_TYPE,
     RESERVATION_TEMPORAL_TYPE,
-    INTENT_TEMPORAL_SHAPE,
-    INTENT_REQUIRE_END_DATE,
     TimeMode,
 )
 from luma.config.intent_meta import validate_required_slots  # noqa: E402
@@ -64,6 +62,7 @@ from luma.clarification import ClarificationReason  # noqa: E402
 from luma.pipeline import LumaPipeline  # noqa: E402
 from luma.trace import validate_stable_fields, TRACE_VERSION  # noqa: E402
 from luma.perf import StageTimer  # noqa: E402
+from luma.config.core import STATUS_READY, STATUS_NEEDS_CLARIFICATION  # noqa: E402
 from luma.app.resolve_service import resolve_message  # noqa: E402
 
 # Internal intent (never returned in API, never persisted)
@@ -279,7 +278,7 @@ def plan_clarification(
     Returns:
         Dict with status, missing_slots, and clarification_reason
     """
-    status = intent_result.get("status", "ready")
+    status = intent_result.get("status", STATUS_READY)
     missing_slots = intent_result.get("missing_slots", []) or []
     clarification_reason = None
 
@@ -295,7 +294,7 @@ def plan_clarification(
             elif hasattr(reason, "value"):
                 # ClarificationReason enum
                 clarification_reason = reason.value
-            status = "needs_clarification"
+            status = STATUS_NEEDS_CLARIFICATION
 
     # Check for ambiguous meridiem in time_issues FIRST (before decision layer)
     # This takes priority because ambiguous meridiem is more specific than MISSING_TIME
@@ -305,7 +304,7 @@ def plan_clarification(
         for issue in time_issues:
             if issue.get("kind") == "ambiguous_meridiem":
                 clarification_reason = "AMBIGUOUS_TIME_MERIDIEM"
-                status = "needs_clarification"
+                status = STATUS_NEEDS_CLARIFICATION
                 break
 
     # Check decision layer for temporal shape violations
@@ -329,7 +328,7 @@ def plan_clarification(
                     clarification_reason = "MISSING_DATE"
             else:
                 clarification_reason = decision_reason  # Use as-is if it matches enum
-            status = "needs_clarification"
+            status = STATUS_NEEDS_CLARIFICATION
 
     # Fallback: map missing slots to reasons
     if not clarification_reason and missing_slots:
@@ -552,7 +551,6 @@ def resolve():
         logger=logger,
         # Constants
         APPOINTMENT_TEMPORAL_TYPE_CONST=APPOINTMENT_TEMPORAL_TYPE,
-        INTENT_TEMPORAL_SHAPE_CONST=INTENT_TEMPORAL_SHAPE,
         MEMORY_TTL=config.MEMORY_TTL,
         # Helper functions
         _merge_semantic_results=_merge_semantic_results,

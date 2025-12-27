@@ -21,6 +21,8 @@ See the FIELD_CLASSIFICATION dictionary for complete field-by-field classificati
 
 from typing import Set, Dict, Any, Optional
 
+from ..config.core import STATUS_READY, STATUS_NEEDS_CLARIFICATION
+
 # Trace version - increment when stable fields change
 TRACE_VERSION = "1.0"
 
@@ -230,8 +232,8 @@ def validate_stable_fields(
                 else:
                     # Type validation for specific fields
                     value = response[field]
-                    if field == "status" and value not in ("ready", "needs_clarification"):
-                        errors.append(f"Stable field 'trace.response.status' must be 'ready' or 'needs_clarification', got '{value}'")
+                    if field == "status" and value not in (STATUS_READY, STATUS_NEEDS_CLARIFICATION):
+                        errors.append(f"Stable field 'trace.response.status' must be '{STATUS_READY}' or '{STATUS_NEEDS_CLARIFICATION}', got '{value}'")
                     elif field == "intent" and not isinstance(value, str):
                         errors.append(f"Stable field 'trace.response.intent' must be a string")
                     elif field == "issues" and not isinstance(value, dict):

@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional, List
 
 from ..trace import log_field_removal
 from ..config import config
+from ..config.core import STATUS_READY, STATUS_NEEDS_CLARIFICATION
 
 logger = logging.getLogger(__name__)
 
@@ -226,7 +227,7 @@ class ResponseBuilder:
         response_body = {
             "success": True,
             "intent": intent_payload,
-            "status": "needs_clarification" if needs_clarification else "ready",
+            "status": STATUS_NEEDS_CLARIFICATION if needs_clarification else STATUS_READY,
             "issues": issues if issues else {},
             "clarification_reason": clarification_reason if needs_clarification else None,
             "needs_clarification": needs_clarification,

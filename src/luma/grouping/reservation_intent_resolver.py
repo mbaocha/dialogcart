@@ -16,6 +16,8 @@ from typing import Tuple, Dict, Any, List, Set
 
 import yaml
 
+from ..config.core import STATUS_READY, STATUS_NEEDS_CLARIFICATION
+
 
 # Canonical intents (locked - 10 production intents)
 DISCOVERY = "DISCOVERY"
@@ -507,9 +509,9 @@ class ReservationIntentResolver:
             if not self._slot_present(slot, entities) and slot not in missing_slots:
                 missing_slots.append(slot)
 
-        status = "ready"
+        status = STATUS_READY
         if missing_slots:
-            status = "needs_clarification"
+            status = STATUS_NEEDS_CLARIFICATION
 
         return {
             "intent": intent,

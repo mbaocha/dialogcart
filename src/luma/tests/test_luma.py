@@ -3,6 +3,7 @@ import random
 import json
 import argparse
 from .scenarios import booking_scenarios, other_scenarios, followup_scenarios, scenarios
+from luma.config.core import STATUS_READY
 
 API_BASE = "http://localhost:9001/resolve"
 USER_ID_PREFIX = "t_user_"
@@ -90,7 +91,7 @@ def assert_response(resp, expected):
     assert resp["intent"]["name"] == expected["intent"]
     assert resp["status"] == expected["status"]
 
-    if expected["status"] == "ready":
+    if expected["status"] == STATUS_READY:
         assert resp["intent"][
             "confidence"] >= 0.7, f"low confidence: {resp['intent'].get('confidence')}"
         # Booking block should be present for ready status (but minimal, only confirmation_state)

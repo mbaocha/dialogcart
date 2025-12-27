@@ -51,11 +51,13 @@ from luma.memory.policy import (
 )
 from luma.resolution.semantic_resolver import SemanticResolutionResult
 from luma.perf import StageTimer
-from luma.config.temporal import APPOINTMENT_TEMPORAL_TYPE, INTENT_TEMPORAL_SHAPE
+from luma.config.temporal import APPOINTMENT_TEMPORAL_TYPE
+from luma.config.intent_meta import get_intent_registry
 from luma.trace import validate_stable_fields
 from luma.trace.stage_snapshot import capture_stage_snapshot
 from luma.trace import log_field_removal
 from luma.config import config
+from luma.config.core import STATUS_READY, STATUS_NEEDS_CLARIFICATION, STATUS_RESOLVED, STATUS_PARTIAL
 from luma.response.builder import ResponseBuilder, format_service_for_response, build_issues
 
 
@@ -122,7 +124,6 @@ def resolve_message(
 
     # Constants
     APPOINTMENT_TEMPORAL_TYPE_CONST,
-    INTENT_TEMPORAL_SHAPE_CONST,
     MEMORY_TTL,
 
     # Helper functions
@@ -910,7 +911,7 @@ def resolve_message(
         # Use pipeline's calendar_result as the base (it already has the binder output)
         calendar_result = pipeline_calendar_result if pipeline_calendar_result else None
         if missing_required and not skip_prebind:
-            results["stages"]["intent"]["status"] = "needs_clarification"
+            results["stages"]["intent"]["status"] = STATUS_NEEDS_CLARIFICATION
             results["stages"]["intent"]["missing_slots"] = missing_required
             # Only create empty calendar_result if pipeline didn't provide one
             if not calendar_result:
@@ -1036,8 +1037,10 @@ def resolve_message(
                     results["stages"]["calendar"] = {"error": str(e)}
                     # Build binder input for error trace
                     semantic_for_binder = merged_semantic_result.resolved_booking if merged_semantic_result else semantic_result.resolved_booking
-                    temporal_shape_for_trace = INTENT_TEMPORAL_SHAPE_CONST.get(
-                        external_intent) if external_intent else None
+                    # Get temporal shape from IntentRegistry (sole policy source)
+                    registry = get_intent_registry()
+                    intent_meta = registry.get(external_intent) if external_intent else None
+                    temporal_shape_for_trace = intent_meta.temporal_shape if intent_meta else None
                     execution_trace["binder"] = {
                         "called": False,
                         "input": {
@@ -1075,8 +1078,10 @@ def resolve_message(
                 semantic_for_binder = merged_semantic_result.resolved_booking if merged_semantic_result else semantic_result.resolved_booking
                 external_intent_for_trace = results["stages"]["intent"].get(
                     "external_intent") or intent
-                temporal_shape_for_trace = INTENT_TEMPORAL_SHAPE_CONST.get(
-                    external_intent_for_trace) if external_intent_for_trace else None
+                # Get temporal shape from IntentRegistry (sole policy source)
+                registry = get_intent_registry()
+                intent_meta = registry.get(external_intent_for_trace) if external_intent_for_trace else None
+                temporal_shape_for_trace = intent_meta.temporal_shape if intent_meta else None
                 execution_trace["binder"] = {
                     "called": False,
                     "input": {
@@ -1115,8 +1120,8 @@ def resolve_message(
             intent_resp, extraction_result, merged_semantic_result, decision_result)
 
         # If calendar needs clarification and none set yet, use calendar clarification
-        if cal_needs_clarification and clar.get("status") != "needs_clarification":
-            clar["status"] = "needs_clarification"
+        if cal_needs_clarification and clar.get("status") != STATUS_NEEDS_CLARIFICATION:
+            clar["status"] = STATUS_NEEDS_CLARIFICATION
             # Extract reason from calendar clarification
             cal_reason = cal_clar_dict.get("reason") if isinstance(
                 cal_clar_dict, dict) else None
@@ -1126,7 +1131,7 @@ def resolve_message(
                 elif hasattr(cal_reason, "value"):
                     clar["clarification_reason"] = cal_reason.value
 
-        needs_clarification = clar.get("status") == "needs_clarification"
+        needs_clarification = clar.get("status") == STATUS_NEEDS_CLARIFICATION
         missing_slots = clar.get("missing_slots", [])
         clarification_reason = clar.get("clarification_reason")
 
@@ -1221,9 +1226,14 @@ def resolve_message(
                     booking_payload = None
         # Temporal shape enforcement (authoritative, post-binding)
         # POLICY: If decision.state == RESOLVED, skip temporal enforcement to avoid downgrading status
-        if (intent_name and intent_name in INTENT_TEMPORAL_SHAPE_CONST and
+        # Get temporal shape from IntentRegistry (sole policy source)
+        registry = get_intent_registry()
+        intent_meta = registry.get(intent_name) if intent_name else None
+        has_temporal_shape = intent_meta and intent_meta.temporal_shape is not None
+        
+        if (intent_name and has_temporal_shape and
                 not (decision_result and decision_result.status == "RESOLVED")):
-            shape = INTENT_TEMPORAL_SHAPE_CONST.get(intent_name)
+            shape = intent_meta.temporal_shape
             if shape == APPOINTMENT_TEMPORAL_TYPE_CONST:
                 has_dtr = bool((calendar_booking or {}).get("datetime_range"))
                 if not has_dtr:
@@ -1246,7 +1256,7 @@ def resolve_message(
                             elif len(temporal_missing) >= 2:
                                 clarification_reason = "MISSING_TIME"  # Default to time if both missing
                         booking_payload = None
-                        response_body_status = "needs_clarification"
+                        response_body_status = STATUS_NEEDS_CLARIFICATION
 
         # FINAL OVERRIDE: Enforce decision layer as authoritative
         # If decision_result.status == "RESOLVED", override any validation that may have set needs_clarification
@@ -1726,7 +1736,7 @@ def resolve_message(
                 missing_slots, time_issues_for_trace)
 
         execution_trace["response"] = {
-            "status": "needs_clarification" if needs_clarification else "ready",
+            "status": STATUS_NEEDS_CLARIFICATION if needs_clarification else STATUS_READY,
             "intent": api_intent,
             "issues": issues_for_trace if issues_for_trace else {},
             "has_booking": booking_payload is not None,
@@ -1747,7 +1757,7 @@ def resolve_message(
                 missing_slots, time_issues_for_final)
 
         final_response = {
-            "status": "needs_clarification" if needs_clarification else "ready",
+            "status": STATUS_NEEDS_CLARIFICATION if needs_clarification else STATUS_READY,
             "intent": api_intent,
             "issues": final_response_issues if final_response_issues else {}
         }

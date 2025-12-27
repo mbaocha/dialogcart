@@ -1,5 +1,7 @@
 # Followup scenarios - multi-turn conversations with shared user_id
 # Each scenario is a batch of related turns that share the same user_id
+from luma.config.core import STATUS_READY, STATUS_NEEDS_CLARIFICATION
+
 followup_scenarios = [
     {
         "name": "service_to_date_to_time",
@@ -9,7 +11,7 @@ followup_scenarios = [
                 "sentence": "book me a haircut",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": "needs_clarification",
+                    "status": STATUS_NEEDS_CLARIFICATION,
                     "missing_slots": ["date", "time"]
                 }
             },
@@ -17,7 +19,7 @@ followup_scenarios = [
                 "sentence": "tomorrow",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": "needs_clarification",
+                    "status": STATUS_NEEDS_CLARIFICATION,
                     "missing_slots": ["time"]
                 }
             },
@@ -25,7 +27,7 @@ followup_scenarios = [
                 "sentence": "at 3pm",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": "ready",
+                    "status": STATUS_READY,
                     "slots": {
                         "service_id": "haircut",  # Single tenant alias for haircut
                         "has_datetime": True
@@ -42,7 +44,7 @@ followup_scenarios = [
                 "sentence": "reserve a room",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
-                    "status": "needs_clarification",
+                    "status": STATUS_NEEDS_CLARIFICATION,
                     "missing_slots": ["start_date", "end_date"]
                 }
             },
@@ -50,7 +52,7 @@ followup_scenarios = [
                 "sentence": "from october 5th",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
-                    "status": "needs_clarification",
+                    "status": STATUS_NEEDS_CLARIFICATION,
                     "missing_slots": ["end_date"]
                 }
             },
@@ -58,7 +60,7 @@ followup_scenarios = [
                 "sentence": "to october 9th",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
-                    "status": "ready",
+                    "status": STATUS_READY,
                     "slots": {
                         "service_id": "room",  # Explicit tenant alias key
                         "date_range": {
@@ -78,7 +80,7 @@ followup_scenarios = [
                 "sentence": "book massage at 2pm",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": "needs_clarification",
+                    "status": STATUS_NEEDS_CLARIFICATION,
                     "missing_slots": ["date"]
                 }
             },
@@ -86,7 +88,7 @@ followup_scenarios = [
                 "sentence": "tomorrow",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": "ready",
+                    "status": STATUS_READY,
                     "slots": {
                         "service_id": "massage",
                         "has_datetime": True
@@ -103,7 +105,7 @@ followup_scenarios = [
                 "sentence": "schedule massage",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": "needs_clarification",
+                    "status": STATUS_NEEDS_CLARIFICATION,
                     "missing_slots": ["date", "time"]
                 }
             },
@@ -111,7 +113,7 @@ followup_scenarios = [
                 "sentence": "friday at 11am",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": "ready",
+                    "status": STATUS_READY,
                     "slots": {
                         "service_id": "massage",
                         "has_datetime": True
@@ -128,7 +130,7 @@ followup_scenarios = [
                 "sentence": "book deluxe room",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
-                    "status": "needs_clarification",
+                    "status": STATUS_NEEDS_CLARIFICATION,
                     "missing_slots": ["start_date", "end_date"]
                 }
             },
@@ -136,7 +138,7 @@ followup_scenarios = [
                 "sentence": "november 1st to 3rd",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
-                    "status": "ready",
+                    "status": STATUS_READY,
                     "slots": {
                         "service_id": "room",
                         "date_range": {

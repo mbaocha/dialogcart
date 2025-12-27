@@ -3,15 +3,136 @@ Intent metadata loading and slot validation.
 
 Loads intent metadata from intent_signals.yaml and provides slot validation.
 """
+from __future__ import annotations
+
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import yaml
 
-from ..config.temporal import APPOINTMENT_TEMPORAL_TYPE, RESERVATION_TEMPORAL_TYPE, INTENT_TEMPORAL_SHAPE, INTENT_REQUIRE_END_DATE, TimeMode
+from ..config.temporal import APPOINTMENT_TEMPORAL_TYPE, RESERVATION_TEMPORAL_TYPE, TimeMode
 
 
 # Cache for intent metadata (required_slots, etc.)
 _INTENT_META_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+@dataclass(frozen=True)
+class IntentMeta:
+    """
+    Immutable intent metadata structure.
+
+    Represents policy metadata for an intent loaded from intent_signals.yaml.
+    All fields are optional to support intents with varying metadata.
+    """
+    intent_name: str
+    is_booking: Optional[bool] = None
+    temporal_shape: Optional[str] = None
+    requires_end_date: Optional[bool] = None
+    supports_date_roles: Optional[bool] = None
+    intent_signals: Optional[Dict[str, Any]] = None
+    intent_defining_slots: Optional[frozenset[str]] = None
+    required_slots: Optional[frozenset[str]] = None
+
+    @classmethod
+    def from_dict(cls, intent_name: str, data: Dict[str, Any]) -> "IntentMeta":
+        """
+        Create IntentMeta from a dictionary (as loaded from YAML).
+
+        Args:
+            intent_name: The intent name
+            data: Dictionary containing intent metadata from YAML
+
+        Returns:
+            IntentMeta instance with fields populated from data
+        """
+        # Convert lists to frozen sets for immutability
+        intent_defining_slots = None
+        if "intent_defining_slots" in data:
+            slots = data.get("intent_defining_slots") or []
+            intent_defining_slots = frozenset(slots) if slots else None
+
+        required_slots = None
+        if "required_slots" in data:
+            slots = data.get("required_slots") or []
+            required_slots = frozenset(slots) if slots else None
+
+        # Extract intent_signals if present
+        intent_signals = data.get("intent_signals")
+
+        return cls(
+            intent_name=intent_name,
+            is_booking=data.get("is_booking"),
+            temporal_shape=data.get("temporal_shape"),
+            requires_end_date=data.get("requires_end_date"),
+            supports_date_roles=data.get("supports_date_roles"),
+            intent_signals=intent_signals,
+            intent_defining_slots=intent_defining_slots,
+            required_slots=required_slots,
+        )
+
+
+class IntentRegistry:
+    """
+    Read-only registry for intent metadata.
+
+    Provides a formal interface to access intent policy metadata loaded from
+    intent_signals.yaml. Uses the existing load_intent_meta() function to avoid
+    duplicating parsing logic.
+    """
+
+    def __init__(self):
+        """Initialize the registry (lazy-loads on first access)."""
+        self._meta_cache: Optional[Dict[str, IntentMeta]] = None
+
+    def _ensure_loaded(self) -> None:
+        """Ensure intent metadata is loaded and cached."""
+        if self._meta_cache is None:
+            raw_meta = load_intent_meta()
+            self._meta_cache = {
+                intent_name: IntentMeta.from_dict(intent_name, data)
+                for intent_name, data in raw_meta.items()
+            }
+
+    def get(self, intent_name: str) -> Optional[IntentMeta]:
+        """
+        Get metadata for an intent by name.
+
+        Args:
+            intent_name: The intent name (e.g., "CREATE_APPOINTMENT")
+
+        Returns:
+            IntentMeta instance if found, None otherwise
+        """
+        self._ensure_loaded()
+        return self._meta_cache.get(intent_name) if self._meta_cache else None
+
+    def all_intents(self) -> Dict[str, IntentMeta]:
+        """
+        Get all registered intents.
+
+        Returns:
+            Dictionary mapping intent names to IntentMeta instances
+        """
+        self._ensure_loaded()
+        return self._meta_cache.copy() if self._meta_cache else {}
+
+
+# Global registry instance (singleton pattern for convenience)
+_registry_instance: Optional[IntentRegistry] = None
+
+
+def get_intent_registry() -> IntentRegistry:
+    """
+    Get the global IntentRegistry instance.
+
+    Returns:
+        Singleton IntentRegistry instance
+    """
+    global _registry_instance
+    if _registry_instance is None:
+        _registry_instance = IntentRegistry()
+    return _registry_instance
 
 
 def load_intent_meta() -> Dict[str, Dict[str, Any]]:
@@ -42,7 +163,10 @@ def validate_required_slots(intent_name: str, resolved_slots: Dict[str, Any], en
     intent_meta = load_intent_meta().get(intent_name, {}) or {}
     required_slots = intent_meta.get("required_slots") or []
     missing: List[str] = []
-    temporal_shape = INTENT_TEMPORAL_SHAPE.get(intent_name)
+    # Get temporal shape from IntentRegistry (sole policy source)
+    registry = get_intent_registry()
+    intent_meta_obj = registry.get(intent_name)
+    temporal_shape = intent_meta_obj.temporal_shape if intent_meta_obj else None
 
     def _slot_present(slot: str) -> bool:
         val = resolved_slots.get(slot)
@@ -116,8 +240,8 @@ def validate_required_slots(intent_name: str, resolved_slots: Dict[str, Any], en
         date_refs = resolved_slots.get("date_refs") or []
         if len(date_refs) < 1 and "start_date" not in missing:
             missing.append("start_date")
-        require_end = INTENT_REQUIRE_END_DATE.get(
-            intent_name) or INTENT_REQUIRE_END_DATE.get("CREATE_RESERVATION")
+        # Get requires_end_date from IntentRegistry (sole policy source)
+        require_end = intent_meta_obj.requires_end_date if intent_meta_obj else False
         # Enforce two refs (or explicit end_date) when require_end is True
         end_present = bool(resolved_slots.get(
             "end_date")) or len(date_refs) >= 2
