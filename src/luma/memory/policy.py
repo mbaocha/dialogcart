@@ -483,7 +483,8 @@ def prepare_memory_for_persistence(
         memory_state=memory_state,
         current_intent=persist_intent,
         current_booking=current_booking,
-        current_clarification=current_clarification
+        current_clarification=current_clarification,
+        request_id=request_id
     )
 
     if decision_result and decision_result.status == "RESOLVED":
@@ -507,6 +508,7 @@ def prepare_memory_for_persistence(
             extra={
                 'request_id': request_id,
                 'stored_date_refs': resolved_booking.get('date_refs', []),
+                'stored_date_roles': resolved_booking.get('date_roles', []),  # ← ADD date_roles to log
                 'stored_date_mode': resolved_booking.get('date_mode', 'none'),
                 'stored_time_refs': resolved_booking.get('time_refs', []),
                 'stored_time_mode': resolved_booking.get('time_mode', 'none'),

@@ -204,32 +204,13 @@ class CalendarBindingResult:
         Returns:
             Dictionary containing only JSON-serializable types
         """
-        # DIAG: Log calendar_booking before serialization
-        import logging
-        logger = logging.getLogger("luma-api")
-        logger.info(
-            f"[datetime_range] DIAG: to_dict() called: self.calendar_booking={self.calendar_booking}, type={type(self.calendar_booking).__name__}, is_none={self.calendar_booking is None}, keys={list(self.calendar_booking.keys()) if (self.calendar_booking and isinstance(self.calendar_booking, dict)) else []}, datetime_range={self.calendar_booking.get('datetime_range') if (self.calendar_booking and isinstance(self.calendar_booking, dict)) else None}",
-            extra={'calendar_booking_id': id(self.calendar_booking) if self.calendar_booking else None, 'self_id': id(self)}
-        )
-        
         # Serialize calendar_booking recursively
         serialized_booking = self._serialize_value(self.calendar_booking)
-        
-        # DIAG: Log after serialization
-        logger.info(
-            f"[datetime_range] DIAG: to_dict() after _serialize_value: serialized_booking keys={list(serialized_booking.keys()) if serialized_booking else []}, datetime_range={serialized_booking.get('datetime_range') if serialized_booking else None}",
-            extra={'serialized_booking_id': id(serialized_booking) if serialized_booking else None}
-        )
 
         result = {
             "calendar_booking": serialized_booking,
             "needs_clarification": self.needs_clarification,
         }
-        
-        # DIAG: Log final result
-        logger.info(
-            f"[datetime_range] DIAG: to_dict() final result: calendar_booking keys={list(result['calendar_booking'].keys()) if result.get('calendar_booking') else []}, datetime_range={result['calendar_booking'].get('datetime_range') if result.get('calendar_booking') else None}",
-        )
 
         # Include clarification object, serializable
         if self.clarification is not None:
@@ -249,14 +230,6 @@ class CalendarBindingResult:
         Returns:
             JSON-serializable value
         """
-        # DIAG: Log when serializing dicts (especially calendar_booking)
-        import logging
-        logger = logging.getLogger("luma-api")
-        if isinstance(value, dict):
-            logger.info(
-                f"[datetime_range] DIAG: _serialize_value called on dict: keys={list(value.keys())}, datetime_range={value.get('datetime_range')}",
-            )
-        
         # Handle None
         if value is None:
             return None
@@ -636,30 +609,14 @@ def bind_calendar(
     # For reservations, ignore time_range and use full-day logic
     datetime_range = combine_datetime_range(
         date_range, time_range, now, tz, external_intent=external_intent)
-    
-    # DIAG: Log datetime_range immediately after computation
-    import logging
-    logger = logging.getLogger("luma-api")
-    logger.info(
-        f"[datetime_range] DIAG: After combine_datetime_range: datetime_range={datetime_range}, type={type(datetime_range).__name__}, is_none={datetime_range is None}, bool={bool(datetime_range) if datetime_range is not None else None}",
-        extra={'external_intent': external_intent, 'date_range': date_range, 'time_range': time_range}
-    )
 
     # Apply duration if present
     if duration and datetime_range:
         datetime_range = _apply_duration(datetime_range, duration, tz)
-        logger.info(
-            f"[datetime_range] DIAG: After _apply_duration: datetime_range={datetime_range}",
-            extra={'external_intent': external_intent}
-        )
 
     # Build calendar_booking dict - ensure all fields are included if present
     # This is the single authoritative carrier of binder output for all intents
     calendar_booking = {}
-    logger.info(
-        f"[datetime_range] DIAG: Starting calendar_booking construction: datetime_range={datetime_range}, datetime_range_is_none={datetime_range is None}, datetime_range_bool={bool(datetime_range) if datetime_range is not None else None}",
-        extra={'external_intent': external_intent}
-    )
     # Always include services if present (even if empty list)
     if services is not None:
         calendar_booking["services"] = services
@@ -670,21 +627,8 @@ def bind_calendar(
     if time_range:
         calendar_booking["time_range"] = time_range
     # Include datetime_range if present (for appointments)
-    logger.info(
-        f"[datetime_range] DIAG: Before adding datetime_range to calendar_booking: datetime_range={datetime_range}, condition_result={bool(datetime_range)}",
-        extra={'external_intent': external_intent}
-    )
     if datetime_range:
         calendar_booking[APPOINTMENT_TEMPORAL_TYPE] = datetime_range
-        logger.info(
-            f"[datetime_range] DIAG: Added datetime_range to calendar_booking: calendar_booking keys={list(calendar_booking.keys())}",
-            extra={'external_intent': external_intent, 'datetime_range_value': datetime_range}
-        )
-    else:
-        logger.warning(
-            f"[datetime_range] DIAG: NOT adding datetime_range to calendar_booking (condition failed): datetime_range={datetime_range}",
-            extra={'external_intent': external_intent, 'datetime_range_is_none': datetime_range is None}
-        )
     # Include duration if present
     if duration:
         calendar_booking["duration"] = duration
@@ -705,22 +649,10 @@ def bind_calendar(
         calendar_booking["start_date"] = date_range.get("start_date")
         calendar_booking["end_date"] = date_range.get("end_date")
 
-    # DIAG: Log calendar_booking state before creating CalendarBindingResult
-    logger.info(
-        f"[datetime_range] DIAG: calendar_booking before CalendarBindingResult: keys={list(calendar_booking.keys())}, datetime_range={calendar_booking.get(APPOINTMENT_TEMPORAL_TYPE)}, calendar_booking_id={id(calendar_booking)}",
-        extra={'external_intent': external_intent, 'calendar_booking_dict': calendar_booking}
-    )
-    
     result = CalendarBindingResult(
         calendar_booking=calendar_booking,
         needs_clarification=False,
         clarification=None
-    )
-    
-    # DIAG: Log result.calendar_booking state after creation
-    logger.info(
-        f"[datetime_range] DIAG: result.calendar_booking after CalendarBindingResult: keys={list(result.calendar_booking.keys()) if result.calendar_booking else []}, datetime_range={result.calendar_booking.get(APPOINTMENT_TEMPORAL_TYPE) if result.calendar_booking else None}, result_calendar_booking_id={id(result.calendar_booking) if result.calendar_booking else None}",
-        extra={'external_intent': external_intent, 'same_object': id(result.calendar_booking) == id(calendar_booking) if result.calendar_booking else False}
     )
     
     trace = {
@@ -731,12 +663,6 @@ def bind_calendar(
             "decision_reason": "success"
         }
     }
-    
-    # DIAG: Log trace output state
-    logger.info(
-        f"[datetime_range] DIAG: trace output: keys={list(trace['binder']['output'].keys()) if trace.get('binder', {}).get('output') else []}, datetime_range={trace['binder']['output'].get(APPOINTMENT_TEMPORAL_TYPE) if trace.get('binder', {}).get('output') else None}",
-        extra={'external_intent': external_intent}
-    )
     
     return result, trace
 
@@ -802,6 +728,19 @@ def _bind_single_date(date_str: str, now: datetime, tz: Any) -> Optional[datetim
     Returns:
         Bound datetime or None
     """
+    # Handle YYYY-MM-DD format (resolved dates from memory rehydration)
+    # This format is used when rehydrating time-only follow-ups with resolved dates
+    # Check this BEFORE lowercasing to preserve the format
+    date_str_stripped = date_str.strip()
+    iso_date_pattern = r"^\d{4}-\d{2}-\d{2}$"
+    if re.match(iso_date_pattern, date_str_stripped):
+        try:
+            parsed_date = datetime.strptime(date_str_stripped, "%Y-%m-%d")
+            return _localize_datetime(parsed_date, tz)
+        except ValueError:
+            # Invalid date format, fall through to other parsers
+            pass
+
     date_str_lower = date_str.lower().strip()
 
     # Handle "<weekday>" (bare), "this <weekday>", "next <weekday>"

@@ -473,11 +473,14 @@ def resolve_semantics(
                     "date": first_ref,
                 },
             )
+            # Extract date_roles from date_resolution
+            date_roles = date_resolution.get("date_roles", [])
             resolved_booking = {
                 "services": booking.get("services", []),
                 "date_mode": date_resolution["mode"],
                 "date_refs": date_resolution["refs"],
                 "date_modifiers": date_modifiers,
+                "date_roles": date_roles,  # Persist date_roles for reservations
                 "time_mode": time_resolution["mode"],
                 "time_refs": time_resolution["refs"],
                 "duration": booking.get("duration"),
@@ -530,11 +533,20 @@ def resolve_semantics(
             intent_result, date_resolution, entities
         )
 
+    # Extract date_roles from date_resolution
+    date_roles = date_resolution.get("date_roles", [])
+    logger.info(
+        f"[date_role] Extracted date_roles from date_resolution: {date_roles}, "
+        f"date_resolution_keys={list(date_resolution.keys())}",
+        extra={'intent': intent_result.get(
+            "intent") if intent_result else None}
+    )
     resolved_booking = {
         "services": services,
         "date_mode": date_resolution["mode"],
         "date_refs": date_resolution["refs"],
         "date_modifiers": date_resolution.get("modifiers", []),
+        "date_roles": date_roles,  # Persist date_roles for reservations
         "time_mode": time_resolution["mode"],
         "time_refs": time_resolution["refs"],
         "duration": duration,
@@ -542,6 +554,11 @@ def resolve_semantics(
         # Optional: list of time parsing issues (e.g., ambiguous meridiem)
         "time_issues": time_issues
     }
+    logger.info(
+        f"[date_role] Stored date_roles in resolved_booking: {resolved_booking.get('date_roles')}",
+        extra={'intent': intent_result.get(
+            "intent") if intent_result else None}
+    )
 
     # Validate temporal shape completeness (authoritative - must pass for RESOLVED)
     # This runs after all ambiguity checks but before finalizing status
@@ -1464,6 +1481,209 @@ def _maybe_complete_shorthand_date_range(
     return [start_text, end_text]
 
 
+def _detect_date_role(
+    entities: Dict[str, Any],
+    date_index: int,
+    intent_name: Optional[str] = None
+) -> Optional[str]:
+    """
+    Detect date role (START_DATE or END_DATE) for reservation dates.
+
+    Only applies to CREATE_RESERVATION intent.
+    Uses normalized vocabulary matching, not hardcoded strings.
+
+    Args:
+        entities: Raw extraction output with osentence
+        date_index: Index of date in date_refs (0 = first, 1 = second, etc.)
+        intent_name: Intent name (CREATE_RESERVATION, CREATE_APPOINTMENT, or BOOK_APPOINTMENT)
+
+    Returns:
+        "START_DATE", "END_DATE", or None
+    """
+    # Use existing logger (already imported at module level)
+    # Only apply to CREATE_RESERVATION or BOOK_APPOINTMENT (which may become CREATE_RESERVATION)
+    # The merge logic in resolve_service.py will filter out appointments, so we can safely detect roles for BOOK_APPOINTMENT
+    if intent_name not in ("CREATE_RESERVATION", "BOOK_APPOINTMENT"):
+        logger.debug(
+            f"[date_role] Skipping detection: intent={intent_name} (not CREATE_RESERVATION or BOOK_APPOINTMENT)",
+            extra={'intent': intent_name, 'date_index': date_index}
+        )
+        return None
+
+    osentence = str(entities.get("osentence", "")).lower()
+    if not osentence:
+        logger.debug(
+            f"[date_role] Skipping detection: no osentence",
+            extra={'intent': intent_name, 'date_index': date_index}
+        )
+        return None
+
+    logger.info(
+        f"[date_role] Starting detection: intent={intent_name}, date_index={date_index}, "
+        f"osentence='{osentence}'",
+        extra={'intent': intent_name, 'date_index': date_index}
+    )
+
+    # START_DATE signals (normalized)
+    start_signals = ["from", "starting", "beginning", "since"]
+    # END_DATE signals (normalized)
+    end_signals = ["to", "until", "till", "through", "ending"]
+
+    # Find date positions in sentence
+    # Note: date_index refers to position in the final date_refs list, not in all_dates
+    # We need to check both dates and dates_absolute, but prioritize absolute
+    dates = entities.get("dates", [])
+    dates_absolute = entities.get("dates_absolute", [])
+
+    logger.info(
+        f"[date_role] Entity check: dates_count={len(dates)}, dates_absolute_count={len(dates_absolute)}, "
+        f"date_index={date_index}",
+        extra={'intent': intent_name, 'date_index': date_index}
+    )
+
+    # Determine which date entity corresponds to date_index
+    # If dates_absolute exist, they come first in the final refs list
+    if dates_absolute and date_index < len(dates_absolute):
+        date_entity = dates_absolute[date_index]
+        logger.info(
+            f"[date_role] Using dates_absolute[{date_index}]: {date_entity}",
+            extra={'intent': intent_name, 'date_index': date_index}
+        )
+    elif dates and date_index < len(dates):
+        # Adjust index if we have absolute dates before relative ones
+        adjusted_index = date_index - \
+            len(dates_absolute) if dates_absolute else date_index
+        if adjusted_index >= 0 and adjusted_index < len(dates):
+            date_entity = dates[adjusted_index]
+            logger.info(
+                f"[date_role] Using dates[{adjusted_index}]: {date_entity}",
+                extra={'intent': intent_name, 'date_index': date_index}
+            )
+        else:
+            logger.warning(
+                f"[date_role] No date entity found: adjusted_index={adjusted_index}, dates_len={len(dates)}",
+                extra={'intent': intent_name, 'date_index': date_index}
+            )
+            return None
+    else:
+        logger.warning(
+            f"[date_role] No date entity found: date_index={date_index} out of range",
+            extra={'intent': intent_name, 'date_index': date_index, 'dates_count': len(
+                dates), 'dates_absolute_count': len(dates_absolute)}
+        )
+        return None
+
+    # FIX: Entities have "position" (token index), not "start"/"end" (character positions)
+    # Find the date text in the sentence to get its character position
+    date_text = date_entity.get("text", "")
+    if not date_text:
+        logger.warning(
+            f"[date_role] No date text in entity: {date_entity}",
+            extra={'intent': intent_name, 'date_index': date_index}
+        )
+        return None
+
+    logger.info(
+        f"[date_role] Date entity text: '{date_text}', entity_keys={list(date_entity.keys())}",
+        extra={'intent': intent_name, 'date_index': date_index}
+    )
+
+    # Find the date text in the sentence (case-insensitive search)
+    # Use the first occurrence (should be unique for the date we're checking)
+    date_text_lower = date_text.lower()
+    osentence_lower = osentence.lower()
+    date_char_start = osentence_lower.find(date_text_lower)
+
+    logger.info(
+        f"[date_role] Text search: date_text='{date_text}', date_text_lower='{date_text_lower}', "
+        f"osentence_lower='{osentence_lower}', date_char_start={date_char_start}",
+        extra={'intent': intent_name, 'date_index': date_index}
+    )
+
+    if date_char_start < 0:
+        # Date text not found in sentence - fallback to checking entire sentence
+        logger.warning(
+            f"[date_role] Date text '{date_text}' not found in sentence '{osentence}' - checking entire sentence",
+            extra={'intent': intent_name, 'date_index': date_index}
+        )
+        sentence_before_date = osentence
+    else:
+        # Look back up to 50 characters before the date
+        lookback_start = max(0, date_char_start - 50)
+        sentence_before_date = osentence[lookback_start:date_char_start]
+        logger.info(
+            f"[date_role] Found date at char position {date_char_start}, checking before: '{sentence_before_date}'",
+            extra={'intent': intent_name, 'date_index': date_index}
+        )
+
+    # Check for START_DATE signals
+    logger.info(
+        f"[date_role] Checking START_DATE signals: {start_signals}, in '{sentence_before_date}'",
+        extra={'intent': intent_name, 'date_index': date_index}
+    )
+    for signal in start_signals:
+        # Use word boundary matching to avoid false positives
+        pattern = rf"\b{re.escape(signal)}\b"
+        match = re.search(pattern, sentence_before_date)
+        logger.debug(
+            f"[date_role] Checking signal '{signal}' with pattern '{pattern}': match={bool(match)}",
+            extra={'intent': intent_name,
+                   'date_index': date_index, 'signal': signal}
+        )
+        if match:
+            logger.info(
+                f"[date_role] ✓ Detected START_DATE signal '{signal}' for date_index={date_index}",
+                extra={'sentence': osentence, 'date_entity': date_entity.get(
+                    'text', ''), 'signal': signal}
+            )
+            return "START_DATE"
+
+    # Check for END_DATE signals
+    logger.info(
+        f"[date_role] Checking END_DATE signals: {end_signals}, in '{sentence_before_date}'",
+        extra={'intent': intent_name, 'date_index': date_index}
+    )
+    for signal in end_signals:
+        pattern = rf"\b{re.escape(signal)}\b"
+        match = re.search(pattern, sentence_before_date)
+        logger.debug(
+            f"[date_role] Checking signal '{signal}' with pattern '{pattern}': match={bool(match)}",
+            extra={'intent': intent_name,
+                   'date_index': date_index, 'signal': signal}
+        )
+        if match:
+            logger.info(
+                f"[date_role] ✓ Detected END_DATE signal '{signal}' for date_index={date_index}",
+                extra={'sentence': osentence, 'date_entity': date_entity.get(
+                    'text', ''), 'signal': signal}
+            )
+            return "END_DATE"
+
+    # Default: first date is START_DATE, second is END_DATE (for ranges)
+    logger.info(
+        f"[date_role] No signals found, using default: date_index={date_index}",
+        extra={'intent': intent_name, 'date_index': date_index}
+    )
+    if date_index == 0:
+        logger.info(
+            f"[date_role] Default: returning START_DATE for date_index=0",
+            extra={'intent': intent_name, 'date_index': date_index}
+        )
+        return "START_DATE"
+    elif date_index == 1:
+        logger.info(
+            f"[date_role] Default: returning END_DATE for date_index=1",
+            extra={'intent': intent_name, 'date_index': date_index}
+        )
+        return "END_DATE"
+
+    logger.warning(
+        f"[date_role] No role determined: date_index={date_index} (not 0 or 1)",
+        extra={'intent': intent_name, 'date_index': date_index}
+    )
+    return None
+
+
 def _resolve_date_semantics(
     entities: Dict[str, Any],
     structure: Dict[str, Any],
@@ -1495,9 +1715,10 @@ def _resolve_date_semantics(
     Args:
         entities: Raw extraction output
         structure: Structure interpretation result
+        intent_name: Intent name (for date_role detection)
 
     Returns:
-        Dict with "mode", "refs", and optional "needs_clarification" flag
+        Dict with "mode", "refs", "date_roles" (list of roles), and optional "needs_clarification" flag
     """
     dates = entities.get("dates", [])
     dates_absolute = entities.get("dates_absolute", [])
@@ -1542,10 +1763,16 @@ def _resolve_date_semantics(
         intent_name
     )
     if shorthand_refs:
+        # Detect date_roles for shorthand ranges
+        date_roles = []
+        for idx in range(len(shorthand_refs)):
+            role = _detect_date_role(entities, idx, intent_name)
+            date_roles.append(role)
         return {
             "mode": DateMode.RANGE.value,
             "refs": shorthand_refs,
-            "modifiers": date_modifiers
+            "modifiers": date_modifiers,
+            "date_roles": date_roles
         }
 
     # Rule 2: Absolute dates take precedence
@@ -1561,25 +1788,35 @@ def _resolve_date_semantics(
                 f"date_refs={[normalized_absolute[0]]} "
                 f"date_modifiers={date_modifiers}"
             )
+            # Detect date_role for single absolute date
+            date_role = _detect_date_role(entities, 0, intent_name)
             return {
                 "mode": DateMode.SINGLE.value,
                 "refs": [normalized_absolute[0]],  # Use normalized text
-                "modifiers": date_modifiers
+                "modifiers": date_modifiers,
+                "date_roles": [date_role] if date_role else []
             }
         elif len(dates_absolute) >= 2:
             # Multiple absolute dates → check for range marker
+            # Detect date_roles for both dates
+            date_roles = []
+            for idx in range(min(2, len(normalized_absolute))):
+                role = _detect_date_role(entities, idx, intent_name)
+                date_roles.append(role)
             if structure.get("date_type") == DateMode.RANGE.value or structure.get("date_type") == DateMode.RANGE or "between" in str(structure).lower() or "from" in str(structure).lower():
                 return {
                     "mode": DateMode.RANGE.value,
                     "refs": normalized_absolute[:2],  # Use normalized text
-                    "modifiers": date_modifiers
+                    "modifiers": date_modifiers,
+                    "date_roles": date_roles
                 }
             else:
                 # Ambiguous - will be flagged
                 return {
                     "mode": DateMode.RANGE.value,  # Default to range, but flag ambiguity
                     "refs": normalized_absolute[:2],  # Use normalized text
-                    "modifiers": date_modifiers
+                    "modifiers": date_modifiers,
+                    "date_roles": date_roles
                 }
 
     # Rule 3: Relative dates
@@ -1587,12 +1824,16 @@ def _resolve_date_semantics(
         if len(dates) == 1:
             date_text = normalized_dates[0]
 
+            # Detect date_role for single relative date
+            date_role = _detect_date_role(entities, 0, intent_name)
+
             # Check for fine-grained modifiers (early/mid/end) → always range
             if _has_fine_grained_modifier(date_text):
                 return {
                     "mode": DateMode.RANGE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
-                    "modifiers": date_modifiers
+                    "modifiers": date_modifiers,
+                    "date_roles": [date_role] if date_role else []
                 }
 
             # Simple relative days → single_day
@@ -1600,7 +1841,8 @@ def _resolve_date_semantics(
                 return {
                     "mode": DateMode.SINGLE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
-                    "modifiers": date_modifiers
+                    "modifiers": date_modifiers,
+                    "date_roles": [date_role] if date_role else []
                 }
 
             # Week-based → range
@@ -1608,7 +1850,8 @@ def _resolve_date_semantics(
                 return {
                     "mode": DateMode.RANGE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
-                    "modifiers": date_modifiers
+                    "modifiers": date_modifiers,
+                    "date_roles": [date_role] if date_role else []
                 }
 
             # Weekend → range
@@ -1616,7 +1859,8 @@ def _resolve_date_semantics(
                 return {
                     "mode": DateMode.RANGE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
-                    "modifiers": date_modifiers
+                    "modifiers": date_modifiers,
+                    "date_roles": [date_role] if date_role else []
                 }
 
             # Specific weekday → single_day
@@ -1624,7 +1868,8 @@ def _resolve_date_semantics(
                 return {
                     "mode": DateMode.SINGLE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
-                    "modifiers": date_modifiers
+                    "modifiers": date_modifiers,
+                    "date_roles": [date_role] if date_role else []
                 }
 
             # Month-relative → range (full month)
@@ -1632,45 +1877,57 @@ def _resolve_date_semantics(
                 return {
                     "mode": DateMode.RANGE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
-                    "modifiers": date_modifiers
+                    "modifiers": date_modifiers,
+                    "date_roles": [date_role] if date_role else []
                 }
 
             # Default: single_day
             return {
                 "mode": DateMode.SINGLE.value,
                 "refs": [normalized_dates[0]],  # Use normalized text
-                "modifiers": date_modifiers
+                "modifiers": date_modifiers,
+                "date_roles": [date_role] if date_role else []
             }
         elif len(dates) >= 2:
             # Multiple relative dates → check for range marker
+            # Detect date_roles for both dates
+            date_roles = []
+            for idx in range(min(2, len(normalized_dates))):
+                role = _detect_date_role(entities, idx, intent_name)
+                date_roles.append(role)
             if structure.get("date_type") == DateMode.RANGE.value or structure.get("date_type") == DateMode.RANGE or "between" in str(structure).lower() or "from" in str(structure).lower():
                 return {
                     "mode": DateMode.RANGE.value,
                     "refs": normalized_dates[:2],  # Use normalized text
-                    "modifiers": date_modifiers
+                    "modifiers": date_modifiers,
+                    "date_roles": date_roles
                 }
             else:
                 # Ambiguous - will be flagged
                 return {
                     "mode": DateMode.RANGE.value,  # Default to range, but flag ambiguity
                     "refs": normalized_dates[:2],  # Use normalized text
-                    "modifiers": date_modifiers
+                    "modifiers": date_modifiers,
+                    "date_roles": date_roles
                 }
 
     # Rule 4: Mixed absolute and relative
     if dates_absolute and dates:
         # Absolute takes precedence
+        date_role = _detect_date_role(entities, 0, intent_name)
         return {
             "mode": DateMode.SINGLE.value,
             "refs": [normalized_absolute[0]],  # Use normalized text
-            "modifiers": date_modifiers
+            "modifiers": date_modifiers,
+            "date_roles": [date_role] if date_role else []
         }
 
     # Rule 5: No dates
     return {
         "mode": DateMode.FLEXIBLE.value,
         "refs": [],
-        "modifiers": date_modifiers
+        "modifiers": date_modifiers,
+        "date_roles": []
     }
 
 

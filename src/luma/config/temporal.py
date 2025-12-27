@@ -51,6 +51,50 @@ class TimeMode(str, Enum):
 
 
 # ----------------------------
+# Date roles
+# ----------------------------
+# Date roles are used to disambiguate start/end dates in multi-turn
+# reservation flows and prevent later turns from overwriting
+# previously resolved temporal anchors.
+class DateRole(str, Enum):
+    START = "START_DATE"
+    END = "END_DATE"
+
+
+# Date role keyword mappings
+# Canonical keyword sets used to infer date roles from user language.
+# This is not hard-coding logic, only declaring intent.
+# NLP / extraction layers may extend this later.
+# This mapping is advisory, not mandatory.
+DATE_ROLE_KEYWORDS = {
+    DateRole.START: {
+        "from",
+        "starting",
+        "start",
+        "beginning",
+        "since",
+        "on",
+    },
+    DateRole.END: {
+        "to",
+        "until",
+        "till",
+        "through",
+        "ending",
+        "end",
+    },
+}
+
+# Intents that support date roles
+# Explicitly state which intents support date roles.
+# Appointments may still use roles later, but do not enable yet.
+# Keeps behavior explicit and safe.
+INTENTS_SUPPORTING_DATE_ROLES = {
+    "CREATE_RESERVATION",
+}
+
+
+# ----------------------------
 # Binding policy
 # ----------------------------
 # Bare weekday (e.g. "monday") without modifier ("this"/"next")

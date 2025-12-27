@@ -52,8 +52,11 @@ from luma.memory.policy import (
 from luma.resolution.semantic_resolver import SemanticResolutionResult
 from luma.perf import StageTimer
 from luma.config.temporal import APPOINTMENT_TEMPORAL_TYPE, INTENT_TEMPORAL_SHAPE
-from luma.trace_contract import validate_stable_fields
+from luma.trace import validate_stable_fields
 from luma.trace.stage_snapshot import capture_stage_snapshot
+from luma.trace import log_field_removal
+from luma.config import config
+from luma.response.builder import ResponseBuilder, format_service_for_response, build_issues
 
 
 # CONTEXTUAL_UPDATE constant removed - no longer used in state-first model
@@ -130,8 +133,6 @@ def resolve_message(
     _count_mutable_slots_modified,
     _has_booking_verb,
     validate_required_slots,
-    _build_issues,
-    _format_service_for_response,
     plan_clarification,
     _log_stage,
 ):
@@ -500,23 +501,177 @@ def resolve_message(
             current_date_refs = current_resolved_booking.get("date_refs", [])
             memory_date_refs = memory_semantic_booking.get("date_refs", [])
             memory_date_mode = memory_semantic_booking.get("date_mode")
+            
+            # FIX: Rehydrate time-only follow-ups with resolved date from memory
+            # If current turn provides time (time_refs or time_constraint) but no date,
+            # and memory contains a previously resolved date, inject it before binder invocation
+            current_time_refs = current_resolved_booking.get("time_refs", [])
+            current_time_mode = current_resolved_booking.get("time_mode", "none")
+            current_time_constraint = current_resolved_booking.get("time_constraint")
+            # Time is present if time_refs exist, time_mode is not "none", or time_constraint exists
+            has_time = bool(current_time_refs) or current_time_mode != "none" or bool(current_time_constraint)
+            has_date = bool(current_date_refs)
+            
+            # Check if memory has a previously resolved date in booking_state
+            memory_resolved_date = None
+            memory_booking_state = memory_state.get("booking_state", {})
+            if memory_booking_state:
+                # Try to extract resolved date from date_range
+                memory_date_range = memory_booking_state.get("date_range")
+                if memory_date_range and isinstance(memory_date_range, dict):
+                    memory_resolved_date = memory_date_range.get("start_date")
+                # Fallback: extract date from datetime_range
+                if not memory_resolved_date:
+                    memory_datetime_range = memory_booking_state.get("datetime_range")
+                    if memory_datetime_range and isinstance(memory_datetime_range, dict):
+                        dt_start = memory_datetime_range.get("start", "")
+                        if dt_start and "T" in dt_start:
+                            memory_resolved_date = dt_start.split("T")[0]
+            
+            # FIX: If booking_state doesn't have resolved date, resolve date_refs from resolved_booking_semantics
+            # This handles date-only turns where booking_state is null but date_refs exist in memory
+            # For date-only turns, the resolved date was stored in context but not in booking_state
+            # We need to resolve the date_refs to get the concrete date for rehydration
+            if not memory_resolved_date and memory_date_refs:
+                # Resolve date_refs to get concrete date for rehydration
+                from luma.calendar.calendar_binder import _bind_dates, get_timezone
+                tz = get_timezone(timezone)
+                resolved_date_range = _bind_dates(memory_date_refs, memory_date_mode or "single_day", now, tz)
+                if resolved_date_range:
+                    memory_resolved_date = resolved_date_range.get("start_date")
+                    logger.info(
+                        f"[rehydration] Resolved date_refs from memory for rehydration: {memory_date_refs} -> {memory_resolved_date}",
+                        extra={'request_id': request_id, 'user_id': user_id}
+                    )
 
             # INVARIANT: Do not parse or reinterpret raw text
             # Date merge logic: Use semantic resolver output as authoritative
             # If semantic resolver produced date_refs, use them as-is (no text parsing to infer structure)
             if current_date_refs:
-                # Current has date_refs: replace (semantic resolver is authoritative)
-                merged_resolved_booking["date_refs"] = current_date_refs
+                # Get current date_roles and intent
+                current_date_roles = current_resolved_booking.get("date_roles", [])
+                memory_date_roles = memory_semantic_booking.get("date_roles", [])
+                
+                # Debug logging for date_role merge
+                logger.info(
+                    f"[date_role] Merge check: intent={intent}, current_date_refs={current_date_refs}, "
+                    f"current_date_roles={current_date_roles}, memory_date_refs={memory_date_refs}, "
+                    f"memory_date_roles={memory_date_roles}, "
+                    f"current_resolved_booking_keys={list(current_resolved_booking.keys())}, "
+                    f"memory_semantic_booking_keys={list(memory_semantic_booking.keys())}",
+                    extra={'request_id': request_id, 'user_id': user_id}
+                )
+                
+                # FIX: For CREATE_RESERVATION, respect date_role when merging
+                # If date_role == START_DATE: set start_date if empty
+                # If date_role == END_DATE: set end_date if start_date exists (don't overwrite start_date)
+                if intent == "CREATE_RESERVATION" and current_date_roles:
+                    # Get the role of the first (and possibly only) date in current turn
+                    current_role = current_date_roles[0] if current_date_roles else None
+                    
+                    logger.info(
+                        f"[date_role] Processing merge: current_role={current_role}, "
+                        f"memory_date_refs_len={len(memory_date_refs) if memory_date_refs else 0}",
+                        extra={'request_id': request_id, 'user_id': user_id}
+                    )
+                    
+                    if current_role == "START_DATE":
+                        # START_DATE: set start_date if empty, don't overwrite if exists
+                        if not memory_date_refs or len(memory_date_refs) == 0:
+                            # No memory dates: set as start
+                            merged_resolved_booking["date_refs"] = current_date_refs
+                            merged_resolved_booking["date_roles"] = current_date_roles
+                        elif len(memory_date_refs) == 1:
+                            # Memory has one date: check if it's START_DATE or untyped
+                            memory_role = memory_date_roles[0] if memory_date_roles and len(memory_date_roles) > 0 else None
+                            if memory_role == "START_DATE" or memory_role is None:
+                                # Replace start_date
+                                merged_resolved_booking["date_refs"] = current_date_refs
+                                merged_resolved_booking["date_roles"] = current_date_roles
+                            else:
+                                # Memory has END_DATE, keep it and add current as START_DATE
+                                merged_resolved_booking["date_refs"] = current_date_refs + memory_date_refs
+                                merged_resolved_booking["date_roles"] = current_date_roles + memory_date_roles
+                                # FIX: When we have 2 dates, set date_mode to "range"
+                                merged_resolved_booking["date_mode"] = "range"
+                                # FIX: When we have 2 dates, set date_mode to "range"
+                                merged_resolved_booking["date_mode"] = "range"
+                        else:
+                            # Memory has 2 dates: replace start_date (first), keep end_date (second)
+                            merged_resolved_booking["date_refs"] = current_date_refs + memory_date_refs[1:]
+                            merged_resolved_booking["date_roles"] = current_date_roles + (memory_date_roles[1:] if memory_date_roles and len(memory_date_roles) > 1 else [])
+                            # FIX: When we have 2 dates, ensure date_mode is "range"
+                            merged_resolved_booking["date_mode"] = "range"
+                    elif current_role == "END_DATE":
+                        # END_DATE: set end_date if start_date exists, don't overwrite start_date
+                        if memory_date_refs and len(memory_date_refs) >= 1:
+                            # Memory has start_date: keep it, add current as end_date
+                            merged_resolved_booking["date_refs"] = memory_date_refs[:1] + current_date_refs
+                            merged_resolved_booking["date_roles"] = (memory_date_roles[:1] if memory_date_roles and len(memory_date_roles) > 0 else ["START_DATE"]) + current_date_roles
+                            # FIX: When we have 2 dates, set date_mode to "range"
+                            merged_resolved_booking["date_mode"] = "range"
+                            logger.info(
+                                f"[date_role] END_DATE merge: kept start_date={memory_date_refs[:1]}, "
+                                f"added end_date={current_date_refs}, final_date_refs={merged_resolved_booking['date_refs']}, "
+                                f"date_mode set to range",
+                                extra={'request_id': request_id, 'user_id': user_id}
+                            )
+                        else:
+                            # No memory dates: can't set end_date without start_date, treat as start
+                            merged_resolved_booking["date_refs"] = current_date_refs
+                            merged_resolved_booking["date_roles"] = current_date_roles
+                    else:
+                        # No role or unknown role: default behavior (replace)
+                        merged_resolved_booking["date_refs"] = current_date_refs
+                        merged_resolved_booking["date_roles"] = current_date_roles
+                else:
+                    # For appointments or no date_role: replace (semantic resolver is authoritative)
+                    merged_resolved_booking["date_refs"] = current_date_refs
+                    merged_resolved_booking["date_roles"] = current_date_roles
+                
                 # Preserve date_mode from current semantic result if available
+                # BUT: Don't overwrite if we already set it to "range" (when merging 2 dates)
                 current_date_mode = current_resolved_booking.get("date_mode")
-                if current_date_mode:
+                if current_date_mode and merged_resolved_booking.get("date_mode") != "range":
                     merged_resolved_booking["date_mode"] = current_date_mode
             elif not current_date_refs:
                 # No current date_refs: keep from memory
-                if memory_date_refs:
+                # FIX: Prefer resolved date over symbolic reference for rehydration
+                # If we have a resolved date (concrete YYYY-MM-DD), use it instead of symbolic reference
+                # This ensures the binder receives concrete dates, not symbolic tokens like "tomorrow"
+                if memory_resolved_date:
+                    # Use resolved date (concrete YYYY-MM-DD) for rehydration
+                    merged_resolved_booking["date_refs"] = [memory_resolved_date]
+                    merged_resolved_booking["date_mode"] = "single_day"
+                    merged_resolved_booking["resolved_date"] = memory_resolved_date
+                    logger.info(
+                        f"[rehydration] Using resolved date from memory: {memory_resolved_date} (from {memory_date_refs})",
+                        extra={'request_id': request_id, 'user_id': user_id}
+                    )
+                elif memory_date_refs:
+                    # Fallback to symbolic reference if no resolved date available
                     merged_resolved_booking["date_refs"] = memory_date_refs
+                    # Preserve date_roles from memory for reservations
+                    memory_date_roles = memory_semantic_booking.get("date_roles", [])
+                    if memory_date_roles:
+                        merged_resolved_booking["date_roles"] = memory_date_roles
                     if memory_date_mode:
                         merged_resolved_booking["date_mode"] = memory_date_mode
+                # REHYDRATION: If time-only turn and memory has resolved date, inject it
+                # This must happen before temporal shape validation and binder invocation
+                # Do NOT infer dates - only reuse previously resolved memory state
+                elif has_time and memory_resolved_date:
+                    # Rehydrate semantic temporal state with resolved date from memory
+                    # Inject resolved date as date_ref (binder will parse YYYY-MM-DD format)
+                    merged_resolved_booking["date_refs"] = [memory_resolved_date]
+                    merged_resolved_booking["date_mode"] = "single_day"
+                    merged_resolved_booking["resolved_date"] = memory_resolved_date
+                    logger.info(
+                        f"[rehydration] Time-only follow-up: injected resolved date {memory_resolved_date} from memory before binder",
+                        extra={'request_id': request_id, 'user_id': user_id, 
+                               'has_time': has_time, 'time_refs': current_time_refs, 
+                               'time_mode': current_time_mode, 'time_constraint': bool(current_time_constraint)}
+                    )
             else:
                 # Current has date_refs: replace (default behavior)
                 merged_resolved_booking["date_refs"] = current_date_refs
@@ -585,6 +740,10 @@ def resolve_message(
                 clarification=semantic_result.clarification
             )
 
+            logger.info(
+                f"[rehydration] DIAG: After merge, merged_resolved_booking.date_refs={merged_resolved_booking.get('date_refs')}, date_roles={merged_resolved_booking.get('date_roles')}, date_mode={merged_resolved_booking.get('date_mode')}, time_refs={merged_resolved_booking.get('time_refs')}, time_mode={merged_resolved_booking.get('time_mode')}",
+                extra={'request_id': request_id, 'user_id': user_id}
+            )
             logger.debug(
                 f"Merged semantic slots for follow-up (before decision) for user {user_id}",
                 extra={
@@ -735,9 +894,10 @@ def resolve_message(
             intent_name_for_slots_raw, dict) else intent_name_for_slots_raw
         missing_required = []
         if intent_name_for_slots:
+            resolved_booking_for_validation = merged_semantic_result.resolved_booking if merged_semantic_result else {}
             missing_required = validate_required_slots(
                 intent_name_for_slots,
-                merged_semantic_result.resolved_booking if merged_semantic_result else {},
+                resolved_booking_for_validation,
                 extraction_result or {}
             )
         skip_prebind = (
@@ -747,10 +907,6 @@ def resolve_message(
         # Extract calendar_result from pipeline_results (pipeline already called bind_calendar)
         # This is the authoritative source - resolve_service should use it instead of calling bind_calendar again
         pipeline_calendar_result = pipeline_results.get("stages", {}).get("calendar")
-        logger.info(
-            f"[datetime_range] DIAG: Extracting calendar_result from pipeline: exists={pipeline_calendar_result is not None}, type={type(pipeline_calendar_result).__name__ if pipeline_calendar_result else None}, calendar_booking_keys={list(pipeline_calendar_result.calendar_booking.keys()) if (pipeline_calendar_result and hasattr(pipeline_calendar_result, 'calendar_booking') and pipeline_calendar_result.calendar_booking) else []}, datetime_range={pipeline_calendar_result.calendar_booking.get('datetime_range') if (pipeline_calendar_result and hasattr(pipeline_calendar_result, 'calendar_booking') and pipeline_calendar_result.calendar_booking) else None}",
-            extra={'request_id': request_id}
-        )
         # Use pipeline's calendar_result as the base (it already has the binder output)
         calendar_result = pipeline_calendar_result if pipeline_calendar_result else None
         if missing_required and not skip_prebind:
@@ -792,11 +948,6 @@ def resolve_message(
                 # Get external_intent for reservation handling (CREATE_RESERVATION vs CREATE_APPOINTMENT)
                 external_intent = results["stages"]["intent"].get(
                     "external_intent")
-                # DIAG: Log before calling bind_calendar
-                logger.info(
-                    f"[datetime_range] DIAG: About to call bind_calendar in resolve_service: decision_status={decision_result.status if decision_result else None}, missing_only_time={missing_only_time}, calendar_result from pipeline exists={calendar_result is not None}",
-                    extra={'request_id': request_id, 'intent': external_intent}
-                )
                 try:
                     # BINDER layer: Structured DEBUG log (before binding)
                     # Legacy log - downgraded to DEBUG as part of logging refactor
@@ -819,51 +970,7 @@ def resolve_message(
                             entities=extraction_result,
                             external_intent=external_intent
                         )
-                        # DIAG: Log calendar_result object ID immediately after bind_calendar
-                        logger.info(
-                            f"[datetime_range] DIAG: After bind_calendar assignment: calendar_result object id={id(calendar_result)}, calendar_booking id={id(calendar_result.calendar_booking) if calendar_result.calendar_booking else None}, keys={list(calendar_result.calendar_booking.keys()) if calendar_result.calendar_booking else []}",
-                            extra={'request_id': request_id, 'intent': external_intent}
-                        )
-                        # 1) Immediately after bind_calendar() returns
-                        logger.info(
-                            f"[datetime_range] After bind_calendar: type(calendar_result)={type(calendar_result).__name__}",
-                            extra={'request_id': request_id}
-                        )
-                        logger.info(
-                            f"[datetime_range] After bind_calendar: vars(calendar_result)={vars(calendar_result) if hasattr(calendar_result, '__dict__') else 'N/A'}",
-                            extra={'request_id': request_id}
-                        )
-                        logger.info(
-                            f"[datetime_range] After bind_calendar: calendar_result.calendar_booking={calendar_result.calendar_booking if calendar_result else None}",
-                            extra={'request_id': request_id}
-                        )
-                        logger.info(
-                            f"[datetime_range] After bind_calendar: binder_trace output={binder_trace.get('binder', {}).get('output', {}) if binder_trace else {}}",
-                            extra={'request_id': request_id}
-                        )
-                        # 1) Immediately after calendar_binder returns - diagnostic
-                        binder_output_dict = binder_trace.get("binder", {}).get("output", {}) if binder_trace else {}
-                        logger.info(
-                            f"[datetime_range] DIAG: After binder returns: binder.output keys={list(binder_output_dict.keys()) if binder_output_dict else []}, intent={external_intent}",
-                            extra={'request_id': request_id, 'intent': external_intent}
-                        )
-                        logger.info(
-                            f"[datetime_range] DIAG: After binder returns: binder.output.datetime_range={binder_output_dict.get('datetime_range') if binder_output_dict else None}",
-                            extra={'request_id': request_id, 'intent': external_intent}
-                        )
-                        # DIAG: Log calendar_result state right before to_dict() call
-                        logger.info(
-                            f"[datetime_range] DIAG: Right before to_dict() call: calendar_result object id={id(calendar_result)}, calendar_booking id={id(calendar_result.calendar_booking) if calendar_result.calendar_booking else None}, keys={list(calendar_result.calendar_booking.keys()) if calendar_result.calendar_booking else []}, datetime_range={calendar_result.calendar_booking.get('datetime_range') if calendar_result.calendar_booking else None}",
-                            extra={'request_id': request_id, 'intent': external_intent, 'same_object_as_after_bind': id(calendar_result) == id(calendar_result)}
-                        )
                         results["stages"]["calendar"] = calendar_result.to_dict()
-                        # 2) Immediately after results["stages"]["calendar"] is assigned
-                        calendar_stage_dict = results.get("stages", {}).get("calendar", {})
-                        calendar_booking_dict = calendar_stage_dict.get("calendar_booking", {}) if calendar_stage_dict else {}
-                        logger.info(
-                            f"[datetime_range] After results assignment: calendar_stage keys={list(calendar_stage_dict.keys()) if calendar_stage_dict else []}",
-                            extra={'request_id': request_id, 'datetime_range': calendar_booking_dict.get('datetime_range') if calendar_booking_dict else None}
-                        )
                     # Update execution_trace with binder trace (overwrites pipeline's trace with merged semantic result)
                     execution_trace.update(binder_trace)
 
@@ -925,10 +1032,6 @@ def resolve_message(
                     if "stage_snapshots" not in execution_trace:
                         execution_trace["stage_snapshots"] = []
                     execution_trace["stage_snapshots"].append(binder_snapshot)
-                    logger.info(
-                        f"[datetime_range] After try block: calendar_result.calendar_booking exists={bool(calendar_result.calendar_booking if calendar_result else None)}, keys={list(calendar_result.calendar_booking.keys()) if (calendar_result and calendar_result.calendar_booking) else []}",
-                        extra={'request_id': request_id}
-                    )
                 except Exception as e:
                     results["stages"]["calendar"] = {"error": str(e)}
                     # Build binder input for error trace
@@ -952,10 +1055,6 @@ def resolve_message(
                         "decision_reason": f"exception: {str(e)}"
                     }
                     # Create empty calendar_result for consistency (even though we return early)
-                    logger.warning(
-                        f"[datetime_range] DIAG: Exception handler creating empty calendar_result at line 939",
-                        extra={'request_id': request_id, 'exception': str(e)}
-                    )
                     calendar_result = CalendarBindingResult(
                         calendar_booking={},
                         needs_clarification=False,
@@ -966,10 +1065,6 @@ def resolve_message(
                 # decision_state != RESOLVED - skip calendar binding
                 # Temporal shape incomplete or other clarification needed
                 reason = f"decision={decision_result.status if decision_result else 'NONE'}"
-                logger.info(
-                    f"[datetime_range] DIAG: Creating empty calendar_result at line 949 (decision != RESOLVED)",
-                    extra={'request_id': request_id, 'decision_status': decision_result.status if decision_result else 'NONE'}
-                )
                 calendar_result = CalendarBindingResult(
                     calendar_booking={},
                     needs_clarification=False,
@@ -1004,27 +1099,9 @@ def resolve_message(
         debug_mode = debug_flag in {"1", "true", "yes"}
 
         # Extract current booking state from calendar result
-        logger.info(
-            f"[datetime_range] Before extraction: calendar_result type={type(calendar_result).__name__}, calendar_result.calendar_booking exists={bool(calendar_result.calendar_booking if hasattr(calendar_result, 'calendar_booking') else None)}, calendar_result.calendar_booking keys={list(calendar_result.calendar_booking.keys()) if (hasattr(calendar_result, 'calendar_booking') and calendar_result.calendar_booking) else []}",
-            extra={'request_id': request_id, 'has_datetime_range_in_result': 'datetime_range' in calendar_result.calendar_booking if (hasattr(calendar_result, 'calendar_booking') and calendar_result.calendar_booking) else False}
-        )
         calendar_dict = calendar_result.to_dict()
         calendar_booking = calendar_dict.get(
             "calendar_booking", {}) if calendar_dict else {}
-        # 2) Immediately after calendar_booking is constructed - diagnostic
-        current_intent = results.get("stages", {}).get("intent", {}).get("external_intent") or results.get("stages", {}).get("intent", {}).get("intent") or "UNKNOWN"
-        logger.info(
-            f"[datetime_range] DIAG: After calendar_booking constructed: calendar_booking={calendar_booking}, intent={current_intent}",
-            extra={'request_id': request_id, 'intent': current_intent}
-        )
-        logger.info(
-            f"[datetime_range] DIAG: After calendar_booking constructed: datetime_range exists={'datetime_range' in calendar_booking if calendar_booking else False}, value={calendar_booking.get('datetime_range') if calendar_booking else None}",
-            extra={'request_id': request_id, 'intent': current_intent}
-        )
-        logger.info(
-            f"[datetime_range] Calendar extraction: calendar_dict exists={bool(calendar_dict)}, calendar_booking exists={bool(calendar_booking)}, has_datetime_range={'datetime_range' in calendar_booking if calendar_booking else False}",
-            extra={'request_id': request_id, 'calendar_booking_keys': list(calendar_booking.keys()) if calendar_booking else [], 'calendar_dict_keys': list(calendar_dict.keys()) if calendar_dict else []}
-        )
         cal_clar_dict = calendar_dict.get(
             "clarification") if calendar_dict else None
         cal_needs_clarification = bool(calendar_dict.get(
@@ -1211,7 +1288,7 @@ def resolve_message(
         # Format services to preserve resolved_alias if present
         calendar_services = calendar_booking.get("services", [])
         formatted_services = [
-            _format_service_for_response(service)
+            format_service_for_response(service)
             for service in calendar_services
             if isinstance(service, dict)
         ] if calendar_services else []
@@ -1340,7 +1417,8 @@ def resolve_message(
                 memory_state=None,  # Don't merge with booking draft
                 current_intent="MODIFY_BOOKING",
                 current_booking=current_booking,
-                current_clarification=current_clarification
+                current_clarification=current_clarification,
+                request_id=request_id
             )
 
             # Persist MODIFY_BOOKING state
@@ -1420,21 +1498,8 @@ def resolve_message(
         booking_payload = None
         context_payload = None
 
-        # 3) Immediately before booking_payload is constructed
-        logger.info(
-            f"[datetime_range] Before booking_payload construction: calendar_result.calendar_booking={calendar_result.calendar_booking if calendar_result else None}",
-            extra={'request_id': request_id}
-        )
-        logger.info(
-            f"[datetime_range] Before booking_payload construction: results.stages.calendar={results.get('stages', {}).get('calendar', {})}",
-            extra={'request_id': request_id}
-        )
         if (is_booking_intent_flag or is_modify_with_booking_id) and not needs_clarification:
             booking_payload = extract_memory_state_for_response(merged_memory)
-            logger.info(
-                f"[datetime_range] After booking_payload construction: booking_payload keys={list(booking_payload.keys()) if booking_payload else []}, booking_payload.datetime_range={booking_payload.get('datetime_range') if booking_payload else None}",
-                extra={'request_id': request_id}
-            )
             # Add booking_state = "RESOLVED" for resolved bookings
             if booking_payload:
                 booking_payload["booking_state"] = "RESOLVED"
@@ -1445,14 +1510,14 @@ def resolve_message(
                     if current_services:
                         # Use services from current semantic result (which may have resolved_alias)
                         booking_payload["services"] = [
-                            _format_service_for_response(service)
+                            format_service_for_response(service)
                             for service in current_services
                             if isinstance(service, dict)
                         ]
                     else:
                         # Format existing services from memory
                         booking_payload["services"] = [
-                            _format_service_for_response(service)
+                            format_service_for_response(service)
                             for service in booking_payload.get("services", [])
                             if isinstance(service, dict)
                         ]
@@ -1485,14 +1550,14 @@ def resolve_message(
                     if current_services:
                         # Use services from current semantic result (which may have resolved_alias)
                         booking_payload["services"] = [
-                            _format_service_for_response(service)
+                            format_service_for_response(service)
                             for service in current_services
                             if isinstance(service, dict)
                         ]
                     else:
                         # Format existing services from memory
                         booking_payload["services"] = [
-                            _format_service_for_response(service)
+                            format_service_for_response(service)
                             for service in booking_payload.get("services", [])
                             if isinstance(service, dict)
                         ]
@@ -1503,17 +1568,27 @@ def resolve_message(
             if not services:
                 service_families = _get_business_categories(extraction_result)
                 services = [
-                    _format_service_for_response(service)
+                    format_service_for_response(service)
                     for service in service_families
                     if isinstance(service, dict) and service.get("text")
                 ]
             else:
                 services = [
-                    _format_service_for_response(service)
+                    format_service_for_response(service)
                     for service in services
                     if isinstance(service, dict)
                 ]
             date_refs = resolved_booking.get("date_refs") or []
+            time_refs = resolved_booking.get("time_refs", [])
+            date_roles = resolved_booking.get("date_roles", [])
+            
+            # Debug: Log what we're getting from resolved_booking
+            logger.info(
+                f"[context] Building context: date_refs={date_refs}, date_roles={date_roles}, "
+                f"resolved_booking_keys={list(resolved_booking.keys())}",
+                extra={'request_id': request_id, 'user_id': user_id}
+            )
+            
             context_payload = {}
             if services:
                 context_payload["services"] = services
@@ -1522,6 +1597,10 @@ def resolve_message(
                 context_payload["start_date_ref"] = date_refs[0]
                 if len(date_refs) >= 2:
                     context_payload["end_date_ref"] = date_refs[1]
+                
+                # Include date_roles if available (for debugging and client logic)
+                # Always include date_roles array (even if empty) for consistency
+                context_payload["date_roles"] = date_roles
 
                 # Bound/processed date (ISO format) from calendar binding
                 # Extract from calendar_booking if available
@@ -1550,7 +1629,56 @@ def resolve_message(
                     if not bound_end_date and calendar_booking.get("end_date"):
                         bound_end_date = calendar_booking.get("end_date")
 
+                # FIX: For date-only turns (CREATE_APPOINTMENT with date but no time),
+                # always resolve the date immediately and persist it in context
+                # This ensures context never carries only symbolic temporal values
+                # Date-only ≠ fully resolved appointment, but resolved dates must always be concrete
+                # Detect date-only turn: CREATE_APPOINTMENT with date_refs but no time_refs
+                is_date_only_turn = (
+                    intent_payload_name == "CREATE_APPOINTMENT" and
+                    date_refs and
+                    not time_refs and
+                    needs_clarification
+                )
+                
+                # For date-only turns, always resolve date to ensure context has concrete values
+                # This ensures context never carries only symbolic temporal values
+                # For other cases, resolve if not already bound
+                if (is_date_only_turn or (not bound_start_date and date_refs)):
+                    # Resolve date directly using binder's date resolution
+                    # This treats date-only as a valid partial state, not an error
+                    from luma.calendar.calendar_binder import _bind_dates, get_timezone
+                    
+                    # Get timezone and now from function scope (set earlier in resolve_message)
+                    tz = get_timezone(timezone)
+                    # Use now from pipeline context (injected, not system time)
+                    
+                    # Get date_mode from resolved_booking
+                    date_mode = resolved_booking.get("date_mode", "single_day")
+                    
+                    # Resolve dates immediately - treat as partially resolved appointment
+                    # For date-only turns, always resolve even if calendar_booking has it
+                    # This ensures context always contains concrete resolved dates
+                    resolved_date_range = _bind_dates(date_refs, date_mode, now, tz)
+                    if resolved_date_range:
+                        # For date-only turns, always use resolved date (even if calendar_booking had it)
+                        # This ensures context never carries only symbolic temporal values
+                        if is_date_only_turn:
+                            bound_start_date = resolved_date_range.get("start_date")
+                            bound_end_date = resolved_date_range.get("end_date")
+                        elif not bound_start_date:
+                            # For non-date-only turns, only use resolved date if not already bound
+                            bound_start_date = resolved_date_range.get("start_date")
+                            bound_end_date = resolved_date_range.get("end_date")
+                        logger.info(
+                            f"[context] Resolved date for {'date-only turn' if is_date_only_turn else 'follow-up'}: {date_refs[0]} -> {bound_start_date}",
+                            extra={'request_id': request_id, 'date_mode': date_mode, 'is_date_only_turn': is_date_only_turn}
+                        )
+
+                # CRITICAL: For date-only turns, always persist resolved date in context
+                # Context must never carry only symbolic temporal values
                 # Use bound date if available, otherwise fallback to semantic reference
+                # For date-only turns, bound_start_date should always be set after resolution above
                 context_payload["start_date"] = bound_start_date if bound_start_date else date_refs[0]
                 if len(date_refs) >= 2:
                     context_payload["end_date"] = bound_end_date if bound_end_date else date_refs[1]
@@ -1570,7 +1698,7 @@ def resolve_message(
                 # Format services with text and canonical (same format as booking.services)
                 # Preserve resolved_alias if present
                 entities_payload["services"] = [
-                    _format_service_for_response(service)
+                    format_service_for_response(service)
                     for service in service_families
                     if isinstance(service, dict) and service.get("text")
                 ]
@@ -1594,7 +1722,7 @@ def resolve_message(
             elif semantic_result:
                 time_issues_for_trace = semantic_result.resolved_booking.get(
                     "time_issues", [])
-            issues_for_trace = _build_issues(
+            issues_for_trace = build_issues(
                 missing_slots, time_issues_for_trace)
 
         execution_trace["response"] = {
@@ -1615,7 +1743,7 @@ def resolve_message(
             elif semantic_result:
                 time_issues_for_final = semantic_result.resolved_booking.get(
                     "time_issues", [])
-            final_response_issues = _build_issues(
+            final_response_issues = build_issues(
                 missing_slots, time_issues_for_final)
 
         final_response = {
@@ -1737,61 +1865,15 @@ def resolve_message(
         # booking_payload is already set above for both RESOLVED and PARTIAL cases
         # For non-booking intents, booking_payload may be None (which is fine)
 
-        # Project minimal booking output shape
+        # Project minimal booking output shape using ResponseBuilder
+        response_builder = ResponseBuilder()
         if booking_payload is not None:
-            # Normalize services to public canonical form
-            if booking_payload.get("services"):
-                booking_payload["services"] = [
-                    _format_service_for_response(s)
-                    for s in booking_payload.get("services", [])
-                    if isinstance(s, dict)
-                ]
-
-            # Appointment responses: only datetime_range
-            if intent_payload_name == "CREATE_APPOINTMENT":
-                # Always copy datetime_range from calendar_booking if present
-                # This comes from calendar binding and should override any memory values
-                datetime_range_from_binder = calendar_booking.get("datetime_range") if calendar_booking else None
-                logger.info(
-                    f"[datetime_range] CREATE_APPOINTMENT: calendar_booking has datetime_range={bool(datetime_range_from_binder)}, value={datetime_range_from_binder}",
-                    extra={'request_id': request_id, 'has_calendar_booking': bool(calendar_booking)}
-                )
-                if datetime_range_from_binder:
-                    booking_payload["datetime_range"] = datetime_range_from_binder
-                    logger.info(
-                        f"[datetime_range] CREATE_APPOINTMENT: Copied datetime_range to booking_payload",
-                        extra={'request_id': request_id, 'datetime_range': datetime_range_from_binder}
-                    )
-                else:
-                    logger.info(
-                        f"[datetime_range] CREATE_APPOINTMENT: No datetime_range in calendar_booking to copy",
-                        extra={'request_id': request_id, 'calendar_booking_keys': list(calendar_booking.keys()) if calendar_booking else []}
-                    )
-                booking_payload.pop("date", None)
-                booking_payload.pop("time", None)
-                booking_payload.pop("date_range", None)
-                booking_payload.pop("time_range", None)
-                booking_payload.pop("start_date", None)
-                booking_payload.pop("end_date", None)
-
-            # Reservation responses: only date_range (for internal booking_payload)
-            if intent_payload_name == "CREATE_RESERVATION":
-                # Build date_range from calendar_booking if available
-                if "start_date" in calendar_booking and "end_date" in calendar_booking:
-                    booking_payload["date_range"] = {
-                        "start": calendar_booking["start_date"],
-                        "end": calendar_booking["end_date"]
-                    }
-                # Clean up legacy fields
-                booking_payload.pop("datetime_range", None)
-                booking_payload.pop("date", None)
-                booking_payload.pop("time", None)
-                booking_payload.pop("time_range", None)
-                booking_payload.pop("start_date", None)
-                booking_payload.pop("end_date", None)
-
-            # Remove legacy booking_state from response payloads
-            booking_payload.pop("booking_state", None)
+            booking_payload = response_builder.format_booking_payload(
+                booking_payload,
+                intent_payload_name,
+                calendar_booking,
+                request_id=request_id
+            )
 
         # Build issues object from missing_slots and time_issues
         issues: Dict[str, Any] = {}
@@ -1845,25 +1927,14 @@ def resolve_message(
             if (intent_payload_name == "CREATE_RESERVATION" and
                     service_resolution_reason == "AMBIGUOUS_SERVICE"):
                 # For ambiguous reservations, set issues.service_id = "ambiguous"
-                issues = _build_issues(
+                issues = build_issues(
                     filtered_missing_slots, time_issues_for_issues)
                 issues["service_id"] = "ambiguous"
             else:
-                issues = _build_issues(
+                issues = build_issues(
                     filtered_missing_slots, time_issues_for_issues)
 
-        # Build response body - status mirrors decision exactly (no recomputation)
-        # Response must mirror decision: if decision says ambiguous service → needs_clarification
-        response_body = {
-            "success": True,
-            "intent": intent_payload,
-            "status": "needs_clarification" if needs_clarification else "ready",
-            "issues": issues if issues else {},
-            "clarification_reason": clarification_reason if needs_clarification else None,
-            "needs_clarification": needs_clarification,
-        }
-
-        # Build slots (single source of truth for temporal data)
+        # Build slots first (single source of truth for temporal data)
         # Slots MUST be present whenever any resolved data exists (service, date, datetime)
         # Slots are built for both ready and clarification cases if data is resolved
         slots: Dict[str, Any] = {}
@@ -1880,22 +1951,10 @@ def resolve_message(
             # For CREATE_APPOINTMENT ready responses, ensure datetime_range is available
             # Priority: booking_payload.datetime_range > calendar_booking.datetime_range
             resolved_datetime_range = booking_payload.get("datetime_range")
-            logger.info(
-                f"[datetime_range] Ready case: booking_payload.datetime_range={bool(resolved_datetime_range)}, value={resolved_datetime_range}",
-                extra={'request_id': request_id, 'intent': intent_payload_name}
-            )
             if not resolved_datetime_range and calendar_booking:
                 datetime_range_from_calendar = calendar_booking.get("datetime_range")
-                logger.info(
-                    f"[datetime_range] Ready case fallback: calendar_booking.datetime_range={bool(datetime_range_from_calendar)}, value={datetime_range_from_calendar}",
-                    extra={'request_id': request_id}
-                )
                 if datetime_range_from_calendar:  # Only use if truthy
                     resolved_datetime_range = datetime_range_from_calendar
-                    logger.info(
-                        f"[datetime_range] Ready case: Set resolved_datetime_range from calendar_booking",
-                        extra={'request_id': request_id}
-                    )
         elif needs_clarification:
             # Clarification case: try to get resolved data from semantic result or decision trace
             # Service resolution: check decision trace for resolved tenant_service_id
@@ -1911,10 +1970,6 @@ def resolve_message(
                 resolved_date_range = calendar_booking.get("date_range")
                 resolved_datetime_range = calendar_booking.get(
                     "datetime_range")
-                logger.debug(
-                    f"[datetime_range] Clarification case: calendar_booking.datetime_range={bool(resolved_datetime_range)}, value={resolved_datetime_range}",
-                    extra={'request_id': request_id}
-                )
 
         # For CREATE_APPOINTMENT, ensure datetime_range is set from calendar_booking if not already set
         # This mirrors reservation behavior which always checks calendar_booking for date_range
@@ -1922,57 +1977,18 @@ def resolve_message(
             # Try calendar_booking first
             if calendar_booking:
                 datetime_range_from_calendar = calendar_booking.get("datetime_range")
-                logger.debug(
-                    f"[datetime_range] CREATE_APPOINTMENT fallback: calendar_booking.datetime_range={bool(datetime_range_from_calendar)}, value={datetime_range_from_calendar}",
-                    extra={'request_id': request_id, 'has_calendar_booking': True, 'calendar_booking_keys': list(calendar_booking.keys())}
-                )
                 if datetime_range_from_calendar:  # Only set if truthy (not None, not empty dict)
                     resolved_datetime_range = datetime_range_from_calendar
-                    logger.debug(
-                        f"[datetime_range] CREATE_APPOINTMENT fallback: Set resolved_datetime_range from calendar_booking",
-                        extra={'request_id': request_id}
-                    )
             else:
                 # Fallback: get from results["stages"]["calendar"] directly (binder output)
                 calendar_stage = results.get("stages", {}).get("calendar", {})
-                logger.info(
-                    f"[datetime_range] CREATE_APPOINTMENT fallback: calendar_stage exists={bool(calendar_stage)}, keys={list(calendar_stage.keys()) if calendar_stage else []}",
-                    extra={'request_id': request_id}
-                )
                 calendar_booking_from_stage = calendar_stage.get("calendar_booking", {}) if calendar_stage else {}
-                logger.info(
-                    f"[datetime_range] CREATE_APPOINTMENT fallback: calendar_booking_from_stage exists={bool(calendar_booking_from_stage)}, keys={list(calendar_booking_from_stage.keys()) if calendar_booking_from_stage else []}",
-                    extra={'request_id': request_id}
-                )
                 datetime_range_from_stage = calendar_booking_from_stage.get("datetime_range") if calendar_booking_from_stage else None
                 # Also try direct access in case datetime_range is at top level of calendar_stage
                 if not datetime_range_from_stage:
                     datetime_range_from_stage = calendar_stage.get("datetime_range")
-                    logger.info(
-                        f"[datetime_range] CREATE_APPOINTMENT fallback: Trying direct calendar_stage.datetime_range={bool(datetime_range_from_stage)}",
-                        extra={'request_id': request_id}
-                    )
-                logger.info(
-                    f"[datetime_range] CREATE_APPOINTMENT fallback: calendar_booking empty, trying results.stages.calendar, datetime_range={bool(datetime_range_from_stage)}, value={datetime_range_from_stage}",
-                    extra={'request_id': request_id, 'has_calendar_stage': bool(calendar_stage), 'has_calendar_booking_from_stage': bool(calendar_booking_from_stage), 'calendar_stage_type': type(calendar_stage).__name__}
-                )
                 if datetime_range_from_stage:
                     resolved_datetime_range = datetime_range_from_stage
-                    logger.info(
-                        f"[datetime_range] CREATE_APPOINTMENT fallback: Set resolved_datetime_range from results.stages.calendar",
-                        extra={'request_id': request_id}
-                    )
-                else:
-                    logger.warning(
-                        f"[datetime_range] CREATE_APPOINTMENT fallback: No datetime_range found in calendar_booking or results.stages.calendar",
-                        extra={'request_id': request_id, 'has_calendar_booking': bool(calendar_booking), 'has_calendar_stage': bool(calendar_stage), 'calendar_stage_keys': list(calendar_stage.keys()) if calendar_stage else [], 'calendar_booking_from_stage_keys': list(calendar_booking_from_stage.keys()) if calendar_booking_from_stage else []}
-                    )
-
-        # Log resolved_datetime_range after all computation but before slots are built
-        logger.info(
-            f"[datetime_range] After resolved_datetime_range computation: resolved_datetime_range={resolved_datetime_range}",
-            extra={'request_id': request_id, 'intent': intent_payload_name}
-        )
 
         # SYNTHESIS: For CREATE_APPOINTMENT with RESOLVED status, construct datetime_range if missing
         # Decision layer is authoritative - if decision says RESOLVED, slots must include datetime_range
@@ -2063,24 +2079,10 @@ def resolve_message(
                                 "start": f"{date_part}T{window_start}Z",
                                 "end": f"{date_part}T{window_end}Z"
                             }
-                            
-                            logger.info(
-                                f"[datetime_range] SYNTHESIS: Constructed datetime_range for CREATE_APPOINTMENT RESOLVED: "
-                                f"date={date_part}, time_mode={time_mode}, window={window_start}-{window_end}",
-                                extra={'request_id': request_id, 'intent': intent_payload_name, 
-                                       'datetime_range': resolved_datetime_range}
-                            )
                         else:
-                            logger.warning(
-                                f"[datetime_range] SYNTHESIS: start_date is not a string: {type(start_date)}",
-                                extra={'request_id': request_id, 'intent': intent_payload_name, 'start_date': start_date}
-                            )
+                            pass
                     except Exception as e:
-                        logger.warning(
-                            f"[datetime_range] SYNTHESIS: Error constructing datetime_range: {e}",
-                            extra={'request_id': request_id, 'intent': intent_payload_name, 
-                                   'start_date': start_date, 'window_start': window_start, 'window_end': window_end}
-                        )
+                        pass
 
         # Build service_id slot (if service is resolved)
         if resolved_services:
@@ -2103,9 +2105,6 @@ def resolve_message(
                     "decision", {}).get("resolved_tenant_service_id")
                 if resolved_tenant_service_id:
                     slots["service_id"] = resolved_tenant_service_id
-                    logger.debug(
-                        f"[slots] Using resolved tenant_service_id from decision: '{resolved_tenant_service_id}'"
-                    )
 
             # FINAL NORMALIZATION: Ensure service_id is always a tenant alias key, never a canonical
             # INVARIANT: API responses must NEVER expose canonical service IDs
@@ -2139,10 +2138,6 @@ def resolve_message(
 
                         if tenant_alias_key:
                             # Replace canonical with tenant alias key
-                            logger.debug(
-                                f"[slots] Normalizing service_id: canonical '{service_id_value}' → tenant alias '{tenant_alias_key}'",
-                                extra={'request_id': request_id}
-                            )
                             slots["service_id"] = tenant_alias_key
                         else:
                             # service_id is not in aliases and doesn't match any canonical
@@ -2155,32 +2150,6 @@ def resolve_message(
                             )
                             slots.pop("service_id", None)
 
-        # 3) Immediately before slot construction - diagnostic
-        logger.info(
-            f"[datetime_range] DIAG: Before slot construction: resolved_datetime_range={resolved_datetime_range}, intent={intent_payload_name}",
-            extra={'request_id': request_id, 'intent': intent_payload_name}
-        )
-        logger.info(
-            f"[datetime_range] DIAG: Before slot construction: calendar_booking={calendar_booking}, intent={intent_payload_name}",
-            extra={'request_id': request_id, 'intent': intent_payload_name}
-        )
-        logger.info(
-            f"[datetime_range] DIAG: Before slot construction: results.stages.calendar={results.get('stages', {}).get('calendar', {})}, intent={intent_payload_name}",
-            extra={'request_id': request_id, 'intent': intent_payload_name}
-        )
-        # 4) Immediately before slots are built
-        logger.info(
-            f"[datetime_range] Before slots built: resolved_datetime_range={resolved_datetime_range}",
-            extra={'request_id': request_id}
-        )
-        logger.info(
-            f"[datetime_range] Before slots built: calendar_result.calendar_booking={calendar_result.calendar_booking if calendar_result else None}",
-            extra={'request_id': request_id}
-        )
-        logger.info(
-            f"[datetime_range] Before slots built: results.stages.calendar={results.get('stages', {}).get('calendar', {})}",
-            extra={'request_id': request_id}
-        )
         # Build temporal slots based on intent-specific temporal shapes
         # CREATE_RESERVATION → slots.date_range
         # CREATE_APPOINTMENT → slots.datetime_range
@@ -2196,16 +2165,6 @@ def resolve_message(
             calendar_booking_from_binder = calendar_stage.get("calendar_booking", {}) if calendar_stage else {}
             datetime_range_from_binder = calendar_booking_from_binder.get("datetime_range") if calendar_booking_from_binder else None
             
-            # 4) Inside slots builder - diagnostic
-            logger.info(
-                f"[datetime_range] DIAG: Inside slots builder: resolved_datetime_range={resolved_datetime_range}, datetime_range_from_binder={datetime_range_from_binder}, intent={intent_payload_name}",
-                extra={'request_id': request_id, 'intent': intent_payload_name}
-            )
-            logger.info(
-                f"[datetime_range] DIAG: Inside slots builder: calendar_booking_from_binder={calendar_booking_from_binder}, intent={intent_payload_name}",
-                extra={'request_id': request_id, 'intent': intent_payload_name}
-            )
-            
             # Use binder output if available (truthy check), otherwise fall back to resolved_datetime_range
             datetime_range_for_slots = datetime_range_from_binder if datetime_range_from_binder else resolved_datetime_range
             
@@ -2214,61 +2173,22 @@ def resolve_message(
                 slots["datetime_range"] = datetime_range_for_slots
                 # Set has_datetime flag when datetime_range exists (response contract)
                 slots["has_datetime"] = True
-                logger.info(
-                    f"[datetime_range] DIAG: Slots builder: Using source={source_used}, datetime_range set in slots, intent={intent_payload_name}",
-                    extra={'request_id': request_id, 'intent': intent_payload_name, 'source': source_used}
-                )
-                logger.info(
-                    f"[datetime_range] Slots building: Set slots.datetime_range from {'binder output' if datetime_range_from_binder else 'resolved_datetime_range'}",
-                    extra={'request_id': request_id, 'intent': intent_payload_name, 'source': 'binder' if datetime_range_from_binder else 'resolved'}
-                )
-            else:
-                logger.warning(
-                    f"[datetime_range] DIAG: Slots builder: datetime_range SKIPPED - both sources empty, intent={intent_payload_name}",
-                    extra={'request_id': request_id, 'intent': intent_payload_name, 'resolved_datetime_range': resolved_datetime_range, 'datetime_range_from_binder': datetime_range_from_binder, 'has_calendar_stage': bool(calendar_stage), 'has_calendar_booking_from_binder': bool(calendar_booking_from_binder)}
-                )
-                logger.warning(
-                    f"[datetime_range] Slots building: No datetime_range found in binder output or resolved_datetime_range",
-                    extra={'request_id': request_id, 'intent': intent_payload_name, 'has_calendar_stage': bool(calendar_stage), 'has_calendar_booking_from_binder': bool(calendar_booking_from_binder)}
-                )
 
-        # Include slots if it has any content (for both ready and clarification)
-        if slots:
-            response_body["slots"] = slots
-
-        # Handle clarification vs ready cases
-        if needs_clarification:
-            # For needs_clarification: include context but NO booking block
-            if context_payload:
-                response_body["context"] = context_payload
-        else:
-            # For ready status: include booking block (minimal, only confirmation_state)
-            if booking_payload is not None:
-                # Attach confirmation_state for ready bookings
-                booking_payload["confirmation_state"] = "pending"
-
-                # Build minimal booking block (temporal and service data is in slots)
-                # Remove all fields that are exposed via slots
-                booking_payload_copy = booking_payload.copy()
-                # Exposed via slots.service_id
-                booking_payload_copy.pop("services", None)
-                # Exposed via slots.date_range
-                booking_payload_copy.pop("date_range", None)
-                # Exposed via slots.datetime_range
-                booking_payload_copy.pop("datetime_range", None)
-                booking_payload_copy.pop("duration", None)  # Removed entirely
-                booking_payload_copy.pop("start_date", None)  # Legacy field
-                booking_payload_copy.pop("end_date", None)  # Legacy field
-
-                response_body["booking"] = booking_payload_copy
-
-        # Add entities field for non-booking intents (always include, even if empty)
-        if entities_payload is not None:
-            response_body["entities"] = entities_payload
-
-        # Attach full internal pipeline data only in debug mode
-        if debug_mode:
-            response_body["debug"] = results
+        # Build response body using ResponseBuilder (slots now built above)
+        # Response must mirror decision: if decision says ambiguous service → needs_clarification
+        response_builder = ResponseBuilder()
+        response_body = response_builder.build_response_body(
+            intent_payload=intent_payload,
+            needs_clarification=needs_clarification,
+            clarification_reason=clarification_reason,
+            issues=issues if issues else {},
+            booking_payload=booking_payload,
+            entities_payload=entities_payload,
+            slots=slots if slots else None,
+            context_payload=context_payload,
+            debug_data=results if debug_mode else None,
+            request_id=request_id
+        )
 
         # Removed per-stage logging - consolidated trace emitted at end
 

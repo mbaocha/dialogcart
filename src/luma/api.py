@@ -23,6 +23,7 @@ Endpoints:
     GET /health - Health check
     GET /info - API information
 """
+from luma.response.builder import build_issues, format_service_for_response
 import sys
 from pathlib import Path
 
@@ -43,6 +44,10 @@ from luma.structure.interpreter import interpret_structure  # noqa: E402
 from luma.grouping.reservation_intent_resolver import ReservationIntentResolver  # noqa: E402
 from luma.extraction.matcher import EntityMatcher  # noqa: E402
 from luma.config import config  # noqa: E402
+
+# Enable slot tracking for debugging (can also use LOG_SLOT_TRACKING env var)
+# config.LOG_SLOT_TRACKING = True  # Uncomment to enable
+
 from luma.config.temporal import (  # noqa: E402
     APPOINTMENT_TEMPORAL_TYPE,
     RESERVATION_TEMPORAL_TYPE,
@@ -51,13 +56,13 @@ from luma.config.temporal import (  # noqa: E402
     TimeMode,
 )
 from luma.config.intent_meta import validate_required_slots  # noqa: E402
-from luma.logging_config import setup_logging, generate_request_id  # noqa: E402
+from luma.config.logging import setup_logging, generate_request_id  # noqa: E402
 from luma.memory import RedisMemoryStore  # noqa: E402
 from luma.memory.merger import merge_booking_state, extract_memory_state_for_response  # noqa: E402
 from luma.decision import decide_booking_status  # noqa: E402
 from luma.clarification import ClarificationReason  # noqa: E402
 from luma.pipeline import LumaPipeline  # noqa: E402
-from luma.trace_contract import validate_stable_fields, TRACE_VERSION  # noqa: E402
+from luma.trace import validate_stable_fields, TRACE_VERSION  # noqa: E402
 from luma.perf import StageTimer  # noqa: E402
 from luma.app.resolve_service import resolve_message  # noqa: E402
 
@@ -155,13 +160,13 @@ _normalization_dir_cache: Optional[Path] = None
 def find_normalization_dir():
     """
     Find the normalization directory.
-    
+
     Cached per process to avoid repeated file system checks.
     """
     global _normalization_dir_cache
     if _normalization_dir_cache is not None:
         return _normalization_dir_cache
-    
+
     current_file = Path(__file__).resolve()
     store_dir = current_file.parent / "store" / "normalization"
     if store_dir.exists():
@@ -172,78 +177,15 @@ def find_normalization_dir():
     if intents_norm.exists():
         _normalization_dir_cache = intents_norm
         return _normalization_dir_cache
-    
+
     _normalization_dir_cache = None
     return None
 
 
-def _build_issues(
-    missing_slots: List[str],
-    time_issues: Optional[List[Dict[str, Any]]] = None
-) -> Dict[str, Any]:
-    """
-    Build issues object from missing_slots and time_issues.
-
-    Args:
-        missing_slots: List of missing slot names (e.g., ["time", "date"])
-        time_issues: Optional list of time-related issues from semantic resolution
-
-    Returns:
-        Issues object with structure:
-        {
-            "time": {"raw": "...", "start_hour": 2, "end_hour": 5, "candidates": ["am", "pm"]} or "missing",
-            "date": "missing"
-        }
-    """
-    issues: Dict[str, Any] = {}
-
-    # Handle missing slots (simple string)
-    for slot in missing_slots:
-        if slot not in issues:
-            issues[slot] = "missing"
-
-    # Handle time issues (rich object with details - simplified, no type/kind)
-    if time_issues:
-        for issue in time_issues:
-            issue_kind = issue.get("kind")
-            if issue_kind == "ambiguous_meridiem":
-                # Override "missing" with rich ambiguous object (data only, no classification)
-                issues["time"] = {
-                    "raw": issue.get("raw"),
-                    "start_hour": issue.get("start_hour"),
-                    "end_hour": issue.get("end_hour"),
-                    "candidates": issue.get("candidates", [])
-                }
-
-    return issues
-
-
-def _format_service_for_response(service: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Format a service dict for API response, preserving resolved alias if present.
-
-    When a tenant alias was explicitly matched, use it for the text field.
-    Otherwise, use the original text field.
-
-    Args:
-        service: Service dict with text, canonical, and optionally resolved_alias
-
-    Returns:
-        Formatted service dict with text and canonical
-    """
-    # If resolved_alias exists (from explicit tenant alias match), use it
-    resolved_alias = service.get("resolved_alias")
-    if resolved_alias:
-        return {
-            "text": resolved_alias,
-            "canonical": service.get("canonical", "")
-        }
-
-    # Otherwise, use existing text field
-    return {
-        "text": service.get("text", ""),
-        "canonical": service.get("canonical", "")
-    }
+# Response building functions moved to luma.response.builder
+# Keep aliases for backward compatibility
+_build_issues = build_issues
+_format_service_for_response = format_service_for_response
 
 
 def _get_business_categories(extraction_result: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -405,8 +347,6 @@ def plan_clarification(
         "missing_slots": missing_slots,
         "clarification_reason": clarification_reason
     }
-
-
 
 
 def _merge_semantic_results(
@@ -622,8 +562,6 @@ def resolve():
         _count_mutable_slots_modified=_count_mutable_slots_modified,
         _has_booking_verb=_has_booking_verb,
         validate_required_slots=validate_required_slots,
-        _build_issues=_build_issues,
-        _format_service_for_response=_format_service_for_response,
         plan_clarification=plan_clarification,
         _log_stage=_log_stage,
     )
@@ -665,7 +603,7 @@ def main():
     logger.info("Luma Service/Reservation Booking API")
     logger.info(f"Starting server on http://localhost:{PORT}")
     logger.info("=" * 60)
-    
+
     # TEMPORARY: Log Redis configuration at startup
     redis_password_masked = "***" if config.REDIS_PASSWORD else None
     logger.info(

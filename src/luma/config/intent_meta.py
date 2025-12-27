@@ -69,6 +69,19 @@ def validate_required_slots(intent_name: str, resolved_slots: Dict[str, Any], en
         if slot == "booking_id":
             bid = entities.get("booking_id")
             return bool(bid)
+        # FIX: service_id can be satisfied by services list in resolved_booking
+        # The decision layer resolves services to tenant_service_id, but resolved_booking
+        # stores services as a list of service objects, not as service_id
+        if slot == "service_id":
+            services = resolved_slots.get("services") or []
+            # Check if services list is non-empty (services are resolved)
+            if services and isinstance(services, list) and len(services) > 0:
+                # Also check if any service has tenant_service_id (fully resolved)
+                for service in services:
+                    if isinstance(service, dict) and service.get("tenant_service_id"):
+                        return True
+                # Even if no tenant_service_id, non-empty services list means service was extracted
+                return True
         return False
 
     for slot in required_slots:

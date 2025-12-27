@@ -6,6 +6,12 @@ Implements merge logic for combining new input with existing memory state.
 
 from typing import Dict, Any, Optional
 from datetime import datetime, timezone
+import logging
+
+from ..trace import log_slot_transformation
+from ..config import config
+
+logger = logging.getLogger(__name__)
 
 # Try zoneinfo first (Python 3.9+), fallback to pytz
 try:
@@ -30,7 +36,8 @@ def merge_booking_state(
     memory_state: Optional[Dict[str, Any]],
     current_intent: str,
     current_booking: Dict[str, Any],
-    current_clarification: Optional[Dict[str, Any]] = None
+    current_clarification: Optional[Dict[str, Any]] = None,
+    request_id: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Merge current input with memory state.
@@ -62,10 +69,21 @@ def merge_booking_state(
         }
     else:
         # Merge onto existing memory
+        memory_booking = memory_state.get("booking_state", {})
         merged_booking = _merge_booking_slots(
-            memory_state.get("booking_state", {}),
+            memory_booking,
             current_booking
         )
+        
+        # Slot tracking: log memory merge transformation
+        if config.LOG_SLOT_TRACKING:
+            log_slot_transformation(
+                "memory_merge",
+                memory_booking,
+                merged_booking,
+                request_id=request_id,
+                enabled=config.LOG_SLOT_TRACKING
+            )
         
         # Handle clarification
         merged_clarification = _merge_clarification(

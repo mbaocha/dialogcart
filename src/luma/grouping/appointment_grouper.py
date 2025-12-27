@@ -15,7 +15,7 @@ Assumptions:
 from typing import Dict, Any, Optional
 
 from luma.structure.structure_types import StructureResult
-from luma.time_constraints import resolve_time_constraint
+from .time_constraints import resolve_time_constraint
 
 
 # Default intent for all appointment/reservation requests
@@ -94,7 +94,8 @@ def _build_booking_dict(
         Booking dictionary with services, date_ref, time_ref, duration
     """
     # Extract services
-    services = entities.get("business_categories") or entities.get("service_families", [])
+    services = entities.get("business_categories") or entities.get(
+        "service_families", [])
 
     # Extract date reference (prefer absolute over relative)
     date_ref = _extract_date_reference(entities)

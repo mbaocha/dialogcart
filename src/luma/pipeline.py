@@ -25,6 +25,8 @@ from luma.resolution.semantic_resolver import resolve_semantics, SemanticResolut
 from luma.decision import decide_booking_status, DecisionResult
 from luma.calendar.calendar_binder import bind_calendar, CalendarBindingResult, get_booking_policy
 from luma.perf import StageTimer
+from luma.trace import log_slot_transformation, create_slot_snapshot
+from luma.config import config
 
 # Pipeline Stage Contracts
 # Defines what each stage produces and what it's allowed to read
@@ -327,6 +329,14 @@ class LumaPipeline:
         _validate_stage_boundary("extraction", extraction_result, previous_stages, debug_mode=debug_mode)
         previous_stages["extraction"] = extraction_result
         
+        # Slot tracking: log extraction stage output
+        if config.LOG_SLOT_TRACKING:
+            log_slot_transformation("extraction", {}, extraction_result, request_id=request_id, enabled=config.LOG_SLOT_TRACKING)
+            snapshot = create_slot_snapshot(extraction_result, "extraction")
+            if "slot_snapshots" not in results["execution_trace"]:
+                results["execution_trace"]["slot_snapshots"] = []
+            results["execution_trace"]["slot_snapshots"].append(snapshot)
+        
         results["stages"]["extraction"] = extraction_result
 
         # Stage 2: Intent Resolution
@@ -352,6 +362,14 @@ class LumaPipeline:
         _validate_stage_boundary("intent", intent_resp, previous_stages, debug_mode=debug_mode)
         previous_stages["intent"] = intent_resp
         
+        # Slot tracking: log intent stage output
+        if config.LOG_SLOT_TRACKING:
+            log_slot_transformation("intent", extraction_result, intent_resp, request_id=request_id, enabled=config.LOG_SLOT_TRACKING)
+            snapshot = create_slot_snapshot(intent_resp, "intent")
+            if "slot_snapshots" not in results["execution_trace"]:
+                results["execution_trace"]["slot_snapshots"] = []
+            results["execution_trace"]["slot_snapshots"].append(snapshot)
+        
         results["stages"]["intent"] = intent_resp
 
         # Stage 3: Structural Interpretation
@@ -368,6 +386,14 @@ class LumaPipeline:
         _validate_stage_boundary("structure", structure, previous_stages, debug_mode=debug_mode)
         previous_stages["structure"] = structure
         
+        # Slot tracking: log structure stage output
+        if config.LOG_SLOT_TRACKING:
+            log_slot_transformation("structure", extraction_result, structure_dict.get("structure", {}), request_id=request_id, enabled=config.LOG_SLOT_TRACKING)
+            snapshot = create_slot_snapshot(structure_dict.get("structure", {}), "structure")
+            if "slot_snapshots" not in results["execution_trace"]:
+                results["execution_trace"]["slot_snapshots"] = []
+            results["execution_trace"]["slot_snapshots"].append(snapshot)
+        
         results["stages"]["structure"] = structure_dict["structure"]
 
         # Stage 4: Appointment Grouping
@@ -379,6 +405,16 @@ class LumaPipeline:
         # Contract validation: grouping stage output
         _validate_stage_boundary("grouping", grouped_result, previous_stages, debug_mode=debug_mode)
         previous_stages["grouping"] = grouped_result
+        
+        # Slot tracking: log grouping stage output
+        if config.LOG_SLOT_TRACKING:
+            booking_before = {}
+            booking_after = grouped_result.get("booking", {})
+            log_slot_transformation("grouping", booking_before, booking_after, request_id=request_id, enabled=config.LOG_SLOT_TRACKING)
+            snapshot = create_slot_snapshot(grouped_result, "grouping")
+            if "slot_snapshots" not in results["execution_trace"]:
+                results["execution_trace"]["slot_snapshots"] = []
+            results["execution_trace"]["slot_snapshots"].append(snapshot)
         
         results["stages"]["grouping"] = grouped_result
 
@@ -396,6 +432,16 @@ class LumaPipeline:
         # Contract validation: semantic stage output
         _validate_stage_boundary("semantic", semantic_result, previous_stages, debug_mode=debug_mode)
         previous_stages["semantic"] = semantic_result
+        
+        # Slot tracking: log semantic stage output
+        if config.LOG_SLOT_TRACKING:
+            grouped_booking = grouped_result.get("booking", {})
+            semantic_booking = semantic_result.resolved_booking
+            log_slot_transformation("semantic", grouped_booking, semantic_booking, request_id=request_id, enabled=config.LOG_SLOT_TRACKING)
+            snapshot = create_slot_snapshot(semantic_result, "semantic")
+            if "slot_snapshots" not in results["execution_trace"]:
+                results["execution_trace"]["slot_snapshots"] = []
+            results["execution_trace"]["slot_snapshots"].append(snapshot)
         
         results["stages"]["semantic"] = semantic_result
         results["execution_trace"].update(semantic_trace)
@@ -425,6 +471,14 @@ class LumaPipeline:
         # Contract validation: decision stage output
         _validate_stage_boundary("decision", decision_result, previous_stages, debug_mode=debug_mode)
         previous_stages["decision"] = decision_result
+        
+        # Slot tracking: log decision stage output
+        if config.LOG_SLOT_TRACKING:
+            log_slot_transformation("decision", semantic_for_decision, decision_result, request_id=request_id, enabled=config.LOG_SLOT_TRACKING)
+            snapshot = create_slot_snapshot(decision_result, "decision")
+            if "slot_snapshots" not in results["execution_trace"]:
+                results["execution_trace"]["slot_snapshots"] = []
+            results["execution_trace"]["slot_snapshots"].append(snapshot)
         
         results["stages"]["decision"] = decision_result
         results["execution_trace"].update(decision_trace)
@@ -466,6 +520,14 @@ class LumaPipeline:
             # Contract validation: calendar stage output
             _validate_stage_boundary("calendar", calendar_result, previous_stages, debug_mode=debug_mode)
             
+            # Slot tracking: log calendar binding output
+            if config.LOG_SLOT_TRACKING:
+                log_slot_transformation("calendar_binding", semantic_result, calendar_result, request_id=request_id, enabled=config.LOG_SLOT_TRACKING)
+                snapshot = create_slot_snapshot(calendar_result, "calendar_binding")
+                if "slot_snapshots" not in results["execution_trace"]:
+                    results["execution_trace"]["slot_snapshots"] = []
+                results["execution_trace"]["slot_snapshots"].append(snapshot)
+            
             results["stages"]["calendar"] = calendar_result
             results["execution_trace"].update(binder_trace)
         else:
@@ -501,6 +563,13 @@ class LumaPipeline:
             
             # Contract validation: calendar stage output (even when skipped)
             _validate_stage_boundary("calendar", calendar_result, previous_stages, debug_mode=debug_mode)
+            
+            # Slot tracking: log calendar binding skipped
+            if config.LOG_SLOT_TRACKING:
+                snapshot = create_slot_snapshot(calendar_result, "calendar_binding_skipped")
+                if "slot_snapshots" not in results["execution_trace"]:
+                    results["execution_trace"]["slot_snapshots"] = []
+                results["execution_trace"]["slot_snapshots"].append(snapshot)
 
         # Final invariant: execution_trace always contains binder key
         assert "binder" in results["execution_trace"], "execution_trace must always contain 'binder' key"
