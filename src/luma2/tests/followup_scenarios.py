@@ -347,8 +347,8 @@ followup_scenarios = [
                     "slots": {
                         "service_id": "suite",
                         "date_range": {
-                            "start": "2026-02-10",
-                            "end": "2026-02-14"
+                            "start": "2027-02-10",
+                            "end": "2027-02-14"
                         }
                     }
                 }
@@ -422,8 +422,8 @@ followup_scenarios = [
                     "slots": {
                         "service_id": "presidential room",
                         "date_range": {
-                            "start": "2026-01-01",
-                            "end": "2026-01-07"
+                            "start": "2027-01-01",
+                            "end": "2027-01-07"
                         }
                     }
                 }
@@ -497,8 +497,8 @@ followup_scenarios = [
                     "slots": {
                         "service_id": "premum suite",  # Fuzzy match from "premium suite"
                         "date_range": {
-                            "start": "2026-03-01",
-                            "end": "2026-03-05"
+                            "start": "2027-03-01",
+                            "end": "2027-03-05"
                         }
                     }
                 }

@@ -1,0 +1,35 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# Testing
+.pytest_cache/
+tests/
+*.log
+
+# Documentation
+*.md
+!API_README.md
+
+# Training artifacts (too large for container)
+store/bert-ner-test/
+store/minilm-ner-test/
+checkpoint-*/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Temporary files
+*.tmp
+*.bak
+

@@ -26,7 +26,6 @@ class CompiledAliasStructure:
     - Pre-sorted alias list (longest-first for deterministic longest-match)
     - Pre-compiled regex patterns for each alias
     - Canonical mappings
-    - Pre-sorted aliases tuple list for fuzzy matching (avoid re-sorting on each request)
     """
     
     def __init__(self, aliases: List[Tuple[str, str, str, re.Pattern]]):
@@ -36,11 +35,6 @@ class CompiledAliasStructure:
                      sorted by token length desc, then char length desc
         """
         self.aliases = aliases
-        # Pre-sorted aliases as (alias_key, canonical) tuples for fuzzy matching
-        # Same sort order: token length desc, then char length desc
-        self.sorted_aliases_tuples: List[Tuple[str, str]] = [
-            (alias_key, canonical) for alias_key, _, canonical, _ in aliases
-        ]
     
     def detect_spans(self, normalized_text: str) -> List[Dict[str, Any]]:
         """

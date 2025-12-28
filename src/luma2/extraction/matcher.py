@@ -149,20 +149,18 @@ def detect_tenant_alias_spans(
 
     # Try optimized compiled version first
     spans = None
-    compiled_structure = None
     try:
-        from luma.normalization.alias_compiler import get_compiled_aliases
-        # Get compiled structure (cached) to reuse sorted aliases for fuzzy matching
-        compiled_structure = get_compiled_aliases(tenant_aliases)
-        if compiled_structure is not None:
-            result = compiled_structure.detect_spans(normalized_text)
-            # If result is not None, use it (empty list means no aliases, which is valid)
-            if result is not None:
-                spans = result
-                # Ensure all spans have match_type for post-processing
-                for span in spans:
-                    if "match_type" not in span:
-                        span["match_type"] = "exact"
+        from luma.normalization.alias_compiler import detect_tenant_alias_spans_compiled
+        result = detect_tenant_alias_spans_compiled(
+            normalized_text, tenant_aliases)
+        # If result is not None, use it (empty list means no aliases, which is valid)
+        # If result is None, it means compilation failed - fall back to slow path
+        if result is not None:
+            spans = result
+            # Ensure all spans have match_type for post-processing
+            for span in spans:
+                if "match_type" not in span:
+                    span["match_type"] = "exact"
     except Exception:
         # Fallback to slow path if import or call fails
         pass
@@ -173,17 +171,13 @@ def detect_tenant_alias_spans(
 
     # Compiled version was used - apply fuzzy matching as post-processing
     # to handle typos and prefer longer matches over shorter exact matches
-    # Pass compiled_structure to reuse pre-sorted aliases
-    return _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, spans, compiled_structure
-    )
+    return _apply_fuzzy_matching_post_process(normalized_text, tenant_aliases, spans)
 
 
 def _apply_fuzzy_matching_post_process(
     normalized_text: str,
     tenant_aliases: Dict[str, str],
-    existing_spans: List[Dict[str, Any]],
-    compiled_structure: Optional[Any] = None
+    existing_spans: List[Dict[str, Any]]
 ) -> List[Dict[str, Any]]:
     """
     Apply fuzzy matching as post-processing to handle typos in tenant aliases.
@@ -201,9 +195,8 @@ def _apply_fuzzy_matching_post_process(
 
     Args:
         normalized_text: The normalized input text
-        tenant_aliases: Dict mapping alias -> canonical (used if compiled_structure not available)
+        tenant_aliases: Dict mapping alias -> canonical
         existing_spans: Spans found by exact matching (from compiled or slow path)
-        compiled_structure: Optional CompiledAliasStructure with pre-sorted aliases (for performance)
 
     Returns:
         Updated spans list with fuzzy matches applied
@@ -218,16 +211,12 @@ def _apply_fuzzy_matching_post_process(
     spans = existing_spans.copy()
     used_ranges = [(s["start_char"], s["end_char"]) for s in spans]
 
-    # Use pre-sorted aliases from compiled structure if available (avoid re-sorting)
-    if compiled_structure and hasattr(compiled_structure, 'sorted_aliases_tuples'):
-        sorted_aliases = compiled_structure.sorted_aliases_tuples
-    else:
-        # Fallback: sort aliases by token length desc, then char length desc for deterministic longest-first
-        sorted_aliases = sorted(
-            tenant_aliases.items(),
-            key=lambda kv: (len(kv[0].split()), len(kv[0])),
-            reverse=True,
-        )
+    # Sort aliases by token length desc, then char length desc for deterministic longest-first
+    sorted_aliases = sorted(
+        tenant_aliases.items(),
+        key=lambda kv: (len(kv[0].split()), len(kv[0])),
+        reverse=True,
+    )
 
     tokens = text_lower.split()
     n_tokens = len(tokens)
