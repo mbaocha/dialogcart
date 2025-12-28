@@ -1,5 +1,0 @@
-"""
-Configuration for intent services
-"""
-
-
