@@ -42,8 +42,12 @@ from luma.clarification import render_clarification
 def find_normalization_dir():
     """Find the normalization directory."""
     current_file = Path(__file__).resolve()
-    # From luma/cli/interactive.py -> luma/store/normalization
-    # parent = luma/cli/, parent.parent = luma/, so luma/store/normalization/
+    # From luma/cli/interactive.py -> luma/config/data
+    # parent = luma/cli/, parent.parent = luma/, so luma/config/data/
+    config_data_dir = current_file.parent.parent / "config" / "data"
+    if config_data_dir.exists():
+        return config_data_dir.resolve()
+    # Fallback to old location for backward compatibility
     store_dir = current_file.parent.parent / "store" / "normalization"
     if store_dir.exists():
         return store_dir.resolve()

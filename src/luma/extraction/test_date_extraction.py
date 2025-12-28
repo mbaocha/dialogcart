@@ -101,7 +101,10 @@ def main():
     try:
         # Find normalization directory and provide path to any file in it
         # EntityMatcher will look for global.v1.json in the same directory
-        normalization_dir = src_dir / "luma" / "store" / "normalization"
+        # Try config/data first, fallback to store/normalization for backward compatibility
+        config_data_dir = src_dir / "luma" / "config" / "data"
+        store_dir = src_dir / "luma" / "store" / "normalization"
+        normalization_dir = config_data_dir if config_data_dir.exists() else store_dir
         # Any file in normalization dir works
         entity_file = normalization_dir / "101.v1.json"
 

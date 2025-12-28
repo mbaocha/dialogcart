@@ -42,4 +42,3 @@ other_scenarios = [
         }
     },
 ]
-

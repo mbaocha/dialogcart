@@ -83,9 +83,15 @@ def find_entity_file() -> Path:
     """Find the entity JSON file."""
     # Try to find normalization files relative to this script
     current_dir = Path(__file__).parent
+    config_data_dir = current_dir.parent / "config" / "data"
+    
+    # Fallback to old location for backward compatibility
     store_dir = current_dir.parent / "store" / "normalization"
-
-    if not store_dir.exists():
+    
+    # Use config/data if it exists, otherwise try store/normalization
+    if config_data_dir.exists():
+        store_dir = config_data_dir
+    elif not store_dir.exists():
         # Try alternative path structure
         store_dir = script_dir.parent.parent / "store" / "normalization"
 
@@ -118,7 +124,7 @@ def interactive_mode():
         print(f"✓ Found entity file: {entity_file}")
     else:
         print("⚠ Warning: No entity file found. Using default configuration.")
-        print("  Place a tenant JSON file in: dialogcart/src/luma/store/normalization/")
+        print("  Place a tenant JSON file in: dialogcart/src/luma/config/data/")
 
     print()
 

@@ -48,7 +48,7 @@ def get_global_json_path(base_dir: Path = None) -> Path:
     
     Args:
         base_dir: Base directory to search in. If None, uses standard location
-                  (luma/store/normalization relative to this file)
+                  (luma/config/data relative to this file)
     
     Returns:
         Path to global JSON file (e.g., global.v3.json)
@@ -59,8 +59,8 @@ def get_global_json_path(base_dir: Path = None) -> Path:
     from ..config import config
     
     if base_dir is None:
-        # Standard location: from entity_loading.py, go to luma/store/normalization/
-        base_dir = Path(__file__).parent.parent / "store" / "normalization"
+        # Standard location: from entity_loading.py, go to luma/config/data/
+        base_dir = Path(__file__).parent.parent / "config" / "data"
     
     version = config.GLOBAL_JSON_VERSION
     json_path = base_dir / f"global.{version}.json"

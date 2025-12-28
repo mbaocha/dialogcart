@@ -1,0 +1,662 @@
+{
+    "version": "v1",
+    "scope": "global",
+    "normalization": {
+        "version": "v1",
+        "scope": "global",
+        "normalization": {
+            "orthography": {
+                "_comment": "Surface-form normalization only. No semantic meaning.",
+                "haircut": [
+                    "hair cut",
+                    "hair-cut"
+                ],
+                "checkin": [
+                    "check in",
+                    "check-in"
+                ],
+                "pickup": [
+                    "pick up",
+                    "pick-up"
+                ],
+                "dropoff": [
+                    "drop off",
+                    "drop-off"
+                ],
+                "airport": [
+                    "air port"
+                ]
+            },
+            "noise": {
+                "_comment": "Removable filler phrases with no semantic value.",
+                "token": "noisetoken",
+                "values": [
+                    "please",
+                    "kindly",
+                    "i want",
+                    "i need",
+                    "looking for",
+                    "can you",
+                    "book me",
+                    "schedule me",
+                    "help me"
+                ]
+            },
+            "vocabularies": {
+                "_comment": "Accepted language variants and recoverable misspellings. Synonyms = valid language. typos = invalid-but-repairable input.",
+                "weekdays": {
+                    "monday": {
+                        "synonyms": [
+                            "mon",
+                            "mondays"
+                        ],
+                        "typos": [
+                            "moneday",
+                            "munday",
+                            "monady"
+                        ]
+                    },
+                    "tuesday": {
+                        "synonyms": [
+                            "tue",
+                            "tuesdays"
+                        ],
+                        "typos": [
+                            "tuesdy",
+                            "tusday",
+                            "tuseday"
+                        ]
+                    },
+                    "wednesday": {
+                        "synonyms": [
+                            "wed",
+                            "wednesdays"
+                        ],
+                        "typos": [
+                            "wednessday",
+                            "wednesdy",
+                            "wensday",
+                            "wednsday"
+                        ]
+                    },
+                    "thursday": {
+                        "synonyms": [
+                            "thu",
+                            "thursdays"
+                        ],
+                        "typos": [
+                            "thurday",
+                            "thursdy",
+                            "thursady"
+                        ]
+                    },
+                    "friday": {
+                        "synonyms": [
+                            "fri",
+                            "fridays"
+                        ],
+                        "typos": [
+                            "fryday",
+                            "fridy"
+                        ]
+                    },
+                    "saturday": {
+                        "synonyms": [
+                            "sat",
+                            "saturdays"
+                        ],
+                        "typos": [
+                            "saturdy",
+                            "saterday"
+                        ]
+                    },
+                    "sunday": {
+                        "synonyms": [
+                            "sun",
+                            "sundays"
+                        ],
+                        "typos": [
+                            "sundy",
+                            "sundey"
+                        ]
+                    }
+                },
+                "months": {
+                    "january": {
+                        "synonyms": [
+                            "jan"
+                        ],
+                        "typos": [
+                            "januaray",
+                            "janurary"
+                        ]
+                    },
+                    "february": {
+                        "synonyms": [
+                            "feb"
+                        ],
+                        "typos": [
+                            "febuary",
+                            "feburary"
+                        ]
+                    },
+                    "march": {
+                        "synonyms": [
+                            "mar"
+                        ],
+                        "typos": [
+                            "marchh"
+                        ]
+                    },
+                    "april": {
+                        "synonyms": [
+                            "apr"
+                        ],
+                        "typos": []
+                    },
+                    "may": {
+                        "synonyms": [],
+                        "typos": [
+                            "mayy"
+                        ]
+                    },
+                    "june": {
+                        "synonyms": [
+                            "jun"
+                        ],
+                        "typos": []
+                    },
+                    "july": {
+                        "synonyms": [
+                            "jul"
+                        ],
+                        "typos": []
+                    },
+                    "august": {
+                        "synonyms": [
+                            "aug"
+                        ],
+                        "typos": [
+                            "augus",
+                            "augustt"
+                        ]
+                    },
+                    "september": {
+                        "synonyms": [
+                            "sep"
+                        ],
+                        "typos": [
+                            "septmeber",
+                            "septembr"
+                        ]
+                    },
+                    "october": {
+                        "synonyms": [
+                            "oct"
+                        ],
+                        "typos": [
+                            "octobr"
+                        ]
+                    },
+                    "november": {
+                        "synonyms": [
+                            "nov"
+                        ],
+                        "typos": [
+                            "novmeber",
+                            "novembr"
+                        ]
+                    },
+                    "december": {
+                        "synonyms": [
+                            "dec"
+                        ],
+                        "typos": [
+                            "decembr"
+                        ]
+                    }
+                },
+                "date_relative": {
+                    "today": {
+                        "synonyms": [],
+                        "typos": [
+                            "todat",
+                            "tody"
+                        ]
+                    },
+                    "tomorrow": {
+                        "synonyms": [],
+                        "typos": [
+                            "tomorow",
+                            "tommorow",
+                            "tmrw",
+                            "tommorrow"
+                        ]
+                    },
+                    "tonight": {
+                        "synonyms": [],
+                        "typos": [
+                            "tonite",
+                            "tonit"
+                        ]
+                    },
+                    "this week": {
+                        "synonyms": [],
+                        "typos": [
+                            "thisweek"
+                        ]
+                    },
+                    "next week": {
+                        "synonyms": [],
+                        "typos": [
+                            "nextweek",
+                            "nxt week"
+                        ]
+                    },
+                    "this weekend": {
+                        "synonyms": [],
+                        "typos": [
+                            "thisweekend"
+                        ]
+                    },
+                    "next weekend": {
+                        "synonyms": [],
+                        "typos": [
+                            "nextweekend",
+                            "nxt weekend"
+                        ]
+                    }
+                },
+                "time_windows": {
+                    "morning": {
+                        "synonyms": [],
+                        "typos": [
+                            "mornign",
+                            "moning",
+                            "mornin"
+                        ]
+                    },
+                    "afternoon": {
+                        "synonyms": [],
+                        "typos": [
+                            "afternon",
+                            "afternoom",
+                            "afteroon"
+                        ]
+                    },
+                    "evening": {
+                        "synonyms": [],
+                        "typos": [
+                            "eveing",
+                            "evenin"
+                        ]
+                    },
+                    "night": {
+                        "synonyms": [],
+                        "typos": [
+                            "nite",
+                            "nigth"
+                        ]
+                    }
+                },
+                "date_modifiers": [
+                    "this",
+                    "next",
+                    "coming"
+                ],
+                "vague_date_patterns": [
+                    "sometime soon",
+                    "later",
+                    "whenever",
+                    "when you're free",
+                    "soon"
+                ],
+                "context_dependent_patterns": [
+                    "just gone",
+                    "just past",
+                    "last week",
+                    "previous"
+                ],
+                "fine_grained_modifiers": [
+                    "early",
+                    "mid",
+                    "end"
+                ]
+            }
+        }
+    },
+    "entity_types": {
+        "date": {
+            "token": "datetoken",
+            "weekday": {
+                "to_number": {
+                    "monday": 0,
+                    "tuesday": 1,
+                    "wednesday": 2,
+                    "thursday": 3,
+                    "friday": 4,
+                    "saturday": 5,
+                    "sunday": 6
+                }
+            },
+            "month": {
+                "to_number": {
+                    "january": 1,
+                    "february": 2,
+                    "march": 3,
+                    "april": 4,
+                    "may": 5,
+                    "june": 6,
+                    "july": 7,
+                    "august": 8,
+                    "september": 9,
+                    "october": 10,
+                    "november": 11,
+                    "december": 12
+                }
+            },
+            "relative": [
+                {
+                    "value": "today",
+                    "offset_days": 0
+                },
+                {
+                    "value": "tomorrow",
+                    "offset_days": 1
+                },
+                {
+                    "value": "tonight",
+                    "offset_days": 0
+                },
+                {
+                    "value": "this week",
+                    "offset_days": 0
+                },
+                {
+                    "value": "next week",
+                    "offset_days": 7
+                },
+                {
+                    "value": "this weekend",
+                    "offset_days": 0
+                },
+                {
+                    "value": "next weekend",
+                    "offset_days": 7
+                },
+                {
+                    "value": "next month",
+                    "offset_days": 30
+                }
+            ],
+            "absolute": {
+                "token": "datetoken",
+                "patterns": [
+                    {
+                        "id": "day_month_text",
+                        "type": "regex",
+                        "value": "\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)(?:\\s+(\\d{4}))?\\b"
+                    },
+                    {
+                        "id": "month_day_text",
+                        "type": "regex",
+                        "value": "\\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s+(\\d{4}))?\\b"
+                    },
+                    {
+                        "id": "numeric_date",
+                        "type": "regex",
+                        "value": "\\b(\\d{1,2})[/-](\\d{1,2})(?:[/-](\\d{2,4}))?\\b"
+                    }
+                ]
+            }
+        },
+        "time": {
+            "token": "timetoken",
+            "patterns": [
+                {
+                    "id": "time_12h",
+                    "type": "regex",
+                    "value": "\\b(1[0-2]|0?[1-9])([:.][0-5][0-9])?\\s?(am|pm)\\b",
+                    "synonym": [
+                        "12pm",
+                        "12 pm",
+                        "12.30pm",
+                        "9am"
+                    ]
+                },
+                {
+                    "id": "time_24h",
+                    "type": "regex",
+                    "value": "\\b([01]?[0-9]|2[0-3]):[0-5][0-9]\\b",
+                    "synonym": [
+                        "15:00",
+                        "09:30"
+                    ]
+                }
+            ],
+            "keywords": [
+                {
+                    "value": "morning",
+                    "granularity": "window",
+                    "range": [
+                        "08:00",
+                        "11:59"
+                    ]
+                },
+                {
+                    "value": "afternoon",
+                    "granularity": "window",
+                    "range": [
+                        "12:00",
+                        "16:59"
+                    ]
+                },
+                {
+                    "value": "evening",
+                    "granularity": "window",
+                    "range": [
+                        "17:00",
+                        "20:59"
+                    ]
+                },
+                {
+                    "value": "night",
+                    "granularity": "window",
+                    "range": [
+                        "21:00",
+                        "23:59"
+                    ]
+                }
+            ],
+            "timewindowtoken": "timewindowtoken"
+        },
+        "duration": {
+            "token": "durationtoken",
+            "patterns": [
+                {
+                    "type": "regex",
+                    "value": "\\b(\\d+)\\s?(minutes|minute|mins|min)\\b",
+                    "unit": "minutes"
+                },
+                {
+                    "type": "regex",
+                    "value": "\\b(\\d+)\\s?(hours|hour|hrs|hr)\\b",
+                    "unit": "hours"
+                }
+            ],
+            "keywords": [
+                {
+                    "value": "half hour",
+                    "minutes": 30
+                },
+                {
+                    "value": "one hour",
+                    "minutes": 60
+                }
+            ]
+        }
+    },
+    "booking_policy": {
+        "_comment": "Policy configuration for booking behavior. Controls semantic role acceptance without touching parsing logic.",
+        "allow_time_windows": true,
+        "allow_constraint_only_time": true
+    },
+    "business_categories": {
+        "_comment": "GLOBAL semantic business categories. Stable, bounded concepts. Tenants MUST map their services to exactly one business category. Variants and pricing belong to tenant configs.",
+        "beauty_and_wellness": {
+            "display_name": "beauty & wellness",
+            "business_type": "services",
+            "families": {
+                "haircut": {
+                    "token": "servicefamilytoken",
+                    "display_name": "Haircut",
+                    "description": "Hair cutting and styling services for head hair",
+                    "synonym": [
+                        "haircut",
+                        "hair trim",
+                        "fade",
+                        "layered cut"
+                    ]
+                },
+                "beard_grooming": {
+                    "token": "servicefamilytoken",
+                    "display_name": "Beard Grooming",
+                    "description": "Beard trimming, shaping, and grooming services",
+                    "synonym": [
+                        "beard trim",
+                        "beard grooming",
+                        "beard shaping"
+                    ]
+                },
+                "shaving": {
+                    "token": "servicefamilytoken",
+                    "display_name": "Shaving",
+                    "description": "Facial shaving services",
+                    "synonym": [
+                        "clean shave",
+                        "razor shave"
+                    ]
+                },
+                "hair_coloring": {
+                    "token": "servicefamilytoken",
+                    "display_name": "Hair Coloring",
+                    "description": "Hair dyeing and coloring services",
+                    "synonym": [
+                        "hair colouring",
+                        "hair coloring",
+                        "hair dye",
+                        "coloring",
+                        "highlights"
+                    ]
+                },
+                "massage": {
+                    "token": "servicefamilytoken",
+                    "display_name": "Massage",
+                    "description": "Therapeutic and relaxation massage services",
+                    "synonym": [
+                        "massage",
+                        "full body massage",
+                        "body massage",
+                        "swedish massage",
+                        "deep tissue massage"
+                    ]
+                },
+                "facial": {
+                    "token": "servicefamilytoken",
+                    "display_name": "Facial",
+                    "description": "Facial skin treatment services",
+                    "synonym": [
+                        "facial",
+                        "skin treatment"
+                    ]
+                },
+                "manicure_pedicure": {
+                    "token": "servicefamilytoken",
+                    "display_name": "Manicure & Pedicure",
+                    "description": "Combined hand and foot grooming services",
+                    "synonym": [
+                        "mani pedi",
+                        "manicure and pedicure",
+                        "mani-pedi",
+                        "manicure & pedicure"
+                    ]
+                },
+                "manicure": {
+                    "token": "servicefamilytoken",
+                    "display_name": "Manicure",
+                    "description": "Hand and nail grooming services",
+                    "synonym": [
+                        "manicure",
+                        "nail care"
+                    ]
+                },
+                "pedicure": {
+                    "token": "servicefamilytoken",
+                    "display_name": "Pedicure",
+                    "description": "Foot and toenail grooming services",
+                    "synonym": [
+                        "pedicure",
+                        "foot care"
+                    ]
+                },
+                "waxing": {
+                    "token": "servicefamilytoken",
+                    "display_name": "Waxing",
+                    "description": "Hair removal services using wax",
+                    "synonym": [
+                        "waxing",
+                        "hair removal"
+                    ]
+                },
+                "threading": {
+                    "token": "servicefamilytoken",
+                    "display_name": "Threading",
+                    "description": "Hair removal using thread, usually for eyebrows or facial hair",
+                    "synonym": [
+                        "eyebrow threading",
+                        "eyebrows threading",
+                        "threading"
+                    ]
+                },
+                "spa_treatment": {
+                    "token": "servicefamilytoken",
+                    "display_name": "Spa Treatment",
+                    "description": "General spa and wellness treatments",
+                    "synonym": [
+                        "spa treatment",
+                        "body treatment"
+                    ]
+                }
+            }
+        },
+        "hospitality": {
+            "display_name": "Hospitality & Accommodation",
+            "business_type": "reservations",
+            "families": {
+                "room": {
+                    "token": "servicefamilytoken",
+                    "display_name": "Room",
+                    "description": "Accommodation units that can be reserved for one or more nights",
+                    "synonym": [
+                        "room",
+                        "hotel room",
+                        "guest room",
+                        "accommodation"
+                    ]
+                },
+                "extras": {
+                    "token": "servicefamilytoken",
+                    "display_name": "Extras",
+                    "description": "Additional items or services added to a reservation",
+                    "synonym": [
+                        "extra",
+                        "add-on",
+                        "addon",
+                        "additional service",
+                        "extra service"
+                    ]
+                }
+            }
+        }
+    }
+}

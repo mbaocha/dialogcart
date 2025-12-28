@@ -141,9 +141,11 @@ def main():
     print("ISOLATED DATE EXTRACTION TEST SUITE")
     print("=" * 70)
     
-    # Find global JSON
+    # Find global JSON - try config/data first, fallback to store/normalization
+    config_data_dir = src_dir / "luma" / "config" / "data"
     store_dir = src_dir / "luma" / "store" / "normalization"
-    global_json_path = store_dir / "global.v1.json"
+    base_dir = config_data_dir if config_data_dir.exists() else store_dir
+    global_json_path = base_dir / "global.v1.json"
     
     if not global_json_path.exists():
         print(f"ERROR: Global JSON not found at: {global_json_path}")

@@ -46,24 +46,63 @@ def _get_global_config_path() -> Path:
 
 # Lazy-loaded config (loaded on first use)
 _VOCAB_CACHE: Dict[str, Any] = {}
+_VOCAB_LOADED: bool = False  # Flag to track if vocabularies are loaded
 # (synonym_map, typo_map, all_canonicals)
 _VOCAB_MAPS_CACHE: Tuple[Dict[str, str], Dict[str, str], Set[str]] = None
 _ENTITY_TYPES_CACHE: Dict[str, Any] = {}
+_ENTITY_TYPES_LOADED: bool = False  # Flag to track if entity types are loaded
+
+# Performance tracking
+_VOCAB_CALL_COUNT: int = 0
+_VOCAB_CACHE_HITS: int = 0
 
 
 def _load_vocabularies() -> Dict[str, Any]:
-    """Load and cache vocabularies from JSON."""
-    if not _VOCAB_CACHE:
+    """
+    Load and cache vocabularies from JSON.
+
+    Uses a flag-based cache check for better performance and reliability.
+    Tracks cache hits/misses for performance monitoring.
+    """
+    global _VOCAB_CACHE, _VOCAB_LOADED, _VOCAB_CALL_COUNT, _VOCAB_CACHE_HITS
+
+    _VOCAB_CALL_COUNT += 1
+
+    if not _VOCAB_LOADED:
+        # Cache miss - load vocabularies
         config_path = _get_global_config_path()
         _VOCAB_CACHE.update(load_global_vocabularies(config_path))
+        _VOCAB_LOADED = True
+        logger.debug(
+            f"[vocab_cache] Loaded vocabularies (call #{_VOCAB_CALL_COUNT})",
+            extra={"cache_hit": False, "total_calls": _VOCAB_CALL_COUNT}
+        )
+    else:
+        # Cache hit
+        _VOCAB_CACHE_HITS += 1
+        if _VOCAB_CALL_COUNT % 50 == 0:  # Log every 50th call to avoid spam
+            logger.debug(
+                f"[vocab_cache] Cache hit (call #{_VOCAB_CALL_COUNT}, "
+                f"hits: {_VOCAB_CACHE_HITS}, miss rate: "
+                f"{((_VOCAB_CALL_COUNT - _VOCAB_CACHE_HITS) / _VOCAB_CALL_COUNT * 100):.1f}%)",
+                extra={
+                    "cache_hit": True,
+                    "total_calls": _VOCAB_CALL_COUNT,
+                    "cache_hits": _VOCAB_CACHE_HITS
+                }
+            )
+
     return _VOCAB_CACHE
 
 
 def _load_entity_types() -> Dict[str, Any]:
     """Load and cache entity_types from JSON."""
-    if not _ENTITY_TYPES_CACHE:
+    global _ENTITY_TYPES_CACHE, _ENTITY_TYPES_LOADED
+
+    if not _ENTITY_TYPES_LOADED:
         config_path = _get_global_config_path()
         _ENTITY_TYPES_CACHE.update(load_global_entity_types(config_path))
+        _ENTITY_TYPES_LOADED = True
     return _ENTITY_TYPES_CACHE
 
 
@@ -75,6 +114,63 @@ def _load_vocabulary_maps() -> Tuple[Dict[str, str], Dict[str, str], Set[str]]:
         vocabularies = load_vocabularies(config_path)
         _VOCAB_MAPS_CACHE = compile_vocabulary_maps(vocabularies)
     return _VOCAB_MAPS_CACHE
+
+
+def initialize_vocabularies(force_reload: bool = False) -> None:
+    """
+    Pre-load vocabularies and entity types at startup.
+
+    This function should be called during pipeline initialization to avoid
+    first-request latency and ensure vocabularies are loaded once.
+
+    Args:
+        force_reload: If True, reload vocabularies even if already loaded
+    """
+    global _VOCAB_CACHE, _VOCAB_LOADED, _ENTITY_TYPES_CACHE, _ENTITY_TYPES_LOADED
+
+    if force_reload:
+        _VOCAB_CACHE.clear()
+        _ENTITY_TYPES_CACHE.clear()
+        _VOCAB_LOADED = False
+        _ENTITY_TYPES_LOADED = False
+
+    # Pre-load vocabularies
+    if not _VOCAB_LOADED:
+        logger.info("[vocab_cache] Pre-loading vocabularies at startup")
+        _load_vocabularies()
+        logger.info(
+            f"[vocab_cache] Vocabularies loaded: {len(_VOCAB_CACHE)} keys")
+
+    # Pre-load entity types
+    if not _ENTITY_TYPES_LOADED:
+        logger.info("[vocab_cache] Pre-loading entity types at startup")
+        _load_entity_types()
+        logger.info(
+            f"[vocab_cache] Entity types loaded: {len(_ENTITY_TYPES_CACHE)} keys")
+
+    # Pre-load vocabulary maps
+    if _VOCAB_MAPS_CACHE is None:
+        logger.info("[vocab_cache] Pre-loading vocabulary maps at startup")
+        _load_vocabulary_maps()
+        logger.info("[vocab_cache] Vocabulary maps loaded")
+
+
+def get_vocab_cache_stats() -> Dict[str, Any]:
+    """
+    Get vocabulary cache statistics for performance monitoring.
+
+    Returns:
+        Dictionary with cache statistics
+    """
+    return {
+        "vocab_loaded": _VOCAB_LOADED,
+        "entity_types_loaded": _ENTITY_TYPES_LOADED,
+        "vocab_maps_loaded": _VOCAB_MAPS_CACHE is not None,
+        "vocab_call_count": _VOCAB_CALL_COUNT,
+        "vocab_cache_hits": _VOCAB_CACHE_HITS,
+        "vocab_cache_misses": _VOCAB_CALL_COUNT - _VOCAB_CACHE_HITS,
+        "cache_hit_rate": (_VOCAB_CACHE_HITS / _VOCAB_CALL_COUNT * 100) if _VOCAB_CALL_COUNT > 0 else 0.0
+    }
 
 
 @dataclass

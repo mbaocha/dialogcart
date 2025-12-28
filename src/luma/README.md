@@ -554,7 +554,7 @@ python -m spacy download en_core_web_sm
 
 ### Issue: Normalization directory not found
 
-**Solution:** Ensure normalization files exist in `luma/store/normalization/` or `intents/normalization/`
+**Solution:** Ensure normalization files exist in `luma/config/data/` (or fallback to `luma/store/normalization/` or `intents/normalization/`)
 
 ---
 

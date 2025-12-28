@@ -68,6 +68,32 @@ from luma.app.resolve_service import resolve_message  # noqa: E402
 # Internal intent (never returned in API, never persisted)
 CONTEXTUAL_UPDATE = "CONTEXTUAL_UPDATE"
 
+# Check for required dependencies at startup
+
+
+def _check_required_dependencies():
+    """Check for required dependencies and fail fast if missing."""
+    missing_deps = []
+
+    # Check rapidfuzz (required for fuzzy matching in tenant alias detection)
+    try:
+        import rapidfuzz  # noqa: F401
+    except ImportError:
+        missing_deps.append("rapidfuzz")
+
+    if missing_deps:
+        error_msg = (
+            f"ERROR: Missing required dependencies: {', '.join(missing_deps)}\n"
+            f"Please install them using: pip install {' '.join(missing_deps)}\n"
+            f"Or uncomment them in luma/requirements.txt and install all requirements."
+        )
+        print(error_msg, file=sys.stderr)
+        sys.exit(1)
+
+
+# Check dependencies before initializing app
+_check_required_dependencies()
+
 # Apply config settings
 PORT = config.API_PORT
 
@@ -167,6 +193,11 @@ def find_normalization_dir():
         return _normalization_dir_cache
 
     current_file = Path(__file__).resolve()
+    config_data_dir = current_file.parent / "config" / "data"
+    if config_data_dir.exists():
+        _normalization_dir_cache = config_data_dir
+        return _normalization_dir_cache
+    # Fallback to old location for backward compatibility
     store_dir = current_file.parent / "store" / "normalization"
     if store_dir.exists():
         _normalization_dir_cache = store_dir
@@ -450,6 +481,11 @@ def init_pipeline():
         # Initialize memory store (required for multi-turn conversations)
         memory_store = RedisMemoryStore()
         logger.info("Memory store initialized successfully")
+
+        # Pre-load vocabularies to avoid first-request latency
+        from luma.resolution.semantic_resolver import initialize_vocabularies
+        initialize_vocabularies()
+        logger.info("Vocabularies pre-loaded successfully")
 
         # Entity matcher will be initialized per-request with entity file
         logger.info("Pipeline components initialized successfully")

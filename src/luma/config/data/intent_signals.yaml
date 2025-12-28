@@ -1,0 +1,361 @@
+# ================================
+# LUMA INTENT SIGNALS & POLICY
+# ================================
+#
+# This file defines INTENT POLICY, not execution logic.
+#
+# Key concepts:
+#
+# intent_signals:
+#   - Language cues used ONLY for intent classification.
+#   - any:    loose signals (OR)
+#   - all:    required co-occurring signals (AND)
+#   - ordered: ordered token patterns
+#
+# intent_defining_slots:
+#   - Slots that help disambiguate the intent itself.
+#   - Missing these may affect intent confidence.
+#
+# required_slots:
+#   - Slots that MUST be present for the intent to be READY.
+#   - Missing any → needs_clarification.
+#
+# temporal_type (CREATE_* intents only):
+#   - Declares the expected temporal output shape.
+#   - datetime_range → appointments/services
+#   - date_range     → reservations/accommodation
+#
+# require_end_date (CREATE_RESERVATION only):
+#   - Enforces check-in / check-out semantics.
+#   - If end_date missing → clarification required.
+#
+# NOTE:
+# - YAML defines POLICY and VARIATION.
+# - Global invariants (time windows, date math, fuzzy mappings)
+#   live in Python config, not here.
+# ================================
+
+
+PAYMENT:
+  is_booking: false
+
+  intent_signals:
+    any:
+      - "pay for"
+      - "pay my"
+      - "how much do i owe"
+    all:
+      - ["pay"]
+      - ["payment"]
+      - ["deposit"]
+      - ["balance"]
+      - ["outstanding"]
+    ordered:
+      - ["pay", "now"]
+
+  intent_defining_slots:
+    - booking_id
+
+  required_slots:
+    - booking_id
+
+
+CANCEL_BOOKING:
+  is_booking: true
+
+  intent_signals:
+    any:
+      - "cancel booking"
+      - "cancel appointment"
+      - "delete booking"
+      - "delete appointment"
+      - "call off"
+    all:
+      - ["cancel"]
+    ordered:
+      - ["cancel", "booking"]
+      - ["cancel", "appointment"]
+
+  intent_defining_slots:
+    - booking_id
+
+  required_slots:
+    - booking_id
+
+
+MODIFY_BOOKING:
+  is_booking: true
+
+  intent_signals:
+    any:
+      - "reschedule my"
+      - "postpone"
+      - "update booking"
+      - "modify booking"
+      - "change reservation"
+      - "change my reservation"
+      - "move my reservation"
+      - "move my appointment"
+    all:
+      - ["reschedule"]
+      - ["change", "reservation"]
+      - ["change", "booking"]
+      - ["move", "reservation"]
+      - ["move", "appointment"]
+    ordered:
+      - ["change", "time"]
+      - ["change", "date"]
+      - ["move", "it", "later"]
+      - ["move", "it", "earlier"]
+
+  intent_defining_slots:
+    - booking_id
+
+  required_slots:
+    - booking_id
+
+
+BOOKING_INQUIRY:
+  is_booking: true
+
+  intent_signals:
+    any:
+      - "my booking"
+      - "my appointment"
+      - "show booking"
+      - "show reservation"
+      - "view booking"
+      - "view reservation"
+      - "booking status"
+      - "reservation status"
+      - "confirmation number"
+    ordered:
+      - ["what", "time", "my"]
+      - ["check", "booking"]
+      - ["check", "reservation"]
+
+  intent_defining_slots:
+    - booking_id
+
+  required_slots:
+    - booking_id
+
+
+AVAILABILITY:
+  is_booking: false
+
+  intent_signals:
+    any:
+      - "any slots"
+      - "are you free"
+      - "any availability"
+    all:
+      - ["available"]
+      - ["availability"]
+      - ["slots"]
+    ordered:
+      - ["do", "you", "have", "slots"]
+      - ["what", "times", "available"]
+      - ["what", "times", "open"]
+      - ["slots", "for", "today"]
+      - ["slots", "for", "tomorrow"]
+      - ["any", "room", "free"]
+
+  intent_defining_slots: []
+
+  required_slots:
+    - date
+
+
+DETAILS:
+  is_booking: false
+
+  intent_signals:
+    any:
+      - "does include"
+      - "what include"
+      - "what come with"
+      - "what included"
+      - "tell me more"
+      - "support refunds"
+      - "do you support refunds"
+    all:
+      - ["duration"]
+      - ["policy"]
+      - ["policies"]
+      - ["cancellation"]
+      - ["address"]
+      - ["location"]
+      - ["hours"]
+      - ["open"]
+      - ["close"]
+      - ["contact"]
+      - ["phone"]
+      - ["email"]
+      - ["refunds"]
+    ordered:
+      - ["how", "long"]
+      - ["tell", "me", "more"]
+
+  intent_defining_slots: []
+  required_slots: []
+
+
+QUOTE:
+  is_booking: false
+
+  intent_signals:
+    any:
+      - "how much"
+      - "price for"
+      - "cost for"
+      - "quote"
+      - "estimate"
+    ordered:
+      - ["how", "much"]
+
+  intent_defining_slots:
+    - service_id
+
+  required_slots:
+    - service_id
+
+
+DISCOVERY:
+  is_booking: false
+
+  intent_signals:
+    any:
+      - "what do you offer"
+      - "what services"
+      - "what rooms"
+      - "what packages"
+      - "list rooms"
+      - "list services"
+    ordered:
+      - ["list", "your", "rooms"]
+      - ["list", "your", "services"]
+
+  intent_defining_slots: []
+  required_slots: []
+
+
+RECOMMENDATION:
+  is_booking: false
+
+  intent_signals:
+    any:
+      - "recommend"
+      - "suggest"
+      - "best option"
+      - "which better"
+    ordered:
+      - ["help", "me", "choose"]
+      - ["recommend", "room", "type"]
+      - ["suggest", "room", "type"]
+      - ["recommend", "spa", "treatment"]
+
+  intent_defining_slots: []
+  required_slots: []
+
+
+CREATE_APPOINTMENT:
+  is_booking: true
+  temporal_shape: datetime_range
+
+  intent_signals:
+    any:
+      - "book"
+      - "schedule"
+      - "appointment"
+    ordered:
+      - ["book", "appointment"]
+      - ["schedule", "appointment"]
+
+  intent_defining_slots:
+    - service_id
+
+  required_slots:
+    - service_id
+    - date
+    - time
+
+
+CREATE_RESERVATION:
+  is_booking: true
+  temporal_shape: date_range
+  requires_end_date: true
+  supports_date_roles: true
+  require_end_date: true
+
+  intent_signals:
+    any:
+      - "reserve"
+      - "book"
+      - "room"
+    ordered:
+      - ["reserve", "room"]
+      - ["book", "room"]
+
+  intent_defining_slots:
+    - service_id
+
+  required_slots:
+    - service_id
+    - start_date
+    - end_date
+
+
+CONFIRM_BOOKING:
+  is_booking: true
+
+  intent_signals:
+    any:
+      - "yes"
+      - "confirm"
+      - "go ahead"
+      - "that works"
+      - "sounds good"
+    ordered:
+      - ["go", "ahead"]
+      - ["that", "works"]
+      - ["sounds", "good"]
+
+  intent_defining_slots: []
+  required_slots: []
+
+
+PAYMENT_STATUS:
+  is_booking: false
+
+  intent_signals:
+    any:
+      - "is it paid"
+      - "payment status"
+      - "status of payment"
+    ordered:
+      - ["payment", "status"]
+      - ["status", "payment"]
+
+  intent_defining_slots:
+    - booking_id
+
+  required_slots:
+    - booking_id
+
+
+REJECT_OR_CHANGE:
+  is_booking: false
+
+  intent_signals:
+    any:
+      - "no"
+      - "change it"
+      - "another day"
+      - "not that"
+    ordered:
+      - ["change", "it"]
+      - ["another", "day"]
+
+  intent_defining_slots: []
+  required_slots: []

@@ -140,12 +140,23 @@ def load_intent_meta() -> Dict[str, Dict[str, Any]]:
     global _INTENT_META_CACHE
     if _INTENT_META_CACHE:
         return _INTENT_META_CACHE
-    path = (
-        Path(__file__).resolve().parent.parent
-        / "store"
-        / "normalization"
-        / "intent_signals.yaml"
-    )
+
+    # Try config/data first, fallback to store/normalization for backward compatibility
+    config_dir = Path(__file__).resolve().parent
+    config_data_path = config_dir / "data" / "intent_signals.yaml"
+    store_path = config_dir.parent / "store" / \
+        "normalization" / "intent_signals.yaml"
+
+    path = config_data_path if config_data_path.exists() else store_path
+
+    if not path.exists():
+        raise FileNotFoundError(
+            f"intent_signals.yaml not found. Tried:\n"
+            f"  - {config_data_path}\n"
+            f"  - {store_path}\n"
+            f"Please ensure intent_signals.yaml exists in one of these locations."
+        )
+
     with path.open(encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
     intents_cfg = raw.get("intents", raw) if isinstance(raw, dict) else {}

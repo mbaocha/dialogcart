@@ -25,7 +25,10 @@ from luma.config.core import STATUS_READY
 class DateRangeTailTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        normalization_dir = SRC_DIR / "luma" / "store" / "normalization"
+        # Try config/data first, fallback to store/normalization for backward compatibility
+        config_data_dir = SRC_DIR / "luma" / "config" / "data"
+        store_dir = SRC_DIR / "luma" / "store" / "normalization"
+        normalization_dir = config_data_dir if config_data_dir.exists() else store_dir
         entity_file = normalization_dir / "101.v1.json"
         if not entity_file.exists():
             json_files = list(normalization_dir.glob("*.json"))
