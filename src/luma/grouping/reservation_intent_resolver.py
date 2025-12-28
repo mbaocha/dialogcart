@@ -72,12 +72,21 @@ def _load_intent_signals_cached() -> Tuple[
             return _intent_signals_cache, _intent_meta_cache
         
         # Load YAML file
-        path = (
-            Path(__file__).resolve().parent.parent
-            / "store"
-            / "normalization"
-            / "intent_signals.yaml"
-        )
+        # Try config/data first, fallback to store/normalization for backward compatibility
+        config_dir = Path(__file__).resolve().parent.parent / "config"
+        config_data_path = config_dir / "data" / "intent_signals.yaml"
+        store_path = config_dir.parent / "store" / "normalization" / "intent_signals.yaml"
+        
+        path = config_data_path if config_data_path.exists() else store_path
+        
+        if not path.exists():
+            raise FileNotFoundError(
+                f"intent_signals.yaml not found. Tried:\n"
+                f"  - {config_data_path}\n"
+                f"  - {store_path}\n"
+                f"Please ensure intent_signals.yaml exists in one of these locations."
+            )
+        
         with path.open(encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
         
