@@ -6,8 +6,8 @@ gunicorn==21.2.0
 spacy==3.7.2
 numpy==1.26.2
 
-# Fuzzy matching (optional - for typo tolerance)
-# rapidfuzz==3.5.2
+# Fuzzy matching (required - for typo tolerance in tenant alias detection)
+rapidfuzz>=3.5.2
 
 # Memory / Redis
 redis==5.0.1

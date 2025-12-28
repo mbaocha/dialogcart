@@ -9,7 +9,7 @@ API_BASE = "http://localhost:9001/resolve"
 USER_ID_PREFIX = "t_user_"
 
 
-def call_luma(sentence, booking_mode, user_id=None):
+def call_luma(sentence, booking_mode, user_id=None, aliases=None):
     """
     Call luma API with the given sentence and booking mode.
 
@@ -17,6 +17,7 @@ def call_luma(sentence, booking_mode, user_id=None):
         sentence: User input text
         booking_mode: "service" or "reservation"
         user_id: Optional user_id. If None, generates a random one.
+        aliases: Optional dict of tenant aliases. If None, uses default aliases.
 
     Returns:
         Tuple of (response_data, status_code, raw_text)
@@ -24,23 +25,30 @@ def call_luma(sentence, booking_mode, user_id=None):
     if user_id is None:
         user_id = f"{USER_ID_PREFIX}{random.randint(10**15, 10**16 - 1)}"
     domain = "reservation" if booking_mode == "reservation" else "service"
+
+    # Default aliases (used if not provided)
+    default_aliases = {
+        "standard": "room",
+        "room": "room",
+        "delux": "room",
+        # Typo in tenant alias (for fuzzy matching tests)
+        "premum suite": "room",
+        "hair cut": "haircut",
+        "haircut": "haircut",
+        "beard": "beard grooming",
+        "beerd": "beard grooming",
+        "suite": "room",
+        "massage": "massage",
+        "presidential room": "room",
+    }
+
     payload = {
         "text": sentence,
         "domain": domain,
         "user_id": user_id,
         "tenant_context": {
             "booking_mode": booking_mode,
-            "aliases": {
-                "standard": "room",
-                "room": "room",
-                "delux": "room",
-                "hair cut": "haircut",
-                "haircut": "haircut",
-                "beard": "beard grooming",
-                "beerd": "beard grooming",
-                "suite": "room",
-                "massage": "massage",
-            },
+            "aliases": aliases if aliases is not None else default_aliases,
         },
     }
 
@@ -267,6 +275,9 @@ def test_followup_scenarios(followup_scenarios_to_run=None, verbose=False, start
         print(f"User ID: {user_id}")
         print(f"{'='*70}")
 
+        # Get scenario-specific aliases if provided, otherwise use None (default)
+        scenario_aliases = scenario_batch.get("aliases", None)
+
         scenario_passed = True
         for turn_idx, turn in enumerate(turns, start=1):
             sentence = turn["sentence"]
@@ -275,7 +286,7 @@ def test_followup_scenarios(followup_scenarios_to_run=None, verbose=False, start
             print(f"  Turn {turn_idx}/{len(turns)}: \"{sentence}\"")
 
             resp, resp_status, resp_raw = call_luma(
-                sentence, booking_mode, user_id=user_id)
+                sentence, booking_mode, user_id=user_id, aliases=scenario_aliases)
 
             try:
                 if resp_status != 200 or resp is None:

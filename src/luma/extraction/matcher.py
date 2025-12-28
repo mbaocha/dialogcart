@@ -6,6 +6,35 @@ Service and reservation entity matcher for DialogCart.
 Extracts and parameterizes entities for service-based appointment booking
 and reservation systems.
 """
+from .service_annotation import (
+    annotate_service_tokens,
+    consume_service_annotations,
+)
+from .entity_processing import (
+    extract_entities_from_doc,
+    build_parameterized_sentence,
+)
+from .entity_loading import (
+    init_nlp_with_business_categories,
+    load_global_noise_set,
+    load_global_orthography_rules,
+    load_global_business_categories,
+    build_business_category_synonym_map,
+    load_global_entity_types,
+    get_global_json_path,
+)
+from .vocabulary_normalization import (
+    load_vocabularies,
+    compile_vocabulary_maps,
+    normalize_vocabularies,
+    validate_vocabularies,
+)
+from .normalization import (
+    normalize_hyphens,
+    pre_normalization,
+    normalize_orthography,
+    normalize_natural_language_variants,
+)
 from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 import re
@@ -30,39 +59,6 @@ except ImportError:  # pragma: no cover - fallback for static analysis
     class ClarificationReason:  # type: ignore
         CONFLICTING_SIGNALS = "CONFLICTING_SIGNALS"
         CONTEXT_DEPENDENT_VALUE = "CONTEXT_DEPENDENT_VALUE"
-
-from .normalization import (
-    normalize_hyphens,
-    pre_normalization,
-    normalize_orthography,
-    normalize_natural_language_variants,
-)
-
-from .vocabulary_normalization import (
-    load_vocabularies,
-    compile_vocabulary_maps,
-    normalize_vocabularies,
-    validate_vocabularies,
-)
-
-from .entity_loading import (
-    init_nlp_with_business_categories,
-    load_global_noise_set,
-    load_global_orthography_rules,
-    load_global_business_categories,
-    build_business_category_synonym_map,
-    load_global_entity_types,
-    get_global_json_path,
-)
-
-from .entity_processing import (
-    extract_entities_from_doc,
-    build_parameterized_sentence,
-)
-from .service_annotation import (
-    annotate_service_tokens,
-    consume_service_annotations,
-)
 
 
 # ------------------------------------------------------------------
@@ -144,27 +140,213 @@ def detect_tenant_alias_spans(
     - Exact phrase match (case-insensitive) on normalized text
     - Longest-match wins (sort by phrase length desc)
     - Word-boundary safe
-    
+    - Fuzzy matching (90%+ threshold) - post-processing to handle typos
+
     Uses compiled alias structure for performance (with fallback to slow path).
     """
     if not tenant_aliases:
         return []
 
     # Try optimized compiled version first
+    spans = None
     try:
         from luma.normalization.alias_compiler import detect_tenant_alias_spans_compiled
-        result = detect_tenant_alias_spans_compiled(normalized_text, tenant_aliases)
+        result = detect_tenant_alias_spans_compiled(
+            normalized_text, tenant_aliases)
         # If result is not None, use it (empty list means no aliases, which is valid)
         # If result is None, it means compilation failed - fall back to slow path
         if result is not None:
-            return result
+            spans = result
+            # Ensure all spans have match_type for post-processing
+            for span in spans:
+                if "match_type" not in span:
+                    span["match_type"] = "exact"
     except Exception:
         # Fallback to slow path if import or call fails
         pass
 
-    # Fallback: original implementation (slow path)
-    # Only called if aliases exist but compilation failed
-    return _detect_tenant_alias_spans_slow(normalized_text, tenant_aliases)
+    # If compiled version didn't work, use slow path (which includes fuzzy matching)
+    if spans is None:
+        return _detect_tenant_alias_spans_slow(normalized_text, tenant_aliases)
+
+    # Compiled version was used - apply fuzzy matching as post-processing
+    # to handle typos and prefer longer matches over shorter exact matches
+    return _apply_fuzzy_matching_post_process(normalized_text, tenant_aliases, spans)
+
+
+def _apply_fuzzy_matching_post_process(
+    normalized_text: str,
+    tenant_aliases: Dict[str, str],
+    existing_spans: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """
+    Apply fuzzy matching as post-processing to handle typos in tenant aliases.
+
+    Processes phrases by word count in descending order: 4-word → 3-word → 2-word → 1-word.
+    This ensures longer matches are preferred over shorter ones.
+
+    This runs even when exact matches exist (from compiled version), to prefer
+    longer fuzzy matches over shorter exact matches.
+    Example: "premium suite" (user) should fuzzy match "premum suite" (tenant typo)
+    instead of just "suite" (shorter exact match).
+
+    Single-word typos (e.g., "massge" → "massage") use fuzz.ratio() with 85% threshold.
+    Multi-word phrases use fuzz.token_sort_ratio() with 90% threshold.
+
+    Args:
+        normalized_text: The normalized input text
+        tenant_aliases: Dict mapping alias -> canonical
+        existing_spans: Spans found by exact matching (from compiled or slow path)
+
+    Returns:
+        Updated spans list with fuzzy matches applied
+    """
+    try:
+        from rapidfuzz import fuzz
+    except ImportError:
+        # rapidfuzz not available, return existing spans
+        return existing_spans
+
+    text_lower = normalized_text.lower()
+    spans = existing_spans.copy()
+    used_ranges = [(s["start_char"], s["end_char"]) for s in spans]
+
+    # Sort aliases by token length desc, then char length desc for deterministic longest-first
+    sorted_aliases = sorted(
+        tenant_aliases.items(),
+        key=lambda kv: (len(kv[0].split()), len(kv[0])),
+        reverse=True,
+    )
+
+    tokens = text_lower.split()
+    n_tokens = len(tokens)
+
+    # Process by word count in descending order: 4 → 3 → 2 → 1
+    # This ensures longer matches are preferred over shorter ones
+    for word_count in range(4, 0, -1):  # 4, 3, 2, 1
+        if word_count > n_tokens:
+            continue
+
+        # Generate candidate phrases of this word count
+        candidate_phrases: List[Tuple[int, int, str]] = []
+
+        for start in range(n_tokens - word_count + 1):
+            end = start + word_count
+            phrase = " ".join(tokens[start:end])
+
+            # Find actual character positions in normalized text
+            # For single words, use word boundaries to avoid partial matches
+            if word_count == 1:
+                pattern_escaped = r"\b" + re.escape(phrase) + r"\b"
+            else:
+                pattern_escaped = re.escape(phrase)
+            match_obj = re.search(pattern_escaped, normalized_text.lower())
+            if not match_obj:
+                continue
+            start_char_pos, end_char_pos = match_obj.span()
+
+            # Skip if this phrase is completely contained within an existing span
+            # (but allow longer phrases that contain existing spans - we'll remove the shorter ones)
+            if any(
+                start_char_pos >= u_start and end_char_pos <= u_end
+                for u_start, u_end in used_ranges
+            ):
+                continue
+
+            candidate_phrases.append((start_char_pos, end_char_pos, phrase))
+
+        # Sort by position (left to right) for deterministic processing within same word count
+        candidate_phrases.sort(key=lambda x: x[0])
+
+        # Try fuzzy matching against tenant aliases for this word count
+        for start_char_pos, end_char_pos, phrase in candidate_phrases:
+            if not phrase or len(phrase.strip()) < 3:
+                continue
+
+            # Skip single words that are too short
+            if word_count == 1 and len(phrase.strip()) < 4:
+                continue
+
+            best_match = None
+            best_score = 0
+            best_alias = None
+            best_canonical = None
+
+            # Filter aliases by word count: single words only match single-word aliases
+            # Multi-word phrases can match any alias
+            aliases_to_check = sorted_aliases
+            if word_count == 1:
+                aliases_to_check = [
+                    (alias, canonical)
+                    for alias, canonical in sorted_aliases
+                    if isinstance(alias, str) and " " not in alias.lower().strip()
+                ]
+
+            for alias, canonical in aliases_to_check:
+                if not isinstance(alias, str) or not isinstance(canonical, str):
+                    continue
+                alias_lower = alias.lower().strip()
+                if not alias_lower:
+                    continue
+
+                # For single words, use ratio; for multi-word, use token_sort_ratio
+                if word_count == 1:
+                    score = fuzz.ratio(phrase, alias_lower)
+                    threshold = 85  # Lower threshold for single-word typos
+                else:
+                    score = fuzz.token_sort_ratio(phrase, alias_lower)
+                    threshold = 90  # Higher threshold for multi-word phrases
+
+                if score >= threshold and score > best_score:
+                    best_score = score
+                    best_match = phrase
+                    best_alias = alias
+                    best_canonical = canonical
+
+            if best_match and best_alias:
+                # Check if this fuzzy match overlaps with any existing exact match
+                overlapping_spans = [
+                    s for s in spans
+                    if not (end_char_pos <= s["start_char"] or start_char_pos >= s["end_char"])
+                ]
+
+                # If fuzzy match overlaps with exact matches, remove the shorter exact matches
+                if overlapping_spans:
+                    # Remove shorter exact matches that are contained within this longer fuzzy match
+                    spans = [
+                        s for s in spans
+                        if not (
+                            s["start_char"] >= start_char_pos and
+                            s["end_char"] <= end_char_pos and
+                            s.get("match_type", "exact") == "exact"
+                        )
+                    ]
+                    # Update used_ranges to remove the removed spans
+                    used_ranges = [
+                        (u_start, u_end) for u_start, u_end in used_ranges
+                        if not (
+                            u_start >= start_char_pos and
+                            u_end <= end_char_pos
+                        )
+                    ]
+
+                # Add the fuzzy match
+                spans.append(
+                    {
+                        "start_char": start_char_pos,
+                        "end_char": end_char_pos,
+                        "text": normalized_text[start_char_pos:end_char_pos],
+                        "canonical": best_canonical,
+                        "alias_key": best_alias,
+                        "match_type": "fuzzy",
+                        "fuzzy_score": best_score,
+                    }
+                )
+                used_ranges.append((start_char_pos, end_char_pos))
+                # Only match one fuzzy alias per phrase
+                break
+
+    return spans
 
 
 def _detect_tenant_alias_spans_slow(
@@ -172,8 +354,13 @@ def _detect_tenant_alias_spans_slow(
 ) -> List[Dict[str, Any]]:
     """
     Slow-path implementation of alias span detection.
-    
+
     Used as fallback when compiled version is unavailable.
+
+    Matching strategy:
+    1. Exact phrase match (word-boundary) - primary method
+    2. Fuzzy matching (90%+ threshold) - fallback when exact match fails
+    3. Prefer longer fuzzy matches over shorter exact matches when they overlap
     """
     if not tenant_aliases:
         return []
@@ -190,6 +377,7 @@ def _detect_tenant_alias_spans_slow(
 
     used_ranges: List[Tuple[int, int]] = []
 
+    # Phase 1: Exact matching
     for alias, canonical in sorted_aliases:
         if not isinstance(alias, str) or not isinstance(canonical, str):
             continue
@@ -216,9 +404,113 @@ def _detect_tenant_alias_spans_slow(
                     "text": normalized_text[start_char:end_char],
                     "canonical": canonical,  # alias value (canonical_family)
                     "alias_key": alias,  # alias key (tenant_service_id)
+                    "match_type": "exact",
                 }
             )
             used_ranges.append((start_char, end_char))
+
+    # Phase 2: Fuzzy matching (runs even if exact matches exist)
+    # This handles typos in tenant aliases and prefers longer matches over shorter ones
+    # Example: "premium suite" (user) should fuzzy match "premum suite" (tenant typo)
+    # even if "suite" (shorter exact match) was found
+    try:
+        from rapidfuzz import fuzz
+    except ImportError:
+        # rapidfuzz not available, skip fuzzy matching
+        return spans
+
+    # Extract potential phrases from text (2-4 word spans)
+    tokens = text_lower.split()
+    n_tokens = len(tokens)
+    candidate_phrases: List[Tuple[int, int, str]] = []
+
+    # Generate candidate phrases (2-4 tokens)
+    for n in range(2, min(5, n_tokens + 1)):
+        for start in range(n_tokens - n + 1):
+            end = start + n
+            phrase = " ".join(tokens[start:end])
+
+            # Find actual character positions in normalized text
+            # Search for the phrase as it appears in the text
+            pattern_escaped = re.escape(phrase)
+            match_obj = re.search(pattern_escaped, normalized_text.lower())
+            if not match_obj:
+                continue
+            start_char_pos, end_char_pos = match_obj.span()
+
+            candidate_phrases.append((start_char_pos, end_char_pos, phrase))
+
+    # Sort by length (longest first) for priority
+    candidate_phrases.sort(key=lambda x: len(x[2]), reverse=True)
+
+    # Try fuzzy matching against tenant aliases
+    for start_char_pos, end_char_pos, phrase in candidate_phrases:
+        if not phrase or len(phrase.strip()) < 3:
+            continue
+
+        best_match = None
+        best_score = 0
+        best_alias = None
+        best_canonical = None
+
+        for alias, canonical in sorted_aliases:
+            if not isinstance(alias, str) or not isinstance(canonical, str):
+                continue
+            alias_lower = alias.lower().strip()
+            if not alias_lower:
+                continue
+
+            # Use token_sort_ratio for better multi-word matching
+            score = fuzz.token_sort_ratio(phrase, alias_lower)
+            if score >= 90 and score > best_score:
+                best_score = score
+                best_match = phrase
+                best_alias = alias
+                best_canonical = canonical
+
+        if best_match and best_alias:
+            # Check if this fuzzy match overlaps with any existing exact match
+            # If it does and the fuzzy match is longer, prefer the fuzzy match
+            overlapping_spans = [
+                s for s in spans
+                if not (end_char_pos <= s["start_char"] or start_char_pos >= s["end_char"])
+            ]
+
+            # If fuzzy match overlaps with exact matches, remove the shorter exact matches
+            if overlapping_spans:
+                # Remove shorter exact matches that are contained within this longer fuzzy match
+                spans = [
+                    s for s in spans
+                    if not (
+                        s["start_char"] >= start_char_pos and
+                        s["end_char"] <= end_char_pos and
+                        s.get("match_type") == "exact"
+                    )
+                ]
+                # Update used_ranges to remove the removed spans
+                used_ranges = [
+                    (u_start, u_end) for u_start, u_end in used_ranges
+                    if not (
+                        u_start >= start_char_pos and
+                        u_end <= end_char_pos
+                    )
+                ]
+
+            # Add the fuzzy match
+            spans.append(
+                {
+                    "start_char": start_char_pos,
+                    "end_char": end_char_pos,
+                    "text": normalized_text[start_char_pos:end_char_pos],
+                    "canonical": best_canonical,
+                    "alias_key": best_alias,
+                    "match_type": "fuzzy",
+                    "fuzzy_score": best_score,
+                }
+            )
+            used_ranges.append((start_char_pos, end_char_pos))
+            # Only match one fuzzy alias per phrase
+            break
 
     return spans
 
@@ -468,7 +760,7 @@ class EntityMatcher:
             business_category_map=self.business_category_map,
             tenant_aliases=tenant_aliases
         )
-        
+
         # Log annotated sentence (Step 1 output)
         if request_id:
             logger.debug(
@@ -486,7 +778,7 @@ class EntityMatcher:
             annotations=service_annotations,
             logger_instance=logger
         )
-        
+
         # Log consumed sentence (Step 2 output)
         if request_id:
             logger.debug(
@@ -501,10 +793,10 @@ class EntityMatcher:
         # Rebuild full parameterized sentence: services from consumption + other entities from build_parameterized_sentence
         final_tokens = [t.text.lower() for t in doc]
         all_replacements = []
-        
+
         # Add service replacements from consumption (servicetenanttoken or servicefamilytoken)
         alias_ranges = service_annotations.get("alias_token_ranges", [])
-        
+
         if consumption_metadata.get("has_alias"):
             # Aliases present: use servicetenanttoken
             for alias_ann in service_annotations.get("alias_annotations", []):
@@ -523,7 +815,7 @@ class EntityMatcher:
                 )
                 if not suppressed:
                     all_replacements.append((start, end, "servicefamilytoken"))
-        
+
         # Add other entity replacements (dates, times, durations)
         placeholder_map = {
             "dates": "datetoken",
@@ -541,18 +833,18 @@ class EntityMatcher:
                     start = e.get("position", 0)
                     end = start + e.get("length", 1)
                     all_replacements.append((start, end, placeholder))
-        
+
         # Apply all replacements backwards (end-to-start) to avoid index shifting
         all_replacements.sort(key=lambda x: (x[1], x[0]), reverse=True)
         for start, end, placeholder in all_replacements:
             final_tokens[start:end] = [placeholder]
-        
+
         psentence = " ".join(final_tokens)
-        
+
         # Post-normalize parameterized text
         from .normalization import post_normalize_parameterized_text
         psentence = post_normalize_parameterized_text(psentence)
-        
+
         # Build business_categories from annotations (for downstream use)
         # MODIFIER annotations are NOT included in business_categories (modifiers are not services)
         business_categories = []
@@ -560,8 +852,10 @@ class EntityMatcher:
         for alias_ann in service_annotations.get("alias_annotations", []):
             business_categories.append({
                 "text": alias_ann["text"],
-                "canonical": alias_ann.get("canonical_family"),  # alias value = canonical_family
-                "tenant_service_id": alias_ann["tenant_service_id"],  # alias key = tenant_service_id
+                # alias value = canonical_family
+                "canonical": alias_ann.get("canonical_family"),
+                # alias key = tenant_service_id
+                "tenant_service_id": alias_ann["tenant_service_id"],
                 "start": alias_ann["start_token"],
                 "end": alias_ann["end_token"],
                 "annotation_type": "ALIAS"
@@ -583,14 +877,14 @@ class EntityMatcher:
                     "end": end,
                     "annotation_type": "FAMILY"
                 })
-        
+
         # Store consumption metadata and annotations for decision layer
         raw_result["_service_consumption_metadata"] = consumption_metadata
         raw_result["_service_annotations"] = service_annotations
-        
+
         # Build phase1_replacements for backward compatibility (empty - replaced by consumption_metadata)
         phase1_replacements = []
-        
+
         # Build phase2_replacements for logging (non-service entities)
         phase2_replacements = []
         for entity_type, ents in raw_result.items():

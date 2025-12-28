@@ -68,6 +68,32 @@ from luma.app.resolve_service import resolve_message  # noqa: E402
 # Internal intent (never returned in API, never persisted)
 CONTEXTUAL_UPDATE = "CONTEXTUAL_UPDATE"
 
+# Check for required dependencies at startup
+
+
+def _check_required_dependencies():
+    """Check for required dependencies and fail fast if missing."""
+    missing_deps = []
+
+    # Check rapidfuzz (required for fuzzy matching in tenant alias detection)
+    try:
+        import rapidfuzz  # noqa: F401
+    except ImportError:
+        missing_deps.append("rapidfuzz")
+
+    if missing_deps:
+        error_msg = (
+            f"ERROR: Missing required dependencies: {', '.join(missing_deps)}\n"
+            f"Please install them using: pip install {' '.join(missing_deps)}\n"
+            f"Or uncomment them in luma/requirements.txt and install all requirements."
+        )
+        print(error_msg, file=sys.stderr)
+        sys.exit(1)
+
+
+# Check dependencies before initializing app
+_check_required_dependencies()
+
 # Apply config settings
 PORT = config.API_PORT
 

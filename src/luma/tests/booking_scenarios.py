@@ -567,4 +567,159 @@ booking_scenarios = [
             "missing_slots": ["date"]
         }
     },
+    # ────────────────
+    # FUZZY MATCHING TESTS — Tenant typo tolerance
+    # ────────────────
+    {
+        "sentence": "book me in for premium suite from oct 5th to 9th",
+        "booking_mode": "reservation",
+        "expected": {
+            "intent": "CREATE_RESERVATION",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "premum suite",  # Fuzzy matched to tenant typo alias
+                "date_range": {
+                    "start": "2026-10-05",
+                    "end": "2026-10-09"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "reserve premum suite october 12 to 14",
+        "booking_mode": "reservation",
+        "expected": {
+            "intent": "CREATE_RESERVATION",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "premum suite",  # Exact match to tenant typo alias
+                "date_range": {
+                    "start": "2026-10-12",
+                    "end": "2026-10-14"
+                }
+            }
+        }
+    },
+    # ────────────────
+    # EXTENDED BOOKING SCENARIOS — Various phrasings with spelling errors
+    # ────────────────
+    {
+        "sentence": "i need a hair cut tomorow at 3pm",
+        "booking_mode": "service",
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "status": STATUS_READY,
+            "slots": {
+                # Tenant alias (typo in "tomorow" handled by date extraction)
+                "service_id": "hair cut",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "can u book me a massge for next friday morning",
+        "booking_mode": "service",
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "status": STATUS_READY,
+            "slots": {
+                # Fuzzy match to "massage" (typo: "massge")
+                "service_id": "massage",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "i'd like to schedual a beard trim on monday at 11am",
+        "booking_mode": "service",
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "beard",  # Tenant alias (typo: "schedual")
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "reserv a presidental rom from dec 15th to dec 20th",
+        "booking_mode": "reservation",
+        "expected": {
+            "intent": "CREATE_RESERVATION",
+            "status": STATUS_READY,
+            "slots": {
+                # Fuzzy match to "standard" (typo: "standrd", "reserv")
+                "service_id": "presidential room",
+                "date_range": {
+                    "start": "2026-12-15",
+                    "end": "2026-12-20"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "book me a presdential room november 1st through november 5th",
+        "booking_mode": "reservation",
+        "expected": {
+            "intent": "CREATE_RESERVATION",
+            "status": STATUS_READY,
+            "slots": {
+                # Fuzzy match to "delux" (user says "deluxe")
+                "service_id": "presidential room",
+                "date_range": {
+                    "start": "2026-11-01",
+                    "end": "2026-11-05"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "i want to make an apointment for a haircut tuesday at 2pm",
+        "booking_mode": "service",
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "haircut",  # Tenant alias (typo: "apointment")
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "can i get a suite from jan 10 to jan 15 please",
+        "booking_mode": "reservation",
+        "expected": {
+            "intent": "CREATE_RESERVATION",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "suite",
+                "date_range": {
+                    "start": "2026-01-10",
+                    "end": "2026-01-15"
+                }
+            }
+        }
+    },
+
+    {
+        "sentence": "book me a facial treatment next wednesday at 4pm",
+        "booking_mode": "service",
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            # Note: "facial" is in global canonical but NOT in tenant context
+            "clarification_reason": "UNSUPPORTED_SERVICE"
+        }
+    },
+    {
+        "sentence": "schedule a manicure for friday afternoon",
+        "booking_mode": "service",
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            # Note: "manicure" is in global canonical but NOT in tenant context
+            "clarification_reason": "UNSUPPORTED_SERVICE"
+        }
+    },
+
 ]
