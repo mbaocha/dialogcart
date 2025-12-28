@@ -1,0 +1,573 @@
+{
+    "version": "v1",
+    "scope": "global",
+    "normalization": {
+        "orthography": {
+            "description": "Global orthographic normalization rules (surface-form only). Canonical-first format.",
+            "haircut": [
+                "hair cut",
+                "hair-cut"
+            ],
+            "checkin": [
+                "check in",
+                "check-in"
+            ],
+            "pickup": [
+                "pick up",
+                "pick-up"
+            ],
+            "dropoff": [
+                "drop off",
+                "drop-off"
+            ],
+            "airport": [
+                "air port"
+            ]
+        },
+        "typos": {
+            "_comment": "ONLY closed-vocabulary typo fixes. Do NOT add services, names, or open text. Canonical-first format: canonical → [variants]. Canonical values must exist elsewhere in this JSON (e.g., in entity_types.date.relative.value).",
+            "date_relative": {
+                "today": [
+                    "todat",
+                    "tody"
+                ],
+                "tomorrow": [
+                    "tomorow",
+                    "tommorow",
+                    "tmrw",
+                    "tommorrow"
+                ],
+                "tonight": [
+                    "tonite",
+                    "tonit"
+                ],
+                "this week": [
+                    "thisweek"
+                ],
+                "next week": [
+                    "nextweek",
+                    "nxt week"
+                ],
+                "this weekend": [
+                    "thisweekend"
+                ],
+                "next weekend": [
+                    "nextweekend",
+                    "nxt weekend"
+                ]
+            },
+            "time_window": {
+                "morning": [
+                    "mornign",
+                    "moning",
+                    "mornin"
+                ],
+                "afternoon": [
+                    "afternon",
+                    "afternoom",
+                    "afteroon"
+                ],
+                "evening": [
+                    "eveing",
+                    "evenin"
+                ],
+                "night": [
+                    "nite",
+                    "nigth"
+                ]
+            },
+            "weekday": {
+                "monday": [
+                    "moneday",
+                    "munday",
+                    "monady",
+                    "mondayy"
+                ],
+                "tuesday": [
+                    "tuesdy",
+                    "tusday",
+                    "tuesay",
+                    "tuseday",
+                    "tuesaday",
+                    "tuesdayy"
+                ],
+                "wednesday": [
+                    "wednessday",
+                    "wednesdy",
+                    "wensday",
+                    "wendsday",
+                    "wednsday",
+                    "wednesdayy",
+                    "wednesay"
+                ],
+                "thursday": [
+                    "thurday",
+                    "thursdy",
+                    "thursay",
+                    "thursady",
+                    "thursdayy",
+                    "thursdday"
+                ],
+                "friday": [
+                    "fryday",
+                    "fridy",
+                    "fridayy",
+                    "fridday",
+                    "firday"
+                ],
+                "saturday": [
+                    "saturdy",
+                    "saterday",
+                    "saturdayy",
+                    "saturdday",
+                    "saterday"
+                ],
+                "sunday": [
+                    "sundy",
+                    "sundayy",
+                    "sundday",
+                    "sundey"
+                ]
+            },
+            "month": {
+                "january": [
+                    "januaray",
+                    "januaryy",
+                    "janurary",
+                    "januray"
+                ],
+                "february": [
+                    "febuary",
+                    "februaryy",
+                    "feburary",
+                    "februray"
+                ],
+                "march": [
+                    "marchh"
+                ],
+                "april": [],
+                "may": [
+                    "mayy"
+                ],
+                "june": [],
+                "july": [],
+                "august": [
+                    "augustt",
+                    "augus"
+                ],
+                "september": [
+                    "septmeber",
+                    "septemberr",
+                    "septembr"
+                ],
+                "october": [
+                    "octoberr",
+                    "octobr"
+                ],
+                "november": [
+                    "novmeber",
+                    "novemberr",
+                    "novembr"
+                ],
+                "december": [
+                    "decembr",
+                    "decemberr",
+                    "decembe"
+                ]
+            }
+        },
+        "noise": {
+            "token": "noisetoken",
+            "values": [
+                "please",
+                "kindly",
+                "i want",
+                "i need",
+                "looking for",
+                "can you",
+                "book me",
+                "schedule me",
+                "help me"
+            ]
+        },
+        "vocabularies": {
+            "_comment": "Closed-vocabulary lists for pattern matching and validation. These are language constants, not logic.",
+            "weekdays": {
+                "monday": [
+                    "mon",
+                    "mondays"
+                ],
+                "tuesday": [
+                    "tue",
+                    "tuesdays"
+                ],
+                "wednesday": [
+                    "wed",
+                    "wednesdays"
+                ],
+                "thursday": [
+                    "thu",
+                    "thursdays"
+                ],
+                "friday": [
+                    "fri",
+                    "fridays"
+                ],
+                "saturday": [
+                    "sat",
+                    "saturdays"
+                ],
+                "sunday": [
+                    "sun",
+                    "sundays"
+                ]
+            },
+            "date_modifiers": [
+                "this",
+                "next",
+                "coming"
+            ],
+            "vague_date_patterns": [
+                "sometime soon",
+                "later",
+                "whenever",
+                "when you're free",
+                "when available",
+                "soon",
+                "eventually"
+            ],
+            "context_dependent_patterns": [
+                "just gone",
+                "just past",
+                "last week",
+                "following",
+                "previous"
+            ],
+            "fine_grained_modifiers": [
+                "early",
+                "mid",
+                "end"
+            ],
+            "months": {
+                "january": [
+                    "jan"
+                ],
+                "february": [
+                    "feb"
+                ],
+                "march": [
+                    "mar"
+                ],
+                "april": [
+                    "apr"
+                ],
+                "may": [],
+                "june": [
+                    "jun"
+                ],
+                "july": [
+                    "jul"
+                ],
+                "august": [
+                    "aug"
+                ],
+                "september": [
+                    "sep"
+                ],
+                "october": [
+                    "oct"
+                ],
+                "november": [
+                    "nov"
+                ],
+                "december": [
+                    "dec"
+                ]
+            }
+        }
+    },
+    "entity_types": {
+        "date": {
+            "token": "datetoken",
+            "weekday": {
+                "to_number": {
+                    "monday": 0,
+                    "tuesday": 1,
+                    "wednesday": 2,
+                    "thursday": 3,
+                    "friday": 4,
+                    "saturday": 5,
+                    "sunday": 6
+                }
+            },
+            "month": {
+                "to_number": {
+                    "january": 1,
+                    "february": 2,
+                    "march": 3,
+                    "april": 4,
+                    "may": 5,
+                    "june": 6,
+                    "july": 7,
+                    "august": 8,
+                    "september": 9,
+                    "october": 10,
+                    "november": 11,
+                    "december": 12
+                }
+            },
+            "relative": [
+                {
+                    "value": "today",
+                    "offset_days": 0
+                },
+                {
+                    "value": "tomorrow",
+                    "offset_days": 1
+                },
+                {
+                    "value": "tonight",
+                    "offset_days": 0
+                },
+                {
+                    "value": "next week",
+                    "offset_days": 7
+                },
+                {
+                    "value": "next month",
+                    "offset_days": 30
+                }
+            ],
+            "absolute": {
+                "token": "datetoken",
+                "patterns": [
+                    {
+                        "id": "day_month_text",
+                        "type": "regex",
+                        "value": "\\b(\\d{1,2})(?:st|nd|rd|th)?\\s+(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)(?:\\s+(\\d{4}))?\\b"
+                    },
+                    {
+                        "id": "month_day_text",
+                        "type": "regex",
+                        "value": "\\b(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:\\s+(\\d{4}))?\\b"
+                    },
+                    {
+                        "id": "numeric_date",
+                        "type": "regex",
+                        "value": "\\b(\\d{1,2})[/-](\\d{1,2})(?:[/-](\\d{2,4}))?\\b"
+                    }
+                ]
+            }
+        },
+        "time": {
+            "token": "timetoken",
+            "patterns": [
+                {
+                    "id": "time_12h",
+                    "type": "regex",
+                    "value": "\\b(1[0-2]|0?[1-9])([:.][0-5][0-9])?\\s?(am|pm)\\b",
+                    "synonym": [
+                        "12pm",
+                        "12 pm",
+                        "12.30pm",
+                        "9am"
+                    ]
+                },
+                {
+                    "id": "time_24h",
+                    "type": "regex",
+                    "value": "\\b([01]?[0-9]|2[0-3]):[0-5][0-9]\\b",
+                    "synonym": [
+                        "15:00",
+                        "09:30"
+                    ]
+                }
+            ],
+            "keywords": [
+                {
+                    "value": "morning",
+                    "granularity": "window",
+                    "range": [
+                        "08:00",
+                        "11:59"
+                    ]
+                },
+                {
+                    "value": "afternoon",
+                    "granularity": "window",
+                    "range": [
+                        "12:00",
+                        "16:59"
+                    ]
+                },
+                {
+                    "value": "evening",
+                    "granularity": "window",
+                    "range": [
+                        "17:00",
+                        "20:59"
+                    ]
+                },
+                {
+                    "value": "night",
+                    "granularity": "window",
+                    "range": [
+                        "21:00",
+                        "23:59"
+                    ]
+                }
+            ],
+            "timewindowtoken": "timewindowtoken"
+        },
+        "duration": {
+            "token": "durationtoken",
+            "patterns": [
+                {
+                    "type": "regex",
+                    "value": "\\b(\\d+)\\s?(minutes|minute|mins|min)\\b",
+                    "unit": "minutes"
+                },
+                {
+                    "type": "regex",
+                    "value": "\\b(\\d+)\\s?(hours|hour|hrs|hr)\\b",
+                    "unit": "hours"
+                }
+            ],
+            "keywords": [
+                {
+                    "value": "half hour",
+                    "minutes": 30
+                },
+                {
+                    "value": "one hour",
+                    "minutes": 60
+                }
+            ]
+        }
+    },
+    "service_families": {
+        "_comment": "GLOBAL semantic service families. Stable, bounded concepts. Tenants MUST map their services to exactly one service_family. Variants and pricing belong to tenant configs.",
+        "beauty_and_wellness": {
+            "haircut": {
+                "token": "servicefamilytoken",
+                "display_name": "Haircut",
+                "description": "Hair cutting and styling services for head hair",
+                "synonym": [
+                    "haircut",
+                    "hair trim",
+                    "fade",
+                    "layered cut"
+                ]
+            },
+            "beard_grooming": {
+                "token": "servicefamilytoken",
+                "display_name": "Beard Grooming",
+                "description": "Beard trimming, shaping, and grooming services",
+                "synonym": [
+                    "beard trim",
+                    "beard grooming",
+                    "beard shaping"
+                ]
+            },
+            "shaving": {
+                "token": "servicefamilytoken",
+                "display_name": "Shaving",
+                "description": "Facial shaving services",
+                "synonym": [
+                    "clean shave",
+                    "razor shave"
+                ]
+            },
+            "hair_coloring": {
+                "token": "servicefamilytoken",
+                "display_name": "Hair Coloring",
+                "description": "Hair dyeing and coloring services",
+                "synonym": [
+                    "hair colouring",
+                    "hair coloring",
+                    "hair dye",
+                    "coloring",
+                    "highlights"
+                ]
+            },
+            "massage": {
+                "token": "servicefamilytoken",
+                "display_name": "Massage",
+                "description": "Therapeutic and relaxation massage services",
+                "synonym": [
+                    "massage",
+                    "full body massage",
+                    "body massage",
+                    "swedish massage",
+                    "deep tissue massage"
+                ]
+            },
+            "facial": {
+                "token": "servicefamilytoken",
+                "display_name": "Facial",
+                "description": "Facial skin treatment services",
+                "synonym": [
+                    "facial",
+                    "skin treatment"
+                ]
+            },
+            "manicure_pedicure": {
+                "token": "servicefamilytoken",
+                "display_name": "Manicure & Pedicure",
+                "description": "Combined hand and foot grooming services",
+                "synonym": [
+                    "mani pedi",
+                    "manicure and pedicure",
+                    "mani-pedi",
+                    "manicure & pedicure"
+                ]
+            },
+            "manicure": {
+                "token": "servicefamilytoken",
+                "display_name": "Manicure",
+                "description": "Hand and nail grooming services",
+                "synonym": [
+                    "manicure",
+                    "nail care"
+                ]
+            },
+            "pedicure": {
+                "token": "servicefamilytoken",
+                "display_name": "Pedicure",
+                "description": "Foot and toenail grooming services",
+                "synonym": [
+                    "pedicure",
+                    "foot care"
+                ]
+            },
+            "waxing": {
+                "token": "servicefamilytoken",
+                "display_name": "Waxing",
+                "description": "Hair removal services using wax",
+                "synonym": [
+                    "waxing",
+                    "hair removal"
+                ]
+            },
+            "threading": {
+                "token": "servicefamilytoken",
+                "display_name": "Threading",
+                "description": "Hair removal using thread, usually for eyebrows or facial hair",
+                "synonym": [
+                    "eyebrow threading",
+                    "eyebrows threading",
+                    "threading"
+                ]
+            },
+            "spa_treatment": {
+                "token": "servicefamilytoken",
+                "display_name": "Spa Treatment",
+                "description": "General spa and wellness treatments",
+                "synonym": [
+                    "spa treatment",
+                    "body treatment"
+                ]
+            }
+        }
+    }
+}

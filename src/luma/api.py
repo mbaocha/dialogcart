@@ -193,6 +193,11 @@ def find_normalization_dir():
         return _normalization_dir_cache
 
     current_file = Path(__file__).resolve()
+    config_data_dir = current_file.parent / "config" / "data"
+    if config_data_dir.exists():
+        _normalization_dir_cache = config_data_dir
+        return _normalization_dir_cache
+    # Fallback to old location for backward compatibility
     store_dir = current_file.parent / "store" / "normalization"
     if store_dir.exists():
         _normalization_dir_cache = store_dir

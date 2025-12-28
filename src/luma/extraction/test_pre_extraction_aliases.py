@@ -29,7 +29,10 @@ def test_alias_phrase_creates_service_entity():
     from luma.config import config
     
     # Initialize matcher
-    global_json_path = Path(__file__).parent.parent / "store" / "normalization" / "global.v2.json"
+    # Try config/data first, fallback to store/normalization for backward compatibility
+    config_data_path = Path(__file__).parent.parent / "config" / "data" / "global.v2.json"
+    store_path = Path(__file__).parent.parent / "store" / "normalization" / "global.v2.json"
+    global_json_path = config_data_path if config_data_path.exists() else store_path
     matcher = EntityMatcher(global_json_path, domain="service", lazy_load_spacy=False)
     
     # Tenant aliases
@@ -82,7 +85,10 @@ def test_alias_no_match_when_phrase_absent():
     from luma.config import config
     
     # Initialize matcher
-    global_json_path = Path(__file__).parent.parent / "store" / "normalization" / "global.v2.json"
+    # Try config/data first, fallback to store/normalization for backward compatibility
+    config_data_path = Path(__file__).parent.parent / "config" / "data" / "global.v2.json"
+    store_path = Path(__file__).parent.parent / "store" / "normalization" / "global.v2.json"
+    global_json_path = config_data_path if config_data_path.exists() else store_path
     matcher = EntityMatcher(global_json_path, domain="service", lazy_load_spacy=False)
     
     # Tenant aliases
@@ -130,7 +136,10 @@ def test_explicit_service_overrides_alias():
     from luma.config import config
     
     # Initialize matcher
-    global_json_path = Path(__file__).parent.parent / "store" / "normalization" / "global.v2.json"
+    # Try config/data first, fallback to store/normalization for backward compatibility
+    config_data_path = Path(__file__).parent.parent / "config" / "data" / "global.v2.json"
+    store_path = Path(__file__).parent.parent / "store" / "normalization" / "global.v2.json"
+    global_json_path = config_data_path if config_data_path.exists() else store_path
     matcher = EntityMatcher(global_json_path, domain="service", lazy_load_spacy=False)
     
     # Tenant aliases - map "premium service" to haircut
