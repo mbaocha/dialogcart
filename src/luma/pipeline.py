@@ -21,7 +21,11 @@ from luma.cache.entity_matcher import get_entity_matcher
 from luma.grouping.reservation_intent_resolver import ReservationIntentResolver
 from luma.structure.interpreter import interpret_structure
 from luma.grouping.appointment_grouper import group_appointment
-from luma.resolution.semantic_resolver import resolve_semantics, SemanticResolutionResult
+from luma.resolution.semantic_resolver import (
+    resolve_semantics,
+    SemanticResolutionResult,
+    initialize_vocabularies
+)
 from luma.decision import decide_booking_status, DecisionResult
 from luma.calendar.calendar_binder import bind_calendar, CalendarBindingResult, get_booking_policy
 from luma.perf import StageTimer
@@ -267,6 +271,9 @@ class LumaPipeline:
         self.domain = domain
         self.entity_file = entity_file
         self.intent_resolver = intent_resolver or ReservationIntentResolver()
+        
+        # Pre-load vocabularies to avoid first-request latency
+        initialize_vocabularies()
 
     def run(
         self,

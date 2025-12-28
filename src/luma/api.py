@@ -477,6 +477,11 @@ def init_pipeline():
         memory_store = RedisMemoryStore()
         logger.info("Memory store initialized successfully")
 
+        # Pre-load vocabularies to avoid first-request latency
+        from luma.resolution.semantic_resolver import initialize_vocabularies
+        initialize_vocabularies()
+        logger.info("Vocabularies pre-loaded successfully")
+
         # Entity matcher will be initialized per-request with entity file
         logger.info("Pipeline components initialized successfully")
         return True

@@ -1,0 +1,50 @@
+================================================================================
+LUMA PIPELINE PERFORMANCE PROFILE REPORT
+================================================================================
+
+SUMMARY STATISTICS
+--------------------------------------------------------------------------------
+Total scenarios profiled: 20
+Average total time: 82.84 ms
+Min total time: 8.72 ms
+Max total time: 1304.67 ms
+
+STAGE TIMINGS (Average)
+--------------------------------------------------------------------------------
+  extraction          :    76.03 ms ( 91.8%)
+  semantic            :     5.21 ms (  6.3%)
+  intent              :     0.87 ms (  1.1%)
+  structure           :     0.11 ms (  0.1%)
+  decision            :     0.05 ms (  0.1%)
+  grouping            :     0.03 ms (  0.0%)
+
+PERFORMANCE BOTTLENECKS
+--------------------------------------------------------------------------------
+
+Slow Functions (Top 10 by cumulative time):
+  - forward                                           :   698.52 ms cumulative, 886 calls
+  - run                                               :   462.61 ms cumulative, 20 calls
+  - __call__                                          :   460.00 ms cumulative, 183 calls
+  - predict                                           :   296.10 ms cumulative, 100 calls
+  - extract_with_parameterization                     :   276.88 ms cumulative, 20 calls
+  - extract_entities_from_doc                         :   257.74 ms cumulative, 20 calls
+  - resolve_semantics                                 :   148.03 ms cumulative, 20 calls
+  - _load_vocabularies                                :   129.62 ms cumulative, 109 calls
+  - _list_forward                                     :   115.67 ms cumulative, 60 calls
+  - _check_ambiguity                                  :    83.59 ms cumulative, 20 calls
+
+Frequently Called Functions (>100 calls):
+  - forward                                           :    886 calls, 0.1026 ms/call
+  - search                                            :    228 calls, 0.0014 ms/call
+  - __call__                                          :    183 calls, 0.1189 ms/call
+  - _get_moments                                      :    120 calls, 0.0134 ms/call
+  - _matches_signals                                  :    120 calls, 0.0201 ms/call
+  - _load_vocabularies                                :    109 calls, 0.0592 ms/call
+  - load_global_vocabularies                          :    107 calls, 0.0164 ms/call
+  - _compile                                          :    101 calls, 0.0057 ms/call
+
+RECOMMENDATIONS
+--------------------------------------------------------------------------------
+• No major bottlenecks identified. Performance looks good!
+
+================================================================================
