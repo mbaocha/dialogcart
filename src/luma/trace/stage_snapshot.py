@@ -245,3 +245,4 @@ class StageSnapshot:
 
         return False  # Never suppress exceptions
 
+

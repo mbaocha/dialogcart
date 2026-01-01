@@ -295,7 +295,8 @@ def plan_clarification(
     intent_result: Dict[str, Any],
     entities: Dict[str, Any],
     semantic_result: Optional[Any],
-    decision_result: Optional[Any] = None
+    decision_result: Optional[Any] = None,
+    decision_trace: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Plan clarification payload based on resolver slots and semantic clarifications.
@@ -305,6 +306,7 @@ def plan_clarification(
         entities: extraction entities
         semantic_result: SemanticResolutionResult or None
         decision_result: DecisionResult or None
+        decision_trace: Optional decision trace containing missing_slots from temporal shape validation
 
     Returns:
         Dict with status, missing_slots, and clarification_reason
@@ -313,7 +315,16 @@ def plan_clarification(
     missing_slots = intent_result.get("missing_slots", []) or []
     clarification_reason = None
 
-    # Prefer semantic clarifications (e.g., SERVICE_VARIANT) if present
+    # CRITICAL: Merge decision layer's missing_slots FIRST (before semantic clarifications)
+    # This ensures temporal shape validation results are preserved even when semantic clarifications exist
+    if decision_trace and isinstance(decision_trace, dict):
+        decision_missing = decision_trace.get("missing_slots", [])
+        if decision_missing:
+            # Merge decision layer's missing_slots (temporal shape validation) with intent resolver's
+            # Use set to avoid duplicates, then convert back to list
+            missing_slots = list(set(missing_slots + decision_missing))
+
+    # Prefer semantic clarifications (e.g., MULTIPLE_MATCHES) if present
     if semantic_result and getattr(semantic_result, "needs_clarification", False):
         sem_dict = semantic_result.to_dict()
         sem_clar = sem_dict.get("clarification") or {}
@@ -334,29 +345,32 @@ def plan_clarification(
         time_issues = resolved_booking.get("time_issues", [])
         for issue in time_issues:
             if issue.get("kind") == "ambiguous_meridiem":
-                clarification_reason = "AMBIGUOUS_TIME_MERIDIEM"
+                clarification_reason = ClarificationReason.AMBIGUOUS_TIME_MERIDIEM.value
                 status = STATUS_NEEDS_CLARIFICATION
                 break
 
     # Check decision layer for temporal shape violations
+    # NOTE: We still check decision layer even if semantic clarification exists, to merge missing_slots
     if decision_result and decision_result.status == "NEEDS_CLARIFICATION":
         decision_reason = decision_result.reason
         if decision_reason and not clarification_reason:  # Only use if no more specific reason set
             # Map decision layer reasons to ClarificationReason enum values
             if decision_reason == "MISSING_TIME":
-                clarification_reason = "MISSING_TIME"
+                clarification_reason = ClarificationReason.MISSING_TIME.value
             elif decision_reason == "MISSING_DATE":
-                clarification_reason = "MISSING_DATE"
+                clarification_reason = ClarificationReason.MISSING_DATE.value
             elif decision_reason == "MISSING_START_DATE":
-                clarification_reason = "MISSING_DATE"  # Use MISSING_DATE for start
+                # Use MISSING_DATE for start
+                clarification_reason = ClarificationReason.MISSING_DATE.value
             elif decision_reason == "MISSING_END_DATE":
-                clarification_reason = "MISSING_DATE"  # Could add MISSING_END_DATE if needed
+                # Could add MISSING_END_DATE if needed
+                clarification_reason = ClarificationReason.MISSING_DATE.value
             elif decision_reason == "temporal_shape_not_satisfied":
                 # Determine which slot is missing from missing_slots
                 if "time" in missing_slots:
-                    clarification_reason = "MISSING_TIME"
+                    clarification_reason = ClarificationReason.MISSING_TIME.value
                 elif "date" in missing_slots:
-                    clarification_reason = "MISSING_DATE"
+                    clarification_reason = ClarificationReason.MISSING_DATE.value
             else:
                 clarification_reason = decision_reason  # Use as-is if it matches enum
             status = STATUS_NEEDS_CLARIFICATION
@@ -364,13 +378,13 @@ def plan_clarification(
     # Fallback: map missing slots to reasons
     if not clarification_reason and missing_slots:
         if "time" in missing_slots:
-            clarification_reason = "MISSING_TIME"
+            clarification_reason = ClarificationReason.MISSING_TIME.value
         elif "date" in missing_slots:
-            clarification_reason = "MISSING_DATE"
+            clarification_reason = ClarificationReason.MISSING_DATE.value
         elif "service_id" in missing_slots or "service" in missing_slots:
-            clarification_reason = "MISSING_SERVICE"
+            clarification_reason = ClarificationReason.MISSING_SERVICE.value
         elif "booking_id" in missing_slots:
-            clarification_reason = "MISSING_BOOKING_REFERENCE"
+            clarification_reason = ClarificationReason.MISSING_BOOKING_REFERENCE.value
 
     return {
         "status": status,

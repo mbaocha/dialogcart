@@ -258,6 +258,12 @@ def merge_slots_for_followup(
     else:
         merged["time_range"] = memory_booking.get("time_range")
     
+    # CONFIRMATION_STATE: Preserve from current if present, else keep from memory
+    if "confirmation_state" in current_booking:
+        merged["confirmation_state"] = current_booking["confirmation_state"]
+    elif "confirmation_state" in memory_booking:
+        merged["confirmation_state"] = memory_booking["confirmation_state"]
+    
     return merged
 
 

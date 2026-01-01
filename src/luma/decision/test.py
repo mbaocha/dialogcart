@@ -1441,7 +1441,7 @@ def test_invariant_api_complete_booking_always_resolved():
 
 
 # ============================================================================
-# CATEGORY G: Alias Preservation Tests (SERVICE_VARIANT clarification)
+# CATEGORY G: Alias Preservation Tests (MULTIPLE_MATCHES clarification)
 # ============================================================================
 
 def test_alias_preservation_premium_haircut():
@@ -1457,7 +1457,7 @@ def test_alias_preservation_premium_haircut():
         }
     }
 
-    # Turn 1: Create PARTIAL booking with SERVICE_VARIANT clarification
+    # Turn 1: Create PARTIAL booking with MULTIPLE_MATCHES clarification
     response1 = make_request(
         USER_ID_ALIAS_1,
         "book me in for haircut tomorrow at 2pm",
@@ -1472,8 +1472,8 @@ def test_alias_preservation_premium_haircut():
         "needs_clarification") == True, "Turn 1: Should need clarification"
 
     clarification1 = response1.get("clarification", {})
-    assert clarification1.get("reason") == "SERVICE_VARIANT", (
-        f"Turn 1: clarification.reason should be SERVICE_VARIANT, got {clarification1.get('reason')}"
+    assert clarification1.get("reason") == "MULTIPLE_MATCHES", (
+        f"Turn 1: clarification.reason should be MULTIPLE_MATCHES, got {clarification1.get('reason')}"
     )
 
     # Turn 2: User selects 'premium haircut'
@@ -1524,7 +1524,7 @@ def test_alias_preservation_smart_haircut():
         }
     }
 
-    # Turn 1: Create PARTIAL booking with SERVICE_VARIANT clarification
+    # Turn 1: Create PARTIAL booking with MULTIPLE_MATCHES clarification
     response1 = make_request(
         USER_ID_ALIAS_2,
         "book me in for haircut tomorrow at 2pm",

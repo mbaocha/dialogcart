@@ -1,8 +1,21 @@
-""" 
-Stateless Conversation Orchestrator 
- 
-Pure stateless function that orchestrates conversation flow. 
-No persistence, no memory, no NLP logic. 
+"""
+Orchestration Layer
+
+Control flow and decision making for conversation handling.
+
+This module orchestrates the conversation flow by:
+- Handling message entry
+- Deriving org_id and domain
+- Constructing catalog and tenant_context
+- Calling Luma API
+- Validating contracts
+- Branching on needs_clarification
+- Deciding outcome types (CLARIFY, BOOKING_CREATED, etc.)
+- Calling business execution functions
+
+Constraints:
+- No copy, no templates, no WhatsApp formatting
+- Must only return structured outcomes
 """
 
 import logging
@@ -11,16 +24,19 @@ import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
-from core.clients.luma_client import LumaClient
-from core.contracts.luma_contracts import assert_luma_contract
-from core.errors.exceptions import ContractViolation, UpstreamError, UnsupportedIntentError
-from core.orchestration.router import get_template_key, get_action_name
-from core.clients.booking_client import BookingClient
-from core.clients.customer_client import CustomerClient
-from core.clients.catalog_client import CatalogClient
-from core.clients.organization_client import OrganizationClient
-from core.cache.catalog_cache import catalog_cache
-from core.cache.org_domain_cache import org_domain_cache
+from core.orchestration.clients.luma_client import LumaClient
+from core.orchestration.contracts.luma_contracts import assert_luma_contract
+from core.orchestration.errors import ContractViolation, UpstreamError, UnsupportedIntentError
+from core.orchestration.luma_response_processor import (
+    process_luma_response,
+    build_clarify_outcome_from_reason
+)
+from core.orchestration.clients.booking_client import BookingClient
+from core.orchestration.clients.customer_client import CustomerClient
+from core.orchestration.clients.catalog_client import CatalogClient
+from core.orchestration.clients.organization_client import OrganizationClient
+from core.orchestration.cache.catalog_cache import catalog_cache
+from core.orchestration.cache.org_domain_cache import org_domain_cache
 
 logger = logging.getLogger(__name__)
 
@@ -124,6 +140,11 @@ def handle_message(
                     "canonical") or svc.get("slug") or name.lower().replace(" ", "_")
                 if not canonical_key:
                     continue
+                # Construct full canonical path if it's a short form (no dot)
+                # Luma expects format: "category.family_id" (e.g., "beauty_and_wellness.haircut")
+                if "." not in str(canonical_key):
+                    # Short form canonical - prefix with category for service domain
+                    canonical_key = f"beauty_and_wellness.{canonical_key}"
                 alias_map[name.lower()] = canonical_key
         else:
             rooms_for_alias = catalog_data_for_alias.get(
@@ -165,6 +186,12 @@ def handle_message(
     }
     if tenant_context:
         luma_payload["tenant_context"] = tenant_context
+
+    # Log sentence passed to Luma
+    print(f"\n[LUMA REQUEST]")
+    print(f"  Sentence: {text}")
+    print(
+        f"  Full payload: {json.dumps(luma_payload, indent=2, ensure_ascii=False)}")
     logger.info("Luma request payload: %s", json.dumps(
         luma_payload, ensure_ascii=False))
 
@@ -176,6 +203,14 @@ def handle_message(
             timezone=timezone,
             tenant_context=tenant_context
         )
+
+        # Log raw Luma API response
+        print(f"\n[LUMA RESPONSE]")
+        print(
+            f"  Raw response: {json.dumps(luma_response, indent=2, ensure_ascii=False)}")
+        logger.info("Luma response: %s", json.dumps(
+            luma_response, ensure_ascii=False))
+
     except UpstreamError as e:
         logger.error(f"Luma API error for user {user_id}: {str(e)}")
         return {
@@ -206,40 +241,22 @@ def handle_message(
             "message": error_msg
         }
 
-    # Step 4: If needs_clarification=true return clarification payload
-    if luma_response.get("needs_clarification", False):
-        clarification = luma_response.get("clarification", {})
-        reason = clarification.get("reason", "")
-        template_key = get_template_key(reason, derived_domain)
+    # Step 4: Process Luma response (interpret and decide CLARIFY vs EXECUTE)
+    decision = process_luma_response(luma_response, derived_domain, user_id)
 
-        logger.info(
-            f"Clarification needed for user {user_id}: {reason} -> {template_key}"
-        )
+    if decision["type"] == "CLARIFY":
+        return decision["outcome"]
 
-        return {
-            "success": True,
-            "outcome": {
-                "type": "CLARIFY",
-                "template_key": template_key,
-                "data": clarification.get("data", {}),
-                "booking": luma_response.get("booking")
-            }
-        }
-
-    # Step 5: Else (resolved) execute business flow
-    intent = luma_response.get("intent", {})
-    intent_name = intent.get("name", "")
-    action_name = get_action_name(intent_name)
-
-    if not action_name:
-        logger.warning(f"Unsupported intent for user {user_id}: {intent_name}")
+    if decision["type"] == "ERROR":
         return {
             "success": False,
-            "error": "unsupported_intent",
-            "message": f"Intent {intent_name} is not supported"
+            "error": decision["error"],
+            "message": decision["message"]
         }
 
-    booking = luma_response.get("booking", {})
+    # Step 5: Execute business flow (decision["type"] == "EXECUTE")
+    action_name = decision["action_name"]
+    booking = decision["booking"]
     booking_type = booking.get("booking_type", "service")
 
     # Resolve service item_id using catalog discovery (no org details scanning)
@@ -311,16 +328,12 @@ def handle_message(
                     "services", []), catalog_services_for_resolution)
                 if resolution.get("clarification"):
                     reason = resolution.get("reason", "MISSING_SERVICE")
-                    template_key = get_template_key("MISSING_SERVICE", domain)
-                    return {
-                        "success": True,
-                        "outcome": {
-                            "type": "CLARIFY",
-                            "template_key": template_key,
-                            "data": {"reason": reason},
-                            "booking": booking
-                        }
-                    }
+                    return build_clarify_outcome_from_reason(
+                        reason=reason,
+                        issues={"service": "missing"},
+                        booking=booking,
+                        domain=derived_domain
+                    )
                 resolved_item_id = resolution.get("item_id")
                 # Inject resolved id back into booking for downstream usage
                 services_list = booking.get("services")
@@ -414,32 +427,24 @@ def handle_message(
                     room_svc, rooms_catalog)
                 if room_resolution.get("clarification"):
                     reason = room_resolution.get("reason", "MISSING_ROOM_TYPE")
-                    template_key = get_template_key("MISSING_SERVICE", domain)
-                    return {
-                        "success": True,
-                        "outcome": {
-                            "type": "CLARIFY",
-                            "template_key": template_key,
-                            "data": {"reason": reason},
-                            "booking": booking
-                        }
-                    }
+                    return build_clarify_outcome_from_reason(
+                        reason=reason,
+                        issues={"room_type": "missing"},
+                        booking=booking,
+                        domain=derived_domain
+                    )
                 resolved_room_id = room_resolution.get("room_type_id")
                 booking["_resolved_room_type_id"] = resolved_room_id
                 extras_resolution = _resolve_extras(booking.get(
                     "extras", []), catalog_extras, resolved_room_id)
                 if extras_resolution.get("clarification"):
                     reason = extras_resolution.get("reason", "INVALID_EXTRA")
-                    template_key = get_template_key("MISSING_SERVICE", domain)
-                    return {
-                        "success": True,
-                        "outcome": {
-                            "type": "CLARIFY",
-                            "template_key": template_key,
-                            "data": {"reason": reason},
-                            "booking": booking
-                        }
-                    }
+                    return build_clarify_outcome_from_reason(
+                        reason=reason,
+                        issues={"extras": "missing"},
+                        booking=booking,
+                        domain=derived_domain
+                    )
                 resolved_extras = extras_resolution.get("extras", [])
                 if resolved_extras is not None:
                     booking["_resolved_extras"] = resolved_extras

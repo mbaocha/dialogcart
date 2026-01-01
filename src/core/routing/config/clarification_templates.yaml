@@ -1,0 +1,35 @@
+# Clarification Reason → Template Key Mapping
+# 
+# This configuration maps clarification reasons from Luma API responses
+# to template keys used by downstream message rendering services.
+#
+# Template keys use the format: "{domain}.{template_name}"
+# The {domain} placeholder is substituted at runtime based on the organization's domain.
+#
+# Format:
+#   clarification_reason: template_key_pattern
+#
+# Examples:
+#   "MISSING_TIME" → "service.ask_time" (when domain="service")
+#   "MISSING_TIME" → "reservation.ask_time" (when domain="reservation")
+#
+# Fallback: Unknown reasons default to "{domain}.clarify"
+
+MISSING_TIME: "{domain}.ask_time"
+MISSING_DATE: "{domain}.ask_date"
+MISSING_DATE_TIME: "{domain}.ask_date_time"
+MISSING_SERVICE: "{domain}.ask_service"
+AMBIGUOUS_TIME_NO_WINDOW: "{domain}.clarify"
+AMBIGUOUS_DATE_MULTIPLE: "{domain}.clarify"
+LOCALE_AMBIGUOUS_DATE: "{domain}.clarify"
+VAGUE_DATE_REFERENCE: "{domain}.clarify"
+AMBIGUOUS_PLURAL_WEEKDAY: "{domain}.clarify"
+AMBIGUOUS_WEEKDAY_REFERENCE: "{domain}.clarify"
+CONFLICTING_SIGNALS: "{domain}.clarify"
+CONTEXT_DEPENDENT_DATE: "{domain}.clarify"
+CONTEXT_DEPENDENT_VALUE: "{domain}.clarify"
+MISSING_BOOKING_REFERENCE: "{domain}.clarify"
+MISSING_DATE_FOR_TIME_CONSTRAINT: "{domain}.clarify"
+MISSING_CONTEXT: "{domain}.clarify"
+MULTIPLE_MATCHES: "{domain}.clarify"
+

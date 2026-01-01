@@ -203,6 +203,7 @@ class ResponseBuilder:
         entities_payload: Optional[Dict[str, Any]] = None,
         slots: Optional[Dict[str, Any]] = None,
         context_payload: Optional[Dict[str, Any]] = None,
+        clarification_data: Optional[Dict[str, Any]] = None,
         debug_data: Optional[Dict[str, Any]] = None,
         request_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -242,15 +243,19 @@ class ResponseBuilder:
             # For needs_clarification: include context but NO booking block
             if context_payload:
                 response_body["context"] = context_payload
+            # Include clarification_data if provided (contains structured data like options for MULTIPLE_MATCHES)
+            if clarification_data:
+                response_body["clarification_data"] = clarification_data
         else:
             # For ready status: include booking block (minimal, only confirmation_state)
             if booking_payload is not None:
-                # Attach confirmation_state for ready bookings
-                booking_payload["confirmation_state"] = "pending"
-
                 # Build minimal booking block (temporal and service data is in slots)
                 # Remove all fields that are exposed via slots
                 booking_payload_copy = booking_payload.copy()
+                # Preserve confirmation_state from memory state, default to "pending" if missing
+                booking_payload_copy["confirmation_state"] = (
+                    booking_payload_copy.get("confirmation_state", "pending")
+                )
                 # Exposed via slots.service_id
                 booking_payload_copy.pop("services", None)
                 # Exposed via slots.date_range

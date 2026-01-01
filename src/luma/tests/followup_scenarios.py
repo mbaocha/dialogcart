@@ -577,4 +577,73 @@ followup_scenarios = [
             }
         ]
     },
+    {
+        "name": "appointment_confirmation",
+        "booking_mode": "service",
+        "aliases": {
+            "massage": "massage",
+        },
+        "turns": [
+            {
+                "sentence": "book massage tomorrow at 3pm",
+                "expected": {
+                    "intent": "CREATE_APPOINTMENT",
+                    "status": STATUS_READY,
+                    "slots": {
+                        "service_id": "massage",
+                        "has_datetime": True
+                    },
+                    "booking": {
+                        "confirmation_state": "pending"
+                    }
+                }
+            },
+            {
+                "sentence": "yes",
+                "expected": {
+                    "intent": "CREATE_APPOINTMENT",
+                    "status": STATUS_READY,
+                    "booking": {
+                        "confirmation_state": "confirmed"
+                    }
+                }
+            }
+        ]
+    },
+    {
+        "name": "reservation_confirmation",
+        "booking_mode": "reservation",
+        "aliases": {
+            "room": "room",
+        },
+        "turns": [
+            {
+                "sentence": "book room from october 5th to october 9th",
+                "expected": {
+                    "intent": "CREATE_RESERVATION",
+                    "status": STATUS_READY,
+                    "slots": {
+                        "service_id": "room",
+                        "date_range": {
+                            "start": "2026-10-05",
+                            "end": "2026-10-09"
+                        }
+                    },
+                    "booking": {
+                        "confirmation_state": "pending"
+                    }
+                }
+            },
+            {
+                "sentence": "confirm",
+                "expected": {
+                    "intent": "CREATE_RESERVATION",
+                    "status": STATUS_READY,
+                    "booking": {
+                        "confirmation_state": "confirmed"
+                    }
+                }
+            }
+        ]
+    },
 ]

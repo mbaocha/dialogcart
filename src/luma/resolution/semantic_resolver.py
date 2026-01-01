@@ -400,12 +400,10 @@ def _check_service_variant_ambiguity(
                 f"[semantic] detected service variant ambiguity: {service_family} → {variants}"
             )
             return Clarification(
-                reason=ClarificationReason.SERVICE_VARIANT,
+                reason=ClarificationReason.MULTIPLE_MATCHES,
                 data={
-                    "type": "SERVICE_VARIANT",
-                    "reason": "MULTIPLE_MATCHES",
-                    "options": variants,
-                    "service_family": service_family
+                    "options": variants
+                    # service_family removed - redundant with context.services[0].canonical
                 }
             )
 

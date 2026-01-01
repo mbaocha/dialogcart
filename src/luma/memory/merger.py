@@ -62,7 +62,10 @@ def merge_booking_state(
             "booking_state": {
                 "services": current_booking.get("services", []),
                 "datetime_range": current_booking.get("datetime_range"),
-                "duration": current_booking.get("duration")
+                "date_range": current_booking.get("date_range"),
+                "time_range": current_booking.get("time_range"),
+                "duration": current_booking.get("duration"),
+                "confirmation_state": current_booking.get("confirmation_state", "pending")
             },
             "clarification": current_clarification,
             "last_updated": datetime.now(timezone.utc).isoformat()
@@ -166,6 +169,29 @@ def _merge_booking_slots(
         merged["duration"] = current_duration
     else:
         merged["duration"] = memory_booking.get("duration")
+    
+    # DATE_RANGE: Replace if current has date_range, else keep from memory
+    current_date_range = current_booking.get("date_range")
+    if current_date_range is not None:
+        merged["date_range"] = current_date_range
+    else:
+        merged["date_range"] = memory_booking.get("date_range")
+    
+    # TIME_RANGE: Replace if current has time_range, else keep from memory
+    current_time_range = current_booking.get("time_range")
+    if current_time_range is not None:
+        merged["time_range"] = current_time_range
+    else:
+        merged["time_range"] = memory_booking.get("time_range")
+    
+    # CONFIRMATION_STATE: Preserve from current if present, else keep from memory
+    if "confirmation_state" in current_booking:
+        merged["confirmation_state"] = current_booking["confirmation_state"]
+    elif "confirmation_state" in memory_booking:
+        merged["confirmation_state"] = memory_booking["confirmation_state"]
+    else:
+        # Default to pending if neither has it
+        merged["confirmation_state"] = "pending"
     
     return merged
 
@@ -281,13 +307,19 @@ def extract_memory_state_for_response(
     
     Returns only the fields needed for the response:
     - services
+    - date_range
     - datetime_range
+    - time_range
     - duration
+    - confirmation_state
     """
     booking_state = memory_state.get("booking_state", {})
     return {
         "services": booking_state.get("services", []),
+        "date_range": booking_state.get("date_range"),
         "datetime_range": booking_state.get("datetime_range"),
-        "duration": booking_state.get("duration")
+        "time_range": booking_state.get("time_range"),
+        "duration": booking_state.get("duration"),
+        "confirmation_state": booking_state.get("confirmation_state", "pending")
     }
 
