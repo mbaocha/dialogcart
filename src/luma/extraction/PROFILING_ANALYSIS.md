@@ -106,3 +106,4 @@ Note: Production shows 1258ms vs 43ms in isolated test, suggesting different con
 But relative percentages should still apply, so these optimizations should help proportionally.
 
 
+

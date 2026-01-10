@@ -11,6 +11,11 @@ import logging
 from ..trace import log_slot_transformation
 from ..config import config
 
+
+def _is_booking_intent(intent: str) -> bool:
+    """Check if intent is a booking intent (CREATE_APPOINTMENT or CREATE_RESERVATION)."""
+    return intent in {"CREATE_APPOINTMENT", "CREATE_RESERVATION"}
+
 logger = logging.getLogger(__name__)
 
 # Try zoneinfo first (Python 3.9+), fallback to pytz
@@ -57,6 +62,8 @@ def merge_booking_state(
     
     # Start with empty state if no memory
     if memory_state is None:
+        # Set lifecycle to CREATING for CREATE intents, NONE otherwise
+        lifecycle = "CREATING" if _is_booking_intent(current_intent) else "NONE"
         merged_state = {
             "intent": current_intent,
             "booking_state": {
@@ -64,9 +71,9 @@ def merge_booking_state(
                 "datetime_range": current_booking.get("datetime_range"),
                 "date_range": current_booking.get("date_range"),
                 "time_range": current_booking.get("time_range"),
-                "duration": current_booking.get("duration"),
-                "confirmation_state": current_booking.get("confirmation_state", "pending")
+                "duration": current_booking.get("duration")
             },
+            "booking_lifecycle": lifecycle,
             "clarification": current_clarification,
             "last_updated": datetime.now(timezone.utc).isoformat()
         }
@@ -94,9 +101,15 @@ def merge_booking_state(
             current_clarification
         )
         
+        # Preserve lifecycle from memory, or set to CREATING if booking intent
+        lifecycle = memory_state.get("booking_lifecycle", "NONE")
+        if _is_booking_intent(current_intent) and lifecycle == "NONE":
+            lifecycle = "CREATING"
+        
         merged_state = {
             "intent": current_intent,
             "booking_state": merged_booking,
+            "booking_lifecycle": lifecycle,
             "clarification": merged_clarification,
             "last_updated": datetime.now(timezone.utc).isoformat()
         }
@@ -184,14 +197,6 @@ def _merge_booking_slots(
     else:
         merged["time_range"] = memory_booking.get("time_range")
     
-    # CONFIRMATION_STATE: Preserve from current if present, else keep from memory
-    if "confirmation_state" in current_booking:
-        merged["confirmation_state"] = current_booking["confirmation_state"]
-    elif "confirmation_state" in memory_booking:
-        merged["confirmation_state"] = memory_booking["confirmation_state"]
-    else:
-        # Default to pending if neither has it
-        merged["confirmation_state"] = "pending"
     
     return merged
 
@@ -311,7 +316,6 @@ def extract_memory_state_for_response(
     - datetime_range
     - time_range
     - duration
-    - confirmation_state
     """
     booking_state = memory_state.get("booking_state", {})
     return {
@@ -319,7 +323,6 @@ def extract_memory_state_for_response(
         "date_range": booking_state.get("date_range"),
         "datetime_range": booking_state.get("datetime_range"),
         "time_range": booking_state.get("time_range"),
-        "duration": booking_state.get("duration"),
-        "confirmation_state": booking_state.get("confirmation_state", "pending")
+        "duration": booking_state.get("duration")
     }
 

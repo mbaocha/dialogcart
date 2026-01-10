@@ -107,6 +107,17 @@ def assert_response(resp, expected):
         booking = resp["booking"]
         # Booking block should be minimal - only confirmation_state (temporal/service data is in slots)
         assert "confirmation_state" in booking, "booking should contain confirmation_state"
+        
+        # Check confirmation_state matches expected value if specified
+        expected_booking = expected.get("booking", {})
+        if isinstance(expected_booking, dict) and "confirmation_state" in expected_booking:
+            expected_confirmation_state = expected_booking["confirmation_state"]
+            actual_confirmation_state = booking.get("confirmation_state")
+            assert actual_confirmation_state == expected_confirmation_state, (
+                f"confirmation_state mismatch: got '{actual_confirmation_state}', "
+                f"expected '{expected_confirmation_state}'"
+            )
+        
         # Ensure booking doesn't contain temporal/service fields (they're in slots)
         assert "services" not in booking, "booking.services should not be present (exposed via slots.service_id)"
         assert "date_range" not in booking, "booking.date_range should not be present (exposed via slots.date_range)"
@@ -130,9 +141,22 @@ def assert_response(resp, expected):
             actual_date_range = resp.get("slots", {}).get("date_range")
             assert actual_date_range is not None, "Expected date_range in slots for reservation"
             expected_date_range = slots["date_range"]
-            assert actual_date_range == expected_date_range, (
-                f"date_range mismatch: got {actual_date_range}, expected {expected_date_range}"
-            )
+            
+            # Handle placeholder dates (e.g., "<resolved_date>") - just check that date_range exists and has start/end
+            if expected_date_range.get("start") == "<resolved_date>" or expected_date_range.get("end") == "<resolved_date>":
+                # For placeholder dates, just verify date_range structure exists
+                assert "start" in actual_date_range, "Expected date_range.start in slots for reservation"
+                assert "end" in actual_date_range, "Expected date_range.end in slots for reservation"
+                # Verify dates are valid ISO format dates
+                import re
+                date_pattern = r'^\d{4}-\d{2}-\d{2}$'
+                assert re.match(date_pattern, actual_date_range["start"]), f"date_range.start must be ISO date format, got {actual_date_range['start']}"
+                assert re.match(date_pattern, actual_date_range["end"]), f"date_range.end must be ISO date format, got {actual_date_range['end']}"
+            else:
+                # Exact match for specific dates
+                assert actual_date_range == expected_date_range, (
+                    f"date_range mismatch: got {actual_date_range}, expected {expected_date_range}"
+                )
 
         # Check datetime_range or has_datetime for appointments
         if slots.get("has_datetime"):
@@ -154,13 +178,20 @@ def assert_response(resp, expected):
                 f"expected '{expected_clarification_reason}'"
             )
 
-        # Check for issues (new structure) or missing_slots (legacy)
+        # Always derive missing_slots from issues (Fix #1)
+        # Luma emits issues → { slot_name: "missing" }, not missing_slots
+        actual_issues = resp.get("issues", {})
+        derived_missing_slots = sorted([
+            slot for slot, issue in actual_issues.items()
+            if issue == "missing" or (isinstance(issue, dict) and issue.get("type") == "missing")
+        ])
+        
+        # Check for issues (new structure) or missing_slots (legacy test format)
         expected_issues = expected.get("issues")
         expected_missing_slots = expected.get("missing_slots") or []
 
         if expected_issues:
             # New structure: validate issues
-            actual_issues = resp.get("issues", {})
             for slot, expected_issue in expected_issues.items():
                 actual_issue = actual_issues.get(slot)
                 if isinstance(expected_issue, dict):
@@ -180,18 +211,12 @@ def assert_response(resp, expected):
                     assert actual_issue == expected_issue, (
                         f"Issue mismatch for '{slot}': got '{actual_issue}', expected '{expected_issue}'"
                     )
-        elif expected_missing_slots:
-            # Legacy structure: check missing_slots (for backward compatibility)
-            # Convert issues to missing_slots format for comparison
-            actual_issues = resp.get("issues", {})
-            # Extract slots with "missing" issues
-            actual_missing = [
-                slot for slot, issue in actual_issues.items()
-                if issue == "missing" or (isinstance(issue, dict) and issue.get("type") == "missing")
-            ]
-            assert sorted(actual_missing) == sorted(expected_missing_slots), (
-                f"missing_slots mismatch: got {actual_missing}, expected {expected_missing_slots}. "
-                f"Note: Response uses 'issues' structure, converted for comparison."
+        
+        # If expected_missing_slots is provided (legacy test format), validate against derived slots
+        if expected_missing_slots:
+            assert derived_missing_slots == sorted(expected_missing_slots), (
+                f"missing_slots mismatch: got {derived_missing_slots}, expected {sorted(expected_missing_slots)}. "
+                f"Derived from issues structure: {actual_issues}"
             )
 
 
@@ -207,8 +232,10 @@ def test_cases(scenarios_to_run=None):
 
     failures = []
     for i, case in enumerate(scenarios_to_run, start=1):
+        # Get scenario-specific aliases if provided, otherwise use None (default aliases)
+        scenario_aliases = case.get("aliases", None)
         resp, resp_status, resp_raw = call_luma(
-            case["sentence"], case["booking_mode"])
+            case["sentence"], case["booking_mode"], aliases=scenario_aliases)
         try:
             if resp_status != 200 or resp is None:
                 raise AssertionError(f"HTTP {resp_status}, body={resp_raw}")
@@ -469,8 +496,10 @@ Examples:
             )
             sys.exit(1)
         single_case = scenarios_to_run[idx - 1]
+        # Get scenario-specific aliases if provided, otherwise use None (default aliases)
+        scenario_aliases = single_case.get("aliases", None)
         single_resp, single_status, single_raw = call_luma(
-            single_case["sentence"], single_case["booking_mode"])
+            single_case["sentence"], single_case["booking_mode"], aliases=scenario_aliases)
         try:
             if single_status != 200 or single_resp is None:
                 raise AssertionError(

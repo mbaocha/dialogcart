@@ -24,6 +24,7 @@ from ..clarification import Clarification, ClarificationReason
 from ..config import debug_print
 from ..config.temporal import (
     ALLOW_BARE_WEEKDAY_BINDING,
+    ALLOW_BARE_WEEKDAY_RANGE_BINDING,
     APPOINTMENT_TEMPORAL_TYPE,
     DateMode,
     RESERVATION_TEMPORAL_TYPE,
@@ -197,16 +198,42 @@ class SemanticResolutionResult:
         return result
 
 
+def _normalize_canonical_to_full(canonical: str, booking_mode: str = "service") -> str:
+    """
+    Normalize short canonical form to full canonical form.
+
+    Args:
+        canonical: Canonical form (short like "haircut" or full like "beauty_and_wellness.haircut")
+        booking_mode: Booking mode ("service" or "reservation") to determine domain prefix
+
+    Returns:
+        Full canonical form (e.g., "beauty_and_wellness.haircut" or "hospitality.room")
+    """
+    if "." in canonical:
+        # Already full canonical form
+        return canonical
+
+    # Short form - add domain prefix based on booking_mode
+    if booking_mode == "reservation":
+        return f"hospitality.{canonical}"
+    else:
+        # Default to service domain
+        return f"beauty_and_wellness.{canonical}"
+
+
 def _build_variants_by_family(tenant_context: Optional[Dict[str, Any]]) -> Dict[str, List[str]]:
     """
     Build variants_by_family dictionary from tenant_context.aliases.
+    Normalizes short canonical forms to full canonical forms for consistent matching.
 
     Args:
         tenant_context: Optional tenant context with aliases mapping
-                       Contains: aliases (Dict[str, str] mapping alias -> service_family)
+                       Contains: 
+                       - aliases (Dict[str, str] mapping alias -> service_family)
+                       - booking_mode (str, optional: "service" or "reservation")
 
     Returns:
-        Dictionary mapping service_family -> list of tenant alias strings
+        Dictionary mapping service_family (full canonical) -> list of tenant alias strings
     """
     variants_by_family: Dict[str, List[str]] = {}
 
@@ -219,18 +246,29 @@ def _build_variants_by_family(tenant_context: Optional[Dict[str, Any]]) -> Dict[
         logger.debug(f"[semantic] aliases is not a dict: {type(aliases)}")
         return variants_by_family
 
+    # Get booking_mode for canonical normalization
+    booking_mode = tenant_context.get("booking_mode", "service")
+    if not isinstance(booking_mode, str):
+        booking_mode = "service"
+
     logger.info(
-        f"[semantic] building variants_by_family from {len(aliases)} aliases")
+        f"[semantic] building variants_by_family from {len(aliases)} aliases (booking_mode: {booking_mode})")
 
     # Build reverse mapping: service_family -> list of aliases
+    # Normalize service_family to full canonical form for consistent matching
     for alias, service_family in aliases.items():
         if not isinstance(alias, str) or not isinstance(service_family, str):
             continue
-        if service_family not in variants_by_family:
-            variants_by_family[service_family] = []
-        variants_by_family[service_family].append(alias)
+
+        # Normalize service_family to full canonical form
+        normalized_family = _normalize_canonical_to_full(
+            service_family, booking_mode)
+
+        if normalized_family not in variants_by_family:
+            variants_by_family[normalized_family] = []
+        variants_by_family[normalized_family].append(alias)
         logger.debug(
-            f"[semantic] mapped alias '{alias}' -> service_family '{service_family}'")
+            f"[semantic] mapped alias '{alias}' -> service_family '{service_family}' -> normalized '{normalized_family}'")
 
     # Sort aliases for deterministic output
     for service_family in variants_by_family:
@@ -243,7 +281,8 @@ def _build_variants_by_family(tenant_context: Optional[Dict[str, Any]]) -> Dict[
 def _track_explicit_alias_match(
     services: List[Dict[str, Any]],
     entities: Dict[str, Any],
-    variants_by_family: Dict[str, List[str]]
+    variants_by_family: Dict[str, List[str]],
+    booking_mode: str = "service"
 ) -> None:
     """
     Track tenant alias matches and store in service dicts.
@@ -258,7 +297,8 @@ def _track_explicit_alias_match(
     Args:
         services: List of service dictionaries (modified in place)
         entities: Raw extraction output containing osentence
-        variants_by_family: Dictionary mapping service_family -> list of tenant alias strings
+        variants_by_family: Dictionary mapping service_family (full canonical) -> list of tenant alias strings
+        booking_mode: Booking mode ("service" or "reservation") for canonical normalization
     """
     if not variants_by_family or not services:
         return
@@ -273,10 +313,14 @@ def _track_explicit_alias_match(
             continue
 
         canonical = service.get("canonical")
-        if not canonical or not isinstance(canonical, str) or "." not in canonical:
+        if not canonical or not isinstance(canonical, str):
             continue
 
-        variants = variants_by_family.get(canonical, [])
+        # Normalize canonical to full form for matching (variants_by_family uses full canonicals)
+        normalized_canonical = _normalize_canonical_to_full(
+            canonical, booking_mode)
+
+        variants = variants_by_family.get(normalized_canonical, [])
         if not variants:
             continue
 
@@ -289,14 +333,14 @@ def _track_explicit_alias_match(
             if re.search(pattern, osentence):
                 matched_alias = variant  # Store original case-preserved alias
                 logger.info(
-                    f"[semantic] explicit alias match: '{matched_alias}' → {canonical}")
+                    f"[semantic] explicit alias match: '{matched_alias}' → {normalized_canonical}")
                 break
 
         # NEW: If no explicit match but exactly one alias exists, use it by default
         if not matched_alias and len(variants) == 1:
             matched_alias = variants[0]  # Use the single alias
             logger.info(
-                f"[semantic] single alias default: '{matched_alias}' → {canonical} (not explicitly mentioned)")
+                f"[semantic] single alias default: '{matched_alias}' → {normalized_canonical} (not explicitly mentioned)")
 
         # Store matched alias in service dict for later use
         if matched_alias:
@@ -306,7 +350,8 @@ def _track_explicit_alias_match(
 def _check_service_variant_ambiguity(
     services: List[Dict[str, Any]],
     entities: Dict[str, Any],
-    variants_by_family: Dict[str, List[str]]
+    variants_by_family: Dict[str, List[str]],
+    booking_mode: str = "service"
 ) -> Optional[Clarification]:
     """
     Check for service variant ambiguity when a service family maps to multiple tenant variants.
@@ -338,22 +383,28 @@ def _check_service_variant_ambiguity(
     logger.info(
         f"[semantic] checking service variant ambiguity: {len(services)} services, {len(variants_by_family)} families with variants")
 
-    # Get service families from resolved services
-    # Services are dicts with "canonical" field containing service family ID (e.g., "beauty_and_wellness.haircut")
+    # Get service families from resolved services and normalize to full canonical form
+    # Services are dicts with "canonical" field containing service family ID (e.g., "beauty_and_wellness.haircut" or "haircut")
     service_families = []
     for service in services:
         if isinstance(service, dict):
             # Check canonical field first (primary source of service family ID)
             canonical = service.get("canonical")
-            if canonical and isinstance(canonical, str) and "." in canonical:
-                service_families.append(canonical)
+            if canonical and isinstance(canonical, str):
+                # Normalize to full canonical form for matching (variants_by_family uses full canonicals)
+                normalized_canonical = _normalize_canonical_to_full(
+                    canonical, booking_mode)
+                service_families.append(normalized_canonical)
                 logger.debug(
-                    f"[semantic] found service family from canonical: {canonical}")
+                    f"[semantic] found service family from canonical: {canonical} -> normalized: {normalized_canonical}")
             # Fallback: check if text field contains canonical format
             elif service.get("text") and "." in str(service.get("text", "")):
-                service_families.append(str(service.get("text", "")))
+                text_canonical = str(service.get("text", ""))
+                normalized_text_canonical = _normalize_canonical_to_full(
+                    text_canonical, booking_mode)
+                service_families.append(normalized_text_canonical)
                 logger.debug(
-                    f"[semantic] found service family from text: {service.get('text')}")
+                    f"[semantic] found service family from text: {service.get('text')} -> normalized: {normalized_text_canonical}")
 
     if not service_families:
         logger.debug("[semantic] no service families extracted from services")
@@ -370,29 +421,44 @@ def _check_service_variant_ambiguity(
                 f"[semantic] skipping {service_family}: {len(variants)} variants (no ambiguity)")
             continue  # No ambiguity if 0 or 1 variant
 
-        # Check if user input explicitly matched one of the aliases
-        # Check the original sentence to see if any variant (tenant alias) appears in it
-        osentence = entities.get("osentence", "").lower()
-        logger.info(
-            f"[semantic] checking osentence for explicit alias match: '{osentence}'")
+        # Check if resolved_alias was already set by _track_explicit_alias_match
+        # This is more reliable than re-checking the sentence
         explicit_alias_match = False
-
-        if osentence:
-            # Check if any variant (tenant alias) appears in the original sentence
-            for variant in variants:
-                variant_lower = variant.lower()
-                # Check if variant appears as a phrase in the original sentence
-                # Use word boundary matching to avoid false positives
-                # Pattern: variant as a phrase (with word boundaries)
-                pattern = r'\b' + re.escape(variant_lower) + r'\b'
-                if re.search(pattern, osentence):
-                    explicit_alias_match = True
+        for service in services:
+            if isinstance(service, dict):
+                resolved_alias = service.get("resolved_alias")
+                if resolved_alias and resolved_alias in variants:
+                    # Explicit alias match already found by _track_explicit_alias_match - no ambiguity
                     logger.info(
-                        f"[semantic] explicit alias match found: '{variant_lower}' in '{osentence}'")
+                        f"[semantic] resolved_alias already set to '{resolved_alias}' for service_family '{service_family}' - skipping ambiguity check"
+                    )
+                    explicit_alias_match = True
                     break
-                else:
-                    logger.debug(
-                        f"[semantic] no match for variant '{variant_lower}' in '{osentence}'")
+
+        # If resolved_alias wasn't found, check the sentence directly
+        if not explicit_alias_match:
+            # Check if user input explicitly matched one of the aliases
+            # Check the original sentence to see if any variant (tenant alias) appears in it
+            osentence = entities.get("osentence", "").lower()
+            logger.info(
+                f"[semantic] checking osentence for explicit alias match: '{osentence}'")
+
+            if osentence:
+                # Check if any variant (tenant alias) appears in the original sentence
+                for variant in variants:
+                    variant_lower = variant.lower()
+                    # Check if variant appears as a phrase in the original sentence
+                    # Use word boundary matching to avoid false positives
+                    # Pattern: variant as a phrase (with word boundaries)
+                    pattern = r'\b' + re.escape(variant_lower) + r'\b'
+                    if re.search(pattern, osentence):
+                        explicit_alias_match = True
+                        logger.info(
+                            f"[semantic] explicit alias match found: '{variant_lower}' in '{osentence}'")
+                        break
+                    else:
+                        logger.debug(
+                            f"[semantic] no match for variant '{variant_lower}' in '{osentence}'")
 
         # If no explicit alias match, ambiguity exists
         if not explicit_alias_match:
@@ -413,10 +479,15 @@ def _check_service_variant_ambiguity(
 def _validate_temporal_shape_completeness(
     intent_name: Optional[str],
     resolved_booking: Dict[str, Any],
-    date_resolution: Dict[str, Any]
+    date_resolution: Dict[str, Any],
+    entities: Optional[Dict[str, Any]] = None,
+    memory_state: Optional[Dict[str, Any]] = None
 ) -> Optional[Clarification]:
     """
     Validate that resolved booking satisfies temporal shape requirements from config.
+    
+    Also normalizes unanchored weekday ranges for CREATE_RESERVATION to ensure
+    both start_date and end_date are marked as missing.
 
     Returns:
         Clarification if temporal shape incomplete, None if complete.
@@ -437,6 +508,25 @@ def _validate_temporal_shape_completeness(
     time_mode = resolved_booking.get("time_mode")
     date_refs = resolved_booking.get("date_refs", [])
     time_constraint = resolved_booking.get("time_constraint")
+
+    # Normalize unanchored weekday ranges for CREATE_RESERVATION
+    # This must happen BEFORE temporal shape validation to ensure both dates are marked missing
+    if temporal_shape == RESERVATION_TEMPORAL_TYPE and entities:
+        # Check entities directly (not date_refs) since date_refs may be empty if already blocked
+        dates = entities.get("dates", [])
+        if len(dates) >= 2:
+            # Extract date texts from entities (original extraction, before normalization/blocking)
+            date_texts = [d.get("text", "") for d in dates[:2]]
+            # Check if this is an unanchored weekday-only range
+            if _is_weekday_only_range(date_texts, DateMode.RANGE.value, entities, memory_state):
+                # Normalize: treat as fully unresolved, mark both dates as missing
+                # This overrides any partial binding that may have occurred
+                return Clarification(
+                    reason=ClarificationReason.MISSING_DATE_RANGE,
+                    data={
+                        "missing_slots": ["start_date", "end_date"]
+                    }
+                )
 
     if temporal_shape == APPOINTMENT_TEMPORAL_TYPE:
         # Require date_mode != None and time_mode in {"exact", "range", "window"}
@@ -465,6 +555,7 @@ def _validate_temporal_shape_completeness(
 
     elif temporal_shape == RESERVATION_TEMPORAL_TYPE:
         # Require start_date AND end_date (two date_refs or date_mode == range)
+        # Note: Unanchored weekday ranges are already handled above
         has_start = len(date_refs) >= 1 or date_mode == DateMode.RANGE.value
         has_end = (
             len(date_refs) >= 2
@@ -609,13 +700,18 @@ def resolve_semantics(
     variants_by_family = _build_variants_by_family(tenant_context)
     # Removed per-stage logging - trace data returned instead
 
+    # Get booking_mode for canonical normalization
+    booking_mode = tenant_context.get(
+        "booking_mode", "service") if tenant_context else "service"
+
     # Track explicit alias matches (before ambiguity check)
     # This stores matched aliases in service dicts for later use
-    _track_explicit_alias_match(services, entities, variants_by_family)
+    _track_explicit_alias_match(
+        services, entities, variants_by_family, booking_mode)
 
     # Check for service variant ambiguity (before other ambiguity checks)
     clarification = _check_service_variant_ambiguity(
-        services, entities, variants_by_family
+        services, entities, variants_by_family, booking_mode
     )
 
     # Check for conflicts and ambiguity (only if no service variant ambiguity)
@@ -660,9 +756,10 @@ def resolve_semantics(
 
     # Validate temporal shape completeness (authoritative - must pass for RESOLVED)
     # This runs after all ambiguity checks but before finalizing status
+    # Pass entities and memory_state for weekday-only range normalization
     intent_name = intent_result.get("intent")
     temporal_clarification = _validate_temporal_shape_completeness(
-        intent_name, resolved_booking, date_resolution
+        intent_name, resolved_booking, date_resolution, entities, None  # memory_state not available here
     )
     if temporal_clarification:
         # Temporal shape incomplete - force needs_clarification
@@ -1271,6 +1368,78 @@ def _is_week_based(text: str) -> bool:
     return any(pattern in text_lower for pattern in week_patterns)
 
 
+def _has_concrete_date_anchor(text: str, entities: Dict[str, Any]) -> bool:
+    """
+    Check if a relative date phrase has a concrete anchor that allows resolution.
+
+    Concrete anchors include:
+    - Weekday (e.g., "Wednesday" in "next week Wednesday")
+    - Explicit date (e.g., "15th", "Jan 15" in "next week 15th")
+    - Range delimiter (e.g., "between", "from" in "between Monday and Wednesday")
+
+    Args:
+        text: The normalized date text to check
+        entities: Raw extraction output (for checking dates_absolute)
+
+    Returns:
+        True if phrase has a concrete anchor, False otherwise
+    """
+    text_lower = text.lower()
+
+    # Check for weekday presence
+    vocab = _load_vocabularies()
+    weekdays_dict = vocab.get("weekdays", {})
+    weekdays = []
+    if isinstance(weekdays_dict, dict):
+        # New structure: vocabularies.weekdays is canonical-first (canonical -> [variants])
+        weekdays = list(weekdays_dict.keys())
+        # Also check all variants (accepted variants from vocabularies)
+        for _canonical, variants in weekdays_dict.items():
+            if isinstance(variants, list):
+                weekdays.extend(variants)
+    # Normalize weekdays to lowercase for comparison
+    weekdays = [day.lower() for day in weekdays if isinstance(day, str)]
+
+    has_weekday = any(day in text_lower for day in weekdays)
+    if has_weekday:
+        return True
+
+    # Check for explicit date (ordinal like "15th", "12th" or month+day like "Jan 15")
+    # Pattern: ordinal number (1st, 2nd, 3rd, 4th, etc.)
+    ordinal_pattern = r'\b\d{1,2}(?:st|nd|rd|th)\b'
+    if re.search(ordinal_pattern, text_lower):
+        return True
+
+    # Check for month + day pattern (e.g., "Jan 15", "December 12")
+    month_names = [
+        "january", "february", "march", "april", "may", "june",
+        "july", "august", "september", "october", "november", "december",
+        "jan", "feb", "mar", "apr", "may", "jun",
+        "jul", "aug", "sep", "sept", "oct", "nov", "dec"
+    ]
+    for month in month_names:
+        if month in text_lower:
+            # Check if there's a day number nearby
+            # Look for pattern like "month day" or "day month"
+            day_pattern = r'\b\d{1,2}\b'
+            if re.search(day_pattern, text_lower):
+                return True
+
+    # Check for range delimiter keywords
+    range_delimiters = ["between", "from", "to", "until", "till", "through"]
+    has_range_delimiter = any(
+        delimiter in text_lower for delimiter in range_delimiters)
+    if has_range_delimiter:
+        return True
+
+    # Check if there are absolute dates in entities (handles cases where date is extracted separately)
+    dates_absolute = entities.get("dates_absolute", [])
+    if dates_absolute:
+        return True
+
+    return False
+
+
 def _is_weekend_reference(text: str) -> bool:
     """Check if text is a weekend reference: this weekend, next weekend."""
     text_lower = text.lower()
@@ -1405,6 +1574,126 @@ def _is_bare_weekday(text: str) -> bool:
             if text_lower.startswith(weekday):
                 return True
 
+    return False
+
+
+def _is_weekday_only_range(
+    date_refs: list,
+    date_mode: str,
+    entities: Dict[str, Any],
+    memory_state: Optional[Dict[str, Any]] = None
+) -> bool:
+    """
+    Check if a date range contains only weekdays without anchors.
+    
+    A weekday-only range is ambiguous if:
+    - date_mode is RANGE
+    - date_refs contains only weekdays (monday, tuesday, etc.)
+    - No modifiers (this/next/last)
+    - No explicit dates/months/years
+    - No anchored date in memory_state
+    
+    Args:
+        date_refs: List of date reference strings
+        date_mode: Date mode ("range", "single_day", etc.)
+        entities: Raw extraction output (for checking dates_absolute)
+        memory_state: Optional memory state (for checking prior anchored dates)
+    
+    Returns:
+        True if this is a weekday-only range without anchors, False otherwise
+    """
+    if date_mode != DateMode.RANGE.value or len(date_refs) < 2:
+        return False
+    
+    if not ALLOW_BARE_WEEKDAY_RANGE_BINDING:
+        # Check if all refs are weekdays
+        vocab = _load_vocabularies()
+        weekdays_dict = vocab.get("weekdays", {})
+        weekdays = list(weekdays_dict.keys()) if isinstance(weekdays_dict, dict) else []
+        
+        # Collect all weekday variants (canonical forms and synonyms)
+        weekday_variants = []
+        for canonical, variants in weekdays_dict.items():
+            if isinstance(canonical, str):
+                weekday_variants.append(canonical.lower())
+            if isinstance(variants, list):
+                weekday_variants.extend([v.lower() for v in variants if isinstance(v, str)])
+            elif isinstance(variants, dict):
+                # New structure: { "synonyms": [...], "typos": [...] }
+                synonyms = variants.get("synonyms", [])
+                if isinstance(synonyms, list):
+                    weekday_variants.extend([v.lower() for v in synonyms if isinstance(v, str)])
+                typos = variants.get("typos", [])
+                if isinstance(typos, list):
+                    weekday_variants.extend([v.lower() for v in typos if isinstance(v, str)])
+        
+        weekday_variants = list(set(weekday_variants))  # Remove duplicates
+        
+        # Check if all date_refs are weekdays (using word-boundary matching for accuracy)
+        all_weekdays = True
+        has_modifier = False
+        has_explicit_date = False
+        
+        # Combine all refs into a single string for checking modifiers and dates
+        combined_refs = " ".join(str(ref).lower() for ref in date_refs)
+        
+        # Check each ref to see if it's a weekday
+        for ref in date_refs:
+            ref_lower = str(ref).lower().strip()
+            if not ref_lower:
+                all_weekdays = False
+                break
+            
+            # Check if ref exactly matches a weekday or contains a weekday as a whole word
+            # Use word boundaries to avoid false matches (e.g., "sunday" in "sundays" should match, but "day" shouldn't match "sunday")
+            is_weekday = False
+            for weekday in weekday_variants:
+                # Exact match or word-boundary match
+                if ref_lower == weekday or re.search(r'\b' + re.escape(weekday) + r'\b', ref_lower):
+                    is_weekday = True
+                    break
+            
+            if not is_weekday:
+                all_weekdays = False
+                break
+            
+            # Check for modifiers in this specific ref (not combined, to avoid false positives)
+            modifiers = ["this", "next", "last", "coming", "following"]
+            if any(re.search(r'\b' + re.escape(mod) + r'\b', ref_lower) for mod in modifiers):
+                has_modifier = True
+                break
+        
+        # Check for explicit dates/months in entities
+        dates_absolute = entities.get("dates_absolute", [])
+        if dates_absolute:
+            has_explicit_date = True
+        
+        # Check for explicit dates in combined refs (ordinal, month names, etc.)
+        month_names = [
+            "january", "february", "march", "april", "may", "june",
+            "july", "august", "september", "october", "november", "december",
+            "jan", "feb", "mar", "apr", "may", "jun",
+            "jul", "aug", "sep", "sept", "oct", "nov", "dec"
+        ]
+        ordinal_pattern = r'\b\d{1,2}(?:st|nd|rd|th)\b'
+        if re.search(ordinal_pattern, combined_refs):
+            has_explicit_date = True
+        if any(re.search(r'\b' + re.escape(month) + r'\b', combined_refs) for month in month_names):
+            has_explicit_date = True
+        
+        # Check for anchored date in memory
+        has_memory_anchor = False
+        if memory_state:
+            booking_state = memory_state.get("booking_state", {})
+            date_range = booking_state.get("date_range") or booking_state.get("datetime_range")
+            if date_range:
+                # If there's a prior resolved date, we have an anchor
+                has_memory_anchor = True
+        
+        # Weekday-only range without anchors: exactly 2 weekdays, no modifiers, no explicit dates, no memory anchor
+        if all_weekdays and len(date_refs) == 2 and not has_modifier and not has_explicit_date and not has_memory_anchor:
+            return True
+    
     return False
 
 
@@ -1790,7 +2079,8 @@ def _detect_date_role(
 def _resolve_date_semantics(
     entities: Dict[str, Any],
     structure: Dict[str, Any],
-    intent_name: Optional[str] = None
+    intent_name: Optional[str] = None,
+    memory_state: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Resolve date semantics with hardened, production-safe subset.
@@ -1939,8 +2229,9 @@ def _resolve_date_semantics(
                     "date_roles": [date_role] if date_role else []
                 }
 
-            # Simple relative days → single_day
-            if _is_simple_relative_day(date_text):
+            # Specific weekday → single_day
+            # Check this FIRST (before week-based) so "next week Wednesday" is caught correctly
+            if _is_specific_weekday(date_text):
                 return {
                     "mode": DateMode.SINGLE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
@@ -1948,10 +2239,32 @@ def _resolve_date_semantics(
                     "date_roles": [date_role] if date_role else []
                 }
 
-            # Week-based → range
+            # Week-based → range (only if has concrete anchor)
+            # Guard: Vague phrases like "next week" without weekday/date require clarification
+            # Check week-based AFTER specific weekday to avoid false matches
             if _is_week_based(date_text):
+                if _has_concrete_date_anchor(date_text, entities):
+                    return {
+                        "mode": DateMode.RANGE.value,
+                        "refs": [normalized_dates[0]],  # Use normalized text
+                        "modifiers": date_modifiers,
+                        "date_roles": [date_role] if date_role else []
+                    }
+                else:
+                    # No concrete anchor → don't resolve, will trigger clarification
+                    # Return FLEXIBLE to indicate no resolution
+                    return {
+                        "mode": DateMode.FLEXIBLE.value,
+                        "refs": [],
+                        "modifiers": date_modifiers,
+                        "date_roles": []
+                    }
+
+            # Simple relative days → single_day
+            # Check this AFTER week-based to avoid false matches
+            if _is_simple_relative_day(date_text):
                 return {
-                    "mode": DateMode.RANGE.value,
+                    "mode": DateMode.SINGLE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
                     "modifiers": date_modifiers,
                     "date_roles": [date_role] if date_role else []
@@ -1966,23 +2279,25 @@ def _resolve_date_semantics(
                     "date_roles": [date_role] if date_role else []
                 }
 
-            # Specific weekday → single_day
-            if _is_specific_weekday(date_text):
-                return {
-                    "mode": DateMode.SINGLE.value,
-                    "refs": [normalized_dates[0]],  # Use normalized text
-                    "modifiers": date_modifiers,
-                    "date_roles": [date_role] if date_role else []
-                }
-
-            # Month-relative → range (full month)
+            # Month-relative → range (full month) (only if has concrete anchor)
+            # Guard: Vague phrases like "next month" without weekday/date require clarification
             if _is_month_relative(date_text):
-                return {
-                    "mode": DateMode.RANGE.value,
-                    "refs": [normalized_dates[0]],  # Use normalized text
-                    "modifiers": date_modifiers,
-                    "date_roles": [date_role] if date_role else []
-                }
+                if _has_concrete_date_anchor(date_text, entities):
+                    return {
+                        "mode": DateMode.RANGE.value,
+                        "refs": [normalized_dates[0]],  # Use normalized text
+                        "modifiers": date_modifiers,
+                        "date_roles": [date_role] if date_role else []
+                    }
+                else:
+                    # No concrete anchor → don't resolve, will trigger clarification
+                    # Return FLEXIBLE to indicate no resolution
+                    return {
+                        "mode": DateMode.FLEXIBLE.value,
+                        "refs": [],
+                        "modifiers": date_modifiers,
+                        "date_roles": []
+                    }
 
             # Default: single_day
             return {
@@ -1998,6 +2313,17 @@ def _resolve_date_semantics(
             for idx in range(min(2, len(normalized_dates))):
                 role = _detect_date_role(entities, idx, intent_name)
                 date_roles.append(role)
+            
+            # Check if this is a weekday-only range without anchors
+            if _is_weekday_only_range(normalized_dates[:2], DateMode.RANGE.value, entities, memory_state):
+                # Block resolution for weekday-only ranges without anchors
+                return {
+                    "mode": DateMode.FLEXIBLE.value,
+                    "refs": [],
+                    "modifiers": date_modifiers,
+                    "date_roles": []
+                }
+            
             if structure.get("date_type") == DateMode.RANGE.value or structure.get("date_type") == DateMode.RANGE or "between" in str(structure).lower() or "from" in str(structure).lower():
                 return {
                     "mode": DateMode.RANGE.value,
@@ -2092,6 +2418,26 @@ def _check_ambiguity(
                             "date": date_text
                         }
                     )
+
+    # Check for weekday-only range without anchors (must check before other ambiguity checks)
+    # This check must override other reasons to ensure consistent normalization
+    # Check entities directly since date_resolution may have been set to FLEXIBLE for weekday-only ranges
+    dates = entities.get("dates", [])
+    if len(dates) >= 2:
+        # Extract date texts from entities (before normalization/modification)
+        date_texts = [d.get("text", "") for d in dates[:2]]
+        # Check if this is a weekday-only range without anchors
+        # Use DateMode.RANGE.value since we're checking if it should be a range
+        # Note: memory_state is not available here, but we can still check for anchors in entities
+        if _is_weekday_only_range(date_texts, DateMode.RANGE.value, entities, None):
+            # Normalize missing slots: both start_date and end_date must be marked as missing
+            # This overrides any partial issues to ensure complete clarification output
+            return Clarification(
+                reason=ClarificationReason.MISSING_DATE_RANGE,
+                data={
+                    "missing_slots": ["start_date", "end_date"]
+                }
+            )
 
     # Check for vague date references
     for date_entity in all_dates:

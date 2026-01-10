@@ -12,6 +12,8 @@ from typing import Dict, Optional
 # Intent name → action name mapping
 INTENT_ACTIONS: Dict[str, str] = {
     "CREATE_BOOKING": "booking.create",
+    "CREATE_APPOINTMENT": "booking.create",
+    "CREATE_RESERVATION": "booking.create",
     "MODIFY_BOOKING": "booking.modify",
     "CANCEL_BOOKING": "booking.cancel",
     "BOOKING_INQUIRY": "booking.inquiry",

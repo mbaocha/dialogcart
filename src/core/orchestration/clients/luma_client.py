@@ -90,6 +90,56 @@ class LumaClient:
                 f"Unexpected error calling Luma API: {str(e)}"
             ) from e
 
+    def notify_execution(
+        self,
+        user_id: str,
+        booking_id: str,
+        domain: str = "service"
+    ) -> Dict[str, Any]:
+        """
+        Notify Luma about booking execution completion.
+        
+        Updates the booking_lifecycle state to EXECUTED in Luma's memory.
+
+        Args:
+            user_id: User identifier (required)
+            booking_id: Booking identifier (required)
+            domain: Domain (optional, default: "service")
+
+        Returns:
+            Response dictionary with success status
+
+        Raises:
+            UpstreamError: On network failures or HTTP errors
+        """
+        url = f"{self.base_url}/notify_execution"
+
+        payload = {
+            "user_id": user_id,
+            "booking_id": booking_id,
+            "booking_lifecycle": "EXECUTED",
+            "domain": domain
+        }
+
+        try:
+            response = self._client.post(url, json=payload)
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            status_code = e.response.status_code
+            error_text = e.response.text[:200] if e.response.text else ""
+            raise UpstreamError(
+                f"Luma API returned error {status_code}: {error_text}"
+            ) from e
+        except httpx.RequestError as e:
+            raise UpstreamError(
+                f"Luma API request failed: {str(e)}"
+            ) from e
+        except Exception as e:
+            raise UpstreamError(
+                f"Unexpected error calling Luma API: {str(e)}"
+            ) from e
+
     def __del__(self):
         """Close httpx client on cleanup."""
         if hasattr(self, "_client"):

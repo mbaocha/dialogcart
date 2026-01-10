@@ -8,6 +8,9 @@ booking_scenarios = [
     {
         "sentence": "book me in for delux rom from oct 5th to 9th",
         "booking_mode": "reservation",
+        "aliases": {
+            "delux": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -23,6 +26,9 @@ booking_scenarios = [
     {
         "sentence": "reserve standard room october 12 to 14",
         "booking_mode": "reservation",
+        "aliases": {
+            "standard": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -38,6 +44,9 @@ booking_scenarios = [
     {
         "sentence": "book delux room from nov 1st to 3rd",
         "booking_mode": "reservation",
+        "aliases": {
+            "delux": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -53,6 +62,9 @@ booking_scenarios = [
     {
         "sentence": "book me a room dec 20 2026 to dec 25 2026",
         "booking_mode": "reservation",
+        "aliases": {
+            "room": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -66,16 +78,19 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "reserve a suite from january 1st to january 5th",
+        "sentence": "reserve a suite from feb 1st to fe 5th",
         "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
             "slots": {
                 "service_id": "suite",  # Single tenant alias for suite
                 "date_range": {
-                    "start": "2026-01-01",
-                    "end": "2026-01-05"
+                    "start": "2026-02-01",
+                    "end": "2026-02-05"
                 }
             }
         }
@@ -83,6 +98,9 @@ booking_scenarios = [
     {
         "sentence": "book standard room from feb 10 to feb 15",
         "booking_mode": "reservation",
+        "aliases": {
+            "standard": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -98,6 +116,9 @@ booking_scenarios = [
     {
         "sentence": "reserve delux room march 1 to march 5",
         "booking_mode": "reservation",
+        "aliases": {
+            "delux": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -113,6 +134,9 @@ booking_scenarios = [
     {
         "sentence": "book a room from april 10th to april 15th",
         "booking_mode": "reservation",
+        "aliases": {
+            "room": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -128,6 +152,9 @@ booking_scenarios = [
     {
         "sentence": "reserve suite may 5 to may 10",
         "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -146,6 +173,9 @@ booking_scenarios = [
     {
         "sentence": "book hair cut tomorrow at 3pm",
         "booking_mode": "service",
+        "aliases": {
+            "hair cut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -156,8 +186,11 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "schedule beerd trim friday at noon",
+        "sentence": "schedule beerd trim this friday at noon",
         "booking_mode": "service",
+        "aliases": {
+            "beerd": "beard grooming"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -170,6 +203,9 @@ booking_scenarios = [
     {
         "sentence": "book massage next monday at 10am",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -182,6 +218,7 @@ booking_scenarios = [
     {
         "sentence": "schedule facial tomorrow evening",
         "booking_mode": "service",
+        # No aliases - facial is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -192,6 +229,9 @@ booking_scenarios = [
     {
         "sentence": "book haircut for next friday at 2pm",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -205,6 +245,9 @@ booking_scenarios = [
     {
         "sentence": "schedule massage tomorrow at 9am",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -215,8 +258,11 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "book beard trim on monday at 11am",
+        "sentence": "book beard trim this monday at 11am",
         "booking_mode": "service",
+        "aliases": {
+            "beard": "beard grooming"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -230,6 +276,7 @@ booking_scenarios = [
     {
         "sentence": "schedule facial next tuesday at 3pm",
         "booking_mode": "service",
+        # No aliases - facial is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -240,6 +287,9 @@ booking_scenarios = [
     {
         "sentence": "book massage tomorrow at 2pm",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -250,8 +300,11 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "schedule haircut friday at 4pm",
+        "sentence": "schedule haircut this friday at 4pm",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -265,6 +318,9 @@ booking_scenarios = [
     {
         "sentence": "book hair cut tomorrow at 2pm",
         "booking_mode": "service",
+        "aliases": {
+            "hair cut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -277,6 +333,9 @@ booking_scenarios = [
     {
         "sentence": "book beerd trim tomorrow at 11am",
         "booking_mode": "service",
+        "aliases": {
+            "beerd": "beard grooming"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -289,6 +348,9 @@ booking_scenarios = [
     {
         "sentence": "book massage tomorrow at 4pm",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -301,6 +363,7 @@ booking_scenarios = [
     {
         "sentence": "book facial tomorrow at 1pm",
         "booking_mode": "service",
+        # No aliases - facial is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -311,6 +374,9 @@ booking_scenarios = [
     {
         "sentence": "schedule massage next monday at 9am",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -323,6 +389,9 @@ booking_scenarios = [
     {
         "sentence": "book haircut next friday at 3pm",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -334,8 +403,11 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "schedule massage friday after 3pm",
+        "sentence": "schedule massage this friday after 3pm",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -348,6 +420,7 @@ booking_scenarios = [
     {
         "sentence": "book facial monday before 11am",
         "booking_mode": "service",
+        # No aliases - facial is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -358,6 +431,9 @@ booking_scenarios = [
     {
         "sentence": "book haircut tomorrow evening",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -369,8 +445,11 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "schedule massage friday morning",
+        "sentence": "schedule massage this friday morning",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -383,6 +462,9 @@ booking_scenarios = [
     {
         "sentence": "book delux room nov 5 to 7 at night",
         "booking_mode": "reservation",
+        "aliases": {
+            "delux": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -398,6 +480,9 @@ booking_scenarios = [
     {
         "sentence": "reserve standard room from dec 1 to dec 5 in the morning",
         "booking_mode": "reservation",
+        "aliases": {
+            "standard": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -413,6 +498,9 @@ booking_scenarios = [
     {
         "sentence": "book suite jan 10 to jan 15 evening",
         "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -428,6 +516,9 @@ booking_scenarios = [
     {
         "sentence": "reserve room from feb 20 to feb 25 afternoon",
         "booking_mode": "reservation",
+        "aliases": {
+            "room": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -443,6 +534,9 @@ booking_scenarios = [
     {
         "sentence": "book haircut tomorrow at noon",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -456,6 +550,9 @@ booking_scenarios = [
     {
         "sentence": "schedule massage tomorrow at midnight",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -466,11 +563,87 @@ booking_scenarios = [
         }
     },
     # ────────────────
+    # EXPLICIT ALIAS MATCHING — Multiple aliases for same canonical
+    # ────────────────
+    {
+        "sentence": "book premium haircut tomorrow at 2pm",
+        "booking_mode": "service",
+        "aliases": {
+            "premium haircut": "haircut",
+            "standard haircut": "haircut",
+            "express haircut": "haircut"
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "premium haircut",  # Explicitly mentioned tenant alias
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "schedule standard haircut next friday at 10am",
+        "booking_mode": "service",
+        "aliases": {
+            "premium haircut": "haircut",
+            "standard haircut": "haircut",
+            "express haircut": "haircut"
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "standard haircut",  # Explicitly mentioned tenant alias
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "book premium haircut tomorrow at 2pm",
+        "booking_mode": "service",
+        "aliases": {
+            "premium spa treatment": "spa_treatment",
+            "premium haircut": "haircut",
+            "flexi haircut + prunning": "haircut",
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "status": STATUS_READY,
+            "slots": {
+                # Explicitly mentioned tenant alias (short canonical form normalized to full)
+                "service_id": "premium haircut",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "book premium haircut tomorrow at 2pm",
+        "booking_mode": "service",
+        "aliases": {
+            "premium spa treatment": "beauty_and_wellness.spa_treatment",
+            "premium haircut": "beauty_and_wellness.haircut",
+            "flexi haircut + prunning": "beauty_and_wellness.haircut",
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "status": STATUS_READY,
+            "slots": {
+                # Explicitly mentioned tenant alias (full canonical form)
+                "service_id": "premium haircut",
+                "has_datetime": True
+            }
+        }
+    },
+    # ────────────────
     # NEEDS_CLARIFICATION — MISSING SLOTS
     # ────────────────
     {
         "sentence": "book a room",
         "booking_mode": "reservation",
+        "aliases": {
+            "room": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -480,6 +653,9 @@ booking_scenarios = [
     {
         "sentence": "reserve a suite",
         "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -489,6 +665,9 @@ booking_scenarios = [
     {
         "sentence": "book a haircut",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -498,6 +677,9 @@ booking_scenarios = [
     {
         "sentence": "schedule a massage",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -507,6 +689,7 @@ booking_scenarios = [
     {
         "sentence": "book facial",
         "booking_mode": "service",
+        # No aliases - facial is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -516,6 +699,9 @@ booking_scenarios = [
     {
         "sentence": "reserve room for tomorrow",
         "booking_mode": "reservation",
+        "aliases": {
+            "room": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -525,6 +711,9 @@ booking_scenarios = [
     {
         "sentence": "book suite from october 10th",
         "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -534,6 +723,9 @@ booking_scenarios = [
     {
         "sentence": "book haircut tomorrow",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -543,6 +735,9 @@ booking_scenarios = [
     {
         "sentence": "schedule massage friday",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -552,6 +747,7 @@ booking_scenarios = [
     {
         "sentence": "book facial at 3pm",
         "booking_mode": "service",
+        # No aliases - facial is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -561,6 +757,9 @@ booking_scenarios = [
     {
         "sentence": "schedule massage at 10am",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -573,6 +772,9 @@ booking_scenarios = [
     {
         "sentence": "book me in for premium suite from oct 5th to 9th",
         "booking_mode": "reservation",
+        "aliases": {
+            "premum suite": "room"  # Tenant typo alias for fuzzy matching
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -588,6 +790,9 @@ booking_scenarios = [
     {
         "sentence": "reserve premum suite october 12 to 14",
         "booking_mode": "reservation",
+        "aliases": {
+            "premum suite": "room"  # Tenant typo alias
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -606,6 +811,9 @@ booking_scenarios = [
     {
         "sentence": "i need a hair cut tomorow at 3pm",
         "booking_mode": "service",
+        "aliases": {
+            "hair cut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -619,6 +827,9 @@ booking_scenarios = [
     {
         "sentence": "can u book me a massge for next friday morning",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -630,8 +841,11 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "i'd like to schedual a beard trim on monday at 11am",
+        "sentence": "i'd like to schedual a beard trim this monday at 11am",
         "booking_mode": "service",
+        "aliases": {
+            "beard": "beard grooming"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -644,11 +858,14 @@ booking_scenarios = [
     {
         "sentence": "reserv a presidental rom from dec 15th to dec 20th",
         "booking_mode": "reservation",
+        "aliases": {
+            "presidential room": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
             "slots": {
-                # Fuzzy match to "standard" (typo: "standrd", "reserv")
+                # Fuzzy match to "presidential room" (typos: "presidental", "rom", "reserv")
                 "service_id": "presidential room",
                 "date_range": {
                     "start": "2026-12-15",
@@ -660,11 +877,14 @@ booking_scenarios = [
     {
         "sentence": "book me a presdential room november 1st through november 5th",
         "booking_mode": "reservation",
+        "aliases": {
+            "presidential room": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
             "slots": {
-                # Fuzzy match to "delux" (user says "deluxe")
+                # Fuzzy match to "presidential room" (typo: "presdential")
                 "service_id": "presidential room",
                 "date_range": {
                     "start": "2026-11-01",
@@ -674,8 +894,11 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "i want to make an apointment for a haircut tuesday at 2pm",
+        "sentence": "i want to make an apointment for a haircut this tuesday at 2pm",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -688,6 +911,9 @@ booking_scenarios = [
     {
         "sentence": "can i get a suite from jan 10 to jan 15 please",
         "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -704,6 +930,7 @@ booking_scenarios = [
     {
         "sentence": "book me a facial treatment next wednesday at 4pm",
         "booking_mode": "service",
+        # No aliases - facial is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -714,6 +941,7 @@ booking_scenarios = [
     {
         "sentence": "schedule a manicure for friday afternoon",
         "booking_mode": "service",
+        # No aliases - manicure is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,

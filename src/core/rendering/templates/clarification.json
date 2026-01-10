@@ -17,6 +17,28 @@
             "service"
         ]
     },
+    "MISSING_DATE_RANGE": {
+        "template": "What dates would you like to book the {{service}} for?",
+        "required_fields": [
+            "service"
+        ]
+    },
+    "MISSING_START_DATE": {
+        "template": "When would you like to start your {{service}} booking?",
+        "required_fields": [
+            "service"
+        ]
+    },
+    "MISSING_END_DATE": {
+        "template": "When would you like your {{service}} booking to end?",
+        "required_fields": [
+            "service"
+        ]
+    },
+    "NEEDS_CLARIFICATION": {
+        "template": "Could you provide more information about your booking?",
+        "required_fields": []
+    },
     "MISSING_SERVICE": {
         "template": "Which service would you like to book?",
         "required_fields": []
@@ -57,6 +79,19 @@
         "template": "I found multiple options: {{options}}. Which one would you like?",
         "required_fields": [
             "options"
+        ]
+    },
+    "AWAITING_CONFIRMATION": {
+        "template": "Please confirm your appointment for {{service_name}} on {{datetime}}.\n\nReply YES to confirm or NO to cancel.",
+        "required_fields": [
+            "service_name",
+            "datetime"
+        ]
+    },
+    "EXECUTED": {
+        "template": "Booking confirmed! Your booking code is {{booking_code}}. Status: {{booking_status}}.",
+        "required_fields": [
+            "booking_code"
         ]
     }
 }

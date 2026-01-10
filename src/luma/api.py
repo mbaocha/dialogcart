@@ -324,7 +324,7 @@ def plan_clarification(
             # Use set to avoid duplicates, then convert back to list
             missing_slots = list(set(missing_slots + decision_missing))
 
-    # Prefer semantic clarifications (e.g., MULTIPLE_MATCHES) if present
+    # Prefer semantic clarifications (e.g., MULTIPLE_MATCHES, MISSING_DATE_RANGE) if present
     if semantic_result and getattr(semantic_result, "needs_clarification", False):
         sem_dict = semantic_result.to_dict()
         sem_clar = sem_dict.get("clarification") or {}
@@ -336,6 +336,15 @@ def plan_clarification(
             elif hasattr(reason, "value"):
                 # ClarificationReason enum
                 clarification_reason = reason.value
+            
+            # Extract missing_slots from clarification data and merge
+            # This ensures MISSING_DATE_RANGE properly normalizes missing slots
+            clar_data = sem_clar.get("data", {})
+            clar_missing_slots = clar_data.get("missing_slots", [])
+            if clar_missing_slots:
+                # Merge semantic clarification's missing_slots with intent resolver's
+                missing_slots = list(set(missing_slots + clar_missing_slots))
+            
             status = STATUS_NEEDS_CLARIFICATION
 
     # Check for ambiguous meridiem in time_issues FIRST (before decision layer)
@@ -375,6 +384,15 @@ def plan_clarification(
                 clarification_reason = decision_reason  # Use as-is if it matches enum
             status = STATUS_NEEDS_CLARIFICATION
 
+    # Check for MISSING_DATE_RANGE first (specific reason for weekday-only ranges)
+    # This takes priority over generic missing slot mapping
+    if clarification_reason == ClarificationReason.MISSING_DATE_RANGE.value:
+        # Ensure both start_date and end_date are in missing_slots
+        if "start_date" not in missing_slots:
+            missing_slots.append("start_date")
+        if "end_date" not in missing_slots:
+            missing_slots.append("end_date")
+    
     # Fallback: map missing slots to reasons
     if not clarification_reason and missing_slots:
         if "time" in missing_slots:
@@ -385,6 +403,9 @@ def plan_clarification(
             clarification_reason = ClarificationReason.MISSING_SERVICE.value
         elif "booking_id" in missing_slots:
             clarification_reason = ClarificationReason.MISSING_BOOKING_REFERENCE.value
+        elif "start_date" in missing_slots and "end_date" in missing_slots:
+            # If both start_date and end_date are missing, use MISSING_DATE_RANGE
+            clarification_reason = ClarificationReason.MISSING_DATE_RANGE.value
 
     return {
         "status": status,
@@ -626,13 +647,119 @@ def book():
     return resolve()
 
 
+@app.route("/notify_execution", methods=["POST"])
+def notify_execution():
+    """
+    Notify Luma about booking execution completion.
+
+    Core calls this endpoint after successfully executing a booking to update
+    the booking_lifecycle state to EXECUTED.
+
+    Request body:
+    {
+        "user_id": "user123",          // required
+        "booking_id": "ABC123",         // required
+        "booking_lifecycle": "EXECUTED", // required
+        "domain": "service"              // optional, default: "service"
+    }
+
+    Response:
+    {
+        "success": true
+    }
+    """
+    request_id = g.request_id if hasattr(g, 'request_id') else 'unknown'
+
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({
+                "success": False,
+                "error": "Request body required"
+            }), 400
+
+        user_id = data.get("user_id")
+        booking_id = data.get("booking_id")
+        lifecycle = data.get("booking_lifecycle")
+        domain = data.get("domain", "service")
+
+        if not user_id:
+            return jsonify({
+                "success": False,
+                "error": "user_id is required"
+            }), 400
+
+        if not booking_id:
+            return jsonify({
+                "success": False,
+                "error": "booking_id is required"
+            }), 400
+
+        if lifecycle != "EXECUTED":
+            return jsonify({
+                "success": False,
+                "error": f"booking_lifecycle must be 'EXECUTED', got '{lifecycle}'"
+            }), 400
+
+        if not memory_store:
+            logger.warning(
+                f"Memory store not initialized, cannot update lifecycle for user {user_id}",
+                extra={'request_id': request_id}
+            )
+            return jsonify({
+                "success": False,
+                "error": "Memory store not available"
+            }), 503
+
+        # Retrieve current memory state
+        memory_state = memory_store.get(user_id, domain)
+
+        if memory_state:
+            # Update lifecycle and booking_id
+            memory_state["booking_lifecycle"] = lifecycle
+            memory_state["booking_id"] = booking_id
+
+            # Persist updated state
+            memory_store.set(user_id, domain, memory_state,
+                             ttl=config.MEMORY_TTL)
+            logger.info(
+                f"Updated booking_lifecycle to EXECUTED for user {user_id}, booking_id={booking_id}",
+                extra={'request_id': request_id, 'booking_id': booking_id}
+            )
+        else:
+            # No memory state exists - create minimal state with lifecycle
+            new_state = {
+                "booking_id": booking_id,
+                "booking_lifecycle": lifecycle,
+                "last_updated": datetime.now(dt_timezone.utc).isoformat()
+            }
+            memory_store.set(user_id, domain, new_state, ttl=config.MEMORY_TTL)
+            logger.info(
+                f"Created new memory state with EXECUTED lifecycle for user {user_id}, booking_id={booking_id}",
+                extra={'request_id': request_id, 'booking_id': booking_id}
+            )
+
+        return jsonify({"success": True})
+
+    except Exception as e:  # noqa: BLE001
+        logger.error(
+            f"Error updating booking lifecycle: {str(e)}",
+            extra={'request_id': request_id},
+            exc_info=True
+        )
+        return jsonify({
+            "success": False,
+            "error": f"Internal error: {str(e)}"
+        }), 500
+
+
 @app.errorhandler(404)
 def not_found(error):  # noqa: ARG001, pylint: disable=unused-argument
     """Handle 404 errors."""
     return jsonify({
         "success": False,
         "error": "Endpoint not found",
-        "available_endpoints": ["/resolve", "/book (deprecated)", "/health", "/info"]
+        "available_endpoints": ["/resolve", "/book (deprecated)", "/notify_execution", "/health", "/info"]
     }), 404
 
 

@@ -283,7 +283,8 @@ class LumaPipeline:
         tenant_context: Optional[Dict[str, Any]] = None,
         booking_mode: Optional[str] = None,
         request_id: Optional[str] = None,
-        debug_mode: bool = False
+        debug_mode: bool = False,
+        memory_state: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Execute the full pipeline.
@@ -295,6 +296,7 @@ class LumaPipeline:
             tenant_context: Optional tenant context with aliases
             booking_mode: Optional booking mode override ("service" or "reservation")
             request_id: Optional request ID for logging
+            memory_state: Optional memory state for MODIFY_BOOKING lifecycle gating
             
         Returns:
             Dictionary with stage results:
@@ -352,10 +354,18 @@ class LumaPipeline:
             effective_booking_mode = tenant_context.get("booking_mode", "service") or "service"
         if not effective_booking_mode:
             effective_booking_mode = "service"
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(
+            f"[PIPELINE] Intent resolution: booking_mode_param={booking_mode}, "
+            f"tenant_context_booking_mode={tenant_context.get('booking_mode') if tenant_context and isinstance(tenant_context, dict) else None}, "
+            f"effective_booking_mode={effective_booking_mode}"
+        )
 
         with StageTimer(results["execution_trace"], "intent", request_id=request_id):
             intent, confidence = self.intent_resolver.resolve_intent(
-                text, extraction_result, booking_mode=effective_booking_mode
+                text, extraction_result, booking_mode=effective_booking_mode, memory_state=memory_state
             )
             intent_resp = self.intent_resolver._build_response(
                 intent, confidence, extraction_result

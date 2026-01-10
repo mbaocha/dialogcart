@@ -134,10 +134,12 @@ class CatalogCache:
         else:
             payload_raw = catalog_client.get_reservation(org_id) or {}
             payload = payload_raw.get("data", payload_raw) or {}
+            room_types = payload.get("room_types", [])
             combined = {
                 "catalog_last_updated_at": payload.get("catalog_last_updated_at"),
                 "services": [],
-                "room_types": payload.get("room_types", []),
+                "room_types": room_types,
+                "rooms": room_types,  # Alias for orchestrator compatibility (line 290)
                 "extras": payload.get("extras", []),
                 "fetched_at": _utc_now_iso(),
             }

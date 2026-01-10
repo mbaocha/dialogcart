@@ -10,7 +10,7 @@ This module orchestrates the conversation flow by:
 - Calling Luma API
 - Validating contracts
 - Branching on needs_clarification
-- Deciding outcome types (CLARIFY, BOOKING_CREATED, etc.)
+- Deciding outcomes based on plan status (NEEDS_CLARIFICATION, AWAITING_CONFIRMATION, READY)
 - Calling business execution functions
 
 Constraints:
@@ -31,14 +31,154 @@ from core.orchestration.luma_response_processor import (
     process_luma_response,
     build_clarify_outcome_from_reason
 )
+from core.routing.action_router import get_handler_action
 from core.orchestration.clients.booking_client import BookingClient
 from core.orchestration.clients.customer_client import CustomerClient
 from core.orchestration.clients.catalog_client import CatalogClient
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.cache.catalog_cache import catalog_cache
 from core.orchestration.cache.org_domain_cache import org_domain_cache
+from core.execution.config import get_execution_mode, EXECUTION_MODE_TEST
+from core.execution.test_backend import TestExecutionBackend
 
 logger = logging.getLogger(__name__)
+
+
+def _get_execution_backend(booking_client: BookingClient) -> Any:
+    """
+    Get the appropriate execution backend based on execution mode.
+
+    In test mode, returns TestExecutionBackend.
+    In production mode, returns the real booking_client.
+
+    Args:
+        booking_client: Real booking client instance
+
+    Returns:
+        Execution backend (TestExecutionBackend or booking_client)
+    """
+    if get_execution_mode() == EXECUTION_MODE_TEST:
+        return TestExecutionBackend
+    return booking_client
+
+
+def _invoke_workflow_after_execute(
+    intent_name: str,
+    outcome: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Invoke workflow after_execute hook if a workflow is registered for the intent.
+
+    This is an optional hook that allows workflows to observe and enrich outcomes
+    after successful execution. If no workflow is registered, the outcome is
+    returned unchanged.
+
+    Args:
+        intent_name: Intent name to look up workflow
+        outcome: Outcome dictionary with status "EXECUTED"
+
+    Returns:
+        Outcome dictionary (potentially enriched by workflow)
+    """
+    if not intent_name:
+        return outcome
+
+    from core.workflows import get_workflow
+
+    workflow = get_workflow(intent_name)
+    if workflow:
+        try:
+            # Ensure outcome has facts structure for workflow to inject data
+            if "facts" not in outcome:
+                outcome["facts"] = {}
+            if "context" not in outcome.get("facts", {}):
+                outcome.setdefault("facts", {})["context"] = {}
+
+            # Invoke workflow hook
+            enriched_outcome = workflow.after_execute(outcome)
+
+            logger.debug(
+                f"Workflow '{intent_name}' after_execute hook invoked and returned outcome"
+            )
+            return enriched_outcome
+        except Exception as e:  # noqa: BLE001
+            # Workflow errors should not break core flow
+            logger.warning(
+                f"Workflow '{intent_name}' after_execute hook raised exception: {e}. "
+                f"Returning original outcome."
+            )
+            return outcome
+
+    return outcome
+
+
+def _handle_non_core_intent(
+    luma_response: Dict[str, Any],
+    decision: Dict[str, Any],
+    user_id: str
+) -> Dict[str, Any]:
+    """
+    Handle non-core intents by passing them through as non-orchestrated signals.
+
+    Non-core intents (e.g., PAYMENT, CONFIRM_BOOKING, BOOKING_INQUIRY) are not
+    orchestrated by core but are passed through to preserve conversational continuity.
+    This enables workflow extensions to handle these intents in future steps.
+
+    This function wraps the Luma response and produces a valid outcome without
+    plan generation, execution, or confirmation gating.
+
+    Args:
+        luma_response: Original Luma API response
+        decision: Decision plan from process_luma_response
+        user_id: User identifier for logging
+
+    Returns:
+        Outcome dictionary with:
+        - success: True (not an error, just non-orchestrated)
+        - outcome.status: "NON_CORE_INTENT"
+        - outcome.intent_name: The non-core intent name
+        - outcome.facts: Facts container with slots, missing_slots, and context
+    """
+    intent_name = decision.get("intent_name", "")
+    facts = decision.get("facts", {})
+
+    # Ensure facts structure includes slots, missing_slots, and context
+    # Facts from decision should already have this structure, but ensure completeness
+    if not facts:
+        facts = {}
+
+    # Preserve slots from Luma response (decision.facts may already have this)
+    slots = luma_response.get("slots", {})
+    if slots:
+        facts.setdefault("slots", slots)
+
+    # Preserve missing_slots from Luma response
+    missing_slots = luma_response.get("missing_slots", [])
+    if missing_slots:
+        facts.setdefault("missing_slots", missing_slots)
+    elif "missing_slots" not in facts:
+        facts["missing_slots"] = []
+
+    # Preserve context from Luma response
+    context = luma_response.get("context")
+    if context:
+        facts.setdefault("context", context)
+    elif "context" not in facts:
+        facts["context"] = {}
+
+    logger.info(
+        f"Passing through non-core intent '{intent_name}' for user {user_id} "
+        f"(not orchestrated by core)"
+    )
+
+    return {
+        "success": True,
+        "outcome": {
+            "status": "NON_CORE_INTENT",
+            "intent_name": intent_name,
+            "facts": facts,
+        }
+    }
 
 
 def _get_org_id_from_env() -> int:
@@ -67,7 +207,8 @@ def handle_message(
     booking_client: Optional[BookingClient] = None,
     customer_client: Optional[CustomerClient] = None,
     catalog_client: Optional[CatalogClient] = None,
-    organization_client: Optional[OrganizationClient] = None
+    organization_client: Optional[OrganizationClient] = None,
+    verbose: bool = False
 ) -> Dict[str, Any]:
     """
     Handle a user message - stateless orchestration.
@@ -81,7 +222,7 @@ def handle_message(
        a. Get organization details
        b. Get or create customer
        c. Create booking
-    6. Return {success:true, outcome:{type:"BOOKING_CREATED"|"CLARIFY", ...}}
+    6. Return {success:true, outcome:{status:"EXECUTED"|"NEEDS_CLARIFICATION"|"AWAITING_CONFIRMATION", ...}}
 
     Args:
         user_id: User identifier
@@ -173,8 +314,14 @@ def handle_message(
                 if not canonical_key:
                     continue
                 alias_map[name.lower()] = canonical_key
+
+        # Always create tenant_context with booking_mode, even if no aliases
+        tenant_context = {}
         if alias_map:
-            tenant_context = {"aliases": alias_map}
+            tenant_context["aliases"] = alias_map
+        # Always include booking_mode in tenant_context so Luma can determine intent correctly
+        # booking_mode should match domain: "service" for appointments, "reservation" for reservations
+        tenant_context["booking_mode"] = derived_domain
 
     # Step 2: Call Luma
     # Build and log Luma payload
@@ -186,14 +333,19 @@ def handle_message(
     }
     if tenant_context:
         luma_payload["tenant_context"] = tenant_context
+    else:
+        logger.warning(
+            f"[ORCHESTRATOR] No tenant_context to send to Luma (domain={derived_domain})"
+        )
 
     # Log sentence passed to Luma
-    print(f"\n[LUMA REQUEST]")
-    print(f"  Sentence: {text}")
-    print(
-        f"  Full payload: {json.dumps(luma_payload, indent=2, ensure_ascii=False)}")
     logger.info("Luma request payload: %s", json.dumps(
         luma_payload, ensure_ascii=False))
+    if verbose:
+        print(f"\n[LUMA REQUEST]")
+        print(f"  Sentence: {text}")
+        print(
+            f"  Full payload: {json.dumps(luma_payload, indent=2, ensure_ascii=False)}")
 
     try:
         luma_response = luma_client.resolve(
@@ -205,11 +357,12 @@ def handle_message(
         )
 
         # Log raw Luma API response
-        print(f"\n[LUMA RESPONSE]")
-        print(
-            f"  Raw response: {json.dumps(luma_response, indent=2, ensure_ascii=False)}")
         logger.info("Luma response: %s", json.dumps(
             luma_response, ensure_ascii=False))
+        if verbose:
+            print(f"\n[LUMA RESPONSE]")
+            print(
+                f"  Raw response: {json.dumps(luma_response, indent=2, ensure_ascii=False)}")
 
     except UpstreamError as e:
         logger.error(f"Luma API error for user {user_id}: {str(e)}")
@@ -244,20 +397,195 @@ def handle_message(
     # Step 4: Process Luma response (interpret and decide CLARIFY vs EXECUTE)
     decision = process_luma_response(luma_response, derived_domain, user_id)
 
-    if decision["type"] == "CLARIFY":
-        return decision["outcome"]
+    # Log decision
+    logger.debug("Decision: %s", json.dumps(
+        decision, ensure_ascii=False, default=str))
+    if verbose:
+        print(f"\n[CORE DECISION]")
+        print(
+            f"  Decision: {json.dumps(decision, indent=2, ensure_ascii=False, default=str)}")
 
-    if decision["type"] == "ERROR":
+    # Extract decision plan
+    plan = decision.get("plan", {})
+    plan_status = plan.get("status", "READY")
+    allowed_actions = plan.get("allowed_actions", [])
+    blocked_actions = plan.get("blocked_actions", [])
+    awaiting = plan.get("awaiting")
+
+    # Handle AWAITING_CONFIRMATION status
+    if plan_status == "AWAITING_CONFIRMATION":
+        # Return confirmation prompt outcome
+        booking = decision.get("booking", {})
+        facts = decision.get("facts", {})
         return {
-            "success": False,
-            "error": decision["error"],
-            "message": decision["message"]
+            "success": True,
+            "outcome": {
+                "status": "AWAITING_CONFIRMATION",
+                "awaiting": awaiting,
+                "booking": booking,
+                "allowed_actions": allowed_actions,
+                "blocked_actions": blocked_actions,
+                "facts": facts
+            }
         }
 
-    # Step 5: Execute business flow (decision["type"] == "EXECUTE")
-    action_name = decision["action_name"]
+    # Handle NEEDS_CLARIFICATION status
+    if plan_status == "NEEDS_CLARIFICATION":
+        # Check if there's an outcome (clarification) or error
+        if "outcome" in decision:
+            # decision["outcome"] is already a complete outcome dict with success/outcome structure
+            # from _build_clarify_outcome, so return it directly
+            return decision["outcome"]
+        if "error" in decision:
+            return {
+                "success": False,
+                "error": decision["error"],
+                "message": decision.get("message", "An error occurred")
+            }
+        # Fallback: return error if no outcome or error provided
+        return {
+            "success": False,
+            "error": "needs_clarification",
+            "message": "Clarification needed but no outcome provided"
+        }
+
+    # Step 5: Execute business flow (plan_status == "READY")
+    # Determine which action to execute from the plan
+    # Priority: commit action if allowed, otherwise first allowed fallback
+    action_to_execute = None
+
+    # Get commit action from plan (if any allowed action is a commit action)
+    intent_name = decision.get("intent_name", "")
+
+    # Enforce core intent boundary: pass through non-core intents without orchestration
+    if intent_name:
+        from core.intents.base_intents import is_core_intent
+        if not is_core_intent(intent_name):
+            # Pass through non-core intents as non-orchestrated signals
+            # This preserves conversational continuity and enables workflow extensions
+            return _handle_non_core_intent(luma_response, decision, user_id)
+
+    from core.orchestration.luma_response_processor import _load_intent_execution_config
+    intent_configs = _load_intent_execution_config()
+    intent_config = intent_configs.get(intent_name, {})
+    commit_config = intent_config.get("commit", {})
+    commit_action = commit_config.get(
+        "action") if isinstance(commit_config, dict) else None
+
+    # Prefer commit action if it's allowed
+    if commit_action and commit_action in allowed_actions:
+        action_to_execute = commit_action
+    elif allowed_actions:
+        # Use first allowed action (fallback)
+        action_to_execute = allowed_actions[0]
+    else:
+        # No allowed actions - this should not happen for READY status, but handle gracefully
+        logger.warning(
+            f"No allowed actions in plan for user {user_id}. "
+            f"Status: {plan_status}, Blocked: {blocked_actions}"
+        )
+        return {
+            "success": False,
+            "error": "no_allowed_actions",
+            "message": "No actions are allowed to execute at this time"
+        }
+
+    # Map action to handler
+    handler_action = get_handler_action(action_to_execute)
+    if not handler_action:
+        # Fallback to legacy action_name for backward compatibility
+        handler_action = decision.get("action_name")
+        if not handler_action:
+            logger.error(
+                f"Could not map action {action_to_execute} to handler for user {user_id}"
+            )
+            return {
+                "success": False,
+                "error": "unsupported_action",
+                "message": f"Action {action_to_execute} is not supported"
+            }
+
+    # Verify action is allowed (safety check)
+    if action_to_execute in blocked_actions:
+        logger.error(
+            f"Attempted to execute blocked action {action_to_execute} for user {user_id}"
+        )
+        return {
+            "success": False,
+            "error": "action_blocked",
+            "message": f"Action {action_to_execute} is blocked"
+        }
+
+    action_name = handler_action
     booking = decision["booking"]
-    booking_type = booking.get("booking_type", "service")
+
+    # Determine booking_type from intent_name if not explicitly set in booking
+    # CREATE_RESERVATION -> "reservation", CREATE_APPOINTMENT -> "service"
+    booking_type = booking.get("booking_type")
+    if not booking_type:
+        if intent_name == "CREATE_RESERVATION":
+            booking_type = "reservation"
+        elif intent_name == "CREATE_APPOINTMENT":
+            booking_type = "service"
+        else:
+            booking_type = "service"  # Default fallback
+    booking["booking_type"] = booking_type  # Ensure it's set in booking object
+
+    # Extract service and datetime_range from facts.slots if missing in booking
+    # Luma may provide these in slots instead of booking object
+    facts = decision.get("facts", {})
+    slots = facts.get("slots", {})
+
+    if not booking.get("services") and booking_type == "service":
+        service_id = slots.get("service_id")
+        if service_id:
+            # Convert service_id string to services array format
+            booking["services"] = [{"text": service_id}]
+            logger.info(
+                f"Extracted service from facts.slots.service_id: {service_id}")
+
+    # For reservations, extract service_id as room identifier
+    if not booking.get("services") and booking_type == "reservation":
+        service_id = slots.get("service_id")
+        if service_id:
+            booking["services"] = [{"text": service_id}]
+            logger.info(
+                f"Extracted room/service from facts.slots.service_id: {service_id}")
+
+    # Extract datetime_range from facts.slots if missing in booking
+    if not booking.get("datetime_range"):
+        # Try datetime_range first
+        if slots.get("datetime_range"):
+            datetime_range = slots.get("datetime_range")
+            if datetime_range:
+                booking["datetime_range"] = datetime_range
+                logger.info(
+                    f"Extracted datetime_range from facts.slots: {datetime_range}")
+        # Try date_range (with start_date/end_date) and convert to datetime_range format
+        elif slots.get("date_range"):
+            date_range = slots.get("date_range")
+            if isinstance(date_range, dict):
+                start_date = date_range.get(
+                    "start_date") or date_range.get("start")
+                end_date = date_range.get("end_date") or date_range.get("end")
+                if start_date and end_date:
+                    # Convert date_range to datetime_range format
+                    # For reservations, dates are typically date-only, so we'll use them as-is
+                    # and let the execution backend handle time if needed
+                    booking["datetime_range"] = {
+                        "start": start_date,
+                        "end": end_date
+                    }
+                    logger.info(
+                        f"Converted date_range to datetime_range: start={start_date}, end={end_date}")
+
+    # Log processed booking
+    logger.debug("Processed booking: %s", json.dumps(
+        booking, ensure_ascii=False, default=str))
+    if verbose:
+        print(f"\n[CORE PROCESSED BOOKING]")
+        print(
+            f"  Processed booking: {json.dumps(booking, indent=2, ensure_ascii=False, default=str)}")
 
     # Resolve service item_id using catalog discovery (no org details scanning)
     def _resolve_service_id(services_from_luma: list, catalog_services_list: list[Dict[str, Any]]) -> Dict[str, Any]:
@@ -520,12 +848,12 @@ def handle_message(
             booking_type_resp = booking_data.get(
                 "type") if isinstance(booking_data, dict) else None
 
-            return {
+            outcome = {
                 "success": True,
                 "outcome": {
-                    "type": "BOOKING_CREATED",
+                    "status": "EXECUTED",
                     "booking_code": booking_code_extracted,
-                    "status": status_extracted,
+                    "booking_status": status_extracted,
                     "starts_at": starts_at,
                     "ends_at": ends_at,
                     "total_amount": total_amount,
@@ -533,6 +861,31 @@ def handle_message(
                     "booking_type": booking_type_resp,
                 }
             }
+
+            # Invoke workflow after_execute hook if registered
+            outcome["outcome"] = _invoke_workflow_after_execute(
+                intent_name, outcome["outcome"]
+            )
+
+            # Notify Luma about execution completion (for lifecycle tracking)
+            if booking_code_extracted and luma_client:
+                try:
+                    luma_client.notify_execution(
+                        user_id=user_id,
+                        booking_id=booking_code_extracted,
+                        domain=derived_domain
+                    )
+                    logger.info(
+                        f"Notified Luma about execution completion for user {user_id}, booking_id={booking_code_extracted}"
+                    )
+                except Exception as e:  # noqa: BLE001
+                    # Log but don't fail the request - lifecycle update is non-critical
+                    logger.warning(
+                        f"Failed to notify Luma about execution: {e}",
+                        exc_info=True
+                    )
+
+            return outcome
 
         elif action_name == "booking.modify":
             # Expect a booking reference and updates
@@ -555,7 +908,9 @@ def handle_message(
                 raise ValueError(
                     "No updates supplied for booking modification")
 
-            api_response = booking_client.update_booking(
+            # Route execution by mode
+            execution_backend = _get_execution_backend(booking_client)
+            api_response = execution_backend.update_booking(
                 booking_code=booking_code,
                 organization_id=resolved_org_id,
                 updates=updates,
@@ -571,15 +926,22 @@ def handle_message(
                 or "updated"
             )
 
-            return {
+            outcome = {
                 "success": True,
                 "outcome": {
-                    "type": "BOOKING_MODIFIED",
+                    "status": "EXECUTED",
                     "booking_code": booking_code,
-                    "status": status_extracted,
+                    "booking_status": status_extracted,
                     "booking": booking_data,
                 },
             }
+
+            # Invoke workflow after_execute hook if registered
+            outcome["outcome"] = _invoke_workflow_after_execute(
+                intent_name, outcome["outcome"]
+            )
+
+            return outcome
 
         elif action_name == "booking.cancel":
             # Extract booking_code from booking payload
@@ -595,7 +957,9 @@ def handle_message(
             refund_method = booking.get("refund_method")
             notify_customer = booking.get("notify_customer")
 
-            api_response = booking_client.cancel_booking(
+            # Route execution by mode
+            execution_backend = _get_execution_backend(booking_client)
+            api_response = execution_backend.cancel_booking(
                 booking_code=booking_code,
                 organization_id=resolved_org_id,
                 cancellation_type=cancellation_type,
@@ -607,33 +971,49 @@ def handle_message(
 
             logger.info(
                 f"Successfully cancelled booking {booking_code} for user {user_id}")
-            return {
+            outcome = {
                 "success": True,
                 "outcome": {
-                    "type": "BOOKING_CANCELLED",
+                    "status": "EXECUTED",
                     "booking_code": booking_code,
-                    "status": api_response.get("status", "cancelled")
+                    "booking_status": api_response.get("status", "cancelled")
                 }
             }
+
+            # Invoke workflow after_execute hook if registered
+            outcome["outcome"] = _invoke_workflow_after_execute(
+                intent_name, outcome["outcome"]
+            )
+
+            return outcome
         elif action_name == "booking.inquiry":
             booking_code = booking.get("booking_code") or booking.get("code")
             if not booking_code:
                 raise ValueError(
                     "booking_code is required for booking inquiry")
 
-            api_response = booking_client.get_booking(booking_code)
+            # Route execution by mode
+            execution_backend = _get_execution_backend(booking_client)
+            api_response = execution_backend.get_booking(booking_code)
             booking_data = api_response.get("booking")
             if isinstance(api_response.get("data"), dict) and isinstance(api_response["data"].get("booking"), dict):
                 booking_data = api_response["data"]["booking"]
 
-            return {
+            outcome = {
                 "success": True,
                 "outcome": {
-                    "type": "BOOKING_INQUIRY",
+                    "status": "EXECUTED",
                     "booking_code": booking_code,
                     "booking": booking_data or api_response,
                 },
             }
+
+            # Invoke workflow after_execute hook if registered
+            outcome["outcome"] = _invoke_workflow_after_execute(
+                intent_name, outcome["outcome"]
+            )
+
+            return outcome
         else:
             raise UnsupportedIntentError(
                 f"Action {action_name} not implemented")
@@ -780,8 +1160,19 @@ def _execute_booking_creation(
             service_canonical = first_service.get(
                 "canonical") or first_service.get("text")
 
+    # In test mode, inject missing execution-required fields before validation
+    if get_execution_mode() == EXECUTION_MODE_TEST:
+        injected = TestExecutionBackend.inject_missing_execution_fields(
+            booking_type=booking_type,
+            item_id=item_id,
+            duration_minutes=None  # Will be computed from catalog or injected if missing
+        )
+        item_id = injected["item_id"]
+        # duration_minutes will be handled below for service bookings
+
     # If service booking and still missing item_id, fail-safe clarification should have already occurred.
     # Retain guardrail error for non-service flows.
+    # Note: In test mode, item_id should have been injected above
     if booking_type == "service" and not item_id:
         raise ValueError(
             f"item_id is required for booking creation. Service '{service_canonical}' could not be resolved.")
@@ -829,9 +1220,21 @@ def _execute_booking_creation(
                 except Exception:
                     duration_minutes = None
 
+        # In test mode, inject missing duration if not found in catalog
         if duration_minutes is None:
-            raise ValueError(
-                "duration is required for service bookings and was not found in catalog")
+            if get_execution_mode() == EXECUTION_MODE_TEST:
+                injected = TestExecutionBackend.inject_missing_execution_fields(
+                    booking_type="service",
+                    item_id=item_id,
+                    duration_minutes=None
+                )
+                duration_minutes = injected["duration_minutes"]
+                logger.debug(
+                    f"[TEST MODE] Injected missing duration_minutes: {duration_minutes} for service booking"
+                )
+            else:
+                raise ValueError(
+                    "duration is required for service bookings and was not found in catalog")
 
         try:
             start_dt = datetime.fromisoformat(start_time)
@@ -848,7 +1251,9 @@ def _execute_booking_creation(
         logger.info(
             f"Creating service booking: org_id={organization_id}, customer_id={customer_id}, item_id={item_id}, start={start_time}, end={end_time}, duration={duration_minutes}m")
 
-        return booking_client.create_booking(
+        # Route execution by mode
+        execution_backend = _get_execution_backend(booking_client)
+        return execution_backend.create_booking(
             organization_id=organization_id,
             customer_id=customer_id,
             booking_type="service",
@@ -875,11 +1280,25 @@ def _execute_booking_creation(
         extras = resolved_extras if resolved_extras is not None else booking.get(
             "extras")
 
-        return booking_client.create_booking(
+        # In test mode, inject missing item_id if both room_type_id and item_id are missing
+        final_item_id = room_type_id or item_id
+        if get_execution_mode() == EXECUTION_MODE_TEST and not final_item_id:
+            injected = TestExecutionBackend.inject_missing_execution_fields(
+                booking_type="reservation",
+                item_id=None
+            )
+            final_item_id = injected["item_id"]
+            logger.debug(
+                f"[TEST MODE] Injected missing item_id: {final_item_id} for reservation booking"
+            )
+
+        # Route execution by mode
+        execution_backend = _get_execution_backend(booking_client)
+        return execution_backend.create_booking(
             organization_id=organization_id,
             customer_id=customer_id,
             booking_type="reservation",
-            item_id=room_type_id or item_id,
+            item_id=final_item_id,
             check_in=check_in,
             check_out=check_out,
             guests=guests,

@@ -3,12 +3,25 @@ End-to-End Test Script for Orchestrator
 
 Simple script to test the orchestrator with real Luma and business API calls.
 Make sure Luma and internal APIs are running before executing this script.
+
+Usage:
+    # Run all 10 examples
+    python3 -m core.tests.orchestration.test_orchestrator_e2e
+
+    # Run a specific example (1-10)
+    python3 -m core.tests.orchestration.test_orchestrator_e2e 4
 """
 
+from core.orchestration.orchestrator import handle_message
+from core.orchestration.clients.luma_client import LumaClient
 import json
 import os
 import sys
 from pathlib import Path
+from typing import Dict, Any, Optional
+
+# Set execution mode to test for deterministic E2E tests
+os.environ["CORE_EXECUTION_MODE"] = "test"
 
 # Add src/ to Python path so we can import core modules
 # __file__ = src/core/tests/orchestration/test_orchestrator_e2e.py
@@ -17,14 +30,13 @@ src_path = Path(__file__).parent.parent.parent.parent
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-from core.orchestration.orchestrator import handle_message
 
 # Load environment variables
 try:
     from dotenv import load_dotenv
     # Project root is two levels up from tests/orchestration/ (where this script now runs from)
     project_root = Path(__file__).parent.parent.parent.parent
-    # Also check for .env in src/core/ 
+    # Also check for .env in src/core/
     core_env_file = Path(__file__).parent.parent.parent / ".env"
     env_file = project_root / ".env"
     env_local_file = project_root / ".env.local"
@@ -93,146 +105,353 @@ except Exception as e:
     print(f"DEBUG ENV: Error loading .env files: {e}")
 
 
-def test_resolved_booking():
-    """Test a resolved booking flow."""
-    print("\n" + "="*60)
-    print("TEST: Resolved Booking Flow")
-    print("="*60)
+# Define 10 test examples
+# Each example explicitly defines tenant aliases (like followup_scenarios.py and booking_scenarios.py)
+TEST_EXAMPLES = [
+    {
+        "name": "Resolved Booking - Full Details",
+        "description": "Complete booking with explicit tenant service name, date, and time",
+        "text": "book premium haircut tomorrow at 2pm",
+        "user_id": "test_user_001",
+        "aliases": {
+            "premium haircut": "beauty_and_wellness.haircut",
+            "flexi haircut + prunning": "beauty_and_wellness.haircut"
+        }
+    },
+    {
+        "name": "Partial Booking - Missing Time",
+        "description": "Explicit service and date provided, but time is missing",
+        "text": "book premium haircut tomorrow",
+        "user_id": "test_user_002",
+        "aliases": {
+            "premium haircut": "beauty_and_wellness.haircut",
+            "flexi haircut + prunning": "beauty_and_wellness.haircut"
+        }
+    },
+    {
+        "name": "Partial Booking - Missing Date",
+        "description": "Explicit service and time provided, but date is missing",
+        "text": "book premium haircut at 2pm",
+        "user_id": "test_user_003",
+        "aliases": {
+            "premium haircut": "beauty_and_wellness.haircut",
+            "flexi haircut + prunning": "beauty_and_wellness.haircut"
+        }
+    },
+    {
+        "name": "Ambiguous Service - Multiple Matches",
+        "description": "Generic service name matches multiple options (should trigger MULTIPLE_MATCHES)",
+        "text": "book haircut tomorrow at 2pm",
+        "user_id": "test_user_004",
+        "aliases": {
+            "premium haircut": "beauty_and_wellness.haircut",
+            "flexi haircut + prunning": "beauty_and_wellness.haircut"
+        }
+    },
+    {
+        "name": "Missing Service",
+        "description": "Only date and time provided, service is missing",
+        "text": "book tomorrow at 2pm",
+        "user_id": "test_user_005",
+        "aliases": {
+            "premium haircut": "beauty_and_wellness.haircut",
+            "flexi haircut + prunning": "beauty_and_wellness.haircut"
+        }
+    },
+    {
+        "name": "Vague Time Reference",
+        "description": "Explicit service and date provided with vague time",
+        "text": "book premium haircut tomorrow afternoon",
+        "user_id": "test_user_006",
+        "aliases": {
+            "premium haircut": "beauty_and_wellness.haircut",
+            "flexi haircut + prunning": "beauty_and_wellness.haircut"
+        }
+    },
+    {
+        "name": "Complex Booking Request",
+        "description": "Multiple details with natural language using explicit service",
+        "text": "I'd like to book a premium haircut next Friday at 3:30pm",
+        "user_id": "test_user_007",
+        "aliases": {
+            "premium haircut": "beauty_and_wellness.haircut",
+            "flexi haircut + prunning": "beauty_and_wellness.haircut"
+        }
+    },
+    {
+        "name": "Minimal Request",
+        "description": "Only generic service name provided (triggers ambiguity)",
+        "text": "book haircut",
+        "user_id": "test_user_008",
+        "aliases": {
+            "premium haircut": "beauty_and_wellness.haircut",
+            "flexi haircut + prunning": "beauty_and_wellness.haircut"
+        }
+    },
+    {
+        "name": "Weekday Reference",
+        "description": "Using weekday name with explicit service",
+        "text": "book premium haircut on Monday at 10am",
+        "user_id": "test_user_009",
+        "aliases": {
+            "premium haircut": "beauty_and_wellness.haircut",
+            "flexi haircut + prunning": "beauty_and_wellness.haircut"
+        }
+    },
+    {
+        "name": "Time Range Request",
+        "description": "Request with time range using explicit service",
+        "text": "book premium haircut tomorrow between 2pm and 4pm",
+        "user_id": "test_user_010",
+        "aliases": {
+            "premium haircut": "beauty_and_wellness.haircut",
+            "flexi haircut + prunning": "beauty_and_wellness.haircut"
+        }
+    }
+]
 
-    # Load customer details from environment
+
+def get_customer_details() -> Dict[str, Optional[Any]]:
+    """Load customer details from environment variables."""
     phone_number = os.getenv("TEST_CUSTOMER_PHONE")
     email = os.getenv("TEST_CUSTOMER_EMAIL")
     customer_id_str = os.getenv("TEST_CUSTOMER_ID")
     customer_id = int(customer_id_str) if customer_id_str else None
 
-    # Debug: Print what was loaded
-    print(
-        f"DEBUG: customer_id_str={customer_id_str}, customer_id={customer_id}")
-    print(f"DEBUG: phone_number={phone_number}, email={email}")
+    return {
+        "phone_number": phone_number,
+        "email": email,
+        "customer_id": customer_id
+    }
 
-    if customer_id:
-        print(f"Using test customer ID: {customer_id}")
-    elif phone_number or email:
-        print(f"Using test customer: phone={phone_number}, email={email}")
-    else:
-        print("WARNING: No customer_id, phone, or email found in environment")
+
+class TestLumaClient(LumaClient):
+    """Custom LumaClient that injects tenant_context from test example aliases."""
+
+    def __init__(self, test_aliases: Optional[Dict[str, str]] = None):
+        """Initialize with test aliases to inject."""
+        super().__init__()
+        self.test_aliases = test_aliases or {}
+
+    def resolve(
+        self,
+        user_id: str,
+        text: str,
+        domain: str = "service",
+        timezone: str = "UTC",
+        tenant_context: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
+        """
+        Override resolve to inject test aliases into tenant_context.
+
+        Test aliases completely override any tenant_context from orchestrator.
+        """
+        # Build tenant_context from test aliases (completely override)
+        if self.test_aliases:
+            tenant_context = {"aliases": self.test_aliases}
+
+        return super().resolve(user_id, text, domain, timezone, tenant_context)
+
+
+def run_example(example_num: int, example: Dict[str, Any], verbose: bool = True) -> Dict[str, Any]:
+    """
+    Run a single test example.
+
+    Args:
+        example_num: Example number (1-based)
+        example: Example dictionary with name, description, text, user_id
+        verbose: Whether to print detailed output
+
+    Returns:
+        Result dictionary from handle_message
+    """
+    if verbose:
+        print("\n" + "="*60)
+        print(f"EXAMPLE {example_num}: {example['name']}")
+        print("="*60)
+        print(f"Description: {example['description']}")
+        print(f"User ID: {example['user_id']}")
+        print(f"Text: {example['text']}")
+        print("-"*60)
+
+    customer_details = get_customer_details()
+
+    if verbose and example_num == 1:
+        # Print customer details only for first example
+        if customer_details['customer_id']:
+            print(f"Using test customer ID: {customer_details['customer_id']}")
+        elif customer_details['phone_number'] or customer_details['email']:
+            print(
+                f"Using test customer: phone={customer_details['phone_number']}, email={customer_details['email']}")
+        else:
+            print("WARNING: No customer_id, phone, or email found in environment")
+
+    # Create custom LumaClient with test aliases if provided
+    test_aliases = example.get("aliases")
+    luma_client = None
+    if test_aliases:
+        luma_client = TestLumaClient(test_aliases=test_aliases)
+        if verbose:
+            print(f"Using test aliases: {test_aliases}")
 
     result = handle_message(
-        user_id="test_user_123",
-        text="book haircut tomorrow at 2pm",
+        user_id=example['user_id'],
+        text=example['text'],
         domain="service",
         timezone="UTC",
-        phone_number=phone_number,
-        email=email,
-        customer_id=customer_id
+        phone_number=customer_details['phone_number'],
+        email=customer_details['email'],
+        customer_id=customer_details['customer_id'],
+        luma_client=luma_client
     )
 
-    print("\nResult:")
-    print(json.dumps(result, indent=2))
+    if verbose:
+        print("\nResult:")
+        print(json.dumps(result, indent=2))
 
-    if result.get("success"):
-        outcome = result.get("outcome", {})
-        if outcome.get("type") == "BOOKING_CREATED":
-            print("\n[SUCCESS] Booking created!")
-            print(f"   Booking Code: {outcome.get('booking_code')}")
-            print(f"   Status: {outcome.get('status')}")
-        elif outcome.get("type") == "CLARIFY":
-            print("\n[CLARIFICATION] More info needed")
-            print(f"   Template: {outcome.get('template_key')}")
-    else:
-        print(f"\n[ERROR] {result.get('error')}")
-        print(f"   Message: {result.get('message')}")
+        if result.get("success"):
+            outcome = result.get("outcome", {})
+            if outcome.get("type") == "BOOKING_CREATED":
+                print("\n[SUCCESS] Booking created!")
+                print(f"   Booking Code: {outcome.get('booking_code')}")
+                print(f"   Status: {outcome.get('status')}")
+            elif outcome.get("type") == "CLARIFY":
+                print("\n[CLARIFICATION] More info needed")
+                print(f"   Template: {outcome.get('template_key')}")
+                data = outcome.get('data', {})
+                if data.get('missing'):
+                    print(f"   Missing: {data.get('missing')}")
+                if data.get('ambiguous'):
+                    print(f"   Ambiguous: {data.get('ambiguous')}")
+                if data.get('reason'):
+                    print(f"   Reason: {data.get('reason')}")
+        else:
+            print(f"\n[ERROR] {result.get('error')}")
+            print(f"   Message: {result.get('message')}")
+
+    return result
 
 
-def test_partial_booking():
-    """Test a partial booking (clarification) flow."""
+def run_all_examples(verbose: bool = True) -> None:
+    """Run all test examples."""
     print("\n" + "="*60)
-    print("TEST: Partial Booking Flow (Clarification)")
+    print("RUNNING ALL TEST EXAMPLES")
     print("="*60)
+    print(f"Total examples: {len(TEST_EXAMPLES)}")
 
-    # Load customer details from environment
-    phone_number = os.getenv("TEST_CUSTOMER_PHONE")
-    email = os.getenv("TEST_CUSTOMER_EMAIL")
-    customer_id_str = os.getenv("TEST_CUSTOMER_ID")
-    customer_id = int(customer_id_str) if customer_id_str else None
+    results = []
+    for i, example in enumerate(TEST_EXAMPLES, start=1):
+        try:
+            result = run_example(i, example, verbose=verbose)
+            results.append({
+                "example_num": i,
+                "name": example['name'],
+                "success": result.get("success", False),
+                "outcome_type": result.get("outcome", {}).get("type", "UNKNOWN")
+            })
+        except Exception as e:
+            print(f"\n[ERROR] Example {i} failed with exception: {e}")
+            results.append({
+                "example_num": i,
+                "name": example['name'],
+                "success": False,
+                "error": str(e)
+            })
 
-    result = handle_message(
-        user_id="test_user_456",
-        text="book haircut",
-        domain="service",
-        timezone="UTC",
-        phone_number=phone_number,
-        email=email,
-        customer_id=customer_id
-    )
-
-    print("\nResult:")
-    print(json.dumps(result, indent=2))
-
-    if result.get("success"):
-        outcome = result.get("outcome", {})
-        if outcome.get("type") == "CLARIFY":
-            print("\n[SUCCESS] Clarification returned")
-            print(f"   Template: {outcome.get('template_key')}")
-    else:
-        print(f"\n[ERROR] {result.get('error')}")
-        print(f"   Message: {result.get('message')}")
-
-
-def test_custom_message(user_id: str, text: str):
-    """Test with a custom message."""
+    # Print summary
     print("\n" + "="*60)
-    print("TEST: Custom Message")
+    print("SUMMARY")
     print("="*60)
-    print(f"User ID: {user_id}")
-    print(f"Text: {text}")
+    for result in results:
+        status = "✓" if result['success'] else "✗"
+        outcome = result.get('outcome_type', result.get('error', 'UNKNOWN'))
+        print(
+            f"{status} Example {result['example_num']:2d}: {result['name']:<40} -> {outcome}")
 
-    # Load customer details from environment
-    phone_number = os.getenv("TEST_CUSTOMER_PHONE")
-    email = os.getenv("TEST_CUSTOMER_EMAIL")
-    customer_id_str = os.getenv("TEST_CUSTOMER_ID")
-    customer_id = int(customer_id_str) if customer_id_str else None
-
-    result = handle_message(
-        user_id=user_id,
-        text=text,
-        domain="service",
-        timezone="UTC",
-        phone_number=phone_number,
-        email=email,
-        customer_id=customer_id
-    )
-
-    print("\nResult:")
-    print(json.dumps(result, indent=2))
+    successful = sum(1 for r in results if r['success'])
+    print(f"\nTotal: {successful}/{len(results)} successful")
 
 
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Test dialogcart-core orchestrator")
+        description="Test dialogcart-core orchestrator with 10 examples",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Run all 10 examples
+  python3 -m core.tests.orchestration.test_orchestrator_e2e
+
+  # Run a specific example (1-10)
+  python3 -m core.tests.orchestration.test_orchestrator_e2e 4
+
+  # Run with minimal output
+  python3 -m core.tests.orchestration.test_orchestrator_e2e --quiet
+        """
+    )
+    parser.add_argument(
+        "example_num",
+        nargs="?",
+        type=int,
+        help="Example number to run (1-10). If not provided, runs all examples."
+    )
+    parser.add_argument(
+        "--quiet", "-q",
+        action="store_true",
+        help="Minimal output (only summary)"
+    )
+    # Keep backward compatibility
     parser.add_argument(
         "--test",
         choices=["resolved", "partial", "custom"],
-        default="resolved",
-        help="Which test to run"
+        help="Legacy: Which test to run (deprecated, use example_num instead)"
     )
-    parser.add_argument("--user-id", default="test_user_123",
-                        help="User ID for custom test")
-    parser.add_argument("--text", help="Message text for custom test")
+    parser.add_argument("--user-id", help="User ID for custom test (legacy)")
+    parser.add_argument("--text", help="Message text for custom test (legacy)")
 
     args = parser.parse_args()
 
-    if args.test == "resolved":
-        test_resolved_booking()
-    elif args.test == "partial":
-        test_partial_booking()
-    elif args.test == "custom":
-        if not args.text:
-            print("Error: --text is required for custom test")
+    verbose = not args.quiet
+
+    # Handle positional argument (example number)
+    if args.example_num is not None:
+        if args.example_num < 1 or args.example_num > len(TEST_EXAMPLES):
+            print(
+                f"Error: Example number must be between 1 and {len(TEST_EXAMPLES)}")
             sys.exit(1)
-        test_custom_message(args.user_id, args.text)
+        example = TEST_EXAMPLES[args.example_num - 1]
+        run_example(args.example_num, example, verbose=verbose)
+    # Handle legacy --test argument
+    elif args.test:
+        if args.test == "resolved":
+            example = TEST_EXAMPLES[0]  # First example is resolved booking
+            run_example(1, example, verbose=verbose)
+        elif args.test == "partial":
+            example = TEST_EXAMPLES[1]  # Second example is partial booking
+            run_example(2, example, verbose=verbose)
+        elif args.test == "custom":
+            if not args.text:
+                print("Error: --text is required for custom test")
+                sys.exit(1)
+            print("\n" + "="*60)
+            print("TEST: Custom Message")
+            print("="*60)
+            customer_details = get_customer_details()
+            result = handle_message(
+                user_id=args.user_id or "test_user_custom",
+                text=args.text,
+                domain="service",
+                timezone="UTC",
+                phone_number=customer_details['phone_number'],
+                email=customer_details['email'],
+                customer_id=customer_details['customer_id']
+            )
+            print("\nResult:")
+            print(json.dumps(result, indent=2))
+    # Default: run all examples
+    else:
+        run_all_examples(verbose=verbose)
 
     print("\n" + "="*60)
     print("Test completed!")

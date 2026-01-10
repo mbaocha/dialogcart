@@ -41,6 +41,7 @@ from ..extraction.entity_loading import (
 )
 from ..config.core import CREATE_RESERVATION, STATUS_READY
 from ..config.temporal import (
+    ALLOW_BARE_WEEKDAY_BINDING,
     APPOINTMENT_TEMPORAL_TYPE,
     DateMode,
     RESERVATION_TEMPORAL_TYPE,
@@ -753,6 +754,7 @@ def _bind_single_date(date_str: str, now: datetime, tz: Any) -> Optional[datetim
     date_str_lower = date_str.lower().strip()
 
     # Handle "<weekday>" (bare), "this <weekday>", "next <weekday>"
+    # Guard: Do not bind bare weekdays unless ALLOW_BARE_WEEKDAY_BINDING is True
     weekday_map = _get_weekday_to_number()
     match = re.search(
         r"\b(this|next)?\s*(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
@@ -760,6 +762,9 @@ def _bind_single_date(date_str: str, now: datetime, tz: Any) -> Optional[datetim
     )
     if match:
         modifier, weekday_str = match.group(1), match.group(2)
+        # Block bare weekday binding if not allowed
+        if not modifier and not ALLOW_BARE_WEEKDAY_BINDING:
+            return None  # Return None to signal that binding is blocked
         today_weekday = now.weekday()
         target_weekday = weekday_map.get(weekday_str)
         if target_weekday is not None:

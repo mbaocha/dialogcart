@@ -258,11 +258,6 @@ def merge_slots_for_followup(
     else:
         merged["time_range"] = memory_booking.get("time_range")
     
-    # CONFIRMATION_STATE: Preserve from current if present, else keep from memory
-    if "confirmation_state" in current_booking:
-        merged["confirmation_state"] = current_booking["confirmation_state"]
-    elif "confirmation_state" in memory_booking:
-        merged["confirmation_state"] = memory_booking["confirmation_state"]
     
     return merged
 
@@ -548,9 +543,11 @@ def get_final_memory_state(
         return memory_state
     else:
         # If no memory, use current state only (no merge)
+        lifecycle = "CREATING" if is_booking_intent else "NONE"
         return {
             "intent": effective_intent if effective_intent != CONTEXTUAL_UPDATE else (memory_state.get("intent") if memory_state else effective_intent),
             "booking_state": current_booking if (is_booking_intent or is_modify_with_booking_id) else {},
+            "booking_lifecycle": lifecycle,
             "clarification": current_clarification,
             "last_updated": datetime.now(dt_timezone.utc).isoformat()
         }

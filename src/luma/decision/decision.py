@@ -22,6 +22,29 @@ from ..clarification.reasons import ClarificationReason
 logger = logging.getLogger(__name__)
 
 
+def _normalize_canonical_to_full(canonical: str, booking_mode: str = "service") -> str:
+    """
+    Normalize short canonical form to full canonical form.
+    
+    Args:
+        canonical: Canonical form (short like "haircut" or full like "beauty_and_wellness.haircut")
+        booking_mode: Booking mode ("service" or "reservation") to determine domain prefix
+    
+    Returns:
+        Full canonical form (e.g., "beauty_and_wellness.haircut" or "hospitality.room")
+    """
+    if "." in canonical:
+        # Already full canonical form
+        return canonical
+    
+    # Short form - add domain prefix based on booking_mode
+    if booking_mode == "reservation":
+        return f"hospitality.{canonical}"
+    else:
+        # Default to service domain
+        return f"beauty_and_wellness.{canonical}"
+
+
 @dataclass
 class DecisionResult:
     """
@@ -99,8 +122,9 @@ def resolve_tenant_service_id(
         )
         return None, "MISSING_SERVICE", resolution_metadata
 
-    # RULE 1: Exact tenant_service_id match wins immediately (authoritative)
+    # RULE 1: Exact tenant_service_id or resolved_alias match wins immediately (authoritative)
     # Services with annotation_type="ALIAS" and tenant_service_id already set
+    # OR services with resolved_alias set by semantic resolver (explicit alias match)
     # are resolved from tenant aliases and require no further processing
     for service in services:
         if isinstance(service, dict):
@@ -117,18 +141,40 @@ def resolve_tenant_service_id(
                     f"[service_resolution] tenant_service_id authoritative: '{service.get('text', '')}' → '{tenant_service_id}' (resolved immediately)"
                 )
                 return tenant_service_id, None, resolution_metadata
+            
+            # Also check for resolved_alias (set by semantic resolver for explicit alias matches)
+            # This handles FAMILY annotations that were matched to explicit tenant aliases
+            resolved_alias = service.get("resolved_alias")
+            if resolved_alias:
+                # resolved_alias is present - explicit alias match found, resolve immediately
+                resolution_metadata["resolution_strategy"] = "resolved_alias_authoritative"
+                resolution_metadata["alias_hits"] = [{
+                    "alias_text": service.get("text", ""),
+                    "tenant_service_id": resolved_alias,
+                    "annotation_type": service.get("annotation_type"),
+                    "source": "resolved_alias"
+                }]
+                logger.info(
+                    f"[service_resolution] resolved_alias authoritative: '{service.get('text', '')}' → '{resolved_alias}' (resolved immediately)"
+                )
+                return resolved_alias, None, resolution_metadata
 
     # RULE 2: Canonical family resolution (fallback only)
     # If no tenant_service_id is present, try to map canonical family → tenant services
 
-    # Get canonical families from services
+    # Get canonical families from services and normalize to full canonical form
     canonical_families = []
+    normalized_canonical_families = []
     for service in services:
         canonical = service.get("canonical")
-        if canonical and canonical not in canonical_families:
-            canonical_families.append(canonical)
+        if canonical:
+            # Normalize to full canonical form for consistent matching
+            normalized_canonical = _normalize_canonical_to_full(canonical, booking_mode or "service")
+            if normalized_canonical not in normalized_canonical_families:
+                canonical_families.append(canonical)  # Keep original for metadata
+                normalized_canonical_families.append(normalized_canonical)
 
-    if not canonical_families:
+    if not normalized_canonical_families:
         # No canonical families to resolve
         resolution_metadata["resolution_strategy"] = "no_canonical_families"
         logger.warning(
@@ -136,13 +182,13 @@ def resolve_tenant_service_id(
         )
         return None, "MISSING_SERVICE", resolution_metadata
 
-    resolution_metadata["canonical_families"] = canonical_families
+    resolution_metadata["canonical_families"] = canonical_families  # Store original for logging
 
     # Check for tenant context (required for canonical → tenant mapping)
     if not tenant_context:
         resolution_metadata["resolution_strategy"] = "no_tenant_context"
         logger.warning(
-            f"[service_resolution] No tenant context - cannot resolve canonical families: {canonical_families}"
+            f"[service_resolution] No tenant context - cannot resolve canonical families: {normalized_canonical_families}"
         )
         return None, ClarificationReason.UNSUPPORTED_SERVICE.value, resolution_metadata
 
@@ -151,24 +197,36 @@ def resolve_tenant_service_id(
         resolution_metadata["resolution_strategy"] = "invalid_aliases"
         return None, ClarificationReason.UNSUPPORTED_SERVICE.value, resolution_metadata
 
-    # Build reverse mapping: canonical_family -> list of tenant_service_ids
+    # Get booking_mode for normalization
+    booking_mode_for_normalization = booking_mode
+    if not booking_mode_for_normalization and tenant_context:
+        booking_mode_for_normalization = tenant_context.get("booking_mode", "service")
+    if not booking_mode_for_normalization:
+        booking_mode_for_normalization = "service"
+
+    # Build reverse mapping: canonical_family (normalized) -> list of tenant_service_ids
     # aliases dict structure: {"alias_key": "canonical_family"}
-    # Example: {"standard": "room", "deluxe": "room", "suite": "room"} → "room" -> ["standard", "deluxe", "suite"]
+    # Normalize canonical_family values to full canonical form for consistent matching
+    # Example: {"standard": "room", "deluxe": "room", "suite": "room"} → "hospitality.room" -> ["standard", "deluxe", "suite"]
     family_to_tenant_services: Dict[str, List[str]] = {}
     for alias_key, canonical_family in aliases.items():
         # alias_key is the tenant_service_id, canonical_family is the value
-        if canonical_family not in family_to_tenant_services:
-            family_to_tenant_services[canonical_family] = []
-        if alias_key not in family_to_tenant_services[canonical_family]:
-            family_to_tenant_services[canonical_family].append(alias_key)
+        # Normalize canonical_family to full canonical form
+        normalized_family = _normalize_canonical_to_full(canonical_family, booking_mode_for_normalization)
+        if normalized_family not in family_to_tenant_services:
+            family_to_tenant_services[normalized_family] = []
+        if alias_key not in family_to_tenant_services[normalized_family]:
+            family_to_tenant_services[normalized_family].append(alias_key)
 
-    # Map canonical families to tenant services
+    # Map canonical families (normalized) to tenant services
     all_tenant_services: List[str] = []
-    for canonical_family in canonical_families:
-        tenant_services = family_to_tenant_services.get(canonical_family, [])
+    for i, normalized_canonical_family in enumerate(normalized_canonical_families):
+        tenant_services = family_to_tenant_services.get(normalized_canonical_family, [])
         all_tenant_services.extend(tenant_services)
+        # Use original canonical for metadata
+        original_canonical = canonical_families[i] if i < len(canonical_families) else normalized_canonical_family
         resolution_metadata["family_hits"].append({
-            "canonical_family": canonical_family,
+            "canonical_family": original_canonical,
             "tenant_services": tenant_services
         })
 
@@ -205,20 +263,20 @@ def resolve_tenant_service_id(
 
         # Check if any canonical family maps to >1 tenant services
         # Even if we resolved to one, if the family has multiple options, it's ambiguous
-        for canonical_family in canonical_families:
+        for normalized_canonical_family in normalized_canonical_families:
             tenant_services_for_family = family_to_tenant_services.get(
-                canonical_family, [])
+                normalized_canonical_family, [])
             if len(tenant_services_for_family) > 1:
                 # This family maps to multiple tenant services - ambiguous
                 # Never auto-resolve a family name that has multiple tenant services
                 resolution_metadata["resolution_strategy"] = "family_maps_to_multiple_tenant_services"
                 resolution_metadata["ambiguous_issue"] = "service_id"
-                resolution_metadata["resolved_from_family"] = canonical_family
+                resolution_metadata["resolved_from_family"] = normalized_canonical_family
                 resolution_metadata["family_tenant_services"] = tenant_services_for_family
                 # Include options for clarification_data
                 resolution_metadata["options"] = tenant_services_for_family
                 logger.warning(
-                    f"[service_resolution] Canonical family '{canonical_family}' maps to {len(tenant_services_for_family)} tenant services: {tenant_services_for_family}. "
+                    f"[service_resolution] Canonical family '{normalized_canonical_family}' maps to {len(tenant_services_for_family)} tenant services: {tenant_services_for_family}. "
                     f"Resolved to '{resolved_id}' but family is ambiguous - requiring clarification."
                 )
                 return None, ClarificationReason.MULTIPLE_MATCHES.value, resolution_metadata

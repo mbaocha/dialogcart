@@ -64,9 +64,9 @@ def test_resolved_flow_calls_booking_client():
     )
 
     assert result["success"] is True
-    assert result["outcome"]["type"] == "BOOKING_CREATED"
+    assert result["outcome"]["status"] == "EXECUTED"
     assert result["outcome"]["booking_code"] == "ABC123"
-    assert result["outcome"]["status"] == "pending"
+    assert result["outcome"]["booking_status"] == "pending"
 
     # Verify catalog client was called
     mock_catalog_client.get_services.assert_called_once_with(1)
@@ -109,7 +109,7 @@ def test_partial_flow_returns_template_key():
     )
 
     assert result["success"] is True
-    assert result["outcome"]["type"] == "CLARIFY"
+    assert result["outcome"]["status"] == "NEEDS_CLARIFICATION"
     assert result["outcome"]["template_key"] == "hotel.ask_time"
     assert "booking" in result["outcome"]
 

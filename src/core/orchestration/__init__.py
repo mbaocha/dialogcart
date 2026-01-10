@@ -10,7 +10,7 @@ This package contains the orchestrator which handles:
 - calling Luma
 - contract validation
 - branching on needs_clarification
-- deciding outcome type (CLARIFY, BOOKING_CREATED, etc.)
+- deciding outcomes based on plan status (NEEDS_CLARIFICATION, AWAITING_CONFIRMATION, READY)
 - calling business execution functions
 """
 

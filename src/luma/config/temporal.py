@@ -86,3 +86,15 @@ DATE_ROLE_KEYWORDS = {
 # Bare weekday (e.g. "monday") without modifier ("this"/"next")
 # must never be resolved silently.
 ALLOW_BARE_WEEKDAY_BINDING = False
+
+# Bare weekday range (e.g. "friday to sunday") without modifier/anchor
+# must never be resolved silently.
+# 
+# Weekday-only ranges are ambiguous without an anchor (explicit date, modifier,
+# or prior anchored date in memory). Luma will request clarification instead
+# of guessing dates. Examples:
+# - ❌ "friday to sunday" → clarification required (ambiguous)
+# - ✅ "next friday to sunday" → resolvable (has modifier)
+# - ✅ "october 3rd to sunday" → resolvable (has explicit date)
+# - ✅ followup using previously resolved date → resolvable (has memory anchor)
+ALLOW_BARE_WEEKDAY_RANGE_BINDING = False

@@ -193,7 +193,8 @@ class ReservationIntentResolver:
         self,
         osentence: str,
         entities: Dict[str, Any],
-        booking_mode: str = "service"
+        booking_mode: str = "service",
+        memory_state: Optional[Dict[str, Any]] = None
     ) -> Tuple[str, float]:
         """
         Resolve intent from original user sentence and extracted entities.
@@ -205,11 +206,13 @@ class ReservationIntentResolver:
         2. Apply intent_signals only for non-booking intents (QUOTE, DISCOVERY, etc.)
         3. Slot-driven fallback: Consider locked booking intent if eligible
         4. Readiness determined by required_slots (ready vs needs_clarification)
+        5. MODIFY_BOOKING gating: Only allowed if booking_lifecycle is EXECUTED or booking_id present
 
         Args:
             osentence: Original user sentence (lowercased)
             entities: Extraction output with service_families, dates, times, etc.
             booking_mode: "service" (appointments) or "reservation" (reservations)
+            memory_state: Optional memory state to check booking_lifecycle for MODIFY_BOOKING gating
 
         Returns:
             Tuple of (intent, confidence_score)
@@ -230,6 +233,14 @@ class ReservationIntentResolver:
         # booking_mode is the sole determinant - locks the booking intent
         booking_mode_normalized = "reservation" if booking_mode == "reservation" else "service"
         locked_booking_intent = CREATE_APPOINTMENT if booking_mode_normalized == "service" else CREATE_RESERVATION
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(
+            f"[INTENT_RESOLVER] resolve_intent called: booking_mode={booking_mode}, "
+            f"booking_mode_normalized={booking_mode_normalized}, "
+            f"locked_booking_intent={locked_booking_intent}"
+        )
 
         # ============================================================
         # STEP 2: SIGNAL-FIRST SELECTION (excludes CREATE_* booking intents)
@@ -245,6 +256,29 @@ class ReservationIntentResolver:
             
             if self._matches_signals(normalized_sentence, sentence_tokens_list, sentence_tokens_set, intent_key):
                 signal_matching_intents.append(intent_key)
+
+        # Apply lifecycle-based gating BEFORE intent selection
+        lifecycle = memory_state.get("booking_lifecycle", "NONE") if memory_state else "NONE"
+        
+        # Gating rule 1: MODIFY_BOOKING only allowed if lifecycle is EXECUTED or booking_id present
+        if MODIFY_BOOKING in signal_matching_intents:
+            booking_id_present = bool(entities.get("booking_id"))
+            
+            if lifecycle != "EXECUTED" and not booking_id_present:
+                # Block MODIFY_BOOKING - remove from candidates
+                signal_matching_intents = [intent for intent in signal_matching_intents if intent != MODIFY_BOOKING]
+                logger.info(
+                    f"[INTENT_RESOLVER] MODIFY_BOOKING blocked: lifecycle={lifecycle}, booking_id_present={booking_id_present}"
+                )
+        
+        # Gating rule 2: CONFIRM_BOOKING only allowed if lifecycle is CREATING
+        if CONFIRM_BOOKING in signal_matching_intents:
+            if lifecycle != "CREATING":
+                # Block CONFIRM_BOOKING - remove from candidates
+                signal_matching_intents = [intent for intent in signal_matching_intents if intent != CONFIRM_BOOKING]
+                logger.info(
+                    f"[INTENT_RESOLVER] CONFIRM_BOOKING blocked: lifecycle={lifecycle} (requires CREATING)"
+                )
 
         # If signals matched, select best matching intent (with priority ordering)
         if signal_matching_intents:
@@ -263,6 +297,16 @@ class ReservationIntentResolver:
         # Consider only the locked booking intent (determined by booking_mode)
         meta = self.intent_meta.get(locked_booking_intent, {})
         intent_defining_slots = meta.get("intent_defining_slots", [])
+        
+        # Gating rule 3: CREATE_* intents only allowed if lifecycle != EXECUTED
+        lifecycle = memory_state.get("booking_lifecycle", "NONE") if memory_state else "NONE"
+        if lifecycle == "EXECUTED":
+            # Block CREATE_* intents when lifecycle is EXECUTED
+            logger.info(
+                f"[INTENT_RESOLVER] {locked_booking_intent} blocked: lifecycle={lifecycle} (CREATE_* not allowed after EXECUTED)"
+            )
+            resp = self._build_response(UNKNOWN, LOW_CONFIDENCE, entities)
+            return resp["intent"], resp["confidence"]
         
         # Check eligibility: all intent_defining_slots must be present
         if intent_defining_slots:

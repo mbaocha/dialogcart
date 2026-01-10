@@ -27,9 +27,9 @@ from luma.trace import log_field_removal
 from luma.trace.stage_snapshot import capture_stage_snapshot
 from luma.trace import validate_stable_fields
 from luma.config.intent_meta import get_intent_registry
-from luma.config.temporal import APPOINTMENT_TEMPORAL_TYPE
+from luma.config.temporal import APPOINTMENT_TEMPORAL_TYPE, RESERVATION_TEMPORAL_TYPE, DateMode, TimeMode
 from luma.perf import StageTimer
-from luma.resolution.semantic_resolver import SemanticResolutionResult
+from luma.resolution.semantic_resolver import SemanticResolutionResult, _is_weekday_only_range
 from luma.memory.policy import (
     # Legacy functions (deprecated, kept for backward compatibility but not used)
     is_active_booking,
@@ -57,26 +57,48 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone as dt_timezone
 
 from flask import jsonify
-
-# Confirmation detection terms
-CONFIRM_TERMS = {
-    "yes", "yep", "yeah", "confirm", "ok", "okay",
-    "go ahead", "sounds good", "that works"
-}
+from luma.config.conversation_signals import (
+    get_confirmation_terms,
+    get_confirmation_phrases,
+    is_confirmation_enabled
+)
 
 
 def is_confirmation(text: str) -> bool:
     """
     Check if text is a confirmation response.
-    
+
+    Uses configuration from conversation_signals.yaml to determine
+    if the input text matches confirmation terms or phrases.
+
     Args:
         text: User input text
-        
+
     Returns:
         True if text is a confirmation, False otherwise
     """
+    if not is_confirmation_enabled():
+        return False
+
     t = text.lower().strip()
-    return t in CONFIRM_TERMS or t.startswith("confirm")
+
+    # Check exact matches
+    confirmation_terms = get_confirmation_terms()
+    if t in confirmation_terms:
+        return True
+
+    # Check if text starts with "confirm" (legacy behavior)
+    if t.startswith("confirm"):
+        return True
+
+    # Check phrase matches (substring)
+    confirmation_phrases = get_confirmation_phrases()
+    for phrase in confirmation_phrases:
+        if phrase in t:
+            return True
+
+    return False
+
 
 logger = logging.getLogger(__name__)
 
@@ -222,10 +244,18 @@ def resolve_message(
         if tenant_context:
             aliases_count = len(tenant_context.get("aliases", {})) if isinstance(
                 tenant_context.get("aliases"), dict) else 0
+            aliases = tenant_context.get("aliases", {}) if isinstance(
+                tenant_context, dict) else {}
+            booking_mode = tenant_context.get("booking_mode") if isinstance(
+                tenant_context, dict) else None
             logger.info(
                 f"Received tenant_context with {aliases_count} aliases",
-                extra={'request_id': request_id,
-                       'aliases_count': aliases_count}
+                extra={
+                    'request_id': request_id,
+                    'aliases_count': aliases_count,
+                    'aliases': aliases,
+                    'booking_mode': booking_mode
+                }
             )
 
         if not text or not isinstance(text, str):
@@ -266,88 +296,6 @@ def resolve_message(
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"Failed to load memory: {e}", extra={
                                'request_id': request_id})
-
-        # STEP 6: Short-circuit confirmation BEFORE NLP pipeline
-        # This is a pure state transition - no extraction, semantic resolution, or calendar binding
-        if memory_state and memory_store:
-            memory_booking_state = memory_state.get("booking_state", {})
-            if isinstance(memory_booking_state, dict):
-                confirmation_state = memory_booking_state.get("confirmation_state")
-                
-                # Guards: Only process confirmation if:
-                # 1. There's an active booking (booking intent)
-                # 2. confirmation_state is "pending"
-                # 3. Text is a confirmation
-                # 4. Not already confirmed
-                # 5. No clarification needed
-                is_booking = is_booking_intent(memory_state.get("intent", ""))
-                has_clarification = memory_state.get("clarification") is not None
-                
-                if (is_booking and 
-                    confirmation_state == "pending" and 
-                    not has_clarification and
-                    is_confirmation(text)):
-                    # Update confirmation_state to "confirmed"
-                    memory_booking_state["confirmation_state"] = "confirmed"
-                    memory_state["booking_state"] = memory_booking_state
-                    
-                    # Persist updated state
-                    try:
-                        memory_store.set(
-                            user_id=user_id,
-                            domain=domain,
-                            state=memory_state,
-                            ttl=MEMORY_TTL
-                        )
-                        logger.info(
-                            f"Confirmed booking for user {user_id}",
-                            extra={'request_id': request_id}
-                        )
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning(f"Failed to persist confirmation: {e}", extra={
-                                       'request_id': request_id})
-                    
-                    # Build early response with confirmed state
-                    # Extract booking state for response
-                    booking_payload = extract_memory_state_for_response(memory_state)
-                    if booking_payload:
-                        booking_payload["booking_state"] = "RESOLVED"
-                    
-                    # Get intent from memory
-                    stored_intent = memory_state.get("intent", "CREATE_RESERVATION")
-                    
-                    # Build intent payload
-                    intent_payload = {
-                        "name": stored_intent,
-                        "confidence": 1.0  # Confirmation is deterministic
-                    }
-                    
-                    # Build response using ResponseBuilder
-                    response_builder = ResponseBuilder()
-                    if booking_payload:
-                        # Format booking payload (no calendar_booking available in short-circuit)
-                        booking_payload = response_builder.format_booking_payload(
-                            booking_payload,
-                            stored_intent,
-                            {},  # Empty calendar_booking
-                            request_id=request_id
-                        )
-                    
-                    response_body = response_builder.build_response_body(
-                        intent_payload=intent_payload,
-                        needs_clarification=False,
-                        clarification_reason=None,
-                        issues={},
-                        booking_payload=booking_payload,
-                        entities_payload=None,
-                        slots=None,
-                        context_payload=None,
-                        clarification_data=None,
-                        debug_data=None,
-                        request_id=request_id
-                    )
-                    
-                    return jsonify(response_body)
 
         # Removed per-stage logging - consolidated trace emitted at end
 
@@ -413,7 +361,8 @@ def resolve_message(
                 tenant_context=tenant_context,
                 booking_mode=booking_mode_for_pipeline,
                 request_id=request_id,
-                debug_mode=pipeline_debug_mode
+                debug_mode=pipeline_debug_mode,
+                memory_state=memory_state
             )
 
             # Extract stage results and execution_trace from pipeline
@@ -1104,9 +1053,36 @@ def resolve_message(
                         required_bound_field_present = False
 
                         if external_intent == "CREATE_APPOINTMENT":
-                            # Appointments require datetime_range
-                            required_bound_field_present = bool(
-                                calendar_booking.get("datetime_range"))
+                            # Early escape: If semantic result has date + time, don't require calendar binding
+                            # This handles follow-ups where date comes from memory and time is added in current turn
+                            semantic_booking = merged_semantic_result.resolved_booking if merged_semantic_result else {}
+                            date_refs = semantic_booking.get("date_refs", [])
+                            time_mode = semantic_booking.get("time_mode", "none")
+                            time_refs = semantic_booking.get("time_refs", [])
+                            time_constraint = semantic_booking.get("time_constraint")
+                            
+                            # Check if date is present (from memory or current turn)
+                            has_date = len(date_refs) > 0
+                            
+                            # Check if time is present (time_mode with refs, or time_constraint)
+                            has_time = False
+                            if time_constraint is not None:
+                                tc_mode = time_constraint.get("mode")
+                                if tc_mode in {TimeMode.EXACT.value, TimeMode.WINDOW.value, TimeMode.FUZZY.value}:
+                                    has_time = True
+                            elif time_mode in {TimeMode.EXACT.value, TimeMode.RANGE.value, TimeMode.WINDOW.value}:
+                                if len(time_refs) > 0:
+                                    has_time = True
+                            
+                            # If both date and time are present semantically, don't require calendar binding
+                            # The calendar binding might fail due to weekday-only ranges or other issues,
+                            # but the semantic slots are sufficient for appointment creation
+                            if has_date and has_time:
+                                required_bound_field_present = True
+                            else:
+                                # Appointments require datetime_range from calendar binding
+                                required_bound_field_present = bool(
+                                    calendar_booking.get("datetime_range"))
                         elif external_intent == "CREATE_RESERVATION":
                             # Reservations require date_range OR (start_date AND end_date)
                             required_bound_field_present = bool(
@@ -1264,13 +1240,97 @@ def resolve_message(
         missing_slots = clar.get("missing_slots", [])
         clarification_reason = clar.get("clarification_reason")
 
-        # Guardrail: If decision was downgraded to INCOMPLETE_BINDING, ensure clarification_reason is set
-        if decision_result and decision_result.reason == ClarificationReason.INCOMPLETE_BINDING.value:
-            clarification_reason = ClarificationReason.INCOMPLETE_BINDING.value
-            needs_clarification = True
+        # Check if semantic resolver already detected MISSING_DATE_RANGE (weekday-only range)
+        # If so, preserve it and ensure both dates are marked missing
+        normalized_weekday_range = False
+        if clarification_reason == ClarificationReason.MISSING_DATE_RANGE.value:
+            # Semantic resolver already detected weekday-only range
+            # Ensure both dates are marked missing (should already be set, but verify)
+            if "start_date" not in missing_slots:
+                missing_slots.append("start_date")
+            if "end_date" not in missing_slots:
+                missing_slots.append("end_date")
+            # Remove duplicates and sort for consistency
+            missing_slots = sorted(list(set(missing_slots)))
+            normalized_weekday_range = True
+            
+            # Lock normalized missing slots in decision_result to prevent downstream overrides
+            if decision_result:
+                decision_result.missing_slots = ["start_date", "end_date"]
+                decision_result.reason = ClarificationReason.MISSING_DATE_RANGE.value
+                decision_result._normalized = True
+            
+            # Update execution trace to reflect normalized missing slots
+            if execution_trace and "decision" in execution_trace:
+                execution_trace["decision"]["missing_slots"] = ["start_date", "end_date"]
+                execution_trace["decision"]["reason"] = ClarificationReason.MISSING_DATE_RANGE.value
+                execution_trace["decision"]["_normalized"] = True
+
+        # Guardrail: If decision was downgraded to INCOMPLETE_BINDING, check if it's a weekday-only range
+        # Only set INCOMPLETE_BINDING if we haven't already detected MISSING_DATE_RANGE
+        if (not normalized_weekday_range and decision_result and 
+            decision_result.reason == ClarificationReason.INCOMPLETE_BINDING.value):
+            # Check if this is actually a weekday-only range that should be MISSING_DATE_RANGE
+            if intent_name == "CREATE_RESERVATION":
+                # Try to get dates from extraction_result first, then fallback to semantic result
+                date_texts = []
+                if extraction_result:
+                    dates = extraction_result.get("dates", [])
+                    if len(dates) >= 2:
+                        date_texts = [d.get("text", "").strip().lower() for d in dates[:2] if d.get("text")]
+                
+                # Fallback: try to get dates from semantic result's date_refs if available
+                if not date_texts and merged_semantic_result and merged_semantic_result.resolved_booking:
+                    date_refs = merged_semantic_result.resolved_booking.get("date_refs", [])
+                    if len(date_refs) >= 2:
+                        date_texts = [str(ref).strip().lower() for ref in date_refs[:2] if ref]
+                
+                if len(date_texts) == 2:
+                    # Simple check: if both dates are common weekday names, treat as weekday-only range
+                    common_weekdays = {"monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+                                       "mon", "tue", "tues", "wed", "thu", "thurs", "fri", "sat", "sun"}
+                    is_simple_weekday_pair = all(text in common_weekdays for text in date_texts)
+                    
+                    # Check if this is an unanchored weekday-only range (more robust check)
+                    # Use extraction_result if available, otherwise pass empty dict
+                    entities_for_check = extraction_result if extraction_result else {}
+                    is_weekday_range = (is_simple_weekday_pair or 
+                                       _is_weekday_only_range(date_texts, DateMode.RANGE.value, entities_for_check, None))
+                    
+                    if is_weekday_range:
+                        # Normalize: treat as fully unresolved, mark both dates as missing
+                        missing_slots = ["start_date", "end_date"]
+                        clarification_reason = ClarificationReason.MISSING_DATE_RANGE.value
+                        normalized_weekday_range = True
+                        needs_clarification = True
+                        
+                        # Lock normalized missing slots in decision_result to prevent downstream overrides
+                        if decision_result:
+                            decision_result.missing_slots = ["start_date", "end_date"]
+                            decision_result.reason = ClarificationReason.MISSING_DATE_RANGE.value
+                            decision_result._normalized = True
+                        
+                        # Update execution trace to reflect normalized missing slots
+                        if execution_trace and "decision" in execution_trace:
+                            execution_trace["decision"]["missing_slots"] = ["start_date", "end_date"]
+                            execution_trace["decision"]["reason"] = ClarificationReason.MISSING_DATE_RANGE.value
+                            execution_trace["decision"]["_normalized"] = True
+                    else:
+                        # Not a weekday-only range, so INCOMPLETE_BINDING is appropriate
+                        clarification_reason = ClarificationReason.INCOMPLETE_BINDING.value
+                        needs_clarification = True
+                else:
+                    # Not enough dates to check, use INCOMPLETE_BINDING as-is
+                    clarification_reason = ClarificationReason.INCOMPLETE_BINDING.value
+                    needs_clarification = True
+            else:
+                # Not a reservation, use INCOMPLETE_BINDING as-is
+                clarification_reason = ClarificationReason.INCOMPLETE_BINDING.value
+                needs_clarification = True
 
         # If missing_slots not set in clarification, use decision trace as fallback
-        if not missing_slots and execution_trace:
+        # Guard: Do not override normalized missing slots for unanchored weekday ranges
+        if not missing_slots and execution_trace and not normalized_weekday_range:
             decision_trace = execution_trace.get("decision", {})
             if decision_trace and isinstance(decision_trace, dict):
                 decision_missing = decision_trace.get("missing_slots", [])
@@ -1339,19 +1399,21 @@ def resolve_message(
                                             if slot not in ("service_id", "service")]
 
                 if enforced_missing:
-                    needs_clarification = True
-                    missing_slots = enforced_missing
-                    # Update clarification_reason based on missing slots
-                    # INVARIANT: For CREATE_APPOINTMENT, never set MISSING_SERVICE if services were extracted
-                    if not clarification_reason:
-                        if "time" in enforced_missing:
-                            clarification_reason = ClarificationReason.MISSING_TIME.value
-                        elif "date" in enforced_missing:
-                            clarification_reason = ClarificationReason.MISSING_DATE.value
-                        elif "service_id" in enforced_missing or "service" in enforced_missing:
-                            # Only set MISSING_SERVICE if it's not CREATE_APPOINTMENT with extracted services
-                            if not (intent_name == "CREATE_APPOINTMENT" and extracted_services):
-                                clarification_reason = ClarificationReason.MISSING_SERVICE.value
+                    # Guard: Do not override normalized missing slots for unanchored weekday ranges
+                    if not normalized_weekday_range:
+                        needs_clarification = True
+                        missing_slots = enforced_missing
+                        # Update clarification_reason based on missing slots
+                        # INVARIANT: For CREATE_APPOINTMENT, never set MISSING_SERVICE if services were extracted
+                        if not clarification_reason:
+                            if "time" in enforced_missing:
+                                clarification_reason = ClarificationReason.MISSING_TIME.value
+                            elif "date" in enforced_missing:
+                                clarification_reason = ClarificationReason.MISSING_DATE.value
+                            elif "service_id" in enforced_missing or "service" in enforced_missing:
+                                # Only set MISSING_SERVICE if it's not CREATE_APPOINTMENT with extracted services
+                                if not (intent_name == "CREATE_APPOINTMENT" and extracted_services):
+                                    clarification_reason = ClarificationReason.MISSING_SERVICE.value
                     booking_payload = None
         # Temporal shape enforcement (authoritative, post-binding)
         # POLICY: If decision.state == RESOLVED, skip temporal enforcement to avoid downgrading status
@@ -1374,17 +1436,19 @@ def resolve_message(
                     else:
                         temporal_missing = ["date", "time"]
                     if temporal_missing:
-                        needs_clarification = True
-                        missing_slots = temporal_missing
-                        # Update clarification_reason based on missing slots
-                        if not clarification_reason:
-                            if "time" in temporal_missing:
-                                clarification_reason = ClarificationReason.MISSING_TIME.value
-                            elif "date" in temporal_missing:
-                                clarification_reason = ClarificationReason.MISSING_DATE.value
-                            elif len(temporal_missing) >= 2:
-                                # Default to time if both missing
-                                clarification_reason = ClarificationReason.MISSING_TIME.value
+                        # Guard: Do not override normalized missing slots for unanchored weekday ranges
+                        if not normalized_weekday_range:
+                            needs_clarification = True
+                            missing_slots = temporal_missing
+                            # Update clarification_reason based on missing slots
+                            if not clarification_reason:
+                                if "time" in temporal_missing:
+                                    clarification_reason = ClarificationReason.MISSING_TIME.value
+                                elif "date" in temporal_missing:
+                                    clarification_reason = ClarificationReason.MISSING_DATE.value
+                                elif len(temporal_missing) >= 2:
+                                    # Default to time if both missing
+                                    clarification_reason = ClarificationReason.MISSING_TIME.value
                         booking_payload = None
                         response_body_status = STATUS_NEEDS_CLARIFICATION
 
@@ -1392,7 +1456,8 @@ def resolve_message(
         # If decision_result.status == "RESOLVED", override any validation that may have set needs_clarification
         # This must run AFTER all validation (plan_clarification, slot validation, temporal enforcement)
         # but BEFORE building the final response body
-        if decision_result and decision_result.status == "RESOLVED":
+        # Guard: Do not override normalized missing slots for unanchored weekday ranges
+        if decision_result and decision_result.status == "RESOLVED" and not normalized_weekday_range:
             needs_clarification = False
             missing_slots = []
             clarification_reason = None
@@ -1457,8 +1522,7 @@ def resolve_message(
             "datetime_range": calendar_booking.get("datetime_range"),
             "date_range": calendar_booking.get("date_range"),
             "time_range": calendar_booking.get("time_range"),
-            "duration": calendar_booking.get("duration"),
-            "confirmation_state": "pending"
+            "duration": calendar_booking.get("duration")
         }
 
         # NEW STATE-FIRST MODEL: Merge slots for follow-ups (after calendar binding)
@@ -1862,7 +1926,8 @@ def resolve_message(
                         context_payload["time_ref"] = time_refs[0]
                     # For window/fuzzy, use first ref or all refs
                     elif time_refs:
-                        context_payload["time_ref"] = time_refs[0] if len(time_refs) == 1 else time_refs
+                        context_payload["time_ref"] = time_refs[0] if len(
+                            time_refs) == 1 else time_refs
 
                 # Include time_mode for client logic
                 if time_mode != "none":
@@ -1875,7 +1940,8 @@ def resolve_message(
                 # Resolved time from calendar binding (if available)
                 # Similar to how dates are bound, extract from calendar_booking
                 if calendar_booking and calendar_booking.get("datetime_range"):
-                    dt_start = calendar_booking["datetime_range"].get("start", "")
+                    dt_start = calendar_booking["datetime_range"].get(
+                        "start", "")
                     if dt_start:
                         # Extract time portion and convert to 12-hour format
                         # dt_start format: "2026-01-01T15:00:00+00:00"
@@ -1883,7 +1949,8 @@ def resolve_message(
                             # Handle both ISO format with timezone and without
                             dt_str = dt_start.replace('Z', '+00:00')
                             if '+' in dt_str or dt_str.endswith('Z'):
-                                dt = datetime.fromisoformat(dt_str.replace('Z', '+00:00'))
+                                dt = datetime.fromisoformat(
+                                    dt_str.replace('Z', '+00:00'))
                             else:
                                 dt = datetime.fromisoformat(dt_str)
                             # Format as 12-hour time (e.g., "3:00 PM")
@@ -1895,7 +1962,8 @@ def resolve_message(
                         except (ValueError, AttributeError):
                             # Fallback: extract time portion directly and convert
                             if "T" in dt_start:
-                                time_part = dt_start.split("T")[1].split("+")[0].split("-")[0]
+                                time_part = dt_start.split(
+                                    "T")[1].split("+")[0].split("-")[0]
                                 # Convert 24h to 12h format
                                 try:
                                     hour, minute = time_part.split(":")[:2]
@@ -2133,14 +2201,20 @@ def resolve_message(
             # Response must mirror decision exactly - decision layer already handled service resolution
             filtered_missing_slots = missing_slots
 
-            # Filter out "service" from missing_slots for MULTIPLE_MATCHES cases
-            # These should use "ambiguous" not "missing", so remove from missing_slots before build_issues
-            if (clarification_reason == ClarificationReason.MULTIPLE_MATCHES.value or
-                    service_resolution_reason == ClarificationReason.MULTIPLE_MATCHES.value):
-                # MULTIPLE_MATCHES: service family resolved, variant ambiguous
-                # Can come from semantic resolver (clarification_reason) or decision layer (service_resolution_reason)
-                filtered_missing_slots = [
-                    s for s in filtered_missing_slots if s not in ("service", "service_id")]
+            # Guard: Preserve normalized missing slots for unanchored weekday ranges
+            # Do not filter out start_date or end_date for normalized weekday ranges
+            if normalized_weekday_range:
+                # Lock: Ensure both start_date and end_date are preserved
+                filtered_missing_slots = ["start_date", "end_date"]
+            else:
+                # Filter out "service" from missing_slots for MULTIPLE_MATCHES cases
+                # These should use "ambiguous" not "missing", so remove from missing_slots before build_issues
+                if (clarification_reason == ClarificationReason.MULTIPLE_MATCHES.value or
+                        service_resolution_reason == ClarificationReason.MULTIPLE_MATCHES.value):
+                    # MULTIPLE_MATCHES: service family resolved, variant ambiguous
+                    # Can come from semantic resolver (clarification_reason) or decision layer (service_resolution_reason)
+                    filtered_missing_slots = [
+                        s for s in filtered_missing_slots if s not in ("service", "service_id")]
 
             # Build issues from filtered missing_slots (excludes ambiguous service slots)
             issues = build_issues(
@@ -2327,20 +2401,30 @@ def resolve_message(
             primary = resolved_services[-1] if isinstance(resolved_services[-1], dict) else (
                 resolved_services[0] if isinstance(resolved_services[0], dict) else {})
 
-            # Prefer tenant_service_id from service object (set during annotation)
-            tenant_service_id = primary.get(
-                "tenant_service_id") if isinstance(primary, dict) else None
-            if tenant_service_id:
-                slots["service_id"] = tenant_service_id
+            # Priority 1: Check for resolved_alias (explicit tenant alias match from semantic resolution)
+            # This preserves the explicitly mentioned tenant alias when multiple aliases map to the same canonical
+            resolved_alias = primary.get(
+                "resolved_alias") if isinstance(primary, dict) else None
+            if resolved_alias:
+                slots["service_id"] = resolved_alias
                 logger.debug(
-                    f"[slots] Using tenant_service_id from service: '{tenant_service_id}'"
+                    f"[slots] Using resolved_alias (explicit match) from service: '{resolved_alias}'"
                 )
             else:
-                # Fallback: use resolved_tenant_service_id from decision layer
-                resolved_tenant_service_id = results.get("stages", {}).get(
-                    "decision", {}).get("resolved_tenant_service_id")
-                if resolved_tenant_service_id:
-                    slots["service_id"] = resolved_tenant_service_id
+                # Priority 2: Check for tenant_service_id from service object (set during annotation)
+                tenant_service_id = primary.get(
+                    "tenant_service_id") if isinstance(primary, dict) else None
+                if tenant_service_id:
+                    slots["service_id"] = tenant_service_id
+                    logger.debug(
+                        f"[slots] Using tenant_service_id from service: '{tenant_service_id}'"
+                    )
+                else:
+                    # Priority 3: Fallback to resolved_tenant_service_id from decision layer
+                    resolved_tenant_service_id = results.get("stages", {}).get(
+                        "decision", {}).get("resolved_tenant_service_id")
+                    if resolved_tenant_service_id:
+                        slots["service_id"] = resolved_tenant_service_id
 
             # FINAL NORMALIZATION: Ensure service_id is always a tenant alias key, never a canonical
             # INVARIANT: API responses must NEVER expose canonical service IDs
@@ -2358,19 +2442,39 @@ def resolve_message(
                         # aliases structure: {tenant_alias_key: canonical_family}
                         # Example: {"suite": "room", "delux": "room"} means "room" is canonical
                         # If service_id is "room", we need to find a tenant alias key that maps to it
+                        # Priority: Use resolved_alias if present (explicit match), otherwise pick first match
                         tenant_alias_key = None
-                        for alias_key, canonical_family in aliases.items():
-                            # Check if service_id matches the canonical family
-                            # Handle both full canonical IDs (e.g., "hospitality.room") and family names (e.g., "room")
-                            if canonical_family:
-                                # Exact match with canonical family
-                                if service_id_value == canonical_family:
-                                    tenant_alias_key = alias_key
-                                    break
-                                # Match with full canonical ID (e.g., "hospitality.room" contains "room")
-                                elif "." in service_id_value and service_id_value.endswith(f".{canonical_family}"):
-                                    tenant_alias_key = alias_key
-                                    break
+                        resolved_alias_from_service = primary.get(
+                            "resolved_alias") if isinstance(primary, dict) else None
+
+                        # If resolved_alias exists and maps to this canonical, use it (preserves explicit match)
+                        if resolved_alias_from_service and resolved_alias_from_service in aliases:
+                            canonical_for_resolved = aliases.get(
+                                resolved_alias_from_service)
+                            if canonical_for_resolved and (
+                                service_id_value == canonical_for_resolved or
+                                ("." in service_id_value and service_id_value.endswith(
+                                    f".{canonical_for_resolved}"))
+                            ):
+                                tenant_alias_key = resolved_alias_from_service
+                                logger.debug(
+                                    f"[slots] Using resolved_alias from normalization: '{tenant_alias_key}'"
+                                )
+
+                        # If no resolved_alias match, pick first alias that maps to this canonical
+                        if not tenant_alias_key:
+                            for alias_key, canonical_family in aliases.items():
+                                # Check if service_id matches the canonical family
+                                # Handle both full canonical IDs (e.g., "hospitality.room") and family names (e.g., "room")
+                                if canonical_family:
+                                    # Exact match with canonical family
+                                    if service_id_value == canonical_family:
+                                        tenant_alias_key = alias_key
+                                        break
+                                    # Match with full canonical ID (e.g., "hospitality.room" contains "room")
+                                    elif "." in service_id_value and service_id_value.endswith(f".{canonical_family}"):
+                                        tenant_alias_key = alias_key
+                                        break
 
                         if tenant_alias_key:
                             # Replace canonical with tenant alias key
