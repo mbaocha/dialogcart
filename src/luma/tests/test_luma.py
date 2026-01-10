@@ -3,6 +3,14 @@ import random
 import json
 import argparse
 from .scenarios import booking_scenarios, other_scenarios, followup_scenarios, scenarios
+from .assertions import (
+    assert_no_partial_binding,
+    assert_clarification_has_missing_slots,
+    assert_ready_has_required_bound_fields,
+    assert_status_missing_slots_consistency,
+    assert_booking_block_consistency,
+    assert_invariants
+)
 from luma.config.core import STATUS_READY
 
 API_BASE = "http://localhost:9001/resolve"
@@ -98,32 +106,55 @@ def _normalize_service_id(svc_id: str) -> str:
 def assert_response(resp, expected):
     assert resp["intent"]["name"] == expected["intent"]
     assert resp["status"] == expected["status"]
+    
+    # Assert invariants (additive safety nets - check after basic assertions)
+    intent_name = resp.get("intent", {}).get("name")
+    assert_invariants(resp, intent_name=intent_name)
 
     if expected["status"] == STATUS_READY:
         assert resp["intent"][
             "confidence"] >= 0.7, f"low confidence: {resp['intent'].get('confidence')}"
-        # Booking block should be present for ready status (but minimal, only confirmation_state)
-        assert "booking" in resp and resp["booking"], "booking should be present when ready"
-        booking = resp["booking"]
-        # Booking block should be minimal - only confirmation_state (temporal/service data is in slots)
-        assert "confirmation_state" in booking, "booking should contain confirmation_state"
         
-        # Check confirmation_state matches expected value if specified
-        expected_booking = expected.get("booking", {})
-        if isinstance(expected_booking, dict) and "confirmation_state" in expected_booking:
-            expected_confirmation_state = expected_booking["confirmation_state"]
-            actual_confirmation_state = booking.get("confirmation_state")
-            assert actual_confirmation_state == expected_confirmation_state, (
-                f"confirmation_state mismatch: got '{actual_confirmation_state}', "
-                f"expected '{expected_confirmation_state}'"
+        # Booking block should be present ONLY for intents that produce_booking_payload
+        # MODIFY_BOOKING and CANCEL_BOOKING do NOT produce booking_payload (intent-specific semantics)
+        intent_name = resp.get("intent", {}).get("name")
+        produces_booking = False
+        if intent_name:
+            from luma.config.intent_meta import get_intent_registry
+            registry = get_intent_registry()
+            intent_meta = registry.get(intent_name)
+            if intent_meta:
+                produces_booking = intent_meta.produces_booking_payload is True
+        
+        if produces_booking:
+            # Booking block should be present for ready status (but minimal, only confirmation_state)
+            assert "booking" in resp and resp["booking"], "booking should be present when ready"
+            booking = resp["booking"]
+            # Booking block should be minimal - only confirmation_state (temporal/service data is in slots)
+            assert "confirmation_state" in booking, "booking should contain confirmation_state"
+            
+            # Check confirmation_state matches expected value if specified
+            expected_booking = expected.get("booking", {})
+            if isinstance(expected_booking, dict) and "confirmation_state" in expected_booking:
+                expected_confirmation_state = expected_booking["confirmation_state"]
+                actual_confirmation_state = booking.get("confirmation_state")
+                assert actual_confirmation_state == expected_confirmation_state, (
+                    f"confirmation_state mismatch: got '{actual_confirmation_state}', "
+                    f"expected '{expected_confirmation_state}'"
+                )
+            
+            # Ensure booking doesn't contain temporal/service fields (they're in slots)
+            assert "services" not in booking, "booking.services should not be present (exposed via slots.service_id)"
+            assert "date_range" not in booking, "booking.date_range should not be present (exposed via slots.date_range)"
+            assert "datetime_range" not in booking, "booking.datetime_range should not be present (exposed via slots.datetime_range)"
+            assert "start_date" not in booking, "booking.start_date should not be present (legacy field removed)"
+            assert "end_date" not in booking, "booking.end_date should not be present (legacy field removed)"
+        else:
+            # For intents that don't produce booking_payload (MODIFY_BOOKING, CANCEL_BOOKING),
+            # booking block should NOT be present
+            assert "booking" not in resp or resp.get("booking") is None, (
+                f"booking block should NOT be present for {intent_name} (produces_booking_payload=false)"
             )
-        
-        # Ensure booking doesn't contain temporal/service fields (they're in slots)
-        assert "services" not in booking, "booking.services should not be present (exposed via slots.service_id)"
-        assert "date_range" not in booking, "booking.date_range should not be present (exposed via slots.date_range)"
-        assert "datetime_range" not in booking, "booking.datetime_range should not be present (exposed via slots.datetime_range)"
-        assert "start_date" not in booking, "booking.start_date should not be present (legacy field removed)"
-        assert "end_date" not in booking, "booking.end_date should not be present (legacy field removed)"
 
         slots = expected.get("slots", {})
 
@@ -162,8 +193,40 @@ def assert_response(resp, expected):
         if slots.get("has_datetime"):
             actual_datetime_range = resp.get("slots", {}).get("datetime_range")
             assert actual_datetime_range is not None, "Expected datetime_range in slots for appointment with has_datetime"
+        
+        # Check booking_id for MODIFY_BOOKING/CANCEL_BOOKING
+        if slots.get("booking_id"):
+            actual_booking_id = resp.get("slots", {}).get("booking_id")
+            expected_booking_id = slots["booking_id"]
+            assert actual_booking_id == expected_booking_id, (
+                f"booking_id mismatch: got '{actual_booking_id}', expected '{expected_booking_id}'"
+            )
+        
+        # Check start_date/end_date for MODIFY_BOOKING date-range modifications
+        if slots.get("start_date"):
+            actual_start_date = resp.get("slots", {}).get("start_date")
+            expected_start_date = slots["start_date"]
+            assert actual_start_date == expected_start_date, (
+                f"start_date mismatch: got '{actual_start_date}', expected '{expected_start_date}'"
+            )
+        
+        if slots.get("end_date"):
+            actual_end_date = resp.get("slots", {}).get("end_date")
+            expected_end_date = slots["end_date"]
+            assert actual_end_date == expected_end_date, (
+                f"end_date mismatch: got '{actual_end_date}', expected '{expected_end_date}'"
+            )
+        
+        # Check has_datetime flag for MODIFY_BOOKING time-only modifications
+        if "has_datetime" in slots:
+            actual_has_datetime = resp.get("slots", {}).get("has_datetime")
+            expected_has_datetime = slots["has_datetime"]
+            assert actual_has_datetime == expected_has_datetime, (
+                f"has_datetime mismatch: got '{actual_has_datetime}', expected '{expected_has_datetime}'"
+            )
 
         # Note: Legacy start_date/end_date support removed - all reservation tests should use date_range
+        # However, MODIFY_BOOKING uses start_date/end_date as delta slots
     else:
         # needs_clarification
         assert resp.get(

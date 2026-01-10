@@ -187,10 +187,16 @@ class CalendarBindingResult:
     Calendar binding result.
 
     Contains actual calendar dates and times in ISO-8601 format.
+    
+    Internal debug fields (not serialized):
+    - _binding_success: True if binding succeeded, False if binding failed or was skipped
+    - _binding_error: Error reason string if binding failed/skipped, None if successful
     """
     calendar_booking: Dict[str, Any]
     needs_clarification: bool = False
     clarification: Optional[Clarification] = None
+    _binding_success: bool = True  # Internal: explicit success/failure flag for debugging
+    _binding_error: Optional[str] = None  # Internal: error reason if binding failed/skipped
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -443,7 +449,9 @@ def bind_calendar(
         result = CalendarBindingResult(
             calendar_booking={},
             needs_clarification=False,
-            clarification=None
+            clarification=None,
+            _binding_success=False,
+            _binding_error=f"intent_not_in_binding_intents: {intent}"
         )
         trace = {
             "binder": {
@@ -462,7 +470,9 @@ def bind_calendar(
         result = CalendarBindingResult(
             calendar_booking=resolved_booking,
             needs_clarification=False,
-            clarification=None
+            clarification=None,
+            _binding_success=False,
+            _binding_error=f"status_not_ready: {status}"
         )
         trace = {
             "binder": {
@@ -570,7 +580,9 @@ def bind_calendar(
                 clarification=Clarification(
                     reason=ClarificationReason.MISSING_DATE,
                     data={"expected": "date"}
-                )
+                ),
+                _binding_success=False,
+                _binding_error="fuzzy_time_no_date"
             )
             trace = {
                 "binder": {
@@ -588,7 +600,9 @@ def bind_calendar(
                 clarification=Clarification(
                     reason=ClarificationReason.MISSING_TIME,
                     data={"expected": "time"}
-                )
+                ),
+                _binding_success=False,
+                _binding_error=f"fuzzy_time_label_not_found: {label}"
             )
             trace = {
                 "binder": {
@@ -655,14 +669,24 @@ def bind_calendar(
         }
 
     # Reservation responses must expose start_date/end_date explicitly
-    if external_intent == CREATE_RESERVATION and date_range:
+    # For CREATE_RESERVATION and MODIFY_BOOKING reservations, expose date_range and start_date/end_date
+    if external_intent in ("CREATE_RESERVATION", "MODIFY_BOOKING") and date_range:
+        # For MODIFY_BOOKING, also ensure date_range is stored directly (for delta slots)
+        if external_intent == "MODIFY_BOOKING":
+            # Store date_range directly for MODIFY_BOOKING (already stored in RESERVATION_TEMPORAL_TYPE above)
+            # No additional action needed since RESERVATION_TEMPORAL_TYPE == "date_range"
+            pass
+        # Expose start_date/end_date for both CREATE_RESERVATION and MODIFY_BOOKING
         calendar_booking["start_date"] = date_range.get("start_date")
         calendar_booking["end_date"] = date_range.get("end_date")
 
+    # Success: binding completed successfully
     result = CalendarBindingResult(
         calendar_booking=calendar_booking,
         needs_clarification=False,
-        clarification=None
+        clarification=None,
+        _binding_success=True,
+        _binding_error=None
     )
     
     trace = {

@@ -949,5 +949,517 @@ booking_scenarios = [
             "clarification_reason": "UNSUPPORTED_SERVICE"
         }
     },
-
+    # ────────────────
+    # MODIFY_BOOKING — RESCHEDULING EXISTING BOOKINGS
+    # ────────────────
+    {
+        "sentence": "reschedule my booking ABC123 to tomorrow at 3pm",
+        "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "ABC123",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "change my appointment XYZ789 to next friday at 10am",
+        "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "XYZ789",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "move my reservation DEF456 from oct 5th to oct 10th",
+        "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "DEF456",
+                "date_range": {
+                    "start": "2026-10-10",
+                    "end": "2026-10-10"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "update booking GHI789 to dec 15 to dec 20",
+        "booking_mode": "reservation",
+        "aliases": {
+            "delux": "room"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "GHI789",
+                "date_range": {
+                    "start": "2026-12-15",
+                    "end": "2026-12-20"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "postpone my booking JKL012 to next monday at 2pm",
+        "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "JKL012",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "modify reservation MNO345 to november 1st through november 5th",
+        "booking_mode": "reservation",
+        "aliases": {
+            "standard": "room"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "MNO345",
+                "date_range": {
+                    "start": "2026-11-01",
+                    "end": "2026-11-05"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "change the time for booking PQR678 to 4pm",
+        "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "PQR678",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "reschedule appointment STU901 to this friday evening",
+        "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "STU901",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "update my room booking VWX234 to jan 10 to jan 15",
+        "booking_mode": "reservation",
+        "aliases": {
+            "premium suite": "room"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "VWX234",
+                "date_range": {
+                    "start": "2026-01-10",
+                    "end": "2026-01-15"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "change booking YZA567 time to tomorrow at noon",
+        "booking_mode": "service",
+        "aliases": {
+            "beard": "beard grooming"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "YZA567",
+                "has_datetime": True
+            }
+        }
+    },
+    # ────────────────
+    # CANCEL_BOOKING — CANCELLING EXISTING BOOKINGS
+    # ────────────────
+    {
+        "sentence": "cancel my booking BCD890",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "BCD890"
+            }
+        }
+    },
+    {
+        "sentence": "cancel booking EFG123",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "EFG123"
+            }
+        }
+    },
+    {
+        "sentence": "delete my reservation HIJ456",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "HIJ456"
+            }
+        }
+    },
+    {
+        "sentence": "cancel my appointment KLM789",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "KLM789"
+            }
+        }
+    },
+    {
+        "sentence": "i need to cancel booking NOP012",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "NOP012"
+            }
+        }
+    },
+    {
+        "sentence": "please cancel reservation QRS345",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "QRS345"
+            }
+        }
+    },
+    {
+        "sentence": "delete booking TUV678",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "TUV678"
+            }
+        }
+    },
+    {
+        "sentence": "cancel my room reservation WXY901",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "WXY901"
+            }
+        }
+    },
+    {
+        "sentence": "i want to cancel appointment ZAB234",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "ZAB234"
+            }
+        }
+    },
+    {
+        "sentence": "can't make it, cancel booking CDE567",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "CDE567"
+            }
+        }
+    },
+    # ────────────────
+    # MODIFY_BOOKING — NEEDS_CLARIFICATION (MISSING BOOKING_ID OR NEW TIME)
+    # ────────────────
+    {
+        "sentence": "reschedule my booking",
+        "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id", "date", "time"]
+        }
+    },
+    {
+        "sentence": "change my appointment",
+        "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id", "date", "time"]
+        }
+    },
+    {
+        "sentence": "modify booking FGH890",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["date", "time"]
+        }
+    },
+    {
+        "sentence": "reschedule reservation IJK123",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["start_date", "end_date"]
+        }
+    },
+    {
+        "sentence": "change booking time to 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id", "date"]
+        }
+    },
+    {
+        "sentence": "move booking to tomorrow",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id", "time"]
+        }
+    },
+    # ────────────────
+    # CANCEL_BOOKING — NEEDS_CLARIFICATION (MISSING BOOKING_ID)
+    # ────────────────
+    {
+        "sentence": "cancel my booking",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id"]
+        }
+    },
+    {
+        "sentence": "delete my reservation",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id"]
+        }
+    },
+    {
+        "sentence": "i need to cancel",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id"]
+        }
+    },
+    {
+        "sentence": "cancel my appointment",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id"]
+        }
+    },
+    {
+        "sentence": "please cancel",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id"]
+        }
+    },
+    # ────────────────
+    # MODIFY_BOOKING — FUZZY MATCHING (TYPOS IN BOOKING_ID)
+    # ────────────────
+    {
+        "sentence": "reschedule booking LMN456 to tomorrow at 2pm",
+        "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "LMN456",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "change apointment OPQ789 to next friday",
+        "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "OPQ789",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "modify reservtion RST012 to dec 20 to dec 25",
+        "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "RST012",
+                "date_range": {
+                    "start": "2026-12-20",
+                    "end": "2026-12-25"
+                }
+            }
+        }
+    },
+    # ────────────────
+    # MODIFY_BOOKING — DELTA BEHAVIOR INVARIANT TESTS
+    # ────────────────
+    # 1) Full date-range modification
+    {
+        "sentence": "change my reservation ABC123 to feb 9 to feb 11",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "ABC123",
+                "start_date": "2026-02-09",
+                "end_date": "2026-02-11"
+            }
+        }
+    },
+    # 2) Partial modification
+    {
+        "sentence": "change my reservation ABC123 to feb 9",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["end_date"]
+        }
+    },
+    # 3) Time-only modification
+    {
+        "sentence": "move my booking ABC123 to 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "ABC123",
+                "has_datetime": True
+            }
+        }
+    },
+    # 4) No-delta modification
+    {
+        "sentence": "reschedule my booking ABC123",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["change"]
+        }
+    },
 ]

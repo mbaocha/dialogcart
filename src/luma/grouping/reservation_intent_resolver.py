@@ -199,20 +199,23 @@ class ReservationIntentResolver:
         """
         Resolve intent from original user sentence and extracted entities.
 
-        Enforces booking_mode as the primary intent determinant:
+        Intent resolution order (strict priority):
+        0. MODIFY/CANCEL absolute override (terminal intent check)
+           - If MODIFY signal detected → MODIFY_BOOKING (bypasses ALL other logic)
+           - If CANCEL signal detected → CANCEL_BOOKING (bypasses ALL other logic)
+           - NO service requirement, NO CREATE evaluation, NO BOOKING_INQUIRY fallback
         1. Lock booking intent by booking_mode (final, cannot be overridden)
            - booking_mode="service" → CREATE_APPOINTMENT
            - booking_mode="reservation" → CREATE_RESERVATION
-        2. Apply intent_signals only for non-booking intents (QUOTE, DISCOVERY, etc.)
+        2. Apply intent_signals for non-CREATE intents (QUOTE, DISCOVERY, etc.)
         3. Slot-driven fallback: Consider locked booking intent if eligible
         4. Readiness determined by required_slots (ready vs needs_clarification)
-        5. MODIFY_BOOKING gating: Only allowed if booking_lifecycle is EXECUTED or booking_id present
 
         Args:
             osentence: Original user sentence (lowercased)
             entities: Extraction output with service_families, dates, times, etc.
             booking_mode: "service" (appointments) or "reservation" (reservations)
-            memory_state: Optional memory state to check booking_lifecycle for MODIFY_BOOKING gating
+            memory_state: Optional memory state (not used for MODIFY/CANCEL overrides)
 
         Returns:
             Tuple of (intent, confidence_score)
@@ -227,6 +230,77 @@ class ReservationIntentResolver:
         sentence_tokens_list, sentence_tokens_set = self._tokenize(
             normalized_sentence)
 
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # ============================================================
+        # STEP 0: MODIFY/CANCEL ABSOLUTE OVERRIDE (terminal intent check)
+        # ============================================================
+        # MODIFY_BOOKING and CANCEL_BOOKING are absolute overrides that bypass ALL other logic:
+        # - MUST be checked FIRST, before service checks, slot validation, CREATE scoring
+        # - DO NOT require service slot
+        # - DO NOT fallback to BOOKING_INQUIRY
+        # - DO NOT evaluate CREATE_APPOINTMENT / CREATE_RESERVATION
+        # - Terminal intent classes: if signal detected, intent is determined immediately
+        
+        modify_signal_present = self._matches_signals(
+            normalized_sentence, sentence_tokens_list, sentence_tokens_set, MODIFY_BOOKING
+        )
+        cancel_signal_present = self._matches_signals(
+            normalized_sentence, sentence_tokens_list, sentence_tokens_set, CANCEL_BOOKING
+        )
+        
+        # Enhanced MODIFY detection: check for MODIFY verbs with booking nouns (even without booking_id)
+        # This handles cases like:
+        # - "move booking" (should match even without booking_id - Case 87, 98)
+        # - "modify reservtion RST012" (typo with booking_id - Case 95)
+        if not modify_signal_present:
+            booking_id_present = bool(entities.get("booking_id"))
+            # Check for MODIFY verbs
+            has_modify_verb = ("modify" in sentence_tokens_set or 
+                              "update" in sentence_tokens_set or 
+                              "change" in sentence_tokens_set or
+                              "move" in sentence_tokens_set or
+                              "reschedule" in sentence_tokens_set)
+            # Check for booking nouns
+            has_booking_noun = ("booking" in sentence_tokens_set or 
+                               "reservation" in sentence_tokens_set or 
+                               "appointment" in sentence_tokens_set)
+            
+            # If MODIFY verb + booking noun present, treat as MODIFY signal (NOT dependent on booking_id)
+            # This ensures "move booking" matches even when booking_id is missing
+            if has_modify_verb and has_booking_noun:
+                modify_signal_present = True
+                logger.info(
+                    f"[INTENT_RESOLVER] MODIFY signal detected via verb + booking noun (booking_id-independent): "
+                    f"tokens={sentence_tokens_set}, booking_id={entities.get('booking_id')}"
+                )
+            # Fallback: also check if modify token + booking_id exists (for typos like "modify reservtion RST012")
+            elif has_modify_verb and booking_id_present:
+                modify_signal_present = True
+                logger.info(
+                    f"[INTENT_RESOLVER] MODIFY signal detected via token + booking_id context: "
+                    f"tokens={sentence_tokens_set}, booking_id={entities.get('booking_id')}"
+                )
+        
+        # If MODIFY signal is detected, intent MUST be MODIFY_BOOKING (absolute override)
+        if modify_signal_present:
+            logger.info(
+                f"[INTENT_RESOLVER] MODIFY signal detected - absolute override to MODIFY_BOOKING "
+                f"(bypassing all CREATE logic, service checks, and slot validation)"
+            )
+            resp = self._build_response(MODIFY_BOOKING, HIGH_CONFIDENCE, entities)
+            return resp["intent"], resp["confidence"]
+        
+        # If CANCEL signal is detected, intent MUST be CANCEL_BOOKING (absolute override)
+        if cancel_signal_present:
+            logger.info(
+                f"[INTENT_RESOLVER] CANCEL signal detected - absolute override to CANCEL_BOOKING "
+                f"(bypassing all CREATE logic, service checks, and slot validation)"
+            )
+            resp = self._build_response(CANCEL_BOOKING, HIGH_CONFIDENCE, entities)
+            return resp["intent"], resp["confidence"]
+
         # ============================================================
         # STEP 1: DETERMINE LOCKED BOOKING INTENT (from booking_mode)
         # ============================================================
@@ -234,8 +308,6 @@ class ReservationIntentResolver:
         booking_mode_normalized = "reservation" if booking_mode == "reservation" else "service"
         locked_booking_intent = CREATE_APPOINTMENT if booking_mode_normalized == "service" else CREATE_RESERVATION
         
-        import logging
-        logger = logging.getLogger(__name__)
         logger.info(
             f"[INTENT_RESOLVER] resolve_intent called: booking_mode={booking_mode}, "
             f"booking_mode_normalized={booking_mode_normalized}, "
@@ -243,35 +315,27 @@ class ReservationIntentResolver:
         )
 
         # ============================================================
-        # STEP 2: SIGNAL-FIRST SELECTION (excludes CREATE_* booking intents)
+        # STEP 2: SIGNAL-FIRST SELECTION (excludes CREATE_* booking intents and MODIFY/CANCEL)
         # ============================================================
-        # Evaluate intent signals for all intents EXCEPT CREATE_APPOINTMENT/CREATE_RESERVATION
-        # These are locked by booking_mode and cannot be overridden by signals
-        # Other booking intents (CANCEL_BOOKING, MODIFY_BOOKING) still use signals
+        # Evaluate intent signals for all intents EXCEPT:
+        # - CREATE_APPOINTMENT/CREATE_RESERVATION (locked by booking_mode)
+        # - MODIFY_BOOKING/CANCEL_BOOKING (already handled as absolute overrides in STEP 0)
         signal_matching_intents = []
         for intent_key in self.intent_signals.keys():
             # Skip CREATE_APPOINTMENT/CREATE_RESERVATION - locked by booking_mode
             if intent_key in [CREATE_APPOINTMENT, CREATE_RESERVATION]:
                 continue
+            # Skip MODIFY_BOOKING/CANCEL_BOOKING - already handled as absolute overrides
+            if intent_key in [MODIFY_BOOKING, CANCEL_BOOKING]:
+                continue
             
             if self._matches_signals(normalized_sentence, sentence_tokens_list, sentence_tokens_set, intent_key):
                 signal_matching_intents.append(intent_key)
 
-        # Apply lifecycle-based gating BEFORE intent selection
+        # Apply lifecycle-based gating for other intents (MODIFY/CANCEL already handled)
         lifecycle = memory_state.get("booking_lifecycle", "NONE") if memory_state else "NONE"
         
-        # Gating rule 1: MODIFY_BOOKING only allowed if lifecycle is EXECUTED or booking_id present
-        if MODIFY_BOOKING in signal_matching_intents:
-            booking_id_present = bool(entities.get("booking_id"))
-            
-            if lifecycle != "EXECUTED" and not booking_id_present:
-                # Block MODIFY_BOOKING - remove from candidates
-                signal_matching_intents = [intent for intent in signal_matching_intents if intent != MODIFY_BOOKING]
-                logger.info(
-                    f"[INTENT_RESOLVER] MODIFY_BOOKING blocked: lifecycle={lifecycle}, booking_id_present={booking_id_present}"
-                )
-        
-        # Gating rule 2: CONFIRM_BOOKING only allowed if lifecycle is CREATING
+        # Gating rule: CONFIRM_BOOKING only allowed if lifecycle is CREATING
         if CONFIRM_BOOKING in signal_matching_intents:
             if lifecycle != "CREATING":
                 # Block CONFIRM_BOOKING - remove from candidates
@@ -295,6 +359,7 @@ class ReservationIntentResolver:
         # STEP 3: SLOT-DRIVEN FALLBACK (locked booking intent only)
         # ============================================================
         # Consider only the locked booking intent (determined by booking_mode)
+        # This step is only reached if no MODIFY/CANCEL signals were present
         meta = self.intent_meta.get(locked_booking_intent, {})
         intent_defining_slots = meta.get("intent_defining_slots", [])
         
@@ -522,22 +587,89 @@ class ReservationIntentResolver:
         # If no priority match, return first in list
         return matching_intents[0] if matching_intents else None
 
+    def _has_change_delta(self, entities: Dict[str, Any]) -> bool:
+        """
+        Check if at least one change delta exists in entities for MODIFY_BOOKING.
+        
+        Valid change deltas (from user requirement):
+        - date: concrete date anchor (single date)
+        - time: time, time_windows, or durations
+        - date_range: date_range object (for reservations)
+        - start_date: concrete date anchor
+        - end_date: second date anchor
+        - service_id: business_categories or service_families
+        - duration: durations
+        
+        Args:
+            entities: Extraction output with dates, times, services, etc.
+            
+        Returns:
+            True if at least one change delta exists, False otherwise.
+        """
+        # Check date_range (may exist as a constructed entity for reservations)
+        if entities.get("date_range"):
+            return True
+        
+        # Check date-related deltas (date, start_date, end_date)
+        if (self._has_date_anchor(entities) or 
+            self._has_second_date_anchor(entities) or
+            bool(entities.get("dates_absolute")) or
+            bool(entities.get("dates"))):
+            return True
+        
+        # Check time-related deltas (time)
+        if (bool(entities.get("times")) or 
+            bool(entities.get("time_windows"))):
+            return True
+        
+        # Check duration delta
+        if bool(entities.get("durations")):
+            return True
+        
+        # Check service_id delta
+        if (bool(entities.get("business_categories")) or 
+            bool(entities.get("service_families")) or
+            bool(entities.get("service_id"))):
+            return True
+        
+        return False
+
     def _build_response(self, intent: str, confidence: float, entities: Dict[str, Any]) -> Dict[str, Any]:
         """
         Build structured response with clarification metadata.
         
         Readiness determination: Uses required_slots to decide ready vs needs_clarification.
         Intent eligibility (intent_defining_slots) is already checked before calling this method.
+        
+        Special handling for MODIFY_BOOKING:
+        - booking_id is mandatory
+        - at least one change delta (date, time, service_id, duration, etc.) must exist
+        - If booking_id missing → missing_slots = ["booking_id"]
+        - Else if no change deltas → missing_slots = ["change"]
+        - Else → READY
         """
         meta = self.intent_meta.get(intent, {}) or {}
         required_slots = meta.get("required_slots") or []
 
         missing_slots: List[str] = []
 
-        # Required slots for execution (readiness determination)
-        for slot in required_slots:
-            if not self._slot_present(slot, entities):
-                missing_slots.append(slot)
+        # Special validation for MODIFY_BOOKING: requires booking_id + at least one change delta
+        if intent == MODIFY_BOOKING:
+            # Check booking_id first (mandatory)
+            booking_id_present = self._slot_present("booking_id", entities)
+            if not booking_id_present:
+                missing_slots.append("booking_id")
+            else:
+                # booking_id present - check for at least one change delta
+                has_change_delta = self._has_change_delta(entities)
+                if not has_change_delta:
+                    # booking_id exists but no change delta - need clarification on what to change
+                    missing_slots.append("change")
+        else:
+            # Standard validation for all other intents
+            for slot in required_slots:
+                if not self._slot_present(slot, entities):
+                    missing_slots.append(slot)
 
         status = STATUS_READY
         if missing_slots:

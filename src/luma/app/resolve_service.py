@@ -30,6 +30,7 @@ from luma.config.intent_meta import get_intent_registry
 from luma.config.temporal import APPOINTMENT_TEMPORAL_TYPE, RESERVATION_TEMPORAL_TYPE, DateMode, TimeMode
 from luma.perf import StageTimer
 from luma.resolution.semantic_resolver import SemanticResolutionResult, _is_weekday_only_range
+from luma.utils.missing_slots import compute_temporal_shape_missing_slots, compute_missing_slots_for_intent
 from luma.memory.policy import (
     # Legacy functions (deprecated, kept for backward compatibility but not used)
     is_active_booking,
@@ -53,6 +54,7 @@ from luma.pipeline import LumaPipeline
 from luma.calendar.calendar_binder import bind_calendar, bind_times, combine_datetime_range, get_timezone, get_booking_policy, CalendarBindingResult
 import time
 import logging
+import re
 from typing import Dict, Any, Optional, List
 from datetime import datetime, timezone as dt_timezone
 
@@ -152,6 +154,94 @@ def is_booking_intent(intent: str) -> bool:
         True if intent is CREATE_APPOINTMENT or CREATE_RESERVATION, False otherwise
     """
     return intent in {"CREATE_APPOINTMENT", "CREATE_RESERVATION"}
+
+
+def build_datetime_range_for_api(
+    slots: Dict[str, Any],
+    semantic_booking: Dict[str, Any],
+    domain: str,
+    request_id: Optional[str] = None,
+    user_id: Optional[str] = None
+) -> None:
+    """
+    Build datetime_range structure for MODIFY_BOOKING API response compatibility.
+
+    This is a compatibility shim that enforces API response shape requirements:
+    - If has_datetime=True, datetime_range must exist in the response
+    - For time-only or date-time changes in appointment modifications, constructs
+      a minimal datetime_range structure with identical start/end values
+
+    CRITICAL: This function does NOT perform temporal resolution or inference.
+    It only shapes the API response structure based on what semantic_booking already
+    contains. It MUST never invent new time values or resolve temporal ambiguity.
+
+    Args:
+        slots: Response slots dict (modified in place)
+        semantic_booking: Semantic resolver output containing date_mode, time_mode, time_refs, etc.
+        domain: Domain context ("service" for appointments, "reservation" for reservations)
+        request_id: Optional request ID for logging
+        user_id: Optional user ID for logging
+
+    Side Effects:
+        - Sets slots["has_datetime"] = True if time or date is present
+        - Sets slots["datetime_range"] with minimal structure if has_datetime=True but datetime_range missing
+    """
+    # Only apply to appointment modifications (service domain)
+    semantic_booking_mode = semantic_booking.get("booking_mode", domain)
+    is_appointment_modify = (semantic_booking_mode == "service" or domain == "service")
+    
+    if not is_appointment_modify:
+        return
+    
+    # Skip if datetime_range already exists
+    if slots.get("datetime_range"):
+        return
+    
+    # Check if date is present (date_mode != "none" and date_refs exist)
+    has_date = (semantic_booking.get("date_mode") is not None and
+               semantic_booking.get("date_mode") != "none" and
+               semantic_booking.get("date_refs"))
+    
+    # Check if time is present (time_mode != "none" and time_refs exist, or time_constraint exists)
+    has_time = ((semantic_booking.get("time_mode") is not None and
+                semantic_booking.get("time_mode") != "none" and
+                semantic_booking.get("time_refs")) or
+               semantic_booking.get("time_constraint"))
+    
+    # Set has_datetime if already set, or if time/date is present
+    if slots.get("has_datetime") or has_time or has_date:
+        # Set has_datetime if not already set
+        if not slots.get("has_datetime"):
+            slots["has_datetime"] = True
+            logger.info(
+                f"[slots] MODIFY_BOOKING appointment: set has_datetime=True (time or date present, "
+                f"has_time={has_time}, has_date={has_date}, "
+                f"booking_mode={semantic_booking_mode}, "
+                f"date_mode={semantic_booking.get('date_mode')}, time_mode={semantic_booking.get('time_mode')})",
+                extra={'request_id': request_id, 'user_id': user_id}
+            )
+        
+        # Build minimal datetime_range when has_datetime is True but datetime_range is missing
+        # This is required by the API contract: if has_datetime=True, datetime_range must exist
+        time_refs = semantic_booking.get("time_refs", [])
+        if time_refs:
+            # Create a minimal datetime_range with time reference (date will be resolved later if needed)
+            # Start and end are identical - this is a compatibility structure, not temporal resolution
+            slots["datetime_range"] = {
+                "start": time_refs[0] if time_refs else None,
+                "end": time_refs[0] if time_refs else None
+            }
+        else:
+            # Fallback: create empty datetime_range structure (will be populated if date/time are bound)
+            slots["datetime_range"] = {
+                "start": None,
+                "end": None
+            }
+        logger.info(
+            f"[slots] MODIFY_BOOKING appointment: built minimal datetime_range for has_datetime=True "
+            f"(time_refs={time_refs})",
+            extra={'request_id': request_id, 'user_id': user_id}
+        )
 
 
 def resolve_message(
@@ -989,7 +1079,9 @@ def resolve_message(
                 calendar_result = CalendarBindingResult(
                     calendar_booking={},
                     needs_clarification=False,
-                    clarification=None
+                    clarification=None,
+                    _binding_success=False,
+                    _binding_error="skipped_due_to_missing_required_slots"
                 )
             results["stages"]["calendar"] = calendar_result.to_dict()
         else:
@@ -1160,7 +1252,9 @@ def resolve_message(
                     calendar_result = CalendarBindingResult(
                         calendar_booking={},
                         needs_clarification=False,
-                        clarification=None
+                        clarification=None,
+                        _binding_success=False,
+                        _binding_error=f"exception: {str(e)}"
                     )
                     return jsonify({"success": False, "data": results}), 500
             else:
@@ -1170,7 +1264,9 @@ def resolve_message(
                 calendar_result = CalendarBindingResult(
                     calendar_booking={},
                     needs_clarification=False,
-                    clarification=None
+                    clarification=None,
+                    _binding_success=False,
+                    _binding_error=f"skipped_due_to_decision_state: {reason}"
                 )
                 results["stages"]["calendar"] = calendar_result.to_dict()
                 # Binder was skipped - add trace with input even though not called
@@ -1216,6 +1312,9 @@ def resolve_message(
         intent_resp = results["stages"]["intent"]
         intent_name = intent_resp.get("name") if isinstance(
             intent_resp, dict) else intent_resp or intent
+        
+        # Determine if this is MODIFY_BOOKING (for special handling of semantic clarifications)
+        is_modify_booking = intent_name == "MODIFY_BOOKING"
 
         # Extract decision trace for plan_clarification (contains missing_slots from temporal shape validation)
         decision_trace_for_plan = execution_trace.get(
@@ -1239,6 +1338,27 @@ def resolve_message(
         needs_clarification = clar.get("status") == STATUS_NEEDS_CLARIFICATION
         missing_slots = clar.get("missing_slots", [])
         clarification_reason = clar.get("clarification_reason")
+
+        # For MODIFY_BOOKING, preserve semantic clarification as authoritative
+        semantic_clarification_present = False
+        semantic_missing_slots = []
+        semantic_clarification_reason = None
+        
+        if is_modify_booking and merged_semantic_result:
+            # Check if semantic resolver set a clarification (e.g., MISSING_DATE when time present but no date)
+            if merged_semantic_result.needs_clarification and merged_semantic_result.clarification:
+                semantic_clarification_present = True
+                semantic_clarification_obj = merged_semantic_result.clarification
+                # Extract missing_slots from semantic clarification data
+                if hasattr(semantic_clarification_obj, 'data') and isinstance(semantic_clarification_obj.data, dict):
+                    semantic_missing_slots = semantic_clarification_obj.data.get("missing_slots", [])
+                # Extract clarification_reason from semantic clarification
+                if hasattr(semantic_clarification_obj, 'reason'):
+                    reason = semantic_clarification_obj.reason
+                    if isinstance(reason, str):
+                        semantic_clarification_reason = reason
+                    elif hasattr(reason, 'value'):
+                        semantic_clarification_reason = reason.value
 
         # Check if semantic resolver already detected MISSING_DATE_RANGE (weekday-only range)
         # If so, preserve it and ensure both dates are marked missing
@@ -1330,7 +1450,9 @@ def resolve_message(
 
         # If missing_slots not set in clarification, use decision trace as fallback
         # Guard: Do not override normalized missing slots for unanchored weekday ranges
-        if not missing_slots and execution_trace and not normalized_weekday_range:
+        # EXCEPTION: For MODIFY_BOOKING, decision/semantic layers set missing_slots via plan_clarification
+        # Do not read from execution_trace procedurally - plan_clarification is authoritative
+        if not missing_slots and execution_trace and not normalized_weekday_range and not is_modify_booking:
             decision_trace = execution_trace.get("decision", {})
             if decision_trace and isinstance(decision_trace, dict):
                 decision_missing = decision_trace.get("missing_slots", [])
@@ -1362,59 +1484,69 @@ def resolve_message(
 
         if intent_name:
             # POLICY: If decision.state == RESOLVED, skip slot validation entirely
-            # Decision layer is authoritative - don't re-validate or override RESOLVED status
-            if decision_result and decision_result.status == "RESOLVED":
-                # Decision already resolved - skip slot validation
+            # EXCEPTION: MODIFY_BOOKING requires "at least one delta" check even if decision is RESOLVED
+            # This is because MODIFY_BOOKING uses delta semantics (booking_id + at least one delta)
+            should_skip_validation = (
+                decision_result and 
+                decision_result.status == "RESOLVED" and
+                intent_name != "MODIFY_BOOKING"
+            )
+            
+            if should_skip_validation:
+                # Decision already resolved - skip slot validation (for non-MODIFY_BOOKING intents)
                 # Don't re-run validation, don't add issues, don't downgrade status
                 pass
             else:
-                # Decision is not RESOLVED - run slot validation
-                enforced_missing = validate_required_slots(
-                    intent_name, resolved_snapshot, extraction_result or {})
+                # Decision is not RESOLVED OR it's MODIFY_BOOKING - run slot validation
+                # INVARIANT: For MODIFY_BOOKING, if missing_slots is already populated before compute_missing_slots_for_intent,
+                # it must NEVER be recomputed or overridden. Decision + semantic layers (via plan_clarification) are authoritative.
+                # Case 84: "modify booking FGH890" with booking_mode="service" → decision layer returns ["date", "time"]
+                # Case 85: "reschedule reservation IJK123" with booking_mode="reservation" → decision layer returns ["start_date", "end_date"]
+                # Case 99: "reschedule my booking ABC123" → decision layer returns ["change"], should use that instead of ["date", "time"]
+                
+                # Guard: Skip compute_missing_slots_for_intent if MODIFY_BOOKING already has missing_slots
+                if is_modify_booking and missing_slots:
+                    # Decision/semantic layers already set missing_slots via plan_clarification - do not override
+                    enforced_missing = None
+                else:
+                    # Use centralized missing slot computation with special-case filtering
+                    enforced_missing = compute_missing_slots_for_intent(
+                        intent_name=intent_name,
+                        resolved_slots=resolved_snapshot,
+                        entities=extraction_result or {},
+                        extraction_result=extraction_result,
+                        merged_semantic_result=merged_semantic_result
+                    )
 
-                # INVARIANT: For CREATE_APPOINTMENT, if extraction produced services, service_id is NEVER missing
-                # Filter service_id from missing slots and prevent MISSING_SERVICE clarification_reason
-                # Track if services were extracted (for CREATE_APPOINTMENT)
-                extracted_services = None
-                if intent_name == "CREATE_APPOINTMENT" and enforced_missing:
-                    # Check if services were extracted (from extraction or semantic result)
-                    # First check extraction_result (most direct - what was actually extracted)
-                    if extraction_result:
-                        business_categories = extraction_result.get(
-                            "business_categories", [])
-                        if business_categories:
-                            extracted_services = business_categories
-                    # Fallback to semantic result if extraction_result doesn't have services
-                    if not extracted_services:
-                        if merged_semantic_result and merged_semantic_result.resolved_booking:
-                            extracted_services = merged_semantic_result.resolved_booking.get(
-                                "services")
-                        elif semantic_result and semantic_result.resolved_booking:
-                            extracted_services = semantic_result.resolved_booking.get(
-                                "services")
-
-                    # If services were extracted (ALIAS or FAMILY), remove service_id from missing slots
-                    if extracted_services:
-                        enforced_missing = [slot for slot in enforced_missing
-                                            if slot not in ("service_id", "service")]
-
-                if enforced_missing:
-                    # Guard: Do not override normalized missing slots for unanchored weekday ranges
-                    if not normalized_weekday_range:
-                        needs_clarification = True
-                        missing_slots = enforced_missing
-                        # Update clarification_reason based on missing slots
-                        # INVARIANT: For CREATE_APPOINTMENT, never set MISSING_SERVICE if services were extracted
-                        if not clarification_reason:
-                            if "time" in enforced_missing:
-                                clarification_reason = ClarificationReason.MISSING_TIME.value
-                            elif "date" in enforced_missing:
-                                clarification_reason = ClarificationReason.MISSING_DATE.value
-                            elif "service_id" in enforced_missing or "service" in enforced_missing:
-                                # Only set MISSING_SERVICE if it's not CREATE_APPOINTMENT with extracted services
-                                if not (intent_name == "CREATE_APPOINTMENT" and extracted_services):
-                                    clarification_reason = ClarificationReason.MISSING_SERVICE.value
-                    booking_payload = None
+                    if enforced_missing:
+                        # Guard: Do not override normalized missing slots for unanchored weekday ranges
+                        if not normalized_weekday_range:
+                            needs_clarification = True
+                            
+                            # For MODIFY_BOOKING: merge semantic missing_slots with enforced_missing, never drop semantic ones
+                            if is_modify_booking and semantic_clarification_present and semantic_missing_slots:
+                                # Merge: keep all semantic missing_slots, add any additional from enforced_missing
+                                missing_slots = list(set(semantic_missing_slots + enforced_missing))
+                            else:
+                                # For other intents or when no semantic clarification: use enforced_missing
+                                missing_slots = enforced_missing
+                            
+                            # Update clarification_reason based on missing slots (only when enforced_missing was used)
+                            # For MODIFY_BOOKING: preserve semantic clarification_reason if present, otherwise infer
+                            # INVARIANT: For CREATE_APPOINTMENT, never set MISSING_SERVICE if services were extracted
+                            if not clarification_reason:
+                                if is_modify_booking and semantic_clarification_reason:
+                                    # Preserve semantic clarification_reason for MODIFY_BOOKING
+                                    clarification_reason = semantic_clarification_reason
+                                elif "time" in missing_slots:
+                                    clarification_reason = ClarificationReason.MISSING_TIME.value
+                                elif "date" in missing_slots:
+                                    clarification_reason = ClarificationReason.MISSING_DATE.value
+                                elif "service_id" in missing_slots or "service" in missing_slots:
+                                    # Only set MISSING_SERVICE if it's not CREATE_APPOINTMENT with extracted services
+                                    if not (intent_name == "CREATE_APPOINTMENT" and extracted_services):
+                                        clarification_reason = ClarificationReason.MISSING_SERVICE.value
+                booking_payload = None
         # Temporal shape enforcement (authoritative, post-binding)
         # POLICY: If decision.state == RESOLVED, skip temporal enforcement to avoid downgrading status
         # Get temporal shape from IntentRegistry (sole policy source)
@@ -1425,19 +1557,17 @@ def resolve_message(
         if (intent_name and has_temporal_shape and
                 not (decision_result and decision_result.status == "RESOLVED")):
             shape = intent_meta.temporal_shape
-            if shape == APPOINTMENT_TEMPORAL_TYPE_CONST:
-                has_dtr = bool((calendar_booking or {}).get("datetime_range"))
-                if not has_dtr:
-                    temporal_missing: List[str] = []
-                    date_refs = merged_semantic_result.resolved_booking.get(
-                        "date_refs") if merged_semantic_result else []
-                    if date_refs:
-                        temporal_missing = ["time"]
-                    else:
-                        temporal_missing = ["date", "time"]
-                    if temporal_missing:
+            # Use centralized temporal shape missing slot computation
+            temporal_missing = compute_temporal_shape_missing_slots(
+                intent_name=intent_name,
+                calendar_booking=calendar_booking or {},
+                merged_semantic_result=merged_semantic_result,
+                temporal_shape=shape
+            )
+            if temporal_missing:
                         # Guard: Do not override normalized missing slots for unanchored weekday ranges
-                        if not normalized_weekday_range:
+                        # Guard: Do not override MODIFY_BOOKING missing_slots if already set (decision/semantic layers are authoritative)
+                        if not normalized_weekday_range and not (is_modify_booking and missing_slots):
                             needs_clarification = True
                             missing_slots = temporal_missing
                             # Update clarification_reason based on missing slots
@@ -1454,10 +1584,19 @@ def resolve_message(
 
         # FINAL OVERRIDE: Enforce decision layer as authoritative
         # If decision_result.status == "RESOLVED", override any validation that may have set needs_clarification
+        # EXCEPTION: MODIFY_BOOKING requires "at least one delta" validation - don't override if validation found missing deltas
         # This must run AFTER all validation (plan_clarification, slot validation, temporal enforcement)
         # but BEFORE building the final response body
         # Guard: Do not override normalized missing slots for unanchored weekday ranges
-        if decision_result and decision_result.status == "RESOLVED" and not normalized_weekday_range:
+        # Guard: Don't override if MODIFY_BOOKING validation found missing deltas ("delta" in missing_slots)
+        should_override_decision = (
+            decision_result and 
+            decision_result.status == "RESOLVED" and 
+            not normalized_weekday_range and
+            intent_name != "MODIFY_BOOKING"  # MODIFY_BOOKING delta validation is authoritative
+        )
+        
+        if should_override_decision:
             needs_clarification = False
             missing_slots = []
             clarification_reason = None
@@ -1470,16 +1609,46 @@ def resolve_message(
         # even if decision layer says RESOLVED (due to invariant override)
         current_clarification = None
 
-        # First priority: Check semantic resolution clarification (e.g., MULTIPLE_MATCHES ambiguity)
+        # First priority: Check semantic resolution clarification (e.g., MULTIPLE_MATCHES ambiguity, MISSING_DATE for MODIFY_BOOKING)
+        # CRITICAL: For MODIFY_BOOKING, semantic clarifications (e.g., time present but no date) must be preserved
+        # even if decision layer says RESOLVED (decision may skip validation for MODIFY_BOOKING)
         if merged_semantic_result and merged_semantic_result.needs_clarification and merged_semantic_result.clarification:
-            # Semantic resolution detected ambiguity (e.g., service variant ambiguity)
-            # This must be preserved even if decision layer says RESOLVED
-            current_clarification = merged_semantic_result.clarification.to_dict()
-            logger.info(
-                f"Preserving semantic clarification: {current_clarification.get('reason')}",
-                extra={'request_id': request_id,
-                       'clarification_reason': current_clarification.get('reason')}
-            )
+            # Semantic resolution detected clarification (e.g., service variant ambiguity, MISSING_DATE for MODIFY_BOOKING)
+            # For MODIFY_BOOKING: This is authoritative and must be preserved even if decision is RESOLVED
+            semantic_clar = merged_semantic_result.clarification.to_dict()
+            semantic_clar_reason = semantic_clar.get("reason")
+            
+            # For MODIFY_BOOKING: preserve semantic clarification regardless of decision status
+            # Semantic resolver is authoritative for MODIFY_BOOKING clarifications (e.g., single date → end_date missing)
+            if is_modify_booking:
+                # MODIFY_BOOKING: Always preserve semantic clarification (authoritative)
+                # This ensures single-date reservations require clarification even if decision layer returns RESOLVED
+                current_clarification = semantic_clar
+                needs_clarification = True  # Force needs_clarification to preserve semantic state
+                # Extract missing_slots from semantic clarification and merge with decision missing_slots
+                semantic_clar_data = semantic_clar.get("data", {})
+                semantic_missing_slots = semantic_clar_data.get("missing_slots", [])
+                if semantic_missing_slots:
+                    # Merge semantic missing_slots with decision missing_slots (if any)
+                    decision_missing_slots = decision_result.missing_slots if decision_result and decision_result.missing_slots else []
+                    missing_slots = list(set(semantic_missing_slots + decision_missing_slots))
+                    clarification_reason = semantic_clar_reason
+                logger.info(
+                    f"Preserving semantic clarification for MODIFY_BOOKING: {semantic_clar_reason}, missing_slots={semantic_missing_slots}",
+                    extra={'request_id': request_id,
+                           'clarification_reason': semantic_clar_reason,
+                           'intent': intent_name,
+                           'missing_slots': semantic_missing_slots}
+                )
+            elif decision_result and decision_result.status != "RESOLVED":
+                # For other intents: only preserve if decision is not RESOLVED
+                # This maintains existing behavior for CREATE intents
+                current_clarification = semantic_clar
+                logger.info(
+                    f"Preserving semantic clarification: {semantic_clar_reason}",
+                    extra={'request_id': request_id,
+                           'clarification_reason': semantic_clar_reason}
+                )
         elif (decision_result and decision_result.status == "NEEDS_CLARIFICATION" and
               decision_result.reason == ClarificationReason.MULTIPLE_MATCHES.value and
               service_resolution_metadata):
@@ -1501,11 +1670,42 @@ def resolve_message(
                 )
         elif decision_result and decision_result.status == "RESOLVED":
             # Decision is RESOLVED - no clarification needed
-            # This clears any existing PARTIAL clarification from memory
-            current_clarification = None
+            # EXCEPTION: For MODIFY_BOOKING, semantic clarifications are authoritative and were already handled above
+            # This clears any existing PARTIAL clarification from memory only for non-MODIFY_BOOKING intents
+            # (MODIFY_BOOKING semantic clarifications were preserved in the first if block)
+            if not is_modify_booking:
+                current_clarification = None
         elif calendar_result.needs_clarification and calendar_result.clarification:
             # Only validation errors from calendar binding (range conflicts, etc.)
             current_clarification = calendar_result.clarification.to_dict()
+
+        # For MODIFY_BOOKING: If semantic clarification was set, update needs_clarification, missing_slots, and clarification_reason
+        # This ensures semantic clarifications are authoritative and not overridden by decision layer
+        if is_modify_booking and current_clarification and isinstance(current_clarification, dict):
+            # Extract missing_slots and clarification_reason from current_clarification
+            clar_missing_slots = current_clarification.get("data", {}).get("missing_slots", [])
+            clar_reason = current_clarification.get("reason")
+            
+            if clar_missing_slots or clar_reason:
+                # Semantic clarification is authoritative for MODIFY_BOOKING
+                needs_clarification = True
+                
+                # Merge semantic missing_slots with existing missing_slots (never drop semantic ones)
+                if clar_missing_slots:
+                    missing_slots = list(set(missing_slots + clar_missing_slots))
+                    logger.info(
+                        f"[MODIFY_BOOKING] Preserving semantic missing_slots: {clar_missing_slots}, "
+                        f"merged: {missing_slots}",
+                        extra={'request_id': request_id, 'intent': intent_name}
+                    )
+                
+                # Preserve semantic clarification_reason (never override if semantic reason is set)
+                if clar_reason and not clarification_reason:
+                    clarification_reason = clar_reason
+                    logger.info(
+                        f"[MODIFY_BOOKING] Preserving semantic clarification_reason: {clar_reason}",
+                        extra={'request_id': request_id, 'intent': intent_name}
+                    )
 
         # Prepare current booking state (only canonical fields)
         # Include date_range and time_range for merge logic to handle time-only updates
@@ -2139,18 +2339,23 @@ def resolve_message(
             }
         )
 
-        # INVARIANT: Do not resurrect missing booking state by rebuilding it silently
-        # If booking_payload is None when it should exist, this is an invariant violation
-        # Log and force clarification instead of silently rebuilding
-        if is_booking_intent(api_intent) and booking_payload is None and not needs_clarification:
+        # INVARIANT: Only require booking_payload for intents that produce it
+        # MODIFY_BOOKING and CANCEL_BOOKING do NOT produce booking_payload (intent-specific semantics)
+        registry = get_intent_registry()
+        intent_meta = registry.get(api_intent) if api_intent else None
+        produces_booking = intent_meta.produces_booking_payload if intent_meta else False
+        
+        # Only enforce booking_payload requirement for intents that produce it
+        if produces_booking and booking_payload is None and not needs_clarification:
             logger.error(
-                f"INVARIANT VIOLATION: Booking intent but booking_payload is None for user {user_id}",
+                f"INVARIANT VIOLATION: Intent {api_intent} requires booking_payload but it is None for user {user_id}",
                 extra={
                     'request_id': request_id,
                     'intent': api_intent,
                     'decision_status': decision_result.status if decision_result else None,
                     'has_calendar_booking': bool(calendar_booking),
                     'has_merged_memory': bool(merged_memory),
+                    'produces_booking_payload': produces_booking,
                     'note': 'This should not happen - decision/binder should have produced booking_payload'
                 }
             )
@@ -2297,6 +2502,27 @@ def resolve_message(
                         "datetime_range")
                 if datetime_range_from_stage:
                     resolved_datetime_range = datetime_range_from_stage
+        
+        # For MODIFY_BOOKING, check calendar_booking and semantic result for date_range/datetime_range
+        # (booking_payload is None for MODIFY_BOOKING, so we need to check calendar_booking/semantic result directly)
+        # Note: Run this check regardless of needs_clarification to populate resolved_date_range/resolved_datetime_range
+        if intent_payload_name == "MODIFY_BOOKING":
+            # Check calendar_booking first (if available)
+            if calendar_booking:
+                if not resolved_date_range:
+                    resolved_date_range = calendar_booking.get("date_range")
+                if not resolved_datetime_range:
+                    resolved_datetime_range = calendar_booking.get("datetime_range")
+            # Fallback: check semantic result for date_range and datetime_range (if calendar binding was skipped)
+            # This is especially important when calendar binding is skipped for MODIFY_BOOKING
+            if merged_semantic_result and merged_semantic_result.resolved_booking:
+                semantic_booking = merged_semantic_result.resolved_booking
+                # Check if semantic result has date_range or if we need to construct it from date_refs
+                if not resolved_date_range and semantic_booking.get("date_range"):
+                    resolved_date_range = semantic_booking.get("date_range")
+                # Check if semantic result has datetime_range (from delta normalization)
+                if not resolved_datetime_range and semantic_booking.get("datetime_range"):
+                    resolved_datetime_range = semantic_booking.get("datetime_range")
 
         # SYNTHESIS: For CREATE_APPOINTMENT with RESOLVED status, construct datetime_range if missing
         # Decision layer is authoritative - if decision says RESOLVED, slots must include datetime_range
@@ -2496,7 +2722,17 @@ def resolve_message(
         if intent_payload_name == "CREATE_RESERVATION":
             # Reservations use date_range {start, end}
             if resolved_date_range:
-                slots["date_range"] = resolved_date_range
+                # Convert date_range format from start_date/end_date to start/end for response
+                if isinstance(resolved_date_range, dict):
+                    start_date = resolved_date_range.get("start_date") or resolved_date_range.get("start")
+                    end_date = resolved_date_range.get("end_date") or resolved_date_range.get("end")
+                    # Store date_range with start/end format (response contract)
+                    slots["date_range"] = {
+                        "start": start_date,
+                        "end": end_date
+                    } if start_date and end_date else resolved_date_range
+                else:
+                    slots["date_range"] = resolved_date_range
         elif intent_payload_name == "CREATE_APPOINTMENT":
             # Appointments use datetime_range {start, end}
             # Source directly from binder output in results["stages"]["calendar"]["calendar_booking"]["datetime_range"]
@@ -2515,11 +2751,254 @@ def resolve_message(
                 slots["datetime_range"] = datetime_range_for_slots
                 # Set has_datetime flag when datetime_range exists (response contract)
                 slots["has_datetime"] = True
+        elif intent_payload_name in {"MODIFY_BOOKING", "CANCEL_BOOKING"}:
+            # MODIFY_BOOKING and CANCEL_BOOKING use booking_id slot
+            # Extract booking_id from entities
+            if extraction_result and extraction_result.get("booking_id"):
+                slots["booking_id"] = extraction_result["booking_id"]
+            # For MODIFY_BOOKING, include delta slots (date_range, datetime_range, start_date, end_date, time)
+            if intent_payload_name == "MODIFY_BOOKING":
+                # Check if semantic resolver set clarification for single-date reservation (end_date missing)
+                # If so, do NOT build date_range from resolved_date_range (even if it exists)
+                # This prevents auto-collapse of single dates into date_range
+                semantic_clarification_for_single_date = False
+                if merged_semantic_result and merged_semantic_result.needs_clarification and merged_semantic_result.clarification:
+                    clar = merged_semantic_result.clarification
+                    # Handle both Clarification object and dict form
+                    clar_data = None
+                    if hasattr(clar, 'data'):
+                        clar_data = clar.data
+                    elif isinstance(clar, dict):
+                        clar_data = clar.get("data", {})
+                    elif hasattr(clar, 'to_dict'):
+                        clar_dict = clar.to_dict()
+                        clar_data = clar_dict.get("data", {})
+                    
+                    if clar_data and isinstance(clar_data, dict):
+                        missing_slots_from_clar = clar_data.get("missing_slots", [])
+                        if "end_date" in missing_slots_from_clar:
+                            # Semantic resolver detected single date and requires end_date clarification
+                            # Do NOT build date_range - preserve the clarification
+                            semantic_clarification_for_single_date = True
+                            logger.info(
+                                f"[slots] MODIFY_BOOKING reservation: semantic resolver set clarification for single date (end_date missing), "
+                                f"skipping date_range build to preserve clarification. missing_slots={missing_slots_from_clar}",
+                                extra={'request_id': request_id, 'user_id': user_id, 'missing_slots': missing_slots_from_clar}
+                            )
+                
+                # Also check if resolved_date_range has start == end (single date collapsed)
+                # This is a guardrail in case semantic clarification wasn't preserved
+                if resolved_date_range and isinstance(resolved_date_range, dict):
+                    start_date_check = resolved_date_range.get("start_date") or resolved_date_range.get("start")
+                    end_date_check = resolved_date_range.get("end_date") or resolved_date_range.get("end")
+                    if start_date_check and end_date_check and start_date_check == end_date_check:
+                        # Check if this is a reservation
+                        semantic_booking = merged_semantic_result.resolved_booking if merged_semantic_result else {}
+                        booking_mode_check = semantic_booking.get("booking_mode", domain)
+                        is_reservation_check = (booking_mode_check == "reservation" or domain == "reservation")
+                        
+                        if is_reservation_check:
+                            # Single date detected in reservation - do NOT build date_range
+                            # This guardrail catches cases where semantic resolver clarification wasn't preserved
+                            semantic_clarification_for_single_date = True
+                            # Reset resolved_date_range to prevent it from being used
+                            resolved_date_range = None
+                            logger.warning(
+                                f"[slots] MODIFY_BOOKING reservation: detected single date (start==end={start_date_check}), "
+                                f"skipping date_range build to prevent auto-collapse. "
+                                f"This should have been caught by semantic resolver.",
+                                extra={'request_id': request_id, 'user_id': user_id, 'date': start_date_check}
+                            )
+                
+                # Check for date_range (reservations) and extract start_date/end_date as deltas
+                # Skip if semantic resolver already set clarification for single-date
+                # Also skip if resolved_date_range was reset due to single-date detection
+                if resolved_date_range and not semantic_clarification_for_single_date:
+                    # Convert date_range format from start_date/end_date to start/end for response
+                    if isinstance(resolved_date_range, dict):
+                        start_date = resolved_date_range.get("start_date") or resolved_date_range.get("start")
+                        end_date = resolved_date_range.get("end_date") or resolved_date_range.get("end")
+                        
+                        # INVARIANT: For MODIFY_BOOKING reservations, NEVER collapse single date into date_range
+                        # If start_date == end_date, this indicates a single date was incorrectly collapsed
+                        # This is a guardrail - semantic resolver should have already caught this
+                        if start_date and end_date and start_date == end_date:
+                            # Check if this is a reservation (not appointment)
+                            semantic_booking = merged_semantic_result.resolved_booking if merged_semantic_result else {}
+                            booking_mode = semantic_booking.get("booking_mode", domain)
+                            is_reservation = (booking_mode == "reservation" or domain == "reservation")
+                            
+                            if is_reservation:
+                                # Single date detected in reservation - do NOT build date_range
+                                # This guardrail catches cases where semantic resolver clarification wasn't preserved
+                                logger.warning(
+                                    f"[slots] MODIFY_BOOKING reservation: single date detected (start==end={start_date}), "
+                                    f"skipping date_range build to prevent auto-collapse. "
+                                    f"This should have been caught by semantic resolver.",
+                                    extra={'request_id': request_id, 'user_id': user_id}
+                                )
+                                # Don't build date_range - should require clarification for end_date
+                                resolved_date_range = None
+                        
+                        if resolved_date_range and isinstance(resolved_date_range, dict):
+                            # Re-extract after potential reset above
+                            start_date = resolved_date_range.get("start_date") or resolved_date_range.get("start")
+                            end_date = resolved_date_range.get("end_date") or resolved_date_range.get("end")
+                            
+                            # Special handling for "move ... from X to Y" pattern: use only destination date (Y)
+                            # Example: "move my reservation DEF456 from oct 5th to oct 10th" → use only oct 10th (both start and end = oct 10th)
+                            move_from_to_pattern = re.search(r'\bmove\b.*\bfrom\b.*\bto\b', text, re.IGNORECASE)
+                            if move_from_to_pattern and start_date and end_date and start_date != end_date:
+                                # Use only the destination date (end_date) - set both start and end to destination
+                                start_date = end_date
+                                logger.info(
+                                    f"[slots] MODIFY_BOOKING: 'move from X to Y' pattern detected, using only destination date: {end_date}",
+                                    extra={'request_id': request_id, 'user_id': user_id}
+                                )
+                            
+                            # Store date_range with start/end format (response contract)
+                            # Build if we have both start and end (allow start == end for "move from X to Y" pattern)
+                            if start_date and end_date:
+                                slots["date_range"] = {
+                                    "start": start_date,
+                                    "end": end_date
+                                }
+                                # Extract start_date and end_date from date_range as separate delta slots
+                                slots["start_date"] = start_date
+                                slots["end_date"] = end_date
+                    elif resolved_date_range:
+                        # Non-dict date_range (shouldn't happen, but handle it)
+                        slots["date_range"] = resolved_date_range
+                
+                # Check for datetime_range (appointments)
+                # Priority: calendar binder output > semantic normalization output
+                if resolved_datetime_range:
+                    slots["datetime_range"] = resolved_datetime_range
+                    slots["has_datetime"] = True
+                elif calendar_booking and calendar_booking.get("datetime_range"):
+                    slots["datetime_range"] = calendar_booking["datetime_range"]
+                    slots["has_datetime"] = True
+                else:
+                    # Delta normalization for MODIFY_BOOKING: check semantic normalization output
+                    # Semantic resolver sets has_datetime and datetime_range during normalization
+                    # Calendar binding is skipped for MODIFY_BOOKING, so semantic output is authoritative
+                    if merged_semantic_result and merged_semantic_result.resolved_booking:
+                        semantic_booking = merged_semantic_result.resolved_booking
+                        
+                        # Check if semantic resolver already set has_datetime or datetime_range
+                        semantic_has_datetime = semantic_booking.get("has_datetime")
+                        semantic_datetime_range = semantic_booking.get("datetime_range")
+                        semantic_date_range = semantic_booking.get("date_range")
+                        
+                        # Propagate has_datetime from semantic normalization (if set)
+                        if semantic_has_datetime and not slots.get("has_datetime"):
+                            slots["has_datetime"] = semantic_has_datetime
+                            logger.info(
+                                f"[slots] MODIFY_BOOKING: propagated has_datetime=True from semantic normalization",
+                                extra={'request_id': request_id, 'user_id': user_id}
+                            )
+                        
+                        # Propagate datetime_range from semantic normalization (if set and not already in slots)
+                        if semantic_datetime_range and not slots.get("datetime_range"):
+                            slots["datetime_range"] = semantic_datetime_range
+                            # Ensure has_datetime is set when datetime_range is present
+                            slots["has_datetime"] = True
+                            logger.info(
+                                f"[slots] MODIFY_BOOKING: propagated datetime_range from semantic normalization",
+                                extra={'request_id': request_id, 'user_id': user_id}
+                            )
+                        
+                        # Propagate date_range from semantic normalization for reservations (if set and not already in slots)
+                        if semantic_date_range and not slots.get("date_range") and domain == "reservation":
+                            slots["date_range"] = semantic_date_range
+                            logger.info(
+                                f"[slots] MODIFY_BOOKING reservation: propagated date_range from semantic normalization",
+                                extra={'request_id': request_id, 'user_id': user_id}
+                            )
+                        
+                        # Fallback: Build datetime_range for API compatibility when semantic resolver didn't set it
+                        # This is a compatibility shim that enforces API response shape (has_datetime=True requires datetime_range)
+                        # It does NOT perform temporal resolution - only shapes response structure from semantic_booking
+                        build_datetime_range_for_api(
+                            slots=slots,
+                            semantic_booking=semantic_booking,
+                            domain=domain,
+                            request_id=request_id,
+                            user_id=user_id
+                        )
 
         # Extract clarification_data from current_clarification if present
         clarification_data_for_response = None
         if current_clarification and isinstance(current_clarification, dict):
             clarification_data_for_response = current_clarification.get("data")
+
+        # Normalize INCOMPLETE_BINDING to a public clarification reason
+        # INCOMPLETE_BINDING is internal/debug-only and must never be exposed in responses
+        public_clarification_reason = clarification_reason
+        if clarification_reason == ClarificationReason.INCOMPLETE_BINDING.value:
+            # Normalize based on intent and missing slots
+            if intent_name == "CREATE_RESERVATION":
+                # For reservations, INCOMPLETE_BINDING typically means missing date range
+                public_clarification_reason = ClarificationReason.MISSING_DATE_RANGE.value
+            elif missing_slots:
+                # Use missing slots to determine appropriate reason
+                if "start_date" in missing_slots and "end_date" in missing_slots:
+                    public_clarification_reason = ClarificationReason.MISSING_DATE_RANGE.value
+                elif "date" in missing_slots:
+                    public_clarification_reason = ClarificationReason.MISSING_DATE.value
+                elif "time" in missing_slots:
+                    public_clarification_reason = ClarificationReason.MISSING_TIME.value
+                else:
+                    # Default to MISSING_DATE for temporal binding issues
+                    public_clarification_reason = ClarificationReason.MISSING_DATE.value
+            else:
+                # Default to MISSING_DATE if no specific missing slots identified
+                public_clarification_reason = ClarificationReason.MISSING_DATE.value
+
+        # CENTRAL NORMALIZATION: Ensure service_id is always a tenant alias key, never a canonical
+        # INVARIANT: API responses must NEVER expose canonical service IDs
+        # This runs for ALL intents in ONE central place before final response assembly
+        if slots and tenant_context and isinstance(tenant_context, dict):
+            aliases = tenant_context.get("aliases", {})
+            if isinstance(aliases, dict) and aliases and slots.get("service_id"):
+                service_id_value = slots.get("service_id")
+                
+                # Check if service_id is already a tenant alias key (direct match)
+                if service_id_value not in aliases:
+                    # service_id is not a tenant alias key - check if it's a canonical value
+                    # Reverse lookup: find tenant alias key that maps to this canonical
+                    # aliases structure: {tenant_alias_key: canonical_family}
+                    # Example: {"suite": "room", "delux": "room"} means "room" is canonical
+                    tenant_alias_key = None
+                    
+                    # Search for alias key that maps to this canonical
+                    for alias_key, canonical_family in aliases.items():
+                        if canonical_family:
+                            # Exact match with canonical family (e.g., "room")
+                            if service_id_value == canonical_family:
+                                tenant_alias_key = alias_key
+                                break
+                            # Match with full canonical ID (e.g., "hospitality.room" contains "room")
+                            elif "." in service_id_value and service_id_value.endswith(f".{canonical_family}"):
+                                tenant_alias_key = alias_key
+                                break
+                    
+                    if tenant_alias_key:
+                        # Replace canonical with tenant alias key
+                        slots["service_id"] = tenant_alias_key
+                        logger.info(
+                            f"[response] Normalized service_id from canonical '{service_id_value}' to tenant alias '{tenant_alias_key}'",
+                            extra={'request_id': request_id}
+                        )
+                    else:
+                        # service_id is not in aliases and doesn't match any canonical
+                        # This violates the invariant - canonical IDs must not appear in responses
+                        # Log error and remove service_id to prevent canonical exposure
+                        logger.error(
+                            f"[response] INVARIANT VIOLATION: service_id '{service_id_value}' is not a tenant alias key and doesn't map to any canonical. Removing from response.",
+                            extra={'request_id': request_id, 'service_id': service_id_value}
+                        )
+                        slots.pop("service_id", None)
 
         # Build response body using ResponseBuilder (slots now built above)
         # Response must mirror decision: if decision says ambiguous service → needs_clarification
@@ -2527,7 +3006,7 @@ def resolve_message(
         response_body = response_builder.build_response_body(
             intent_payload=intent_payload,
             needs_clarification=needs_clarification,
-            clarification_reason=clarification_reason,
+            clarification_reason=public_clarification_reason,
             issues=issues if issues else {},
             booking_payload=booking_payload,
             entities_payload=entities_payload,

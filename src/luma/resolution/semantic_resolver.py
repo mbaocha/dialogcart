@@ -758,13 +758,112 @@ def resolve_semantics(
     # This runs after all ambiguity checks but before finalizing status
     # Pass entities and memory_state for weekday-only range normalization
     intent_name = intent_result.get("intent")
-    temporal_clarification = _validate_temporal_shape_completeness(
-        intent_name, resolved_booking, date_resolution, entities, None  # memory_state not available here
-    )
-    if temporal_clarification:
-        # Temporal shape incomplete - force needs_clarification
-        # This overrides any prior RESOLVED decision
-        clarification = temporal_clarification
+    
+    # Delta normalization for MODIFY_BOOKING: slot normalization (semantic shaping), not calendar binding
+    # This runs BEFORE temporal shape validation to normalize modification deltas
+    # Rules:
+    # - Do NOT run for CREATE intents (CREATE_APPOINTMENT, CREATE_RESERVATION)
+    # - Do NOT calendar-bind (actual date resolution happens later)
+    # - Do NOT infer missing values
+    if (intent_name == "MODIFY_BOOKING" and
+        clarification is None and
+        tenant_context):
+        
+        booking_mode = tenant_context.get("booking_mode", "service")
+        
+        # Appointment (service) rules: normalize datetime_range for MODIFY_BOOKING
+        if booking_mode == "service":
+            time_refs = resolved_booking.get("time_refs", [])
+            time_mode = resolved_booking.get("time_mode")
+            date_refs = resolved_booking.get("date_refs", [])
+            date_mode = resolved_booking.get("date_mode")
+            
+            # Check if time is present (time_refs exist or time_mode is valid)
+            has_time = bool(time_refs) or time_mode in {
+                TimeMode.EXACT.value, TimeMode.RANGE.value, TimeMode.WINDOW.value
+            } or resolved_booking.get("time_constraint")
+            
+            # Check if date is present (date_refs exist and date_mode is valid)
+            has_date = bool(date_refs) and date_mode is not None and date_mode != DateMode.FLEXIBLE.value
+            
+            if has_time:
+                # Set has_datetime = true
+                resolved_booking["has_datetime"] = True
+                
+                # Build minimal datetime_range structure (calendar binder will resolve to actual dates)
+                # Structure: { "start": <time-ref or date+time>, "end": <same> }
+                # For now, store time_refs - calendar binder will combine with dates
+                if time_refs:
+                    # Build minimal datetime_range with time references
+                    # The calendar binder will resolve these to actual datetime values
+                    resolved_booking["datetime_range"] = {
+                        "start": time_refs[0] if time_refs else None,
+                        "end": time_refs[0] if time_refs else None  # Same for minimal range
+                    }
+                    logger.info(
+                        f"[semantic] MODIFY_BOOKING appointment: set has_datetime=True and built datetime_range "
+                        f"from time_refs={time_refs} (calendar binder will resolve to actual dates)"
+                    )
+                
+                # If time present but no date: require clarification ["date"]
+                if not has_date:
+                    clarification = Clarification(
+                        reason=ClarificationReason.MISSING_DATE,
+                        data={
+                            "missing_slots": ["date"]
+                        }
+                    )
+                    logger.info(
+                        f"[semantic] MODIFY_BOOKING appointment: time present but no date, requiring clarification: "
+                        f"time_refs={time_refs}, date_refs={date_refs}"
+                    )
+        
+        # Reservation rules: normalize date_range for MODIFY_BOOKING
+        elif booking_mode == "reservation":
+            date_refs = resolved_booking.get("date_refs", [])
+            date_mode = resolved_booking.get("date_mode")
+            
+            # If exactly TWO explicit dates: emit date_range {start, end}
+            if len(date_refs) == 2:
+                # Emit date_range structure in resolved_booking for MODIFY_BOOKING
+                # The calendar binder will bind the date_refs to actual dates
+                # Store date_refs in date_range structure (calendar binder will resolve to actual dates)
+                resolved_booking["date_range"] = {
+                    "start": date_refs[0] if len(date_refs) > 0 else None,
+                    "end": date_refs[1] if len(date_refs) > 1 else None
+                }
+                logger.info(
+                    f"[semantic] MODIFY_BOOKING reservation: emitted date_range from exactly two dates: "
+                    f"date_refs={date_refs}, date_mode={date_mode} (calendar binder will resolve to actual dates)"
+                )
+            # If exactly ONE date: DO NOT build date_range, require clarification
+            elif len(date_refs) == 1:
+                # Single date detected - do NOT collapse into date_range (NEVER collapse a single date)
+                # Require clarification for missing date (end_date or start_date)
+                # For simplicity, require end_date clarification
+                clarification = Clarification(
+                    reason=ClarificationReason.MISSING_DATE,
+                    data={
+                        "missing_slots": ["end_date"]
+                    }
+                )
+                logger.info(
+                    f"[semantic] MODIFY_BOOKING reservation: single date detected, requiring clarification: "
+                    f"date_refs={date_refs} (NEVER collapse single date into date_range)"
+                )
+
+    # Validate temporal shape completeness (authoritative - must pass for RESOLVED)
+    # This runs AFTER delta normalization for MODIFY_BOOKING
+    # For CREATE intents, this validation still applies
+    # For MODIFY_BOOKING, skip temporal shape validation (delta normalization handles it)
+    if intent_name != "MODIFY_BOOKING":
+        temporal_clarification = _validate_temporal_shape_completeness(
+            intent_name, resolved_booking, date_resolution, entities, None  # memory_state not available here
+        )
+        if temporal_clarification:
+            # Temporal shape incomplete - force needs_clarification
+            # This overrides any prior RESOLVED decision
+            clarification = temporal_clarification
 
     result = SemanticResolutionResult(
         resolved_booking=resolved_booking,

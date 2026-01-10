@@ -317,12 +317,49 @@ def plan_clarification(
 
     # CRITICAL: Merge decision layer's missing_slots FIRST (before semantic clarifications)
     # This ensures temporal shape validation results are preserved even when semantic clarifications exist
+    # For MODIFY_BOOKING: decision layer's specific deltas (date/time or start_date/end_date) take precedence
+    # over intent resolver's generic "change" marker
     if decision_trace and isinstance(decision_trace, dict):
         decision_missing = decision_trace.get("missing_slots", [])
         if decision_missing:
-            # Merge decision layer's missing_slots (temporal shape validation) with intent resolver's
-            # Use set to avoid duplicates, then convert back to list
-            missing_slots = list(set(missing_slots + decision_missing))
+            # Extract intent name to check if it's MODIFY_BOOKING
+            intent_name = intent_result.get("intent")
+            if isinstance(intent_name, dict):
+                intent_name = intent_name.get("name")
+            elif not isinstance(intent_name, str):
+                intent_name = None
+            
+            # For MODIFY_BOOKING: decision layer is authoritative for missing_slots
+            # Decision layer handles generic vs specific wording correctly based on booking_mode
+            # Use decision layer's missing_slots directly, only merge with intent resolver's if decision layer didn't provide any
+            if intent_name == "MODIFY_BOOKING":
+                # Decision layer is authoritative for MODIFY_BOOKING missing_slots
+                # It correctly handles generic wording (["change"]) vs specific wording (["date", "time"] or ["start_date", "end_date"])
+                # Use decision layer's missing_slots directly, but also include booking_id if present from intent resolver
+                if decision_missing:
+                    # Decision layer provided missing_slots - use those as authoritative
+                    # Remove "change" from intent resolver's missing_slots if decision layer provided specific deltas
+                    specific_deltas = {"date", "time", "start_date", "end_date"}
+                    decision_has_specific_deltas = any(slot in specific_deltas for slot in decision_missing)
+                    decision_has_change = "change" in decision_missing
+                    
+                    if decision_has_specific_deltas:
+                        # Decision layer returned specific deltas - use those, remove "change" from intent resolver's
+                        missing_slots = [s for s in missing_slots if s != "change"]  # Remove "change" if present
+                        missing_slots = list(set(missing_slots + decision_missing))  # Merge with decision deltas
+                    elif decision_has_change:
+                        # Decision layer returned ["change"] for generic wording - use that, remove specific deltas from intent resolver's
+                        # Remove any specific deltas that might have been added by intent resolver
+                        intent_specific_deltas = {"date", "time", "start_date", "end_date"}
+                        missing_slots = [s for s in missing_slots if s not in intent_specific_deltas]
+                        missing_slots = list(set(missing_slots + decision_missing))  # Merge with decision ["change"]
+                    else:
+                        # Decision layer provided other missing_slots (e.g., ["booking_id", "date", "time"])
+                        # Merge with intent resolver's missing_slots
+                        missing_slots = list(set(missing_slots + decision_missing))
+            else:
+                # For other intents: standard merge
+                missing_slots = list(set(missing_slots + decision_missing))
 
     # Prefer semantic clarifications (e.g., MULTIPLE_MATCHES, MISSING_DATE_RANGE) if present
     if semantic_result and getattr(semantic_result, "needs_clarification", False):
@@ -395,17 +432,35 @@ def plan_clarification(
     
     # Fallback: map missing slots to reasons
     if not clarification_reason and missing_slots:
-        if "time" in missing_slots:
-            clarification_reason = ClarificationReason.MISSING_TIME.value
-        elif "date" in missing_slots:
-            clarification_reason = ClarificationReason.MISSING_DATE.value
-        elif "service_id" in missing_slots or "service" in missing_slots:
-            clarification_reason = ClarificationReason.MISSING_SERVICE.value
-        elif "booking_id" in missing_slots:
-            clarification_reason = ClarificationReason.MISSING_BOOKING_REFERENCE.value
-        elif "start_date" in missing_slots and "end_date" in missing_slots:
-            # If both start_date and end_date are missing, use MISSING_DATE_RANGE
-            clarification_reason = ClarificationReason.MISSING_DATE_RANGE.value
+        # MODIFY_BOOKING delta semantics: "change" placeholder means booking_id exists but no deltas
+        # This indicates at least one delta slot (date, time, service_id, etc.) is required
+        # Keep "change" in missing_slots to indicate what needs clarification
+        if "change" in missing_slots:
+            # Extract intent name to check if it's MODIFY_BOOKING
+            intent_name = intent_result.get("intent")
+            if isinstance(intent_name, dict):
+                intent_name = intent_name.get("name")
+            elif not isinstance(intent_name, str):
+                intent_name = None
+            
+            if intent_name == "MODIFY_BOOKING":
+                # booking_id is present but no deltas - indicate clarification needed
+                # Use MISSING_CONTEXT since we're asking "what should be modified?" (not missing booking_id)
+                clarification_reason = ClarificationReason.MISSING_CONTEXT.value
+                # Keep "change" in missing_slots - it indicates what needs clarification
+        
+        if not clarification_reason:
+            if "time" in missing_slots:
+                clarification_reason = ClarificationReason.MISSING_TIME.value
+            elif "date" in missing_slots:
+                clarification_reason = ClarificationReason.MISSING_DATE.value
+            elif "service_id" in missing_slots or "service" in missing_slots:
+                clarification_reason = ClarificationReason.MISSING_SERVICE.value
+            elif "booking_id" in missing_slots:
+                clarification_reason = ClarificationReason.MISSING_BOOKING_REFERENCE.value
+            elif "start_date" in missing_slots and "end_date" in missing_slots:
+                # If both start_date and end_date are missing, use MISSING_DATE_RANGE
+                clarification_reason = ClarificationReason.MISSING_DATE_RANGE.value
 
     return {
         "status": status,

@@ -33,6 +33,7 @@ class IntentMeta:
     intent_signals: Optional[Dict[str, Any]] = None
     intent_defining_slots: Optional[frozenset[str]] = None
     required_slots: Optional[frozenset[str]] = None
+    produces_booking_payload: Optional[bool] = None
 
     @classmethod
     def from_dict(cls, intent_name: str, data: Dict[str, Any]) -> "IntentMeta":
@@ -69,6 +70,7 @@ class IntentMeta:
             intent_signals=intent_signals,
             intent_defining_slots=intent_defining_slots,
             required_slots=required_slots,
+            produces_booking_payload=data.get("produces_booking_payload"),
         )
 
 
@@ -227,8 +229,17 @@ def validate_required_slots(intent_name: str, resolved_slots: Dict[str, Any], en
         if not _slot_present(slot):
             missing.append(slot)
 
-    # Temporal-shape based enforcement
-    if temporal_shape == APPOINTMENT_TEMPORAL_TYPE:
+    # MODIFY_BOOKING delta semantics: booking_id is mandatory (already checked above)
+    # All other slots are optional deltas (presence = replace, absence = leave unchanged)
+    # The "at least one delta" check is handled in compute_missing_slots_for_intent()
+    # No temporal shape enforcement for MODIFY_BOOKING - it's a delta-only intent
+    # Skip temporal shape validation for MODIFY_BOOKING
+    if intent_name == "MODIFY_BOOKING":
+        # MODIFY_BOOKING uses delta semantics - no temporal shape requirement
+        # booking_id is the only required slot (already validated above)
+        # At least one delta slot check is in compute_missing_slots_for_intent()
+        pass
+    elif temporal_shape == APPOINTMENT_TEMPORAL_TYPE:
         # Requires both date and time; fuzzy time not allowed
         has_date = bool(resolved_slots.get("date_refs"))
         has_time = False

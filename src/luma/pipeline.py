@@ -552,7 +552,9 @@ class LumaPipeline:
             calendar_result = CalendarBindingResult(
                 calendar_booking={},
                 needs_clarification=False,
-                clarification=None
+                clarification=None,
+                _binding_success=False,
+                _binding_error="skipped_by_pipeline_decision"
             )
             results["stages"]["calendar"] = calendar_result
             # Add trace indicating binder was skipped

@@ -18,6 +18,7 @@ from ..config.temporal import (
 )
 from ..config.intent_meta import get_intent_registry
 from ..clarification.reasons import ClarificationReason
+from ..utils.missing_slots import derive_missing_slot_from_reason
 
 logger = logging.getLogger(__name__)
 
@@ -403,7 +404,12 @@ def decide_booking_status(
     time_constraint = resolved_booking.get("time_constraint")
     date_range = resolved_booking.get("date_range")
     time_range = resolved_booking.get("time_range")
-    booking_mode = resolved_booking.get("booking_mode", "service")
+    # Determine booking_mode from resolved_booking or tenant_context (fallback to "service")
+    booking_mode = resolved_booking.get("booking_mode")
+    if not booking_mode and tenant_context:
+        booking_mode = tenant_context.get("booking_mode", "service")
+    if not booking_mode:
+        booking_mode = "service"
 
     # SERVICE RESOLUTION GATE
     # Policy differs by intent:
@@ -414,9 +420,225 @@ def decide_booking_status(
 
     is_appointment = intent_name == "CREATE_APPOINTMENT"
     is_reservation = intent_name == "CREATE_RESERVATION"
+    is_modify = intent_name == "MODIFY_BOOKING"
+    is_cancel = intent_name == "CANCEL_BOOKING"
 
-    if not services:
-        # No services extracted - always MISSING_SERVICE
+    # For MODIFY_BOOKING and CANCEL_BOOKING, service is not required - only booking_id is required
+    if is_modify or is_cancel:
+        # Check for booking_id in entities instead of services
+        booking_id = entities.get("booking_id") if entities else None
+        if not booking_id:
+            # For MODIFY/CANCEL, booking_id is required - return early if missing
+            # For MODIFY_BOOKING, also include missing deltas (date/time or start/end dates)
+            missing_slots = ["booking_id"]
+            
+            if is_modify:
+                # Determine missing deltas based on what the user is trying to change
+                has_date = (date_mode is not None and date_mode != "none" and len(date_refs) > 0) or date_range is not None
+                has_time = ((time_mode is not None and time_mode != "none" and len(time_refs) > 0) or time_constraint is not None)
+                
+                if booking_mode == "service":
+                    # Appointment-style: requires date and time
+                    if has_time and not has_date:
+                        # Time present but no date → missing includes ["booking_id", "date"]
+                        missing_slots.append("date")
+                    elif has_date and not has_time:
+                        # Date present but no time → missing includes ["booking_id", "time"]
+                        missing_slots.append("time")
+                    elif not has_date and not has_time:
+                        # Neither date nor time → missing includes ["booking_id", "date", "time"]
+                        missing_slots.extend(["date", "time"])
+                elif booking_mode == "reservation":
+                    # Reservation-style: requires start_date and end_date
+                    # Check if both start and end dates are present (2+ date_refs OR date_range OR date_mode == "range")
+                    has_start = len(date_refs) >= 1 or date_mode == "range" or (date_range is not None)
+                    has_end = len(date_refs) >= 2 or date_mode == "range" or (date_range is not None and isinstance(date_range, dict) and date_range.get("start") and date_range.get("end"))
+                    
+                    if not has_start or not has_end:
+                        # Missing start_date and/or end_date → missing includes ["booking_id", "start_date", "end_date"]
+                        missing_slots.extend(["start_date", "end_date"])
+            
+            effective_time = _determine_effective_time(
+                time_mode, time_refs, time_constraint
+            )
+            result = DecisionResult(
+                status="NEEDS_CLARIFICATION",
+                reason=ClarificationReason.MISSING_BOOKING_REFERENCE.value,
+                effective_time=effective_time
+            )
+            trace = {
+                "decision": {
+                    "state": result.status,
+                    "reason": result.reason,
+                    "missing_slots": missing_slots,
+                    "service_resolution": {
+                        "resolved_tenant_service_id": None,
+                        "clarification_reason": "MISSING_BOOKING_REFERENCE",
+                        "metadata": {"resolution_strategy": "booking_id_required"}
+                    }
+                }
+            }
+            return result, trace
+        
+        # booking_id present - for MODIFY_BOOKING, check for change deltas before proceeding
+        # MODIFY_BOOKING requires at least one change delta (date, time, date_range, start_date, end_date, service_id, duration)
+        if is_modify:
+            # Check for change deltas in resolved_booking
+            has_date = (date_mode is not None and date_mode != "none" and len(date_refs) > 0) or date_range is not None
+            has_time = ((time_mode is not None and time_mode != "none" and len(time_refs) > 0) or time_constraint is not None)
+            has_service_id = bool(services and len(services) > 0)
+            has_duration = resolved_booking.get("duration") is not None
+            
+            # Special case: For reservations, single date should require clarification for end_date
+            # Don't treat single date as a valid change delta - semantic resolver should have set clarification
+            # Check both: (1) only one date_ref exists, OR (2) date_range exists with start == end (collapsed single date)
+            is_single_date_reservation = False
+            if booking_mode == "reservation":
+                if len(date_refs) == 1 and not date_range:
+                    # Single date_ref for reservation - require clarification
+                    is_single_date_reservation = True
+                elif date_range and isinstance(date_range, dict):
+                    # Check if date_range was collapsed from single date (start == end)
+                    start_date = date_range.get("start_date") or date_range.get("start")
+                    end_date = date_range.get("end_date") or date_range.get("end")
+                    if start_date and end_date and start_date == end_date and len(date_refs) <= 1:
+                        # Single date collapsed into date_range - require clarification
+                        is_single_date_reservation = True
+            
+            if is_single_date_reservation:
+                # Single date for reservation - require clarification for end_date (semantic resolver should have set this)
+                effective_time = _determine_effective_time(
+                    time_mode, time_refs, time_constraint
+                )
+                result = DecisionResult(
+                    status="NEEDS_CLARIFICATION",
+                    reason=ClarificationReason.MISSING_DATE.value,
+                    effective_time=effective_time
+                )
+                trace = {
+                    "decision": {
+                        "state": result.status,
+                        "reason": result.reason,
+                        "missing_slots": ["end_date"],
+                        "service_resolution": {
+                            "resolved_tenant_service_id": None,
+                            "clarification_reason": "MISSING_DATE",
+                            "metadata": {"resolution_strategy": "single_date_reservation", "booking_id_present": True}
+                        }
+                    }
+                }
+                logger.info(
+                    f"[decision] MODIFY_BOOKING reservation: single date detected, requiring end_date clarification. "
+                    f"date_refs={date_refs}, date_range={date_range}",
+                    extra={'missing_slots': ["end_date"], 'booking_id': booking_id, 'date_refs': date_refs, 'date_range': date_range}
+                )
+                return result, trace
+            
+            # Check if any change delta exists (after excluding single-date reservations)
+            has_change_delta = has_date or has_time or has_service_id or has_duration
+            
+            if not has_change_delta:
+                # booking_id present but no change delta - need clarification
+                effective_time = _determine_effective_time(
+                    time_mode, time_refs, time_constraint
+                )
+                
+                # Determine missing slots based on booking_mode and wording
+                # Priority: booking_mode context > generic wording detection
+                # Heuristic: Check booking_mode first; if explicit, use specific deltas
+                # Exception: For "service" mode with no temporal entities, check if wording is truly generic
+                # Case 84: "modify booking FGH890" with booking_mode="service" → ["date", "time"] (specific)
+                # Case 85: "reschedule reservation IJK123" with booking_mode="reservation" → ["start_date", "end_date"] (specific)
+                # Case 99: "reschedule my booking ABC123" with booking_mode="service" → ["change"] (generic)
+                missing_slots_list = []
+                
+                # Check if ANY temporal entities were actually extracted
+                # Only consider entities extracted, not mode values which might be defaults
+                has_any_extracted_temporal_entities = (len(date_refs) > 0 or len(time_refs) > 0 or 
+                                                       time_constraint is not None or 
+                                                       date_range is not None)
+                
+                # Check if we can infer generic wording from entities (e.g., "reschedule my booking" vs "modify booking")
+                # Try to detect if the original sentence was truly generic by checking entities for clues
+                is_generic_wording = False
+                if entities and isinstance(entities, dict):
+                    # Check for generic patterns in osentence if available
+                    osentence = entities.get("osentence", "").lower() if isinstance(entities.get("osentence"), str) else ""
+                    if osentence:
+                        # Generic patterns: "reschedule my booking" (possessive + "booking")
+                        # Specific patterns: "modify booking", "reschedule reservation" (verb + specific noun)
+                        has_possessive_my = " my " in osentence or osentence.startswith("my ")
+                        has_generic_reschedule = "reschedule" in osentence and (" my booking" in osentence or " my reservation" in osentence)
+                        # If sentence has "reschedule my booking" pattern, it's generic wording
+                        if has_possessive_my and has_generic_reschedule:
+                            is_generic_wording = True
+                            logger.info(
+                                f"[decision] MODIFY_BOOKING: detected generic wording pattern 'reschedule my booking', "
+                                f"booking_mode={booking_mode}, has_temporal_entities={has_any_extracted_temporal_entities}",
+                                extra={'booking_mode': booking_mode, 'has_temporal_entities': has_any_extracted_temporal_entities, 'osentence': osentence}
+                            )
+                
+                # Priority 1: If booking_mode is "reservation", always use specific deltas (Case 85)
+                if booking_mode == "reservation":
+                    missing_slots_list = ["start_date", "end_date"]
+                # Priority 2: If booking_mode is "service" and wording is generic (Case 99), use ["change"]
+                elif booking_mode == "service" and is_generic_wording and not has_any_extracted_temporal_entities:
+                    missing_slots_list = ["change"]
+                # Priority 3: If booking_mode is "service" (Case 84), use specific deltas
+                elif booking_mode == "service":
+                    missing_slots_list = ["date", "time"]
+                # Priority 4: No booking_mode context, check temporal entities
+                elif not has_any_extracted_temporal_entities:
+                    missing_slots_list = ["change"]
+                else:
+                    # Has temporal entities but no booking_mode - default to generic ["change"]
+                    missing_slots_list = ["change"]
+                
+                result = DecisionResult(
+                    status="NEEDS_CLARIFICATION",
+                    reason=ClarificationReason.MISSING_CONTEXT.value,
+                    effective_time=effective_time
+                )
+                trace = {
+                    "decision": {
+                        "state": result.status,
+                        "reason": result.reason,
+                        "missing_slots": missing_slots_list,
+                        "service_resolution": {
+                            "resolved_tenant_service_id": None,
+                            "clarification_reason": "MISSING_CONTEXT",
+                            "metadata": {
+                                "resolution_strategy": "no_change_delta", 
+                                "booking_id_present": True,
+                                "booking_mode": booking_mode,
+                                "is_generic_wording": is_generic_wording,
+                                "has_temporal_entities": has_any_extracted_temporal_entities
+                            }
+                        }
+                    }
+                }
+                logger.info(
+                    f"[decision] MODIFY_BOOKING: booking_id present but no change delta. "
+                    f"Missing slots: {missing_slots_list}, booking_mode={booking_mode}, "
+                    f"is_generic_wording={is_generic_wording}, has_temporal_entities={has_any_extracted_temporal_entities}",
+                    extra={
+                        'missing_slots': missing_slots_list, 
+                        'booking_id': booking_id,
+                        'booking_mode': booking_mode,
+                        'is_generic_wording': is_generic_wording,
+                        'has_temporal_entities': has_any_extracted_temporal_entities
+                    }
+                )
+                return result, trace
+        
+        # booking_id present and change delta exists (for MODIFY_BOOKING) or CANCEL_BOOKING
+        # Skip service resolution entirely and continue to temporal validation
+        # Set resolved_tenant_service_id to None since we're not resolving services
+        resolved_tenant_service_id = None
+        service_resolution_reason = None
+        service_resolution_metadata = {"resolution_strategy": "skipped_modify_cancel"}
+    elif not services:
+        # No services extracted - always MISSING_SERVICE (for CREATE_* intents)
         effective_time = _determine_effective_time(
             time_mode, time_refs, time_constraint
         )
@@ -437,9 +659,8 @@ def decide_booking_status(
             }
         }
         return result, trace
-
-    if services:
-        # Attempt to resolve services to tenant_service_id
+    else:
+        # services present - attempt to resolve services to tenant_service_id (for CREATE_* intents)
         resolved_tenant_service_id, service_resolution_reason, service_resolution_metadata = resolve_tenant_service_id(
             services=services,
             entities=entities,
@@ -447,7 +668,7 @@ def decide_booking_status(
             booking_mode=booking_mode
         )
 
-        # POLICY: All requests require tenant-authoritative resolution
+        # POLICY: All CREATE_* requests require tenant-authoritative resolution
         # No special case for appointments - all require tenant_service_id
         if not resolved_tenant_service_id:
             # Service resolution failed - return early with service resolution reason
@@ -493,8 +714,11 @@ def decide_booking_status(
 
     # MANDATORY: Validate temporal shape completeness BEFORE any RESOLVED decision
     # This is authoritative - config and YAML define what's required
-    temporal_shape_reason = _validate_temporal_shape_for_decision(
-        intent_name, resolved_booking)
+    # SKIP temporal validation for MODIFY_BOOKING - it only requires change deltas, not temporal shape
+    temporal_shape_reason = None
+    if intent_name != "MODIFY_BOOKING":
+        temporal_shape_reason = _validate_temporal_shape_for_decision(
+            intent_name, resolved_booking)
 
     # Get expected temporal shape from IntentRegistry (sole policy source)
     registry = get_intent_registry()
@@ -528,18 +752,6 @@ def decide_booking_status(
         elif time_refs and time_mode != "none":
             actual_shape = "time_only"
 
-        # Extract missing slot name from reason
-        missing_slot = temporal_shape_reason.lower().replace(
-            "missing_", "").replace("_", "_")
-        if missing_slot == "time":
-            missing_slot = "time"
-        elif missing_slot == "date":
-            missing_slot = "date"
-        elif missing_slot == "start_date":
-            missing_slot = "start_date"
-        elif missing_slot == "end_date":
-            missing_slot = "end_date"
-
         # Build temporal shape derivation
         temporal_shape_derivation = {
             "date_present": bool(date_refs and date_mode != "none"),
@@ -547,8 +759,8 @@ def decide_booking_status(
             "derived_shape": actual_shape
         }
 
-        # Build missing_slots list - include temporal missing slots
-        missing_slots_list = [missing_slot] if temporal_shape_reason else []
+        # Build missing_slots list - derive from temporal shape reason
+        missing_slots_list = derive_missing_slot_from_reason(temporal_shape_reason)
 
         # Note: Service resolution is checked first and returns early if it fails,
         # so at this point service resolution must have succeeded
