@@ -6,10 +6,8 @@ from their dedicated files.
 """
 from .booking_scenarios import booking_scenarios
 from .other_scenarios import other_scenarios
-from .followup_scenarios import followup_scenarios
 
 # Default: use booking scenarios for backward compatibility
 scenarios = booking_scenarios
 
-__all__ = ['booking_scenarios', 'other_scenarios',
-           'followup_scenarios', 'scenarios']
+__all__ = ['booking_scenarios', 'other_scenarios', 'scenarios']

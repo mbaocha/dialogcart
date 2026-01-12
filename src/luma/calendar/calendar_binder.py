@@ -736,6 +736,16 @@ def _bind_dates(
             start_date = _bind_single_date(date_refs[0], now, tz)
             end_date = _bind_single_date(date_refs[1], now, tz)
             if start_date and end_date:
+                # Fix year drift: If start_date > end_date, re-normalize start_date using end_date.year
+                # This handles cases where dates are normalized independently (e.g., "jan 10 to jan 15")
+                # and can cause year drift when crossing year boundaries.
+                # Invariant: start_date <= end_date MUST always hold for date_mode == "range"
+                if start_date > end_date:
+                    # Re-normalize start_date using end_date.year
+                    start_date = _localize_datetime(
+                        datetime(end_date.year, start_date.month, start_date.day), tz
+                    )
+                
                 return {
                     "start_date": start_date.strftime("%Y-%m-%d"),
                     "end_date": end_date.strftime("%Y-%m-%d")
@@ -762,8 +772,7 @@ def _bind_single_date(date_str: str, now: datetime, tz: Any) -> Optional[datetim
     Returns:
         Bound datetime or None
     """
-    # Handle YYYY-MM-DD format (resolved dates from memory rehydration)
-    # This format is used when rehydrating time-only follow-ups with resolved dates
+    # Handle YYYY-MM-DD format (ISO date strings from calendar binding or date resolution)
     # Check this BEFORE lowercasing to preserve the format
     date_str_stripped = date_str.strip()
     iso_date_pattern = r"^\d{4}-\d{2}-\d{2}$"

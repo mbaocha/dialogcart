@@ -11,7 +11,7 @@ INVARIANT: This file must NEVER:
 
 This file's responsibilities are LIMITED to:
 - Orchestrating pipeline stages (extraction, intent, structure, grouping, semantic, decision, binder)
-- Merging already-produced semantics (combining memory state with current semantic results)
+- Processing each request independently (Luma is stateless)
 - Enforcing decision/binder guardrails (validating completeness, temporal shapes, etc.)
 
 If logic would violate this invariant, replace the behavior with:
@@ -31,27 +31,10 @@ from luma.config.temporal import APPOINTMENT_TEMPORAL_TYPE, RESERVATION_TEMPORAL
 from luma.perf import StageTimer
 from luma.resolution.semantic_resolver import SemanticResolutionResult, _is_weekday_only_range
 from luma.utils.missing_slots import compute_temporal_shape_missing_slots, compute_missing_slots_for_intent
-from luma.memory.policy import (
-    # Legacy functions (deprecated, kept for backward compatibility but not used)
-    is_active_booking,
-    is_partial_booking,
-    maybe_persist_draft,
-    should_clear_memory,
-    should_persist_memory,
-    prepare_memory_for_persistence,
-    get_final_memory_state,
-    is_booking_intent,
-    # New state-first model functions
-    state_exists,
-    is_new_task,
-    get_state_intent,
-    merge_slots_for_followup
-)
-from luma.memory.merger import merge_booking_state, extract_memory_state_for_response
 from luma.decision import decide_booking_status
 from luma.clarification.reasons import ClarificationReason
 from luma.pipeline import LumaPipeline
-from luma.calendar.calendar_binder import bind_calendar, bind_times, combine_datetime_range, get_timezone, get_booking_policy, CalendarBindingResult
+from luma.calendar.calendar_binder import bind_calendar, bind_times, combine_datetime_range, get_timezone, get_booking_policy, CalendarBindingResult, _bind_single_date, _localize_datetime
 import time
 import logging
 import re
@@ -251,15 +234,12 @@ def resolve_message(
 
     # Module globals
     intent_resolver,
-    memory_store,
     logger,
 
     # Constants
     APPOINTMENT_TEMPORAL_TYPE_CONST,
-    MEMORY_TTL,
 
     # Helper functions
-    _merge_semantic_results,
     _localize_datetime,
     find_normalization_dir,
     _get_business_categories,
@@ -356,38 +336,10 @@ def resolve_message(
                 "error": "'text' must be a non-empty string"
             }), 400
 
-        # Load memory state
+        # Luma is now stateless - no memory storage or recall
         memory_state = None
-        # Initialize execution_trace early for memory timing
+        # Initialize execution_trace
         execution_trace = {"timings": {}}
-
-        if memory_store:
-            try:
-                # Time memory read operation
-                memory_read_input = {"user_id": user_id, "domain": domain}
-                with StageTimer(execution_trace, "memory", request_id=request_id):
-                    memory_state = memory_store.get(user_id, domain)
-                memory_read_output = {
-                    "found": memory_state is not None,
-                    "has_intent": bool(memory_state.get("intent")) if memory_state else False,
-                    "has_booking_state": bool(memory_state.get("booking_state")) if memory_state else False
-                }
-
-                # Capture memory read snapshot (if stage_snapshots exists)
-                # Note: We capture this early, so we'll initialize it if needed
-                if "stage_snapshots" not in execution_trace:
-                    execution_trace["stage_snapshots"] = []
-                memory_read_snapshot = capture_stage_snapshot(
-                    stage_name="memory_read",
-                    input_data=memory_read_input,
-                    output_data=memory_read_output
-                )
-                execution_trace["stage_snapshots"].append(memory_read_snapshot)
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"Failed to load memory: {e}", extra={
-                               'request_id': request_id})
-
-        # Removed per-stage logging - consolidated trace emitted at end
 
     except Exception as e:  # noqa: BLE001
         logger.error(
@@ -451,8 +403,7 @@ def resolve_message(
                 tenant_context=tenant_context,
                 booking_mode=booking_mode_for_pipeline,
                 request_id=request_id,
-                debug_mode=pipeline_debug_mode,
-                memory_state=memory_state
+                debug_mode=pipeline_debug_mode
             )
 
             # Extract stage results and execution_trace from pipeline
@@ -510,77 +461,17 @@ def resolve_message(
             classifier_intent = intent_resp["intent"]
             confidence = intent_resp["confidence"]
 
-            # NEW STATE-FIRST MODEL: Determine if this is a new task or follow-up
-            state_exists_flag = state_exists(memory_state)
-            is_new_task_flag = is_new_task(
-                input_text=text,
-                extraction_result=extraction_result,
-                intent_result={"intent": classifier_intent,
-                               "confidence": confidence},
-                state_exists_flag=state_exists_flag
-            )
-
-            # CRITICAL INVARIANT: UNKNOWN intent must NEVER start a new task when memory_state exists
-            # This safeguard ensures memory is preserved for follow-ups even if is_new_task returns True
-            if state_exists_flag and classifier_intent == "UNKNOWN":
-                is_new_task_flag = False
-                logger.debug(
-                    f"Override: UNKNOWN intent with existing state treated as follow-up for user {user_id}",
-                    extra={'request_id': request_id,
-                           'classifier_intent': classifier_intent}
-                )
-
-            # Apply state-first behavior
-            if is_new_task_flag:
-                # New task: discard previous state, use classifier intent
-                memory_state = None
-                state_exists_flag = False
-                intent = classifier_intent
-                logger.debug(
-                    f"New task detected for user {user_id}",
-                    extra={'request_id': request_id,
-                           'classifier_intent': classifier_intent}
-                )
-            else:
-                # Follow-up: keep previous intent from state, classifier intent is advisory only
-                state_intent = get_state_intent(memory_state)
-                if state_intent:
-                    intent = state_intent
-                    # Intent from memory is already the real intent (CREATE_APPOINTMENT or CREATE_RESERVATION)
-                    logger.debug(
-                        f"Follow-up detected for user {user_id}, using state intent: {intent}",
-                        extra={'request_id': request_id,
-                               'classifier_intent': classifier_intent, 'state_intent': intent}
-                    )
-                else:
-                    # State exists but intent field is missing (e.g., legacy memory)
-                    # INVARIANT: Do not infer intent from domain - use classifier intent (already produced by pipeline)
-                    # If classifier intent is also unavailable, let decision layer handle clarification
-                    if classifier_intent and classifier_intent != "UNKNOWN":
-                        intent = classifier_intent
-                        logger.debug(
-                            f"Follow-up detected but state intent is None for user {user_id}, using classifier intent: {intent}",
-                            extra={'request_id': request_id, 'classifier_intent': classifier_intent,
-                                   'note': 'Using pipeline-produced intent, not inferring from domain'}
-                        )
-                    else:
-                        # No valid intent available - log and let decision layer handle clarification
-                        intent = classifier_intent  # May be UNKNOWN or None
-                        logger.warning(
-                            f"Follow-up detected but no valid intent available for user {user_id}",
-                            extra={'request_id': request_id, 'classifier_intent': classifier_intent,
-                                   'state_intent': None, 'note': 'Decision layer will handle clarification'}
-                        )
+            # Luma is stateless - all requests are independent (no follow-ups)
+            # Use classifier intent directly
+            intent = classifier_intent
 
             # Store intent in results (real intent, no normalization)
             # Intent resolver returns CREATE_APPOINTMENT or CREATE_RESERVATION directly
             results["stages"]["intent"]["external_intent"] = intent if is_booking_intent(
                 intent) else None
 
-            # Store state-first model decision in results for debugging
-            results["stages"]["intent"]["state_first"] = {
-                "is_new_task": is_new_task_flag,
-                "state_exists": state_exists_flag,
+            # Luma is stateless - all requests are independent
+            results["stages"]["intent"]["stateless"] = {
                 "classifier_intent": classifier_intent,
                 "effective_intent": intent
             }
@@ -615,446 +506,155 @@ def resolve_message(
             execution_trace["semantic"] = {}
         execution_trace["semantic"]["service_missing"] = service_missing
 
-        # NEW STATE-FIRST MODEL: Semantic result handling
-        # For follow-ups, merge semantic slots BEFORE decision layer
-        # This ensures decision/completeness checking sees the merged state
-        if not is_new_task_flag and memory_state and semantic_result:
-            # Merge slots from memory into current semantic result BEFORE decision
-            current_resolved_booking = semantic_result.resolved_booking or {}
+        # Luma is stateless - use semantic result directly (no memory merging)
+        merged_semantic_result = semantic_result
 
-            # Check for semantic fields in memory (preferred source)
-            memory_semantic_booking = memory_state.get(
-                "resolved_booking_semantics", {})
-            memory_booking_state = memory_state.get("booking_state", {})
-
-            # Merge at semantic level (services, date_refs, time_refs, duration)
-            merged_resolved_booking = current_resolved_booking.copy()
-
-            # SERVICES: Replace if mentioned in current, else keep from memory
-            current_services = current_resolved_booking.get("services", [])
-            if not current_services:
-                # Prefer semantic booking, fallback to booking_state
-                memory_services = memory_semantic_booking.get(
-                    "services") or memory_booking_state.get("services", [])
-                if memory_services:
-                    merged_resolved_booking["services"] = memory_services
-
-            # DATE_REFS: Replace if current has date_refs, else keep from memory
-            current_date_refs = current_resolved_booking.get("date_refs", [])
-            memory_date_refs = memory_semantic_booking.get("date_refs", [])
-            memory_date_mode = memory_semantic_booking.get("date_mode")
-
-            # FIX: Rehydrate time-only follow-ups with resolved date from memory
-            # If current turn provides time (time_refs or time_constraint) but no date,
-            # and memory contains a previously resolved date, inject it before binder invocation
-            current_time_refs = current_resolved_booking.get("time_refs", [])
-            current_time_mode = current_resolved_booking.get(
-                "time_mode", "none")
-            current_time_constraint = current_resolved_booking.get(
-                "time_constraint")
-            # Time is present if time_refs exist, time_mode is not "none", or time_constraint exists
-            has_time = bool(current_time_refs) or current_time_mode != "none" or bool(
-                current_time_constraint)
-            has_date = bool(current_date_refs)
-
-            # Check if memory has a previously resolved date in booking_state
-            memory_resolved_date = None
-            memory_booking_state = memory_state.get("booking_state", {})
-            if memory_booking_state:
-                # Try to extract resolved date from date_range
-                memory_date_range = memory_booking_state.get("date_range")
-                if memory_date_range and isinstance(memory_date_range, dict):
-                    memory_resolved_date = memory_date_range.get("start_date")
-                # Fallback: extract date from datetime_range
-                if not memory_resolved_date:
-                    memory_datetime_range = memory_booking_state.get(
-                        "datetime_range")
-                    if memory_datetime_range and isinstance(memory_datetime_range, dict):
-                        dt_start = memory_datetime_range.get("start", "")
-                        if dt_start and "T" in dt_start:
-                            memory_resolved_date = dt_start.split("T")[0]
-
-            # FIX: If booking_state doesn't have resolved date, resolve date_refs from resolved_booking_semantics
-            # This handles date-only turns where booking_state is null but date_refs exist in memory
-            # For date-only turns, the resolved date was stored in context but not in booking_state
-            # We need to resolve the date_refs to get the concrete date for rehydration
-            if not memory_resolved_date and memory_date_refs:
-                # Resolve date_refs to get concrete date for rehydration
-                from luma.calendar.calendar_binder import _bind_dates, get_timezone
-                tz = get_timezone(timezone)
-                resolved_date_range = _bind_dates(
-                    memory_date_refs, memory_date_mode or "single_day", now, tz)
-                if resolved_date_range:
-                    memory_resolved_date = resolved_date_range.get(
-                        "start_date")
-                    logger.info(
-                        f"[rehydration] Resolved date_refs from memory for rehydration: {memory_date_refs} -> {memory_resolved_date}",
-                        extra={'request_id': request_id, 'user_id': user_id}
-                    )
-
-            # INVARIANT: Do not parse or reinterpret raw text
-            # Date merge logic: Use semantic resolver output as authoritative
-            # If semantic resolver produced date_refs, use them as-is (no text parsing to infer structure)
-            if current_date_refs:
-                # Get current date_roles and intent
-                current_date_roles = current_resolved_booking.get(
-                    "date_roles", [])
-                memory_date_roles = memory_semantic_booking.get(
-                    "date_roles", [])
-
-                # Debug logging for date_role merge
-                logger.info(
-                    f"[date_role] Merge check: intent={intent}, current_date_refs={current_date_refs}, "
-                    f"current_date_roles={current_date_roles}, memory_date_refs={memory_date_refs}, "
-                    f"memory_date_roles={memory_date_roles}, "
-                    f"current_resolved_booking_keys={list(current_resolved_booking.keys())}, "
-                    f"memory_semantic_booking_keys={list(memory_semantic_booking.keys())}",
-                    extra={'request_id': request_id, 'user_id': user_id}
-                )
-
-                # FIX: For CREATE_RESERVATION, respect date_role when merging
-                # If date_role == START_DATE: set start_date if empty
-                # If date_role == END_DATE: set end_date if start_date exists (don't overwrite start_date)
-                if intent == "CREATE_RESERVATION" and current_date_roles:
-                    # Get the role of the first (and possibly only) date in current turn
-                    current_role = current_date_roles[0] if current_date_roles else None
-
-                    logger.info(
-                        f"[date_role] Processing merge: current_role={current_role}, "
-                        f"memory_date_refs_len={len(memory_date_refs) if memory_date_refs else 0}",
-                        extra={'request_id': request_id, 'user_id': user_id}
-                    )
-
-                    if current_role == "START_DATE":
-                        # START_DATE: set start_date if empty, don't overwrite if exists
-                        if not memory_date_refs or len(memory_date_refs) == 0:
-                            # No memory dates: set as start
-                            merged_resolved_booking["date_refs"] = current_date_refs
-                            merged_resolved_booking["date_roles"] = current_date_roles
-                        elif len(memory_date_refs) == 1:
-                            # Memory has one date: check if it's START_DATE or untyped
-                            memory_role = memory_date_roles[0] if memory_date_roles and len(
-                                memory_date_roles) > 0 else None
-                            if memory_role == "START_DATE" or memory_role is None:
-                                # Replace start_date
-                                merged_resolved_booking["date_refs"] = current_date_refs
-                                merged_resolved_booking["date_roles"] = current_date_roles
-                            else:
-                                # Memory has END_DATE, keep it and add current as START_DATE
-                                merged_resolved_booking["date_refs"] = current_date_refs + \
-                                    memory_date_refs
-                                merged_resolved_booking["date_roles"] = current_date_roles + \
-                                    memory_date_roles
-                                # FIX: When we have 2 dates, set date_mode to "range"
-                                merged_resolved_booking["date_mode"] = "range"
-                                # FIX: When we have 2 dates, set date_mode to "range"
-                                merged_resolved_booking["date_mode"] = "range"
-                        else:
-                            # Memory has 2 dates: replace start_date (first), keep end_date (second)
-                            merged_resolved_booking["date_refs"] = current_date_refs + \
-                                memory_date_refs[1:]
-                            merged_resolved_booking["date_roles"] = current_date_roles + (
-                                memory_date_roles[1:] if memory_date_roles and len(memory_date_roles) > 1 else [])
-                            # FIX: When we have 2 dates, ensure date_mode is "range"
-                            merged_resolved_booking["date_mode"] = "range"
-                    elif current_role == "END_DATE":
-                        # END_DATE: set end_date if start_date exists, don't overwrite start_date
-                        if memory_date_refs and len(memory_date_refs) >= 1:
-                            # Memory has start_date: keep it, add current as end_date
-                            merged_resolved_booking["date_refs"] = memory_date_refs[:1] + \
-                                current_date_refs
-                            merged_resolved_booking["date_roles"] = (memory_date_roles[:1] if memory_date_roles and len(
-                                memory_date_roles) > 0 else ["START_DATE"]) + current_date_roles
-                            # FIX: When we have 2 dates, set date_mode to "range"
-                            merged_resolved_booking["date_mode"] = "range"
-                            logger.info(
-                                f"[date_role] END_DATE merge: kept start_date={memory_date_refs[:1]}, "
-                                f"added end_date={current_date_refs}, final_date_refs={merged_resolved_booking['date_refs']}, "
-                                f"date_mode set to range",
-                                extra={'request_id': request_id,
-                                       'user_id': user_id}
-                            )
-                        else:
-                            # No memory dates: can't set end_date without start_date, treat as start
-                            merged_resolved_booking["date_refs"] = current_date_refs
-                            merged_resolved_booking["date_roles"] = current_date_roles
-                    else:
-                        # No role or unknown role: default behavior (replace)
-                        merged_resolved_booking["date_refs"] = current_date_refs
-                        merged_resolved_booking["date_roles"] = current_date_roles
-                else:
-                    # For appointments or no date_role: replace (semantic resolver is authoritative)
-                    merged_resolved_booking["date_refs"] = current_date_refs
-                    merged_resolved_booking["date_roles"] = current_date_roles
-
-                # Preserve date_mode from current semantic result if available
-                # BUT: Don't overwrite if we already set it to "range" (when merging 2 dates)
-                current_date_mode = current_resolved_booking.get("date_mode")
-                if current_date_mode and merged_resolved_booking.get("date_mode") != "range":
-                    merged_resolved_booking["date_mode"] = current_date_mode
-            elif not current_date_refs:
-                # No current date_refs: keep from memory
-                # FIX: Prefer resolved date over symbolic reference for rehydration
-                # If we have a resolved date (concrete YYYY-MM-DD), use it instead of symbolic reference
-                # This ensures the binder receives concrete dates, not symbolic tokens like "tomorrow"
-                if memory_resolved_date:
-                    # Use resolved date (concrete YYYY-MM-DD) for rehydration
-                    merged_resolved_booking["date_refs"] = [
-                        memory_resolved_date]
-                    merged_resolved_booking["date_mode"] = "single_day"
-                    merged_resolved_booking["resolved_date"] = memory_resolved_date
-                    logger.info(
-                        f"[rehydration] Using resolved date from memory: {memory_resolved_date} (from {memory_date_refs})",
-                        extra={'request_id': request_id, 'user_id': user_id}
-                    )
-                elif memory_date_refs:
-                    # Fallback to symbolic reference if no resolved date available
-                    merged_resolved_booking["date_refs"] = memory_date_refs
-                    # Preserve date_roles from memory for reservations
-                    memory_date_roles = memory_semantic_booking.get(
-                        "date_roles", [])
-                    if memory_date_roles:
-                        merged_resolved_booking["date_roles"] = memory_date_roles
-                    if memory_date_mode:
-                        merged_resolved_booking["date_mode"] = memory_date_mode
-                # REHYDRATION: If time-only turn and memory has resolved date, inject it
-                # This must happen before temporal shape validation and binder invocation
-                # Do NOT infer dates - only reuse previously resolved memory state
-                elif has_time and memory_resolved_date:
-                    # Rehydrate semantic temporal state with resolved date from memory
-                    # Inject resolved date as date_ref (binder will parse YYYY-MM-DD format)
-                    merged_resolved_booking["date_refs"] = [
-                        memory_resolved_date]
-                    merged_resolved_booking["date_mode"] = "single_day"
-                    merged_resolved_booking["resolved_date"] = memory_resolved_date
-                    logger.info(
-                        f"[rehydration] Time-only follow-up: injected resolved date {memory_resolved_date} from memory before binder",
-                        extra={'request_id': request_id, 'user_id': user_id,
-                               'has_time': has_time, 'time_refs': current_time_refs,
-                               'time_mode': current_time_mode, 'time_constraint': bool(current_time_constraint)}
-                    )
-            else:
-                # Current has date_refs: replace (default behavior)
-                merged_resolved_booking["date_refs"] = current_date_refs
-                # date_mode should already be preserved from current_resolved_booking.copy() above
-                # but explicitly ensure it's set if present
-                current_date_mode = current_resolved_booking.get("date_mode")
-                if current_date_mode:
-                    merged_resolved_booking["date_mode"] = current_date_mode
-
-            # TIME_REFS: Replace if current has time_refs, else keep from memory
-            current_time_refs = current_resolved_booking.get("time_refs", [])
-            if not current_time_refs:
-                memory_time_refs = memory_semantic_booking.get("time_refs", [])
-                if memory_time_refs:
-                    merged_resolved_booking["time_refs"] = memory_time_refs
-                    # Also preserve time_mode if available
-                    memory_time_mode = memory_semantic_booking.get("time_mode")
-                    if memory_time_mode:
-                        merged_resolved_booking["time_mode"] = memory_time_mode
-
-            # Bug B: TIME_CONSTRAINT: Merge from memory if current doesn't have it
-            # The binder needs time_constraint to build time_range/datetime_range
-            current_time_constraint = current_resolved_booking.get(
-                "time_constraint")
-            if not current_time_constraint:
-                memory_time_constraint = memory_semantic_booking.get(
-                    "time_constraint")
-                if memory_time_constraint:
-                    merged_resolved_booking["time_constraint"] = memory_time_constraint
-
-            # INVARIANT: Do not invent dates/times - if time_constraint is missing, let decision layer handle it
-            # If time_refs exist but time_constraint is missing, log diagnostic info but do not derive it
-            time_constraint_missing_but_derivable = False
-            if (not merged_resolved_booking.get("time_constraint") and
-                merged_resolved_booking.get("time_refs") and
-                    merged_resolved_booking.get("time_mode") == "exact"):
-                time_constraint_missing_but_derivable = True
-                time_ref = merged_resolved_booking["time_refs"][0]
-                logger.debug(
-                    f"Time constraint missing but derivable from time_refs for user {user_id} (quarantined - not deriving)",
-                    extra={
-                        'request_id': request_id,
-                        'time_ref': str(time_ref),
-                        'time_mode': merged_resolved_booking.get("time_mode"),
-                        'note': 'Decision layer will handle clarification if binder requires time_constraint'
-                    }
-                )
-
-            # Store trace flag for diagnostic purposes
-            if "semantic" not in execution_trace:
-                execution_trace["semantic"] = {}
-            execution_trace["semantic"]["time_constraint_missing_but_derivable"] = time_constraint_missing_but_derivable
-
-            # DURATION: Replace if mentioned, else keep from memory
-            current_duration = current_resolved_booking.get("duration")
-            if current_duration is None:
-                memory_duration = memory_semantic_booking.get(
-                    "duration") or memory_booking_state.get("duration")
-                if memory_duration is not None:
-                    merged_resolved_booking["duration"] = memory_duration
-
-            # Create merged semantic result
-            merged_semantic_result = SemanticResolutionResult(
-                resolved_booking=merged_resolved_booking,
-                needs_clarification=semantic_result.needs_clarification,
-                clarification=semantic_result.clarification
-            )
-
-            logger.info(
-                f"[rehydration] DIAG: After merge, merged_resolved_booking.date_refs={merged_resolved_booking.get('date_refs')}, date_roles={merged_resolved_booking.get('date_roles')}, date_mode={merged_resolved_booking.get('date_mode')}, time_refs={merged_resolved_booking.get('time_refs')}, time_mode={merged_resolved_booking.get('time_mode')}",
-                extra={'request_id': request_id, 'user_id': user_id}
-            )
-            logger.debug(
-                f"Merged semantic slots for follow-up (before decision) for user {user_id}",
-                extra={
-                    'request_id': request_id,
-                    'merged_keys': list(merged_resolved_booking.keys()),
-                    'has_services': bool(merged_resolved_booking.get("services")),
-                    'has_date_refs': bool(merged_resolved_booking.get("date_refs")),
-                    'has_time_refs': bool(merged_resolved_booking.get("time_refs"))
-                }
-            )
-        else:
-            # New task: use current semantic result as-is
-            merged_semantic_result = semantic_result
-
-        # OLD CONTINUATION LOGIC REMOVED - replaced by state-first model
-        # All contextual update detection logic removed (handled by slot merge before decision)
+        # Extract intent_name early to check for UNKNOWN
+        intent_name_early = intent if isinstance(intent, str) else (intent.get("name") if isinstance(intent, dict) else None)
+        is_unknown_intent = (intent_name_early == "UNKNOWN")
 
         # Decision / Policy Layer - ACTIVE
         # Decision layer determines if clarification is needed BEFORE calendar binding
         # Policy operates ONLY on semantic roles, never on raw text or regex
+        # Luma is stateless - decision sees only the current semantic result (no merging)
+        # EXCEPTION: UNKNOWN intents skip decision layer (pure extraction, no validation)
         decision_result = None
         # Initialize semantic_for_decision before try block to ensure it's always defined
         semantic_for_decision = merged_semantic_result.resolved_booking if merged_semantic_result else {}
 
-        try:
-            # Load booking policy from config
-            booking_policy = get_booking_policy()
+        # Skip decision layer for UNKNOWN intents (pure extraction, no validation)
+        if not is_unknown_intent:
+            try:
+                # Load booking policy from config
+                booking_policy = get_booking_policy()
 
-            # OLD CONTINUATION LOGIC REMOVED - replaced by state-first model
-            # The old contextual update detection logic has been removed.
-            # Slot merging now happens after calendar binding via merge_slots_for_followup()
+                # Attach booking_mode for decision policy (service vs reservation)
+                if isinstance(semantic_for_decision, dict):
+                    semantic_for_decision["booking_mode"] = domain
 
-            # CRITICAL INVARIANT: decision must see fully merged semantics
-            # If there is an active booking, the semantic object passed to decision
-            # MUST be the merged semantic booking, not the current fragment
-            # Attach booking_mode for decision policy (service vs reservation)
-            if isinstance(semantic_for_decision, dict):
-                semantic_for_decision["booking_mode"] = domain
+                # Get intent_name for temporal shape validation
+                # Use intent directly (already CREATE_APPOINTMENT or CREATE_RESERVATION)
+                intent_name_for_decision = intent
 
-            # Get intent_name for temporal shape validation
-            # Use intent directly (already CREATE_APPOINTMENT or CREATE_RESERVATION)
-            intent_name_for_decision = intent
+                # Time decision re-run (with merged semantic result)
+                # Decision layer now handles tenant-authoritative service resolution internally
+                with StageTimer(execution_trace, "decision", request_id=request_id):
+                    decision_result, decision_trace = decide_booking_status(
+                        semantic_for_decision,
+                        entities=extraction_result,
+                        policy=booking_policy,
+                        intent_name=intent_name_for_decision,
+                        tenant_context=tenant_context
+                    )
 
-            # Time decision re-run (with merged semantic result)
-            # Decision layer now handles tenant-authoritative service resolution internally
-            with StageTimer(execution_trace, "decision", request_id=request_id):
-                decision_result, decision_trace = decide_booking_status(
-                    semantic_for_decision,
-                    entities=extraction_result,
-                    policy=booking_policy,
-                    intent_name=intent_name_for_decision,
-                    tenant_context=tenant_context
-                )
+                # Extract resolved tenant_service_id from decision trace
+                # (Service resolution is now handled within decision layer)
+                service_resolution_info = decision_trace.get(
+                    "decision", {}).get("service_resolution", {})
+                resolved_tenant_service_id = service_resolution_info.get(
+                    "resolved_tenant_service_id")
+                service_resolution_reason = service_resolution_info.get(
+                    "clarification_reason")
+                service_resolution_metadata = service_resolution_info.get(
+                    "metadata", {})
 
-            # Extract resolved tenant_service_id from decision trace
-            # (Service resolution is now handled within decision layer)
-            service_resolution_info = decision_trace.get(
-                "decision", {}).get("service_resolution", {})
-            resolved_tenant_service_id = service_resolution_info.get(
-                "resolved_tenant_service_id")
-            service_resolution_reason = service_resolution_info.get(
-                "clarification_reason")
-            service_resolution_metadata = service_resolution_info.get(
-                "metadata", {})
+                if resolved_tenant_service_id:
+                    logger.info(
+                        f"[decision] Service resolved to tenant_service_id: '{resolved_tenant_service_id}'"
+                    )
+                elif service_resolution_reason:
+                    logger.info(
+                        f"[decision] Service resolution failed: {service_resolution_reason}"
+                    )
 
-            if resolved_tenant_service_id:
-                logger.info(
-                    f"[decision] Service resolved to tenant_service_id: '{resolved_tenant_service_id}'"
-                )
-            elif service_resolution_reason:
-                logger.info(
-                    f"[decision] Service resolution failed: {service_resolution_reason}"
-                )
-
-            # Store decision result in results
-            results["stages"]["decision"] = {
-                "status": decision_result.status,
-                "reason": decision_result.reason,
-                "effective_time": decision_result.effective_time,
-                "resolved_tenant_service_id": resolved_tenant_service_id
-            }
-            # Update execution_trace with decision trace (overwrites pipeline's trace with merged semantic result)
-            execution_trace.update(decision_trace)
-
-            # Capture decision snapshot
-            decision_input = {
-                "semantic_booking": semantic_for_decision,
-                "intent_name": intent_name_for_decision
-            }
-            decision_output = {
-                "status": decision_result.status,
-                "reason": decision_result.reason,
-                "effective_time": decision_result.effective_time
-            }
-            decision_snapshot = capture_stage_snapshot(
-                stage_name="decision",
-                input_data=decision_input,
-                output_data=decision_output,
-                decision_flags={
-                    "temporal_shape_satisfied": decision_trace.get("decision", {}).get("temporal_shape_satisfied"),
-                    "missing_slots": decision_trace.get("decision", {}).get("missing_slots", [])
+                # Store decision result in results
+                results["stages"]["decision"] = {
+                    "status": decision_result.status,
+                    "reason": decision_result.reason,
+                    "effective_time": decision_result.effective_time,
+                    "resolved_tenant_service_id": resolved_tenant_service_id
                 }
-            )
-            if "stage_snapshots" not in execution_trace:
-                execution_trace["stage_snapshots"] = []
-            execution_trace["stage_snapshots"].append(decision_snapshot)
+                # Update execution_trace with decision trace (overwrites pipeline's trace with merged semantic result)
+                execution_trace.update(decision_trace)
 
-            # Fail fast guardrail: If temporal_shape == datetime_range and missing slots, ensure binder is skipped
-            expected_shape = decision_trace.get(
-                "decision", {}).get("expected_temporal_shape")
-            if expected_shape == APPOINTMENT_TEMPORAL_TYPE_CONST:
-                missing = decision_trace.get(
-                    "decision", {}).get("missing_slots", [])
-                if missing and decision_result.status == "RESOLVED":
-                    # This is an invariant violation - should not happen
-                    # Force NEEDS_CLARIFICATION
-                    decision_result.status = "NEEDS_CLARIFICATION"
-                    decision_result.reason = "temporal_shape_not_satisfied"
-                    execution_trace["decision"]["state"] = "NEEDS_CLARIFICATION"
-                    execution_trace["decision"]["reason"] = "temporal_shape_not_satisfied"
-                    execution_trace["decision"]["temporal_shape_satisfied"] = False
-                    execution_trace["decision"]["rule_enforced"] = "temporal_shape_guardrail"
-                    execution_trace["decision"]["missing_slots"] = missing
+                # Capture decision snapshot
+                decision_input = {
+                    "semantic_booking": semantic_for_decision,
+                    "intent_name": intent_name_for_decision
+                }
+                decision_output = {
+                    "status": decision_result.status,
+                    "reason": decision_result.reason,
+                    "effective_time": decision_result.effective_time
+                }
+                decision_snapshot = capture_stage_snapshot(
+                    stage_name="decision",
+                    input_data=decision_input,
+                    output_data=decision_output,
+                    decision_flags={
+                        "temporal_shape_satisfied": decision_trace.get("decision", {}).get("temporal_shape_satisfied"),
+                        "missing_slots": decision_trace.get("decision", {}).get("missing_slots", [])
+                    }
+                )
+                if "stage_snapshots" not in execution_trace:
+                    execution_trace["stage_snapshots"] = []
+                execution_trace["stage_snapshots"].append(decision_snapshot)
 
-            # Decision is RESOLVED - proceed to calendar binding unconditionally
-            # Calendar binding will assume inputs are already approved
+                # Fail fast guardrail: If temporal_shape == datetime_range and missing slots, ensure binder is skipped
+                expected_shape = decision_trace.get(
+                    "decision", {}).get("expected_temporal_shape")
+                if expected_shape == APPOINTMENT_TEMPORAL_TYPE_CONST:
+                    missing = decision_trace.get(
+                        "decision", {}).get("missing_slots", [])
+                    if missing and decision_result.status == "RESOLVED":
+                        # This is an invariant violation - should not happen
+                        # Force NEEDS_CLARIFICATION
+                        decision_result.status = "NEEDS_CLARIFICATION"
+                        decision_result.reason = "temporal_shape_not_satisfied"
+                        execution_trace["decision"]["state"] = "NEEDS_CLARIFICATION"
+                        execution_trace["decision"]["reason"] = "temporal_shape_not_satisfied"
+                        execution_trace["decision"]["temporal_shape_satisfied"] = False
+                        execution_trace["decision"]["rule_enforced"] = "temporal_shape_guardrail"
+                        execution_trace["decision"]["missing_slots"] = missing
 
-        except Exception as e:  # noqa: BLE001
-            # Decision layer failure should not block - log and continue
-            logger.error(
-                f"[DECISION] Decision layer failed: {e}",
-                extra={'request_id': request_id},
-                exc_info=True
-            )
-            results["stages"]["decision"] = {"error": str(e)}
-            # Continue to calendar binding on error (fallback behavior)
+                # Decision is RESOLVED - proceed to calendar binding unconditionally
+                # Calendar binding will assume inputs are already approved
 
-        # NEW STATE-FIRST MODEL: Effective intent is just the intent we determined
-        # OLD CONTEXTUAL_UPDATE logic bypassed (kept for reference but not used in state-first model)
+            except Exception as e:  # noqa: BLE001
+                # Decision layer failure should not block - log and continue
+                logger.error(
+                    f"[DECISION] Decision layer failed: {e}",
+                    extra={'request_id': request_id},
+                    exc_info=True
+                )
+                results["stages"]["decision"] = {"error": str(e)}
+                # Continue to calendar binding on error (fallback behavior)
+        else:
+            # UNKNOWN intent: Skip decision layer, force RESOLVED status
+            # Store empty decision result for UNKNOWN
+            results["stages"]["decision"] = {
+                "status": "RESOLVED",
+                "reason": None,
+                "effective_time": None,
+                "resolved_tenant_service_id": None
+            }
+            execution_trace["decision"] = {
+                "state": "RESOLVED",
+                "reason": None,
+                "temporal_shape_satisfied": None,
+                "missing_slots": []
+            }
+
+        # Luma is stateless - effective intent is just the intent we determined
         effective_intent = intent
 
-        # OLD LOGIC (bypassed):
-        # effective_intent = detect_contextual_update(...)
-
         # Stage 6: Required slots validation (before calendar binding)
+        # UNKNOWN intents skip required slots validation (pure extraction, no validation)
         intent_name_for_slots_raw = intent or effective_intent
         intent_name_for_slots = intent_name_for_slots_raw.get("name") if isinstance(
             intent_name_for_slots_raw, dict) else intent_name_for_slots_raw
         missing_required = []
-        if intent_name_for_slots:
+        if intent_name_for_slots and not is_unknown_intent:
             resolved_booking_for_validation = merged_semantic_result.resolved_booking if merged_semantic_result else {}
             missing_required = validate_required_slots(
                 intent_name_for_slots,
@@ -1067,11 +667,24 @@ def resolve_message(
         )
         # Extract calendar_result from pipeline_results (pipeline already called bind_calendar)
         # This is the authoritative source - resolve_service should use it instead of calling bind_calendar again
-        pipeline_calendar_result = pipeline_results.get(
-            "stages", {}).get("calendar")
-        # Use pipeline's calendar_result as the base (it already has the binder output)
-        calendar_result = pipeline_calendar_result if pipeline_calendar_result else None
-        if missing_required and not skip_prebind:
+        # UNKNOWN intents: Skip calendar binding (intentionally skipped per design)
+        # Slots will be built directly from semantic output using normalization functions
+        if is_unknown_intent:
+            # Create empty calendar_result for UNKNOWN (calendar binding is intentionally skipped)
+            calendar_result = CalendarBindingResult(
+                calendar_booking={},
+                needs_clarification=False,
+                clarification=None,
+                _binding_success=False,
+                _binding_error="skipped_for_unknown_intent"
+            )
+            results["stages"]["calendar"] = calendar_result.to_dict()
+        else:
+            pipeline_calendar_result = pipeline_results.get(
+                "stages", {}).get("calendar")
+            # Use pipeline's calendar_result as the base (it already has the binder output)
+            calendar_result = pipeline_calendar_result if pipeline_calendar_result else None
+        if not is_unknown_intent and missing_required and not skip_prebind:
             results["stages"]["intent"]["status"] = STATUS_NEEDS_CLARIFICATION
             results["stages"]["intent"]["missing_slots"] = missing_required
             # Only create empty calendar_result if pipeline didn't provide one
@@ -1103,11 +716,11 @@ def resolve_message(
                                  decision_missing_slots == ["time"] and
                                  has_date)
 
-            if decision_result and (decision_result.status == "RESOLVED" or missing_only_time):
+            # UNKNOWN intents skip calendar binding (pure extraction, no temporal binding)
+            if not is_unknown_intent and decision_result and (decision_result.status == "RESOLVED" or missing_only_time):
                 # Proceed with calendar binding
                 # Use effective_intent for calendar binding
-                # Use merged semantic result if this was a PARTIAL continuation
-                # CONTEXTUAL_UPDATE logic removed (dead code)
+                # Luma is stateless - use current semantic result directly
                 binding_intent = effective_intent
                 # Get external_intent for reservation handling (CREATE_RESERVATION vs CREATE_APPOINTMENT)
                 external_intent = results["stages"]["intent"].get(
@@ -1146,14 +759,14 @@ def resolve_message(
 
                         if external_intent == "CREATE_APPOINTMENT":
                             # Early escape: If semantic result has date + time, don't require calendar binding
-                            # This handles follow-ups where date comes from memory and time is added in current turn
+                            # Handle date-time combination
                             semantic_booking = merged_semantic_result.resolved_booking if merged_semantic_result else {}
                             date_refs = semantic_booking.get("date_refs", [])
                             time_mode = semantic_booking.get("time_mode", "none")
                             time_refs = semantic_booking.get("time_refs", [])
                             time_constraint = semantic_booking.get("time_constraint")
                             
-                            # Check if date is present (from memory or current turn)
+                            # Check if date is present
                             has_date = len(date_refs) > 0
                             
                             # Check if time is present (time_mode with refs, or time_constraint)
@@ -1320,24 +933,36 @@ def resolve_message(
         decision_trace_for_plan = execution_trace.get(
             "decision", {}) if execution_trace else {}
 
-        clar = plan_clarification(
-            intent_resp, extraction_result, merged_semantic_result, decision_result, decision_trace_for_plan)
+        # UNKNOWN intents skip clarification planning (pure extraction, no validation)
+        if is_unknown_intent:
+            # Force status = READY and needs_clarification = False for UNKNOWN
+            clar = {
+                "status": STATUS_READY,
+                "missing_slots": [],
+                "clarification_reason": None
+            }
+            needs_clarification = False
+            missing_slots = []
+            clarification_reason = None
+        else:
+            clar = plan_clarification(
+                intent_resp, extraction_result, merged_semantic_result, decision_result, decision_trace_for_plan)
 
-        # If calendar needs clarification and none set yet, use calendar clarification
-        if cal_needs_clarification and clar.get("status") != STATUS_NEEDS_CLARIFICATION:
-            clar["status"] = STATUS_NEEDS_CLARIFICATION
-            # Extract reason from calendar clarification
-            cal_reason = cal_clar_dict.get("reason") if isinstance(
-                cal_clar_dict, dict) else None
-            if cal_reason:
-                if isinstance(cal_reason, str):
-                    clar["clarification_reason"] = cal_reason
-                elif hasattr(cal_reason, "value"):
-                    clar["clarification_reason"] = cal_reason.value
+            # If calendar needs clarification and none set yet, use calendar clarification
+            if cal_needs_clarification and clar.get("status") != STATUS_NEEDS_CLARIFICATION:
+                clar["status"] = STATUS_NEEDS_CLARIFICATION
+                # Extract reason from calendar clarification
+                cal_reason = cal_clar_dict.get("reason") if isinstance(
+                    cal_clar_dict, dict) else None
+                if cal_reason:
+                    if isinstance(cal_reason, str):
+                        clar["clarification_reason"] = cal_reason
+                    elif hasattr(cal_reason, "value"):
+                        clar["clarification_reason"] = cal_reason.value
 
-        needs_clarification = clar.get("status") == STATUS_NEEDS_CLARIFICATION
-        missing_slots = clar.get("missing_slots", [])
-        clarification_reason = clar.get("clarification_reason")
+            needs_clarification = clar.get("status") == STATUS_NEEDS_CLARIFICATION
+            missing_slots = clar.get("missing_slots", [])
+            clarification_reason = clar.get("clarification_reason")
 
         # For MODIFY_BOOKING, preserve semantic clarification as authoritative
         semantic_clarification_present = False
@@ -1507,7 +1132,7 @@ def resolve_message(
                 # Guard: Skip compute_missing_slots_for_intent if MODIFY_BOOKING already has missing_slots
                 if is_modify_booking and missing_slots:
                     # Decision/semantic layers already set missing_slots via plan_clarification - do not override
-                    enforced_missing = None
+                        enforced_missing = None
                 else:
                     # Use centralized missing slot computation with special-case filtering
                     enforced_missing = compute_missing_slots_for_intent(
@@ -1609,37 +1234,45 @@ def resolve_message(
         # even if decision layer says RESOLVED (due to invariant override)
         current_clarification = None
 
-        # First priority: Check semantic resolution clarification (e.g., MULTIPLE_MATCHES ambiguity, MISSING_DATE for MODIFY_BOOKING)
-        # CRITICAL: For MODIFY_BOOKING, semantic clarifications (e.g., time present but no date) must be preserved
-        # even if decision layer says RESOLVED (decision may skip validation for MODIFY_BOOKING)
+        # First priority: Check semantic resolution clarification (e.g., MULTIPLE_MATCHES ambiguity)
+        # NOTE: For MODIFY_BOOKING, decision layer is authoritative for readiness (not semantic clarifications)
+        # Semantic resolver no longer sets clarifications for time-only or date-only MODIFY_BOOKING
         if merged_semantic_result and merged_semantic_result.needs_clarification and merged_semantic_result.clarification:
-            # Semantic resolution detected clarification (e.g., service variant ambiguity, MISSING_DATE for MODIFY_BOOKING)
-            # For MODIFY_BOOKING: This is authoritative and must be preserved even if decision is RESOLVED
+            # Semantic resolution detected clarification (e.g., service variant ambiguity)
             semantic_clar = merged_semantic_result.clarification.to_dict()
             semantic_clar_reason = semantic_clar.get("reason")
             
-            # For MODIFY_BOOKING: preserve semantic clarification regardless of decision status
-            # Semantic resolver is authoritative for MODIFY_BOOKING clarifications (e.g., single date → end_date missing)
+            # For MODIFY_BOOKING: decision layer is authoritative - only preserve if decision also says NEEDS_CLARIFICATION
+            # This ensures decision layer readiness rules are not overridden by semantic clarifications
             if is_modify_booking:
-                # MODIFY_BOOKING: Always preserve semantic clarification (authoritative)
-                # This ensures single-date reservations require clarification even if decision layer returns RESOLVED
-                current_clarification = semantic_clar
-                needs_clarification = True  # Force needs_clarification to preserve semantic state
-                # Extract missing_slots from semantic clarification and merge with decision missing_slots
-                semantic_clar_data = semantic_clar.get("data", {})
-                semantic_missing_slots = semantic_clar_data.get("missing_slots", [])
-                if semantic_missing_slots:
-                    # Merge semantic missing_slots with decision missing_slots (if any)
-                    decision_missing_slots = decision_result.missing_slots if decision_result and decision_result.missing_slots else []
-                    missing_slots = list(set(semantic_missing_slots + decision_missing_slots))
-                    clarification_reason = semantic_clar_reason
-                logger.info(
-                    f"Preserving semantic clarification for MODIFY_BOOKING: {semantic_clar_reason}, missing_slots={semantic_missing_slots}",
-                    extra={'request_id': request_id,
-                           'clarification_reason': semantic_clar_reason,
-                           'intent': intent_name,
-                           'missing_slots': semantic_missing_slots}
-                )
+                # MODIFY_BOOKING: Only preserve semantic clarification if decision layer also says NEEDS_CLARIFICATION
+                # Decision layer is authoritative for MODIFY_BOOKING readiness (reservation date_range, time-only, etc.)
+                if decision_result and decision_result.status == "NEEDS_CLARIFICATION":
+                    # Both decision and semantic say NEEDS_CLARIFICATION - preserve semantic clarification
+                    current_clarification = semantic_clar
+                    needs_clarification = True
+                    semantic_clar_data = semantic_clar.get("data", {})
+                    semantic_missing_slots = semantic_clar_data.get("missing_slots", [])
+                    if semantic_missing_slots:
+                        # Merge semantic missing_slots with decision missing_slots (if any)
+                        decision_missing_slots = decision_result.missing_slots if decision_result and decision_result.missing_slots else []
+                        missing_slots = list(set(semantic_missing_slots + decision_missing_slots))
+                        clarification_reason = semantic_clar_reason
+                    logger.info(
+                        f"Preserving semantic clarification for MODIFY_BOOKING (decision also says NEEDS_CLARIFICATION): {semantic_clar_reason}",
+                        extra={'request_id': request_id,
+                               'clarification_reason': semantic_clar_reason,
+                               'intent': intent_name,
+                               'missing_slots': semantic_missing_slots}
+                    )
+                # If decision says RESOLVED, ignore semantic clarification (decision layer is authoritative)
+                elif decision_result and decision_result.status == "RESOLVED":
+                    logger.info(
+                        f"Ignoring semantic clarification for MODIFY_BOOKING (decision says RESOLVED): {semantic_clar_reason}",
+                        extra={'request_id': request_id,
+                               'clarification_reason': semantic_clar_reason,
+                               'intent': intent_name}
+                    )
             elif decision_result and decision_result.status != "RESOLVED":
                 # For other intents: only preserve if decision is not RESOLVED
                 # This maintains existing behavior for CREATE intents
@@ -1671,7 +1304,7 @@ def resolve_message(
         elif decision_result and decision_result.status == "RESOLVED":
             # Decision is RESOLVED - no clarification needed
             # EXCEPTION: For MODIFY_BOOKING, semantic clarifications are authoritative and were already handled above
-            # This clears any existing PARTIAL clarification from memory only for non-MODIFY_BOOKING intents
+            # Clear any existing PARTIAL clarification for non-MODIFY_BOOKING intents
             # (MODIFY_BOOKING semantic clarifications were preserved in the first if block)
             if not is_modify_booking:
                 current_clarification = None
@@ -1679,27 +1312,32 @@ def resolve_message(
             # Only validation errors from calendar binding (range conflicts, etc.)
             current_clarification = calendar_result.clarification.to_dict()
 
-        # For MODIFY_BOOKING: If semantic clarification was set, update needs_clarification, missing_slots, and clarification_reason
-        # This ensures semantic clarifications are authoritative and not overridden by decision layer
-        if is_modify_booking and current_clarification and isinstance(current_clarification, dict):
-            # Extract missing_slots and clarification_reason from current_clarification
-            clar_missing_slots = current_clarification.get("data", {}).get("missing_slots", [])
-            clar_reason = current_clarification.get("reason")
-            
-            if clar_missing_slots or clar_reason:
-                # Semantic clarification is authoritative for MODIFY_BOOKING
-                needs_clarification = True
-                
-                # Merge semantic missing_slots with existing missing_slots (never drop semantic ones)
+        # For MODIFY_BOOKING: Decision layer is authoritative for readiness
+        # If decision says RESOLVED, use decision status (even if semantic set clarification)
+        # If decision says NEEDS_CLARIFICATION, preserve semantic clarification if present
+        if is_modify_booking:
+            if decision_result and decision_result.status == "RESOLVED":
+                # Decision layer says RESOLVED - override any semantic clarifications
+                needs_clarification = False
+                current_clarification = None
+                missing_slots = []
+                clarification_reason = None
+                logger.info(
+                    f"[MODIFY_BOOKING] Decision layer says RESOLVED - overriding semantic clarifications",
+                    extra={'request_id': request_id, 'intent': intent_name}
+                )
+            elif decision_result and decision_result.status == "NEEDS_CLARIFICATION" and current_clarification:
+                # Decision says NEEDS_CLARIFICATION - preserve semantic clarification if present
+                clar_missing_slots = current_clarification.get("data", {}).get("missing_slots", [])
+                clar_reason = current_clarification.get("reason")
                 if clar_missing_slots:
-                    missing_slots = list(set(missing_slots + clar_missing_slots))
+                    # Merge semantic missing_slots with decision missing_slots
+                    decision_missing_slots = decision_result.missing_slots if decision_result and decision_result.missing_slots else []
+                    missing_slots = list(set(missing_slots + clar_missing_slots + decision_missing_slots))
                     logger.info(
-                        f"[MODIFY_BOOKING] Preserving semantic missing_slots: {clar_missing_slots}, "
-                        f"merged: {missing_slots}",
+                        f"[MODIFY_BOOKING] Preserving semantic missing_slots: {clar_missing_slots}, merged: {missing_slots}",
                         extra={'request_id': request_id, 'intent': intent_name}
                     )
-                
-                # Preserve semantic clarification_reason (never override if semantic reason is set)
                 if clar_reason and not clarification_reason:
                     clarification_reason = clar_reason
                     logger.info(
@@ -1725,180 +1363,8 @@ def resolve_message(
             "duration": calendar_booking.get("duration")
         }
 
-        # NEW STATE-FIRST MODEL: Merge slots for follow-ups (after calendar binding)
-        # For follow-ups, merge current_booking with memory booking state
-        # New slot value replaces old, missing slot keeps old
-        if not is_new_task_flag and memory_state and memory_state.get("booking_state"):
-            memory_booking_state = memory_state.get("booking_state", {})
-            if isinstance(memory_booking_state, dict):
-                merged_booking = merge_slots_for_followup(
-                    memory_booking=memory_booking_state,
-                    current_booking=current_booking
-                )
-                current_booking = merged_booking
-                logger.debug(
-                    f"Merged slots for follow-up for user {user_id}",
-                    extra={'request_id': request_id,
-                           'merged_booking_keys': list(merged_booking.keys())}
-                )
-
-        # OLD CONTEXTUAL_UPDATE logic removed - this is handled by merge_slots_for_followup in the new state-first model
-        # This entire block has been removed as part of the cleanup of obsolete continuation logic
-
-        # Memory clearing and persistence decisions delegated to memory policy
-        should_clear = should_clear_memory(effective_intent)
-        if should_clear and memory_store:
-            try:
-                memory_store.clear(user_id, domain)
-                logger.info(f"Cleared memory for {user_id} due to intent: {effective_intent}", extra={
-                            'request_id': request_id})
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"Failed to clear memory: {e}", extra={
-                               'request_id': request_id})
-
-        # Determine if and how memory should be persisted
-        should_persist, is_booking_intent_flag, is_modify_with_booking_id, persist_intent = should_persist_memory(
-            effective_intent=effective_intent,
-            data=data,
-            should_clear=should_clear
-        )
-
-        merged_memory = None
-        if should_persist and is_booking_intent_flag:
-            # Prepare memory for persistence (handles RESOLVED vs PARTIAL logic)
-            merged_memory = prepare_memory_for_persistence(
-                memory_state=memory_state,
-                decision_result=decision_result,
-                persist_intent=persist_intent,
-                current_booking=current_booking,
-                current_clarification=current_clarification,
-                merged_semantic_result=merged_semantic_result,
-                logger=logger,
-                user_id=user_id,
-                request_id=request_id
-            )
-
-            # Persist merged state with real intent (CREATE_APPOINTMENT or CREATE_RESERVATION)
-            # Only persist if we have a valid booking state (RESOLVED or PARTIAL)
-            if memory_store:
-                try:
-                    # Time memory write operation
-                    memory_input = {
-                        "user_id": user_id,
-                        "domain": domain,
-                        "state_intent": merged_memory.get("intent") if merged_memory else None,
-                        "state_has_booking": bool(merged_memory.get("booking_state")) if merged_memory else False
-                    }
-                    with StageTimer(execution_trace, "memory", request_id=request_id):
-                        memory_store.set(
-                            user_id=user_id,
-                            domain=domain,
-                            state=merged_memory,
-                            ttl=MEMORY_TTL
-                        )
-                    memory_output = {
-                        "stored": True,
-                        "intent": merged_memory.get("intent") if merged_memory else None,
-                        "has_booking_state": bool(merged_memory.get("booking_state")) if merged_memory else False
-                    }
-
-                    # Capture memory snapshot
-                    memory_snapshot = capture_stage_snapshot(
-                        stage_name="memory_write",
-                        input_data=memory_input,
-                        output_data=memory_output,
-                        decision_flags={
-                            "should_persist": True,
-                            "is_booking_intent": is_booking_intent_flag
-                        }
-                    )
-                    if "stage_snapshots" not in execution_trace:
-                        execution_trace["stage_snapshots"] = []
-                    execution_trace["stage_snapshots"].append(memory_snapshot)
-
-                    # Stage 8: STATE PERSIST - Log what was stored
-                    storage_backend = "redis" if hasattr(
-                        memory_store, 'redis') else "memory"
-                    _log_stage(
-                        logger, request_id, "state_persist",
-                        input_data={"user_id": user_id, "domain": domain},
-                        output_data={
-                            "stored": {
-                                "intent": merged_memory.get("intent"),
-                                "booking_state": merged_memory.get("booking_state", {}).get("booking_state") if isinstance(merged_memory.get("booking_state"), dict) else None,
-                                "has_services": bool(merged_memory.get("booking_state", {}).get("services") if isinstance(merged_memory.get("booking_state"), dict) else False),
-                                "has_datetime_range": bool(merged_memory.get("booking_state", {}).get("datetime_range") if isinstance(merged_memory.get("booking_state"), dict) else False)
-                            },
-                            "storage_backend": storage_backend
-                        }
-                    )
-                except Exception as e:  # noqa: BLE001
-                    logger.warning(f"Failed to persist memory: {e}", extra={
-                                   'request_id': request_id})
-        elif should_persist and is_modify_with_booking_id:
-            # MODIFY_BOOKING with booking_id: persist as MODIFY_BOOKING
-            merged_memory = merge_booking_state(
-                memory_state=None,  # Don't merge with booking draft
-                current_intent="MODIFY_BOOKING",
-                current_booking=current_booking,
-                current_clarification=current_clarification,
-                request_id=request_id
-            )
-
-            # Persist MODIFY_BOOKING state
-            if memory_store:
-                try:
-                    # Time memory write operation
-                    memory_input = {
-                        "user_id": user_id,
-                        "domain": domain,
-                        "intent": "MODIFY_BOOKING",
-                        "has_booking_state": bool(merged_memory.get("booking_state")) if merged_memory else False
-                    }
-                    with StageTimer(execution_trace, "memory", request_id=request_id):
-                        memory_store.set(
-                            user_id=user_id,
-                            domain=domain,
-                            state=merged_memory,
-                            ttl=MEMORY_TTL
-                        )
-                    memory_output = {
-                        "stored": True,
-                        "intent": "MODIFY_BOOKING",
-                        "has_booking_state": bool(merged_memory.get("booking_state")) if merged_memory else False
-                    }
-
-                    # Capture memory snapshot
-                    memory_snapshot = capture_stage_snapshot(
-                        stage_name="memory",
-                        input_data=memory_input,
-                        output_data=memory_output,
-                        decision_flags={
-                            "should_persist": True,
-                            "is_modify_with_booking_id": True
-                        }
-                    )
-                    if "stage_snapshots" not in execution_trace:
-                        execution_trace["stage_snapshots"] = []
-                    execution_trace["stage_snapshots"].append(memory_snapshot)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning(f"Failed to persist memory: {e}", extra={
-                                   'request_id': request_id})
-
-        # Get final memory state based on all decisions
-        merged_memory = get_final_memory_state(
-            should_clear=should_clear,
-            should_persist=should_persist,
-            is_booking_intent=is_booking_intent_flag,
-            is_modify_with_booking_id=is_modify_with_booking_id,
-            effective_intent=effective_intent,
-            memory_state=memory_state,
-            current_booking=current_booking,
-            current_clarification=current_clarification,
-            merged_memory=merged_memory,
-            logger=logger,
-            request_id=request_id
-        )
+        # Luma is stateless - no memory persistence or follow-up merging
+        # All requests are independent
 
         # Post-semantic validation guard: Check for orphan slot updates
         # If extracted slots exist but cannot be applied (no booking_id, no draft, no booking),
@@ -1922,8 +1388,17 @@ def resolve_message(
         booking_payload = None
         context_payload = None
 
-        if (is_booking_intent_flag or is_modify_with_booking_id) and not needs_clarification:
-            booking_payload = extract_memory_state_for_response(merged_memory)
+        # Determine if this is a CREATE booking intent (MODIFY_BOOKING and CANCEL_BOOKING do NOT produce booking_payload)
+        # UNKNOWN intents never produce booking_payload (pure extraction, no booking logic)
+        is_booking_intent_flag = is_booking_intent(effective_intent)
+        # HARD INVARIANT: MODIFY_BOOKING and CANCEL_BOOKING never produce booking_payload
+        # UNKNOWN intents never produce booking_payload
+        is_creates_booking = (is_booking_intent_flag and 
+                             effective_intent not in {"MODIFY_BOOKING", "CANCEL_BOOKING", "UNKNOWN"})
+
+        if not is_unknown_intent and is_creates_booking and not needs_clarification:
+            # Use current_booking directly (stateless - no memory merging)
+            booking_payload = current_booking.copy() if current_booking else {}
             # Add booking_state = "RESOLVED" for resolved bookings
             if booking_payload:
                 booking_payload["booking_state"] = "RESOLVED"
@@ -1938,13 +1413,6 @@ def resolve_message(
                             for service in current_services
                             if isinstance(service, dict)
                         ]
-                    else:
-                        # Format existing services from memory
-                        booking_payload["services"] = [
-                            format_service_for_response(service)
-                            for service in booking_payload.get("services", [])
-                            if isinstance(service, dict)
-                        ]
             # INVARIANT: Do not resurrect missing booking state by rebuilding it silently
             # If booking_payload is missing or incomplete, log and let decision layer handle clarification
             if not booking_payload or (not booking_payload.get("services") and not booking_payload.get("datetime_range") and
@@ -1955,37 +1423,13 @@ def resolve_message(
                         'request_id': request_id,
                         'intent': api_intent,
                         'has_calendar_booking': bool(calendar_booking),
-                        'has_merged_memory': bool(merged_memory),
                         'note': 'Decision layer should have handled this - forcing clarification'
                     }
                 )
                 # Force clarification instead of silently rebuilding
                 needs_clarification = True
                 booking_payload = None
-        elif memory_state and is_booking_intent(memory_state.get("intent", "")) and not needs_clarification:
-            # Return existing booking state from memory for follow-ups
-            booking_payload = extract_memory_state_for_response(memory_state)
-            if booking_payload:
-                booking_payload["booking_state"] = "RESOLVED"
-                # Format services to preserve resolved_alias if present in current semantic result
-                if merged_semantic_result:
-                    current_services = merged_semantic_result.resolved_booking.get(
-                        "services", [])
-                    if current_services:
-                        # Use services from current semantic result (which may have resolved_alias)
-                        booking_payload["services"] = [
-                            format_service_for_response(service)
-                            for service in current_services
-                            if isinstance(service, dict)
-                        ]
-                    else:
-                        # Format existing services from memory
-                        booking_payload["services"] = [
-                            format_service_for_response(service)
-                            for service in booking_payload.get("services", [])
-                            if isinstance(service, dict)
-                        ]
-        elif is_booking_intent_flag and needs_clarification:
+        elif is_creates_booking and needs_clarification:
             # For booking intents that need clarification, return lightweight context only
             resolved_booking = merged_semantic_result.resolved_booking
             services = resolved_booking.get("services", [])
@@ -2071,7 +1515,8 @@ def resolve_message(
                 if (is_date_only_turn or (not bound_start_date and date_refs)):
                     # Resolve date directly using binder's date resolution
                     # This treats date-only as a valid partial state, not an error
-                    from luma.calendar.calendar_binder import _bind_dates, get_timezone
+                    from luma.calendar.calendar_binder import _bind_dates
+                    # get_timezone is already imported at module level (line 37)
 
                     # Get timezone and now from function scope (set earlier in resolve_message)
                     tz = get_timezone(timezone)
@@ -2354,7 +1799,6 @@ def resolve_message(
                     'intent': api_intent,
                     'decision_status': decision_result.status if decision_result else None,
                     'has_calendar_booking': bool(calendar_booking),
-                    'has_merged_memory': bool(merged_memory),
                     'produces_booking_payload': produces_booking,
                     'note': 'This should not happen - decision/binder should have produced booking_payload'
                 }
@@ -2380,7 +1824,8 @@ def resolve_message(
         issues: Dict[str, Any] = {}
         # POLICY: If decision.state == RESOLVED, skip issue construction entirely
         # Decision layer is authoritative - no issues should be reported for RESOLVED requests
-        if needs_clarification and not (decision_result and decision_result.status == "RESOLVED"):
+        # UNKNOWN intents skip issues building (pure extraction, no validation)
+        if not is_unknown_intent and needs_clarification and not (decision_result and decision_result.status == "RESOLVED"):
             # Get time_issues from resolved_booking if available
             time_issues_for_issues = None
             if merged_semantic_result:
@@ -2445,6 +1890,150 @@ def resolve_message(
         # Slots MUST be present whenever any resolved data exists (service, date, datetime)
         # Slots are built for both ready and clarification cases if data is resolved
         slots: Dict[str, Any] = {}
+
+        # UNKNOWN intent: Build slots directly from semantic output (pure extraction, no booking logic)
+        # Calendar binder is intentionally skipped for UNKNOWN, so we normalize date/time refs directly
+        # Reuse existing normalization functions (_bind_single_date, bind_times) - do NOT reparse text
+        # UNKNOWN intents should always have needs_clarification=False (forced at line 938)
+        if is_unknown_intent:
+            # Get semantic_booking from merged_semantic_result or semantic_result (fallback)
+            # merged_semantic_result = semantic_result for stateless Luma (line 510)
+            semantic_booking = {}
+            if merged_semantic_result and merged_semantic_result.resolved_booking:
+                semantic_booking = merged_semantic_result.resolved_booking
+            elif semantic_result and semantic_result.resolved_booking:
+                # Fallback to semantic_result if merged_semantic_result is not available
+                semantic_booking = semantic_result.resolved_booking
+            
+            # Date handling: Normalize date_refs using existing date normalizer
+            date_mode = semantic_booking.get("date_mode")
+            date_refs = semantic_booking.get("date_refs", [])
+            
+            if date_mode == "single_day" and len(date_refs) >= 1:
+                # Single date: normalize using _bind_single_date (reuse existing normalizer)
+                try:
+                    tz = get_timezone(timezone)
+                    # Ensure now is timezone-aware for _bind_single_date
+                    # now should already be timezone-aware from line 371, but ensure it is
+                    if now.tzinfo is None:
+                        now_tz_aware = _localize_datetime(now, tz)
+                    else:
+                        now_tz_aware = now
+                    bound_date = _bind_single_date(date_refs[0], now_tz_aware, tz)
+                    if bound_date:
+                        slots["date"] = bound_date.strftime("%Y-%m-%d")
+                    else:
+                        logger.warning(
+                            f"[UNKNOWN] _bind_single_date returned None for date_ref: {date_refs[0]}",
+                            extra={'request_id': request_id, 'date_ref': date_refs[0], 'date_mode': date_mode}
+                        )
+                except Exception as e:
+                    # If normalization fails, skip date (extraction-only, no fallback)
+                    logger.warning(
+                        f"[UNKNOWN] Date normalization failed: {str(e)}",
+                        extra={'request_id': request_id, 'date_ref': date_refs[0] if date_refs else None, 'error': str(e)}
+                    )
+                    pass
+            
+            elif date_mode == "range" and len(date_refs) >= 2:
+                # Date range: normalize both dates using _bind_single_date
+                try:
+                    tz = get_timezone(timezone)
+                    # Ensure now is timezone-aware for _bind_single_date
+                    if now.tzinfo is None:
+                        now_tz_aware = _localize_datetime(now, tz)
+                    else:
+                        now_tz_aware = now
+                    start_date_dt = _bind_single_date(date_refs[0], now_tz_aware, tz)
+                    end_date_dt = _bind_single_date(date_refs[1], now_tz_aware, tz)
+                    if start_date_dt and end_date_dt:
+                        # Fix year drift if needed (same logic as _bind_dates)
+                        if start_date_dt > end_date_dt:
+                            from datetime import datetime as dt
+                            start_date_dt = _localize_datetime(
+                                dt(end_date_dt.year, start_date_dt.month, start_date_dt.day), tz
+                            )
+                        slots["date_range"] = {
+                            "start": start_date_dt.strftime("%Y-%m-%d"),
+                            "end": end_date_dt.strftime("%Y-%m-%d")
+                        }
+                except Exception as e:
+                    # If normalization fails, skip date_range (extraction-only)
+                    logger.debug(f"[UNKNOWN] Date range normalization failed: {str(e)}", extra={'request_id': request_id})
+                    pass
+            
+            # Time handling: Normalize time_refs using existing time normalizer (bind_times)
+            time_refs = semantic_booking.get("time_refs", [])
+            time_mode = semantic_booking.get("time_mode", "none")
+            if len(time_refs) >= 1:
+                try:
+                    tz = get_timezone(timezone)
+                    # Ensure now is timezone-aware for bind_times
+                    if now.tzinfo is None:
+                        now_tz_aware = _localize_datetime(now, tz)
+                    else:
+                        now_tz_aware = now
+                    time_windows = extraction_result.get("time_windows", []) if extraction_result else []
+                    time_result = bind_times(
+                        time_refs,
+                        time_mode,
+                        now_tz_aware,
+                        tz,
+                        time_windows=time_windows
+                    )
+                    if time_result:
+                        start_time = time_result.get("start_time")
+                        if start_time:
+                            slots["time"] = start_time
+                except Exception as e:
+                    # If normalization fails, skip time (extraction-only, no fallback)
+                    logger.debug(f"[UNKNOWN] Time normalization failed: {str(e)}", extra={'request_id': request_id})
+                    pass
+            
+            # Service handling: Extract from semantic_booking (tenant alias normalization)
+            # CRITICAL: service_id must be a TENANT alias key, never a canonical ID
+            services = semantic_booking.get("services", [])
+            if len(services) == 1 and isinstance(services[0], dict):
+                service = services[0]
+                
+                # Priority 1: Use resolved_alias if present (this is the tenant alias key)
+                tenant_alias_key = service.get("resolved_alias")
+                
+                # Priority 2: If no resolved_alias, map canonical -> tenant alias key using tenant_context.aliases
+                if not tenant_alias_key:
+                    canonical = service.get("canonical")
+                    if canonical and tenant_context and isinstance(tenant_context, dict):
+                        aliases = tenant_context.get("aliases", {})
+                        if isinstance(aliases, dict):
+                            # Inverse lookup: find tenant alias key for this canonical
+                            # aliases dict is {alias_key: canonical}, so we need to find key by value
+                            for alias_key, alias_canonical in aliases.items():
+                                if alias_canonical == canonical:
+                                    tenant_alias_key = alias_key
+                                    break
+                
+                # Priority 3: If still no mapping, use text (raw matched text, not canonical)
+                # This ensures we NEVER return a canonical ID in service_id
+                if not tenant_alias_key:
+                    tenant_alias_key = service.get("text")
+                    # Safety check: if text is a canonical ID (contains "."), don't use it
+                    # Instead, use the first alias key from aliases if available
+                    if tenant_alias_key and "." in tenant_alias_key:
+                        # This looks like a canonical ID, try to find an alias
+                        if tenant_context and isinstance(tenant_context, dict):
+                            aliases = tenant_context.get("aliases", {})
+                            if isinstance(aliases, dict) and aliases:
+                                # Use the first alias key as fallback (better than canonical)
+                                tenant_alias_key = list(aliases.keys())[0]
+                
+                if tenant_alias_key:
+                    slots["service_id"] = tenant_alias_key
+            
+            # date + time present → keep them SEPARATE (do NOT collapse to datetime)
+            # This is already handled above - date and time are set separately
+            
+            # Skip all output-shaping cleanup for UNKNOWN (no removal of date, time, date_range, etc.)
+            # Slots are built directly from semantic output using normalization functions
 
         # Get resolved data sources (prioritize booking_payload for ready, semantic for clarification)
         resolved_services = None
@@ -2719,7 +2308,8 @@ def resolve_message(
         # Build temporal slots based on intent-specific temporal shapes
         # CREATE_RESERVATION → slots.date_range
         # CREATE_APPOINTMENT → slots.datetime_range
-        if intent_payload_name == "CREATE_RESERVATION":
+        # UNKNOWN intents skip this (slots already built directly from semantic output above)
+        if not is_unknown_intent and intent_payload_name == "CREATE_RESERVATION":
             # Reservations use date_range {start, end}
             if resolved_date_range:
                 # Convert date_range format from start_date/end_date to start/end for response
@@ -2733,7 +2323,7 @@ def resolve_message(
                     } if start_date and end_date else resolved_date_range
                 else:
                     slots["date_range"] = resolved_date_range
-        elif intent_payload_name == "CREATE_APPOINTMENT":
+        elif not is_unknown_intent and intent_payload_name == "CREATE_APPOINTMENT":
             # Appointments use datetime_range {start, end}
             # Source directly from binder output in results["stages"]["calendar"]["calendar_booking"]["datetime_range"]
             # This ensures we get the value even if calendar_result variable is empty
@@ -2751,181 +2341,11 @@ def resolve_message(
                 slots["datetime_range"] = datetime_range_for_slots
                 # Set has_datetime flag when datetime_range exists (response contract)
                 slots["has_datetime"] = True
-        elif intent_payload_name in {"MODIFY_BOOKING", "CANCEL_BOOKING"}:
+        elif not is_unknown_intent and intent_payload_name in {"MODIFY_BOOKING", "CANCEL_BOOKING"}:
             # MODIFY_BOOKING and CANCEL_BOOKING use booking_id slot
             # Extract booking_id from entities
             if extraction_result and extraction_result.get("booking_id"):
                 slots["booking_id"] = extraction_result["booking_id"]
-            # For MODIFY_BOOKING, include delta slots (date_range, datetime_range, start_date, end_date, time)
-            if intent_payload_name == "MODIFY_BOOKING":
-                # Check if semantic resolver set clarification for single-date reservation (end_date missing)
-                # If so, do NOT build date_range from resolved_date_range (even if it exists)
-                # This prevents auto-collapse of single dates into date_range
-                semantic_clarification_for_single_date = False
-                if merged_semantic_result and merged_semantic_result.needs_clarification and merged_semantic_result.clarification:
-                    clar = merged_semantic_result.clarification
-                    # Handle both Clarification object and dict form
-                    clar_data = None
-                    if hasattr(clar, 'data'):
-                        clar_data = clar.data
-                    elif isinstance(clar, dict):
-                        clar_data = clar.get("data", {})
-                    elif hasattr(clar, 'to_dict'):
-                        clar_dict = clar.to_dict()
-                        clar_data = clar_dict.get("data", {})
-                    
-                    if clar_data and isinstance(clar_data, dict):
-                        missing_slots_from_clar = clar_data.get("missing_slots", [])
-                        if "end_date" in missing_slots_from_clar:
-                            # Semantic resolver detected single date and requires end_date clarification
-                            # Do NOT build date_range - preserve the clarification
-                            semantic_clarification_for_single_date = True
-                            logger.info(
-                                f"[slots] MODIFY_BOOKING reservation: semantic resolver set clarification for single date (end_date missing), "
-                                f"skipping date_range build to preserve clarification. missing_slots={missing_slots_from_clar}",
-                                extra={'request_id': request_id, 'user_id': user_id, 'missing_slots': missing_slots_from_clar}
-                            )
-                
-                # Also check if resolved_date_range has start == end (single date collapsed)
-                # This is a guardrail in case semantic clarification wasn't preserved
-                if resolved_date_range and isinstance(resolved_date_range, dict):
-                    start_date_check = resolved_date_range.get("start_date") or resolved_date_range.get("start")
-                    end_date_check = resolved_date_range.get("end_date") or resolved_date_range.get("end")
-                    if start_date_check and end_date_check and start_date_check == end_date_check:
-                        # Check if this is a reservation
-                        semantic_booking = merged_semantic_result.resolved_booking if merged_semantic_result else {}
-                        booking_mode_check = semantic_booking.get("booking_mode", domain)
-                        is_reservation_check = (booking_mode_check == "reservation" or domain == "reservation")
-                        
-                        if is_reservation_check:
-                            # Single date detected in reservation - do NOT build date_range
-                            # This guardrail catches cases where semantic resolver clarification wasn't preserved
-                            semantic_clarification_for_single_date = True
-                            # Reset resolved_date_range to prevent it from being used
-                            resolved_date_range = None
-                            logger.warning(
-                                f"[slots] MODIFY_BOOKING reservation: detected single date (start==end={start_date_check}), "
-                                f"skipping date_range build to prevent auto-collapse. "
-                                f"This should have been caught by semantic resolver.",
-                                extra={'request_id': request_id, 'user_id': user_id, 'date': start_date_check}
-                            )
-                
-                # Check for date_range (reservations) and extract start_date/end_date as deltas
-                # Skip if semantic resolver already set clarification for single-date
-                # Also skip if resolved_date_range was reset due to single-date detection
-                if resolved_date_range and not semantic_clarification_for_single_date:
-                    # Convert date_range format from start_date/end_date to start/end for response
-                    if isinstance(resolved_date_range, dict):
-                        start_date = resolved_date_range.get("start_date") or resolved_date_range.get("start")
-                        end_date = resolved_date_range.get("end_date") or resolved_date_range.get("end")
-                        
-                        # INVARIANT: For MODIFY_BOOKING reservations, NEVER collapse single date into date_range
-                        # If start_date == end_date, this indicates a single date was incorrectly collapsed
-                        # This is a guardrail - semantic resolver should have already caught this
-                        if start_date and end_date and start_date == end_date:
-                            # Check if this is a reservation (not appointment)
-                            semantic_booking = merged_semantic_result.resolved_booking if merged_semantic_result else {}
-                            booking_mode = semantic_booking.get("booking_mode", domain)
-                            is_reservation = (booking_mode == "reservation" or domain == "reservation")
-                            
-                            if is_reservation:
-                                # Single date detected in reservation - do NOT build date_range
-                                # This guardrail catches cases where semantic resolver clarification wasn't preserved
-                                logger.warning(
-                                    f"[slots] MODIFY_BOOKING reservation: single date detected (start==end={start_date}), "
-                                    f"skipping date_range build to prevent auto-collapse. "
-                                    f"This should have been caught by semantic resolver.",
-                                    extra={'request_id': request_id, 'user_id': user_id}
-                                )
-                                # Don't build date_range - should require clarification for end_date
-                                resolved_date_range = None
-                        
-                        if resolved_date_range and isinstance(resolved_date_range, dict):
-                            # Re-extract after potential reset above
-                            start_date = resolved_date_range.get("start_date") or resolved_date_range.get("start")
-                            end_date = resolved_date_range.get("end_date") or resolved_date_range.get("end")
-                            
-                            # Special handling for "move ... from X to Y" pattern: use only destination date (Y)
-                            # Example: "move my reservation DEF456 from oct 5th to oct 10th" → use only oct 10th (both start and end = oct 10th)
-                            move_from_to_pattern = re.search(r'\bmove\b.*\bfrom\b.*\bto\b', text, re.IGNORECASE)
-                            if move_from_to_pattern and start_date and end_date and start_date != end_date:
-                                # Use only the destination date (end_date) - set both start and end to destination
-                                start_date = end_date
-                                logger.info(
-                                    f"[slots] MODIFY_BOOKING: 'move from X to Y' pattern detected, using only destination date: {end_date}",
-                                    extra={'request_id': request_id, 'user_id': user_id}
-                                )
-                            
-                            # Store date_range with start/end format (response contract)
-                            # Build if we have both start and end (allow start == end for "move from X to Y" pattern)
-                            if start_date and end_date:
-                                slots["date_range"] = {
-                                    "start": start_date,
-                                    "end": end_date
-                                }
-                                # Extract start_date and end_date from date_range as separate delta slots
-                                slots["start_date"] = start_date
-                                slots["end_date"] = end_date
-                    elif resolved_date_range:
-                        # Non-dict date_range (shouldn't happen, but handle it)
-                        slots["date_range"] = resolved_date_range
-                
-                # Check for datetime_range (appointments)
-                # Priority: calendar binder output > semantic normalization output
-                if resolved_datetime_range:
-                    slots["datetime_range"] = resolved_datetime_range
-                    slots["has_datetime"] = True
-                elif calendar_booking and calendar_booking.get("datetime_range"):
-                    slots["datetime_range"] = calendar_booking["datetime_range"]
-                    slots["has_datetime"] = True
-                else:
-                    # Delta normalization for MODIFY_BOOKING: check semantic normalization output
-                    # Semantic resolver sets has_datetime and datetime_range during normalization
-                    # Calendar binding is skipped for MODIFY_BOOKING, so semantic output is authoritative
-                    if merged_semantic_result and merged_semantic_result.resolved_booking:
-                        semantic_booking = merged_semantic_result.resolved_booking
-                        
-                        # Check if semantic resolver already set has_datetime or datetime_range
-                        semantic_has_datetime = semantic_booking.get("has_datetime")
-                        semantic_datetime_range = semantic_booking.get("datetime_range")
-                        semantic_date_range = semantic_booking.get("date_range")
-                        
-                        # Propagate has_datetime from semantic normalization (if set)
-                        if semantic_has_datetime and not slots.get("has_datetime"):
-                            slots["has_datetime"] = semantic_has_datetime
-                            logger.info(
-                                f"[slots] MODIFY_BOOKING: propagated has_datetime=True from semantic normalization",
-                                extra={'request_id': request_id, 'user_id': user_id}
-                            )
-                        
-                        # Propagate datetime_range from semantic normalization (if set and not already in slots)
-                        if semantic_datetime_range and not slots.get("datetime_range"):
-                            slots["datetime_range"] = semantic_datetime_range
-                            # Ensure has_datetime is set when datetime_range is present
-                            slots["has_datetime"] = True
-                            logger.info(
-                                f"[slots] MODIFY_BOOKING: propagated datetime_range from semantic normalization",
-                                extra={'request_id': request_id, 'user_id': user_id}
-                            )
-                        
-                        # Propagate date_range from semantic normalization for reservations (if set and not already in slots)
-                        if semantic_date_range and not slots.get("date_range") and domain == "reservation":
-                            slots["date_range"] = semantic_date_range
-                            logger.info(
-                                f"[slots] MODIFY_BOOKING reservation: propagated date_range from semantic normalization",
-                                extra={'request_id': request_id, 'user_id': user_id}
-                            )
-                        
-                        # Fallback: Build datetime_range for API compatibility when semantic resolver didn't set it
-                        # This is a compatibility shim that enforces API response shape (has_datetime=True requires datetime_range)
-                        # It does NOT perform temporal resolution - only shapes response structure from semantic_booking
-                        build_datetime_range_for_api(
-                            slots=slots,
-                            semantic_booking=semantic_booking,
-                            domain=domain,
-                            request_id=request_id,
-                            user_id=user_id
-                        )
 
         # Extract clarification_data from current_clarification if present
         clarification_data_for_response = None
@@ -2955,6 +2375,152 @@ def resolve_message(
                 # Default to MISSING_DATE if no specific missing slots identified
                 public_clarification_reason = ClarificationReason.MISSING_DATE.value
 
+        # ============================================================
+        # CENTRALIZED MODIFY_BOOKING OUTPUT SHAPING (critical)
+        # ============================================================
+        # This runs AFTER decision == RESOLVED and BEFORE response return.
+        # Output shaping rules for MODIFY_BOOKING (delta-only output):
+        # - Always include booking_id
+        # - If any time OR date change detected → set has_datetime = true
+        # - If reservation date range detected → include date_range
+        # - For appointments: datetime_range must exist when has_datetime=True
+        # - For reservations: preserve legacy start_date/end_date fields
+        # This logic exists in ONE place only (final response shaping),
+        # not in semantic or decision layers.
+        # UNKNOWN intents skip all output-shaping cleanup (pure extraction)
+        if not is_unknown_intent and intent_payload_name == "MODIFY_BOOKING" and decision_result and decision_result.status == "RESOLVED":
+            # Ensure booking_id is always included (should already be set earlier, but verify)
+            if extraction_result and extraction_result.get("booking_id") and not slots.get("booking_id"):
+                slots["booking_id"] = extraction_result["booking_id"]
+            # Determine booking mode
+            semantic_booking = merged_semantic_result.resolved_booking if merged_semantic_result else {}
+            booking_mode = semantic_booking.get("booking_mode", domain)
+            is_reservation = (booking_mode == "reservation" or domain == "reservation")
+            
+            # Check for date_range (reservations) - may come from calendar binding or semantic normalization
+            has_date_range = False
+            if is_reservation:
+                # Check resolved_date_range (from calendar binding or semantic result)
+                if resolved_date_range and isinstance(resolved_date_range, dict):
+                    start_date = resolved_date_range.get("start_date") or resolved_date_range.get("start")
+                    end_date = resolved_date_range.get("end_date") or resolved_date_range.get("end")
+                    # Only include date_range if we have both start and end (allow start == end for destination-only moves)
+                    if start_date and end_date:
+                        # Handle "from X to Y" pattern: collapse to destination only
+                        # Detect pattern in original text: "from <date> to <date>"
+                        text_lower = text.lower() if text else ""
+                        # Match "from <something> to <something>" pattern
+                        from_to_pattern = r'\bfrom\s+.*?\s+to\s+.*'
+                        if re.search(from_to_pattern, text_lower):
+                            # Collapse to destination date only
+                            slots["date_range"] = {
+                                "start": end_date,
+                                "end": end_date
+                            }
+                        else:
+                            slots["date_range"] = {
+                                "start": start_date,
+                                "end": end_date
+                            }
+                        # Preserve legacy delta fields for reservations
+                        slots["start_date"] = start_date
+                        slots["end_date"] = end_date
+                        has_date_range = True
+                # Also check semantic result for date_range (may have been set by semantic resolver)
+                elif semantic_booking.get("date_range") and isinstance(semantic_booking.get("date_range"), dict):
+                    date_range_from_semantic = semantic_booking.get("date_range")
+                    start_date = date_range_from_semantic.get("start_date") or date_range_from_semantic.get("start")
+                    end_date = date_range_from_semantic.get("end_date") or date_range_from_semantic.get("end")
+                    if start_date and end_date:
+                        # Handle "from X to Y" pattern: collapse to destination only
+                        text_lower = text.lower() if text else ""
+                        from_to_pattern = r'\bfrom\s+.*?\s+to\s+.*'
+                        if re.search(from_to_pattern, text_lower):
+                            slots["date_range"] = {
+                                "start": end_date,
+                                "end": end_date
+                            }
+                        else:
+                            slots["date_range"] = {
+                                "start": start_date,
+                                "end": end_date
+                            }
+                        # Preserve legacy delta fields for reservations
+                        slots["start_date"] = start_date
+                        slots["end_date"] = end_date
+                        has_date_range = True
+            
+            # Check for time-related changes (appointments or time-only modifications)
+            # Priority: semantic normalization > calendar binding
+            has_time_change = False
+            has_date_change = False
+            
+            if merged_semantic_result and merged_semantic_result.resolved_booking:
+                # Check semantic result for time-related changes
+                semantic_has_datetime = semantic_booking.get("has_datetime")
+                semantic_datetime_range = semantic_booking.get("datetime_range")
+                time_refs = semantic_booking.get("time_refs", [])
+                time_constraint = semantic_booking.get("time_constraint")
+                time_mode = semantic_booking.get("time_mode")
+                date_refs = semantic_booking.get("date_refs", [])
+                date_mode = semantic_booking.get("date_mode")
+                
+                # Check if time-related change exists
+                has_time_change = (
+                    semantic_has_datetime or
+                    bool(semantic_datetime_range) or
+                    len(time_refs) > 0 or
+                    time_constraint is not None or
+                    (time_mode and time_mode != "none")
+                )
+                
+                # Check if date-related change exists (for appointments, date-only changes should set has_datetime)
+                has_date_change = (
+                    len(date_refs) > 0 or
+                    (date_mode and date_mode != "none" and date_mode != "flexible") or
+                    bool(semantic_booking.get("date_range"))
+                )
+            
+            # For appointments (service mode), any date OR time change → set has_datetime = true
+            # For reservations, only date_range is output (no has_datetime)
+            if not is_reservation:
+                # Appointment mode: any date OR time change → has_datetime = true
+                if has_time_change or has_date_change:
+                    slots["has_datetime"] = True
+                
+                # For appointments: ensure datetime_range exists when has_datetime=True
+                # This is required by API contract
+                if slots.get("has_datetime"):
+                    # First, try to get datetime_range from resolved sources
+                    if not slots.get("datetime_range"):
+                        if resolved_datetime_range:
+                            slots["datetime_range"] = resolved_datetime_range
+                        elif calendar_booking and calendar_booking.get("datetime_range"):
+                            slots["datetime_range"] = calendar_booking.get("datetime_range")
+                        else:
+                            # Call build_datetime_range_for_api to construct minimal structure
+                            build_datetime_range_for_api(
+                                slots,
+                                semantic_booking,
+                                domain,
+                                request_id=request_id,
+                                user_id=user_id
+                            )
+            # For reservations, date_range is already set above if present
+            
+            # CRITICAL: Remove fields that shouldn't be in delta output
+            # BUT preserve fields required by API contract or tests:
+            # - datetime_range: NEVER remove if has_datetime=True
+            # - start_date/end_date: NEVER remove for MODIFY_BOOKING reservations
+            # - time_range: can be removed (redundant with datetime_range)
+            if not is_reservation:
+                # For appointments: only remove datetime_range if has_datetime is False
+                if not slots.get("has_datetime"):
+                    slots.pop("datetime_range", None)
+            # For reservations: start_date and end_date are preserved above
+            slots.pop("time_range", None)
+            # booking_payload is already None for MODIFY_BOOKING (handled above)
+
         # CENTRAL NORMALIZATION: Ensure service_id is always a tenant alias key, never a canonical
         # INVARIANT: API responses must NEVER expose canonical service IDs
         # This runs for ALL intents in ONE central place before final response assembly
@@ -2971,17 +2537,34 @@ def resolve_message(
                     # Example: {"suite": "room", "delux": "room"} means "room" is canonical
                     tenant_alias_key = None
                     
-                    # Search for alias key that maps to this canonical
-                    for alias_key, canonical_family in aliases.items():
-                        if canonical_family:
-                            # Exact match with canonical family (e.g., "room")
-                            if service_id_value == canonical_family:
-                                tenant_alias_key = alias_key
-                                break
-                            # Match with full canonical ID (e.g., "hospitality.room" contains "room")
-                            elif "." in service_id_value and service_id_value.endswith(f".{canonical_family}"):
-                                tenant_alias_key = alias_key
-                                break
+                    # Priority 1: Check for resolved_alias from semantic result (preserves explicit match)
+                    # This is important for CREATE_RESERVATION cases where semantic resolver may have set resolved_alias
+                    if merged_semantic_result and merged_semantic_result.resolved_booking:
+                        resolved_services = merged_semantic_result.resolved_booking.get("services", [])
+                        if resolved_services:
+                            # Get resolved_alias from first service (explicit match)
+                            primary_service = resolved_services[0] if isinstance(resolved_services[0], dict) else {}
+                            resolved_alias = primary_service.get("resolved_alias")
+                            if resolved_alias and resolved_alias in aliases:
+                                # resolved_alias is a valid tenant alias key - use it
+                                tenant_alias_key = resolved_alias
+                                logger.info(
+                                    f"[response] Using resolved_alias from semantic result: '{tenant_alias_key}'",
+                                    extra={'request_id': request_id}
+                                )
+                    
+                    # Priority 2: If no resolved_alias found, search for alias key that maps to this canonical
+                    if not tenant_alias_key:
+                        for alias_key, canonical_family in aliases.items():
+                            if canonical_family:
+                                # Exact match with canonical family (e.g., "room")
+                                if service_id_value == canonical_family:
+                                    tenant_alias_key = alias_key
+                                    break
+                                # Match with full canonical ID (e.g., "hospitality.room" contains "room")
+                                elif "." in service_id_value and service_id_value.endswith(f".{canonical_family}"):
+                                    tenant_alias_key = alias_key
+                                    break
                     
                     if tenant_alias_key:
                         # Replace canonical with tenant alias key

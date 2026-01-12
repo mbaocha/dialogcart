@@ -138,24 +138,6 @@ class LumaConfig:
         "WARMUP_ON_STARTUP", "true").lower() == "true"
     """Preload models on startup (slower startup, faster requests)"""
 
-    # ========================================================================
-    # Redis / Memory Settings
-    # ========================================================================
-
-    REDIS_HOST: str = os.getenv("REDIS_HOST", "localhost")
-    """Redis hostname"""
-
-    REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
-    """Redis port"""
-
-    REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
-    """Redis database number"""
-
-    REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD")
-    """Redis password (optional)"""
-
-    MEMORY_TTL: int = int(os.getenv("MEMORY_TTL", "3600"))
-    """Memory TTL in seconds (default: 3600 = 1 hour)"""
 
     # ========================================================================
     # Helper Methods

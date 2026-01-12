@@ -756,7 +756,7 @@ def resolve_semantics(
 
     # Validate temporal shape completeness (authoritative - must pass for RESOLVED)
     # This runs after all ambiguity checks but before finalizing status
-    # Pass entities and memory_state for weekday-only range normalization
+    # Pass entities for weekday-only range normalization (Luma is stateless)
     intent_name = intent_result.get("intent")
     
     # Delta normalization for MODIFY_BOOKING: slot normalization (semantic shaping), not calendar binding
@@ -786,13 +786,15 @@ def resolve_semantics(
             # Check if date is present (date_refs exist and date_mode is valid)
             has_date = bool(date_refs) and date_mode is not None and date_mode != DateMode.FLEXIBLE.value
             
-            if has_time:
-                # Set has_datetime = true
+            # For MODIFY_BOOKING appointments: any time OR date change → set has_datetime = true
+            # Time-only modifications are valid (no date required)
+            # Date-only modifications are valid (no time required) - date can anchor time from existing booking
+            if has_time or has_date:
+                # Set has_datetime = true for any time-related or date-related change
                 resolved_booking["has_datetime"] = True
                 
-                # Build minimal datetime_range structure (calendar binder will resolve to actual dates)
-                # Structure: { "start": <time-ref or date+time>, "end": <same> }
-                # For now, store time_refs - calendar binder will combine with dates
+                # Build minimal datetime_range structure only if time_refs exist
+                # Calendar binder will resolve to actual dates/times
                 if time_refs:
                     # Build minimal datetime_range with time references
                     # The calendar binder will resolve these to actual datetime values
@@ -804,19 +806,15 @@ def resolve_semantics(
                         f"[semantic] MODIFY_BOOKING appointment: set has_datetime=True and built datetime_range "
                         f"from time_refs={time_refs} (calendar binder will resolve to actual dates)"
                     )
-                
-                # If time present but no date: require clarification ["date"]
-                if not has_date:
-                    clarification = Clarification(
-                        reason=ClarificationReason.MISSING_DATE,
-                        data={
-                            "missing_slots": ["date"]
-                        }
-                    )
+                elif has_date:
+                    # Date-only modification: set has_datetime=True (date can anchor time from existing booking)
                     logger.info(
-                        f"[semantic] MODIFY_BOOKING appointment: time present but no date, requiring clarification: "
-                        f"time_refs={time_refs}, date_refs={date_refs}"
+                        f"[semantic] MODIFY_BOOKING appointment: date-only modification, set has_datetime=True "
+                        f"(date_refs={date_refs}, calendar binder will anchor time from existing booking)"
                     )
+                
+                # DO NOT require clarification for time-only or date-only MODIFY_BOOKING
+                # Both are valid modifications - decision layer will determine readiness
         
         # Reservation rules: normalize date_range for MODIFY_BOOKING
         elif booking_mode == "reservation":
@@ -858,7 +856,7 @@ def resolve_semantics(
     # For MODIFY_BOOKING, skip temporal shape validation (delta normalization handles it)
     if intent_name != "MODIFY_BOOKING":
         temporal_clarification = _validate_temporal_shape_completeness(
-            intent_name, resolved_booking, date_resolution, entities, None  # memory_state not available here
+            intent_name, resolved_booking, date_resolution, entities, None  # Luma is stateless
         )
         if temporal_clarification:
             # Temporal shape incomplete - force needs_clarification
@@ -912,13 +910,17 @@ def _extract_hour_only_time(entities: Dict[str, Any]) -> Optional[Dict[str, Any]
 
     Patterns:
     - Direct: "at 9", "at 10", "by 4", "before 6", "after 3"
-    - Contextual modifications: "make it 10", "set it to 9", "change it 11", "move it to 14"
+    - Modification patterns: "make it 10", "set it to 9", "change it 11", "move it to 14"
+      (for single-turn modifications or explicit MODIFY_BOOKING intent, not continuation inference)
 
     Only extracts if:
     - No full time already extracted (CRITICAL: skip if TIME tokens with am/pm exist)
     - No time window already extracted
     - Pattern matches hour-only expression
     - No time constraint pattern (constraints handled separately)
+
+    NOTE: This function only extracts time values from the sentence. It does NOT infer intent.
+    Fragmentary inputs without explicit booking verbs must return UNKNOWN intent via intent resolver.
 
     Args:
         entities: Raw extraction output containing osentence
@@ -959,9 +961,11 @@ def _extract_hour_only_time(entities: Dict[str, Any]) -> Optional[Dict[str, Any]
                 "text": match.group(0)  # Full match like "at 10"
             }
 
-    # Pattern 2: Contextual modification patterns
+    # Pattern 2: Modification patterns (for single-turn modifications or explicit MODIFY_BOOKING)
     # (make|set|change|update|move)\s+(it|this)\s+(to\s+)?(\d{1,2})\b
     # Matches: "make it 10", "set it to 9", "change it 11", "move it to 14"
+    # NOTE: These patterns are for time extraction only, not continuation inference
+    # If input lacks explicit booking verbs, intent resolver will return UNKNOWN
     modification_pattern = re.compile(
         r'\b(make|set|change|update|move)\s+(it|this)\s+(to\s+)?(\d{1,2})\b',
         re.IGNORECASE
@@ -1690,13 +1694,13 @@ def _is_weekday_only_range(
     - date_refs contains only weekdays (monday, tuesday, etc.)
     - No modifiers (this/next/last)
     - No explicit dates/months/years
-    - No anchored date in memory_state
+        - No anchored date (Luma is stateless)
     
     Args:
         date_refs: List of date reference strings
         date_mode: Date mode ("range", "single_day", etc.)
         entities: Raw extraction output (for checking dates_absolute)
-        memory_state: Optional memory state (for checking prior anchored dates)
+        memory_state: Optional memory state (unused - Luma is stateless, always None)
     
     Returns:
         True if this is a weekday-only range without anchors, False otherwise
@@ -1780,7 +1784,7 @@ def _is_weekday_only_range(
         if any(re.search(r'\b' + re.escape(month) + r'\b', combined_refs) for month in month_names):
             has_explicit_date = True
         
-        # Check for anchored date in memory
+        # Check for anchored date in memory (Luma is stateless, so this is always False)
         has_memory_anchor = False
         if memory_state:
             booking_state = memory_state.get("booking_state", {})
@@ -1790,6 +1794,7 @@ def _is_weekday_only_range(
                 has_memory_anchor = True
         
         # Weekday-only range without anchors: exactly 2 weekdays, no modifiers, no explicit dates, no memory anchor
+        # Since Luma is stateless, has_memory_anchor is always False
         if all_weekdays and len(date_refs) == 2 and not has_modifier and not has_explicit_date and not has_memory_anchor:
             return True
     
@@ -2527,7 +2532,7 @@ def _check_ambiguity(
         date_texts = [d.get("text", "") for d in dates[:2]]
         # Check if this is a weekday-only range without anchors
         # Use DateMode.RANGE.value since we're checking if it should be a range
-        # Note: memory_state is not available here, but we can still check for anchors in entities
+        # Note: Luma is stateless (memory_state is always None), but we can still check for anchors in entities
         if _is_weekday_only_range(date_texts, DateMode.RANGE.value, entities, None):
             # Normalize missing slots: both start_date and end_date must be marked as missing
             # This overrides any partial issues to ensure complete clarification output

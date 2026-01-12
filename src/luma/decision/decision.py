@@ -489,11 +489,31 @@ def decide_booking_status(
             has_service_id = bool(services and len(services) > 0)
             has_duration = resolved_booking.get("duration") is not None
             
+            # Reservation readiness rule: For MODIFY_BOOKING + reservation, if two dates are present OR "from X to Y" detected, mark as READY
+            # This is stateless and applies only to MODIFY_BOOKING reservations
+            # Allow start == end for destination-only moves (e.g., "move from X to Y" where Y is the destination)
+            is_reservation_ready = False
+            if booking_mode == "reservation":
+                # Check for two dates explicitly present
+                has_two_dates = len(date_refs) >= 2
+                # Check for date_range with valid start and end (allow start == end for "move from X to Y" pattern)
+                has_valid_date_range = False
+                if date_range and isinstance(date_range, dict):
+                    start_date = date_range.get("start_date") or date_range.get("start")
+                    end_date = date_range.get("end_date") or date_range.get("end")
+                    if start_date and end_date:
+                        # Valid date_range exists (start == end is allowed for destination-only moves)
+                        has_valid_date_range = True
+                
+                # Reservation is ready if two dates are present OR valid date_range exists
+                is_reservation_ready = has_two_dates or has_valid_date_range
+            
             # Special case: For reservations, single date should require clarification for end_date
             # Don't treat single date as a valid change delta - semantic resolver should have set clarification
             # Check both: (1) only one date_ref exists, OR (2) date_range exists with start == end (collapsed single date)
+            # BUT: Skip this check if reservation is ready (two dates or valid date_range present)
             is_single_date_reservation = False
-            if booking_mode == "reservation":
+            if booking_mode == "reservation" and not is_reservation_ready:
                 if len(date_refs) == 1 and not date_range:
                     # Single date_ref for reservation - require clarification
                     is_single_date_reservation = True
@@ -534,7 +554,39 @@ def decide_booking_status(
                 )
                 return result, trace
             
-            # Check if any change delta exists (after excluding single-date reservations)
+            # Reservation readiness rule: For MODIFY_BOOKING + reservation, if two dates are present OR valid date_range exists, mark as READY
+            # This is stateless and applies only to MODIFY_BOOKING reservations
+            # Allow start == end for destination-only moves (e.g., "move from X to Y" where Y is the destination)
+            if is_reservation_ready:
+                # Valid date_range exists for reservation - return RESOLVED (no clarification needed)
+                effective_time = _determine_effective_time(
+                    time_mode, time_refs, time_constraint
+                )
+                result = DecisionResult(
+                    status="RESOLVED",
+                    reason=None,
+                    effective_time=effective_time
+                )
+                trace = {
+                    "decision": {
+                        "state": result.status,
+                        "reason": None,
+                        "missing_slots": [],
+                        "service_resolution": {
+                            "resolved_tenant_service_id": None,
+                            "clarification_reason": None,
+                            "metadata": {"resolution_strategy": "reservation_ready", "booking_id_present": True, "date_range_present": True}
+                        }
+                    }
+                }
+                logger.info(
+                    f"[decision] MODIFY_BOOKING reservation: valid date_range present (two dates or 'from X to Y' pattern), marking as RESOLVED. "
+                    f"date_refs={date_refs}, date_range={date_range}",
+                    extra={'booking_id': booking_id, 'date_refs': date_refs, 'date_range': date_range}
+                )
+                return result, trace
+            
+            # Check if any change delta exists (after excluding single-date reservations and ready reservations)
             has_change_delta = has_date or has_time or has_service_id or has_duration
             
             if not has_change_delta:

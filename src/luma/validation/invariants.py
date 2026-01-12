@@ -148,16 +148,14 @@ def _slot_present(slot: str, semantic_slots: Dict[str, Any]) -> bool:
     if slot == "date" or slot == "start_date":
         date_refs = semantic_slots.get("date_refs", [])
         date_mode = semantic_slots.get("date_mode", "none")
-        # Also check for bound dates from memory (date_range or datetime_range)
-        # In follow-ups, dates may be bound in memory but not in date_refs
+        # Also check for bound dates (date_range or datetime_range from calendar binding)
         date_range = semantic_slots.get("date_range")
         datetime_range = semantic_slots.get("datetime_range")
         has_bound_date = bool(date_range or datetime_range)
         # Consider date present if:
-        # - We have date_refs (regardless of date_mode - they may be rehydrated from memory), OR
-        # - We have bound dates from memory (rehydrated from prior binding)
-        # For follow-up turns, date_refs may be rehydrated from memory even if date_mode is "flexible"
-        # The merged semantic state (current turn + memory) is authoritative
+        # - We have date_refs (from current semantic resolution), OR
+        # - We have bound dates (from calendar binding in current request)
+        # Luma is stateless - all data comes from the current request
         return len(date_refs) > 0 or has_bound_date
     
     if slot == "end_date":
@@ -243,8 +241,7 @@ def _validate_temporal_shape(
     time_refs = semantic_slots.get("time_refs", [])
     time_constraint = semantic_slots.get("time_constraint")
     
-    # Check for bound dates from memory (date_range or datetime_range)
-    # In follow-ups, dates may be bound in memory but not in date_refs
+    # Check for bound dates (date_range or datetime_range from calendar binding)
     date_range = semantic_slots.get("date_range")
     datetime_range = semantic_slots.get("datetime_range")
     has_bound_date = bool(date_range or datetime_range)
@@ -257,10 +254,9 @@ def _validate_temporal_shape(
             time_constraint is not None and time_constraint.get("mode") == TimeMode.FUZZY.value
         ) or (time_mode == TimeMode.FUZZY.value)
         
-        # CREATE_APPOINTMENT date validation: check merged semantic state
-        # For follow-up turns, date_refs may be rehydrated from memory even if date_mode is "flexible"
-        # Accept date_refs if they exist (regardless of date_mode), OR if bound dates exist
-        # This ensures time-only follow-ups can use dates from memory
+        # CREATE_APPOINTMENT date validation: check current semantic state
+        # Accept date_refs if they exist (regardless of date_mode), OR if bound dates exist (from calendar binding)
+        # Luma is stateless - all data comes from the current request
         has_valid_date = (
             len(date_refs) > 0 or
             has_bound_date
@@ -306,7 +302,7 @@ def _validate_temporal_shape(
                     issues["end_date"] = "missing"
                     return issues
         
-        # General date validation (consider bound dates from memory)
+        # General date validation (consider bound dates from calendar binding)
         has_start = (
             (len(date_refs) >= 1 and date_mode not in ("none", "flexible")) or
             (has_bound_date and date_range)  # date_range implies start_date

@@ -55,8 +55,6 @@ from luma.config.temporal import (  # noqa: E402
 )
 from luma.config.intent_meta import validate_required_slots  # noqa: E402
 from luma.config.logging import setup_logging, generate_request_id  # noqa: E402
-from luma.memory import RedisMemoryStore  # noqa: E402
-from luma.memory.merger import merge_booking_state, extract_memory_state_for_response  # noqa: E402
 from luma.decision import decide_booking_status  # noqa: E402
 from luma.clarification import ClarificationReason  # noqa: E402
 from luma.pipeline import LumaPipeline  # noqa: E402
@@ -64,9 +62,6 @@ from luma.trace import validate_stable_fields, TRACE_VERSION  # noqa: E402
 from luma.perf import StageTimer  # noqa: E402
 from luma.config.core import STATUS_READY, STATUS_NEEDS_CLARIFICATION  # noqa: E402
 from luma.app.resolve_service import resolve_message  # noqa: E402
-
-# Internal intent (never returned in API, never persisted)
-CONTEXTUAL_UPDATE = "CONTEXTUAL_UPDATE"
 
 # Check for required dependencies at startup
 
@@ -111,7 +106,6 @@ logger = setup_logging(
 # Global pipeline components
 entity_matcher = None
 intent_resolver = None
-memory_store = None
 
 # Structured stage logger
 
@@ -469,97 +463,9 @@ def plan_clarification(
     }
 
 
-def _merge_semantic_results(
-    memory_booking: Dict[str, Any],
-    current_resolved_booking: Dict[str, Any]
-) -> Dict[str, Any]:
-    """
-    Merge semantic results from memory and current input.
-
-    Rules:
-    - SERVICES: Keep from memory if present, otherwise use current
-    - DATE: Keep from memory if present, otherwise use current
-    - TIME: Use current if present, otherwise keep from memory
-    - DURATION: Use current if present, otherwise keep from memory
-    - TIME_CONSTRAINT: Use current if present, otherwise keep from memory
-
-    This preserves existing fields and fills missing ones only.
-    """
-    merged = {}
-
-    # SERVICES: Prefer memory (existing booking), fallback to current
-    # CRITICAL: If current has no services, preserve memory services (services are sticky)
-    memory_services = memory_booking.get("services", [])
-    current_services = current_resolved_booking.get("services", [])
-    if current_services:
-        # Current input has services → use current (explicit change)
-        merged["services"] = current_services
-    else:
-        # Current input has no services → preserve memory services (sticky)
-        merged["services"] = memory_services if memory_services else []
-
-    # DATE: Prefer memory if present, otherwise use current (promote current if memory is empty)
-    # CRITICAL: If memory has NO date and current provides date, promote current date
-    # This enables "time only" → "date only" → RESOLVED flow
-    memory_date_mode = memory_booking.get("date_mode", "none")
-    memory_date_refs = memory_booking.get("date_refs", [])
-    current_date_mode = current_resolved_booking.get("date_mode", "none")
-    current_date_refs = current_resolved_booking.get("date_refs", [])
-
-    if memory_date_refs and memory_date_mode != "none":
-        # Memory has date → keep memory date
-        merged["date_mode"] = memory_date_mode
-        merged["date_refs"] = memory_date_refs
-        merged["date_modifiers"] = memory_booking.get("date_modifiers", [])
-    elif current_date_refs and current_date_mode != "none":
-        # Memory has no date, current has date → promote current date
-        merged["date_mode"] = current_date_mode
-        merged["date_refs"] = current_date_refs
-        merged["date_modifiers"] = current_resolved_booking.get(
-            "date_modifiers", [])
-    else:
-        # Neither has date
-        merged["date_mode"] = "none"
-        merged["date_refs"] = []
-        merged["date_modifiers"] = []
-
-    # TIME: Prefer current (new input), fallback to memory
-    memory_time_mode = memory_booking.get("time_mode", "none")
-    memory_time_refs = memory_booking.get("time_refs", [])
-    current_time_mode = current_resolved_booking.get("time_mode", "none")
-    current_time_refs = current_resolved_booking.get("time_refs", [])
-
-    if current_time_refs and current_time_mode != "none":
-        merged["time_mode"] = current_time_mode
-        merged["time_refs"] = current_time_refs
-    elif memory_time_refs and memory_time_mode != "none":
-        merged["time_mode"] = memory_time_mode
-        merged["time_refs"] = memory_time_refs
-    else:
-        merged["time_mode"] = "none"
-        merged["time_refs"] = []
-
-    # TIME_CONSTRAINT: Prefer current, fallback to memory
-    current_time_constraint = current_resolved_booking.get("time_constraint")
-    memory_time_constraint = memory_booking.get("time_constraint")
-    merged["time_constraint"] = current_time_constraint if current_time_constraint else memory_time_constraint
-
-    # DURATION: Prefer current, fallback to memory
-    current_duration = current_resolved_booking.get("duration")
-    memory_duration = memory_booking.get("duration")
-    merged["duration"] = current_duration if current_duration is not None else memory_duration
-
-    # TIME_ISSUES: Prefer current (new parsing issues), fallback to memory
-    current_time_issues = current_resolved_booking.get("time_issues", [])
-    memory_time_issues = memory_booking.get("time_issues", [])
-    merged["time_issues"] = current_time_issues if current_time_issues else memory_time_issues
-
-    return merged
-
-
 def init_pipeline():
     """Initialize the pipeline components."""
-    global entity_matcher, intent_resolver, memory_store  # noqa: PLW0603
+    global entity_matcher, intent_resolver  # noqa: PLW0603
 
     logger.info("=" * 60)
     logger.info("Initializing Luma Service/Reservation Booking Pipeline")
@@ -567,10 +473,6 @@ def init_pipeline():
     try:
         # Initialize intent resolver (lightweight, no file I/O)
         intent_resolver = ReservationIntentResolver()
-
-        # Initialize memory store (required for multi-turn conversations)
-        memory_store = RedisMemoryStore()
-        logger.info("Memory store initialized successfully")
 
         # Pre-load vocabularies to avoid first-request latency
         from luma.resolution.semantic_resolver import initialize_vocabularies
@@ -673,13 +575,10 @@ def resolve():
         request=request,
         # Module globals
         intent_resolver=intent_resolver,
-        memory_store=memory_store,
         logger=logger,
         # Constants
         APPOINTMENT_TEMPORAL_TYPE_CONST=APPOINTMENT_TEMPORAL_TYPE,
-        MEMORY_TTL=config.MEMORY_TTL,
         # Helper functions
-        _merge_semantic_results=_merge_semantic_results,
         _localize_datetime=_localize_datetime,
         find_normalization_dir=find_normalization_dir,
         _get_business_categories=_get_business_categories,
@@ -702,119 +601,13 @@ def book():
     return resolve()
 
 
-@app.route("/notify_execution", methods=["POST"])
-def notify_execution():
-    """
-    Notify Luma about booking execution completion.
-
-    Core calls this endpoint after successfully executing a booking to update
-    the booking_lifecycle state to EXECUTED.
-
-    Request body:
-    {
-        "user_id": "user123",          // required
-        "booking_id": "ABC123",         // required
-        "booking_lifecycle": "EXECUTED", // required
-        "domain": "service"              // optional, default: "service"
-    }
-
-    Response:
-    {
-        "success": true
-    }
-    """
-    request_id = g.request_id if hasattr(g, 'request_id') else 'unknown'
-
-    try:
-        data = request.get_json()
-        if not data:
-            return jsonify({
-                "success": False,
-                "error": "Request body required"
-            }), 400
-
-        user_id = data.get("user_id")
-        booking_id = data.get("booking_id")
-        lifecycle = data.get("booking_lifecycle")
-        domain = data.get("domain", "service")
-
-        if not user_id:
-            return jsonify({
-                "success": False,
-                "error": "user_id is required"
-            }), 400
-
-        if not booking_id:
-            return jsonify({
-                "success": False,
-                "error": "booking_id is required"
-            }), 400
-
-        if lifecycle != "EXECUTED":
-            return jsonify({
-                "success": False,
-                "error": f"booking_lifecycle must be 'EXECUTED', got '{lifecycle}'"
-            }), 400
-
-        if not memory_store:
-            logger.warning(
-                f"Memory store not initialized, cannot update lifecycle for user {user_id}",
-                extra={'request_id': request_id}
-            )
-            return jsonify({
-                "success": False,
-                "error": "Memory store not available"
-            }), 503
-
-        # Retrieve current memory state
-        memory_state = memory_store.get(user_id, domain)
-
-        if memory_state:
-            # Update lifecycle and booking_id
-            memory_state["booking_lifecycle"] = lifecycle
-            memory_state["booking_id"] = booking_id
-
-            # Persist updated state
-            memory_store.set(user_id, domain, memory_state,
-                             ttl=config.MEMORY_TTL)
-            logger.info(
-                f"Updated booking_lifecycle to EXECUTED for user {user_id}, booking_id={booking_id}",
-                extra={'request_id': request_id, 'booking_id': booking_id}
-            )
-        else:
-            # No memory state exists - create minimal state with lifecycle
-            new_state = {
-                "booking_id": booking_id,
-                "booking_lifecycle": lifecycle,
-                "last_updated": datetime.now(dt_timezone.utc).isoformat()
-            }
-            memory_store.set(user_id, domain, new_state, ttl=config.MEMORY_TTL)
-            logger.info(
-                f"Created new memory state with EXECUTED lifecycle for user {user_id}, booking_id={booking_id}",
-                extra={'request_id': request_id, 'booking_id': booking_id}
-            )
-
-        return jsonify({"success": True})
-
-    except Exception as e:  # noqa: BLE001
-        logger.error(
-            f"Error updating booking lifecycle: {str(e)}",
-            extra={'request_id': request_id},
-            exc_info=True
-        )
-        return jsonify({
-            "success": False,
-            "error": f"Internal error: {str(e)}"
-        }), 500
-
-
 @app.errorhandler(404)
 def not_found(error):  # noqa: ARG001, pylint: disable=unused-argument
     """Handle 404 errors."""
     return jsonify({
         "success": False,
         "error": "Endpoint not found",
-        "available_endpoints": ["/resolve", "/book (deprecated)", "/notify_execution", "/health", "/info"]
+        "available_endpoints": ["/resolve", "/book (deprecated)", "/health", "/info"]
     }), 404
 
 
@@ -833,20 +626,6 @@ def main():
     logger.info("Luma Service/Reservation Booking API")
     logger.info(f"Starting server on http://localhost:{PORT}")
     logger.info("=" * 60)
-
-    # TEMPORARY: Log Redis configuration at startup
-    redis_password_masked = "***" if config.REDIS_PASSWORD else None
-    logger.info(
-        f"Redis Config: host={config.REDIS_HOST}, port={config.REDIS_PORT}, "
-        f"db={config.REDIS_DB}, password={redis_password_masked}, ttl={config.MEMORY_TTL}s",
-        extra={
-            "redis_host": config.REDIS_HOST,
-            "redis_port": config.REDIS_PORT,
-            "redis_db": config.REDIS_DB,
-            "redis_password": redis_password_masked,
-            "memory_ttl": config.MEMORY_TTL
-        }
-    )
 
     # Initialize pipeline
     if not init_pipeline():

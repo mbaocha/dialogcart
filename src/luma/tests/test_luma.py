@@ -2,7 +2,7 @@ import requests
 import random
 import json
 import argparse
-from .scenarios import booking_scenarios, other_scenarios, followup_scenarios, scenarios
+from .scenarios import booking_scenarios, other_scenarios, scenarios
 from .assertions import (
     assert_no_partial_binding,
     assert_clarification_has_missing_slots,
@@ -110,6 +110,50 @@ def assert_response(resp, expected):
     # Assert invariants (additive safety nets - check after basic assertions)
     intent_name = resp.get("intent", {}).get("name")
     assert_invariants(resp, intent_name=intent_name)
+    
+    # For UNKNOWN intents: enforce stateless behavior - no intent promotion, no missing_slots, no clarification
+    if intent_name == "UNKNOWN":
+        # UNKNOWN intents must NOT have missing_slots (no intent promotion)
+        actual_issues = resp.get("issues", {})
+        derived_missing_slots = sorted([
+            slot for slot, issue in actual_issues.items()
+            if issue == "missing" or (isinstance(issue, dict) and issue.get("type") == "missing")
+        ])
+        assert len(derived_missing_slots) == 0, (
+            f"UNKNOWN intent must not have missing_slots (no intent promotion). "
+            f"Got missing_slots: {derived_missing_slots}, issues: {actual_issues}"
+        )
+        # UNKNOWN intents must NOT have clarification_reason
+        assert resp.get("clarification_reason") is None, (
+            f"UNKNOWN intent must not have clarification_reason. "
+            f"Got: {resp.get('clarification_reason')}"
+        )
+        # UNKNOWN intents must NOT have booking block (no booking payload)
+        assert "booking" not in resp or resp.get("booking") is None, (
+            f"UNKNOWN intent must not have booking block (no booking payload). "
+            f"Got: {resp.get('booking')}"
+        )
+        
+        # For UNKNOWN intents: check that all expected slots match actual slots (extraction-only)
+        # This ensures Luma only returns extracted slots, not inferred or promoted slots
+        expected_slots = expected.get("slots", {})
+        actual_slots = resp.get("slots", {})
+        
+        # Check each expected slot (date, time, date_range, service_id, etc.)
+        for slot_name, expected_value in expected_slots.items():
+            actual_value = actual_slots.get(slot_name)
+            if slot_name == "date_range":
+                # Special handling for date_range (dict comparison)
+                assert actual_value is not None, f"Expected {slot_name} in slots for UNKNOWN intent"
+                assert isinstance(actual_value, dict), f"{slot_name} must be a dict, got {type(actual_value)}"
+                assert actual_value == expected_value, (
+                    f"{slot_name} mismatch: got {actual_value}, expected {expected_value}"
+                )
+            else:
+                # Direct value comparison for other slots (date, time, service_id, etc.)
+                assert actual_value == expected_value, (
+                    f"Slot '{slot_name}' mismatch: got '{actual_value}', expected '{expected_value}'"
+                )
 
     if expected["status"] == STATUS_READY:
         assert resp["intent"][
@@ -337,97 +381,6 @@ def test_cases(scenarios_to_run=None):
         # Do not crash; report failures and continue
 
 
-def test_followup_scenarios(followup_scenarios_to_run=None, verbose=False, start_index=1):
-    """
-    Run followup scenarios where each scenario is a batch of related turns.
-    All turns in a batch share the same user_id to test multi-turn conversations.
-
-    Args:
-        followup_scenarios_to_run: List of followup scenario batches. If None, uses all followup_scenarios.
-        verbose: If True, show full response JSON for each turn.
-        start_index: Starting index for scenario numbering (default 1).
-    """
-    if followup_scenarios_to_run is None:
-        followup_scenarios_to_run = followup_scenarios
-
-    failures = []
-    for relative_idx, scenario_batch in enumerate(followup_scenarios_to_run, start=0):
-        scenario_idx = start_index + relative_idx
-        scenario_name = scenario_batch.get("name", f"scenario_{scenario_idx}")
-        booking_mode = scenario_batch["booking_mode"]
-        turns = scenario_batch["turns"]
-
-        # Generate a single user_id for this batch
-        user_id = f"{USER_ID_PREFIX}{random.randint(10**15, 10**16 - 1)}"
-
-        print(f"\n{'='*70}")
-        print(f"Followup Scenario {scenario_idx}: {scenario_name}")
-        print(f"User ID: {user_id}")
-        print(f"{'='*70}")
-
-        # Get scenario-specific aliases if provided, otherwise use None (default)
-        scenario_aliases = scenario_batch.get("aliases", None)
-
-        scenario_passed = True
-        for turn_idx, turn in enumerate(turns, start=1):
-            sentence = turn["sentence"]
-            expected = turn["expected"]
-
-            print(f"  Turn {turn_idx}/{len(turns)}: \"{sentence}\"")
-
-            resp, resp_status, resp_raw = call_luma(
-                sentence, booking_mode, user_id=user_id, aliases=scenario_aliases)
-
-            try:
-                if resp_status != 200 or resp is None:
-                    raise AssertionError(
-                        f"HTTP {resp_status}, body={resp_raw}")
-                assert_response(resp, expected)
-                print(f"    ✓ Turn {turn_idx} passed")
-                if verbose:
-                    print("    response json:")
-                    try:
-                        print(json.dumps(resp, indent=2, ensure_ascii=False))
-                    except (TypeError, ValueError) as dump_err:
-                        print(
-                            f"      (could not dump actual json: {dump_err})")
-            except AssertionError as e:
-                print(f"    ✗ Turn {turn_idx} failed")
-                print(f"      sentence: {sentence}")
-                print(f"      expected: {expected}")
-                if resp:
-                    print(f"      actual.status: {resp.get('status')}")
-                    print(f"      actual.intent: {resp.get('intent')}")
-                    print(
-                        f"      actual.missing_slots: {resp.get('missing_slots')}")
-                else:
-                    print(f"      actual.http_status: {resp_status}")
-                    print(f"      actual.raw_body: {resp_raw}")
-                try:
-                    print("      actual.response json:")
-                    print(json.dumps(resp, indent=2, ensure_ascii=False))
-                except (TypeError, ValueError) as dump_err:
-                    print(f"      (could not dump actual json: {dump_err})")
-                failures.append((scenario_idx, scenario_name,
-                                turn_idx, sentence, expected, e))
-                scenario_passed = False
-                # Continue to next turn even if one fails
-
-        if scenario_passed:
-            print(
-                f"✓ Followup scenario {scenario_idx} ({scenario_name}) passed all {len(turns)} turns")
-        else:
-            print(
-                f"✗ Followup scenario {scenario_idx} ({scenario_name}) had failures")
-
-    if failures:
-        print(f"\n{len(failures)} followup turn(s) failed:")
-        for scenario_idx, scenario_name, turn_idx, sentence, expected, err in failures:
-            print(
-                f"- Scenario {scenario_idx} ({scenario_name}), Turn {turn_idx}: \"{sentence}\" -> {err}")
-        # Do not crash; report failures and continue
-
-
 def test_no_canonical_service_id_in_response():
     """
     Invariant test: Assert that no API response ever returns a canonical service ID as service_id.
@@ -476,6 +429,84 @@ def test_no_canonical_service_id_in_response():
     print("✓ Invariant test passed: No canonical service IDs returned in API responses")
 
 
+def test_output_independent_of_previous_requests():
+    """
+    Invariant test: Assert that Luma output must not depend on previous requests.
+    
+    Luma is stateless - each request is processed independently without any memory
+    or context from previous requests. This test verifies that:
+    1. Same input with same user_id produces identical output regardless of prior requests
+    2. Different inputs with same user_id produce outputs that depend only on the current input
+    3. Fragmentary inputs like "tomorrow" or "at 3pm" without booking verbs return UNKNOWN
+       regardless of any prior requests with the same user_id
+    
+    This invariant ensures that Luma never infers intent or slots from previous turns.
+    """
+    # Use a fixed user_id to test statelessness
+    fixed_user_id = f"{USER_ID_PREFIX}stateless_test"
+    
+    # Test 1: Same input should produce identical output regardless of prior requests
+    test_input_1 = "book haircut tomorrow at 3pm"
+    
+    # Make first request
+    resp1, status1, raw1 = call_luma(test_input_1, "service", user_id=fixed_user_id)
+    assert status1 == 200 and resp1 is not None, f"First request failed: HTTP {status1}, body={raw1}"
+    
+    # Make a different request with the same user_id
+    test_input_2 = "what times are available"
+    resp2, status2, raw2 = call_luma(test_input_2, "service", user_id=fixed_user_id)
+    assert status2 == 200 and resp2 is not None, f"Second request failed: HTTP {status2}, body={raw2}"
+    
+    # Make the same first request again - should produce identical output
+    resp3, status3, raw3 = call_luma(test_input_1, "service", user_id=fixed_user_id)
+    assert status3 == 200 and resp3 is not None, f"Third request failed: HTTP {status3}, body={raw3}"
+    
+    # Assert that resp1 and resp3 are identical (same input = same output)
+    assert resp1 == resp3, (
+        f"INVARIANT VIOLATION: Same input with same user_id produced different outputs. "
+        f"This violates statelessness - Luma must not depend on previous requests. "
+        f"First response: {json.dumps(resp1, indent=2)}, "
+        f"Third response: {json.dumps(resp3, indent=2)}"
+    )
+    
+    # Test 2: Fragmentary inputs without booking verbs should return UNKNOWN
+    # regardless of any prior requests with the same user_id
+    fragmentary_inputs = [
+        "tomorrow",
+        "at 3pm",
+        "at 10",
+        "in the morning",
+    ]
+    
+    for fragment in fragmentary_inputs:
+        resp, status, raw = call_luma(fragment, "service", user_id=fixed_user_id)
+        assert status == 200 and resp is not None, f"Request failed for '{fragment}': HTTP {status}, body={raw}"
+        
+        intent_name = resp.get("intent", {}).get("name", "")
+        assert intent_name == "UNKNOWN", (
+            f"INVARIANT VIOLATION: Fragmentary input '{fragment}' without booking verb "
+            f"should return UNKNOWN intent (stateless behavior), but got '{intent_name}'. "
+            f"This violates statelessness - Luma must not infer intent from previous turns. "
+            f"Response: {json.dumps(resp, indent=2)}"
+        )
+    
+    # Test 3: Explicit booking inputs should work regardless of prior fragmentary inputs
+    # This ensures that prior UNKNOWN responses don't affect valid booking requests
+    explicit_booking = "book haircut tomorrow at 3pm"
+    resp4, status4, raw4 = call_luma(explicit_booking, "service", user_id=fixed_user_id)
+    assert status4 == 200 and resp4 is not None, f"Request failed for '{explicit_booking}': HTTP {status4}, body={raw4}"
+    
+    intent_name_4 = resp4.get("intent", {}).get("name", "")
+    assert intent_name_4 == "CREATE_APPOINTMENT", (
+        f"INVARIANT VIOLATION: Explicit booking input should return CREATE_APPOINTMENT "
+        f"regardless of prior fragmentary inputs, but got '{intent_name_4}'. "
+        f"This violates statelessness - Luma must not let prior UNKNOWN responses affect valid requests. "
+        f"Response: {json.dumps(resp4, indent=2)}"
+    )
+    
+    print("✓ Invariant test passed: Luma output is independent of previous requests (stateless)")
+
+
 if __name__ == "__main__":
     import sys
 
@@ -486,11 +517,10 @@ if __name__ == "__main__":
 Examples:
   python -m luma.tests.test_luma                    # Run booking scenarios (default)
   python -m luma.tests.test_luma --other            # Run other intent scenarios
-  python -m luma.tests.test_luma --followup         # Run followup scenarios (multi-turn)
-  python -m luma.tests.test_luma --f                # Run followup scenarios (short form)
-  python -m luma.tests.test_luma --f 1               # Run followup scenario 1
-  python -m luma.tests.test_luma --f 2 -v           # Run followup scenario 2 with verbose output
   python -m luma.tests.test_luma 5                  # Run test case 5 from booking scenarios
+  python -m luma.tests.test_luma 62 63 64           # Run test cases 62, 63, 64
+  python -m luma.tests.test_luma 62,63,64           # Run test cases 62, 63, 64 (comma-separated)
+  python -m luma.tests.test_luma 100-105           # Run test cases 100, 101, 102, 103, 104, 105
   python -m luma.tests.test_luma --other 2          # Run test case 2 from other scenarios
   python -m luma.tests.test_luma 5 -v               # Run test case 5 with verbose output
         """
@@ -501,17 +531,9 @@ Examples:
         help="Run other intent scenarios (MODIFY_BOOKING, CANCEL_BOOKING, etc.) instead of booking scenarios"
     )
     parser.add_argument(
-        "--followup",
-        "--f",
-        action="store_true",
-        dest="followup",
-        help="Run followup scenarios (multi-turn conversations with shared user_id)"
-    )
-    parser.add_argument(
-        "test_index",
-        nargs="?",
-        type=int,
-        help="Optional test case index to run a single test (works with --followup/--f to run a specific followup scenario)"
+        "test_indices",
+        nargs="*",
+        help="Optional test case indices to run (e.g., '62 63 64', '62,63,64', or '100-105'). Can be space-separated, comma-separated, or range syntax."
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -521,81 +543,108 @@ Examples:
 
     args = parser.parse_args()
 
-    # Handle followup scenarios separately (they have a different structure)
-    if args.followup:
-        if args.test_index is not None:
-            # Run a single followup scenario by index
-            idx = args.test_index
-            if idx < 1 or idx > len(followup_scenarios):
-                print(
-                    f"Invalid followup scenario index: {idx}. Must be between 1 and {len(followup_scenarios)}."
-                )
-                sys.exit(1)
-            single_scenario = [followup_scenarios[idx - 1]]
-            scenario_name = single_scenario[0].get("name", f"scenario_{idx}")
-            print(f"Running followup scenario {idx}: {scenario_name}")
-            test_followup_scenarios(
-                single_scenario, verbose=args.verbose, start_index=idx)
-            print(f"Followup scenario {idx} completed.")
-        else:
-            # Run all followup scenarios
-            print(
-                f"Running {len(followup_scenarios)} followup scenario batch(es)...")
-            test_followup_scenarios(followup_scenarios, verbose=args.verbose)
-            print(f"All followup scenarios completed.")
-        sys.exit(0)
-
     # Select which scenarios to use for regular scenarios
     scenarios_to_run = other_scenarios if args.other else booking_scenarios
     scenario_type = "other intents" if args.other else "booking intents"
 
-    if args.test_index is not None:
-        # Run a single test case
-        idx = args.test_index
-        if idx < 1 or idx > len(scenarios_to_run):
-            print(
-                f"Invalid test index: {idx}. Must be between 1 and {len(scenarios_to_run)} "
-                f"(scenario type: {scenario_type})."
-            )
-            sys.exit(1)
-        single_case = scenarios_to_run[idx - 1]
-        # Get scenario-specific aliases if provided, otherwise use None (default aliases)
-        scenario_aliases = single_case.get("aliases", None)
-        single_resp, single_status, single_raw = call_luma(
-            single_case["sentence"], single_case["booking_mode"], aliases=scenario_aliases)
-        try:
-            if single_status != 200 or single_resp is None:
-                raise AssertionError(
-                    f"HTTP {single_status}, body={single_raw}")
-            assert_response(single_resp, single_case["expected"])
-            print(f"✓ Test case {idx} ({scenario_type}) passed")
-            if args.verbose:
+    # Parse test indices - support space-separated, comma-separated, and range syntax
+    test_indices = []
+    if args.test_indices:
+        for arg in args.test_indices:
+            # Check for range syntax (e.g., "100-105")
+            if '-' in arg and ',' not in arg:
+                try:
+                    parts = arg.split('-')
+                    if len(parts) == 2:
+                        start = int(parts[0].strip())
+                        end = int(parts[1].strip())
+                        if start > end:
+                            print(f"Invalid range: '{arg}'. Start ({start}) must be <= end ({end}).")
+                            sys.exit(1)
+                        # Expand range (inclusive on both ends)
+                        test_indices.extend(range(start, end + 1))
+                    else:
+                        print(f"Invalid range syntax: '{arg}'. Expected format: 'start-end' (e.g., '100-105').")
+                        sys.exit(1)
+                except ValueError:
+                    print(f"Invalid range: '{arg}'. Both start and end must be integers.")
+                    sys.exit(1)
+            # Split by comma if comma-separated
+            elif ',' in arg:
+                test_indices.extend([int(x.strip()) for x in arg.split(',') if x.strip()])
+            else:
+                # Single integer
+                try:
+                    test_indices.append(int(arg))
+                except ValueError:
+                    print(f"Invalid test index: '{arg}'. Must be an integer, range (e.g., '100-105'), or comma-separated list.")
+                    sys.exit(1)
+
+    if test_indices:
+        # Run multiple test cases
+        failures = []
+        for idx in test_indices:
+            if idx < 1 or idx > len(scenarios_to_run):
+                print(
+                    f"Invalid test index: {idx}. Must be between 1 and {len(scenarios_to_run)} "
+                    f"(scenario type: {scenario_type})."
+                )
+                sys.exit(1)
+            single_case = scenarios_to_run[idx - 1]
+            # Get scenario-specific aliases if provided, otherwise use None (default aliases)
+            scenario_aliases = single_case.get("aliases", None)
+            single_resp, single_status, single_raw = call_luma(
+                single_case["sentence"], single_case["booking_mode"], aliases=scenario_aliases)
+            try:
+                if single_status != 200 or single_resp is None:
+                    raise AssertionError(
+                        f"HTTP {single_status}, body={single_raw}")
+                assert_response(single_resp, single_case["expected"])
+                print(f"✓ Test case {idx} ({scenario_type}) passed")
+                if args.verbose:
+                    print(f"  sentence: {single_case['sentence']}")
+                    print("  response json:")
+                    try:
+                        print(json.dumps(single_resp, indent=2, ensure_ascii=False))
+                    except (TypeError, ValueError) as dump_err:
+                        print(f"  (could not dump actual json: {dump_err})")
+            except AssertionError as e:
+                print(f"✗ Test case {idx} ({scenario_type}) failed")
                 print(f"  sentence: {single_case['sentence']}")
-                print("  response json:")
+                print(f"  expected: {single_case['expected']}")
+                print("  actual.response json:")
                 try:
                     print(json.dumps(single_resp, indent=2, ensure_ascii=False))
                 except (TypeError, ValueError) as dump_err:
                     print(f"  (could not dump actual json: {dump_err})")
-        except AssertionError as e:
-            print(f"✗ Test case {idx} ({scenario_type}) failed")
-            print(f"  sentence: {single_case['sentence']}")
-            print(f"  expected: {single_case['expected']}")
-            print("  actual.response json:")
-            try:
-                print(json.dumps(single_resp, indent=2, ensure_ascii=False))
-            except (TypeError, ValueError) as dump_err:
-                print(f"  (could not dump actual json: {dump_err})")
-            raise e
+                failures.append((idx, single_case, e))
+        
+        if failures:
+            print(f"\n{len(failures)} test(s) failed:")
+            for idx, case, err in failures:
+                print(f"- Case {idx}: {case['sentence']} -> {err}")
+            sys.exit(1)
     else:
         # Run all test cases
         print(f"Running {len(scenarios_to_run)} {scenario_type} scenarios...")
         test_cases(scenarios_to_run)
         print(f"All {scenario_type} tests passed.")
 
-        # Run invariant test
-        print("\nRunning invariant test: No canonical service IDs in responses...")
+        # Run invariant tests
+        print("\nRunning invariant tests...")
+        
+        print("\n  Running invariant: No canonical service IDs in responses...")
         try:
             test_no_canonical_service_id_in_response()
         except AssertionError as e:
             print(f"✗ Invariant test failed: {e}")
             sys.exit(1)
+        
+        print("\n  Running invariant: Output independent of previous requests...")
+        try:
+            test_output_independent_of_previous_requests()
+        except AssertionError as e:
+            print(f"✗ Invariant test failed: {e}")
+            sys.exit(1)
+        
+        print("\n✓ All invariant tests passed")

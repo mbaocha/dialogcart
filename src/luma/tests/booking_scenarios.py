@@ -1462,4 +1462,86 @@ booking_scenarios = [
             "missing_slots": ["change"]
         }
     },
+    # ────────────────
+    # UNKNOWN / FRAGMENT INPUTS
+    # ────────────────
+    # These tests enforce that Luma does NOT promote intent, does NOT invent missing_slots,
+    # only returns extracted slots, and remains stateless for inputs without booking intent verbs.
+    {
+        "sentence": "feb 12th",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-02-12"
+            }
+        }
+    },
+    {
+        "sentence": "3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "feb 12th at 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-02-12",
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "from april 12th to april 16th",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-04-12",
+                    "end": "2026-04-16"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "deluxe room",
+        "booking_mode": "reservation",
+        "aliases": {"deluxe room": "room"},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "deluxe room"
+            }
+        }
+    },
+    {
+        "sentence": "haircut tomorrow",
+        "booking_mode": "service",
+        "aliases": {"haircut": "haircut"},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "haircut",
+                "date": "2026-01-13"
+            }
+        }
+    },
 ]

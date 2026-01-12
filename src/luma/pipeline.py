@@ -283,8 +283,7 @@ class LumaPipeline:
         tenant_context: Optional[Dict[str, Any]] = None,
         booking_mode: Optional[str] = None,
         request_id: Optional[str] = None,
-        debug_mode: bool = False,
-        memory_state: Optional[Dict[str, Any]] = None
+        debug_mode: bool = False
     ) -> Dict[str, Any]:
         """
         Execute the full pipeline.
@@ -296,7 +295,7 @@ class LumaPipeline:
             tenant_context: Optional tenant context with aliases
             booking_mode: Optional booking mode override ("service" or "reservation")
             request_id: Optional request ID for logging
-            memory_state: Optional memory state for MODIFY_BOOKING lifecycle gating
+            debug_mode: Enable debug mode for contract validation
             
         Returns:
             Dictionary with stage results:
@@ -364,8 +363,11 @@ class LumaPipeline:
         )
 
         with StageTimer(results["execution_trace"], "intent", request_id=request_id):
+            # Use osentence from extraction_result (typo-corrected, extraction-normalized)
+            # Fallback to raw text if osentence is not available
+            osentence = extraction_result.get("osentence", text)
             intent, confidence = self.intent_resolver.resolve_intent(
-                text, extraction_result, booking_mode=effective_booking_mode, memory_state=memory_state
+                osentence, extraction_result, booking_mode=effective_booking_mode
             )
             intent_resp = self.intent_resolver._build_response(
                 intent, confidence, extraction_result
