@@ -1540,8 +1540,841 @@ booking_scenarios = [
             "status": STATUS_READY,
             "slots": {
                 "service_id": "haircut",
-                "date": "2026-01-13"
+                "date": "2026-01-14"
             }
         }
     },
+    # ────────────────
+    # FOLLOW-UP DATE INPUTS — Weekday phrases from Core session tests
+    # ────────────────
+    # These test that Luma extracts dates from weekday phrases when provided as standalone follow-ups
+    # ────────────────
+    # Standalone weekday follow-ups (AUTHORITATIVE)
+    # ────────────────
+
+    {
+        "sentence": "friday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-16"  # Nearest future Friday
+            }
+        }
+    },
+    {
+        "sentence": "this friday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-16"  # Same as bare weekday
+            }
+        }
+    },
+    {
+        "sentence": "next friday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-23"  # Friday of the following week
+            }
+        }
+    },
+
+    {
+        "sentence": "monday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-19"  # Nearest future Monday
+            }
+        }
+    },
+    {
+        "sentence": "this monday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-19"  # Identical to bare weekday
+            }
+        }
+    },
+    {
+        "sentence": "next monday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-26"  # Monday of the following week
+            }
+        }
+    },
+
+    {
+        "sentence": "tuesday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-20"  # Not today; next Tuesday
+            }
+        }
+    },
+    {
+        "sentence": "wednesday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-14"  # Upcoming this week
+            }
+        }
+    },
+    {
+        "sentence": "thursday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-15"  # Upcoming this week
+            }
+        }
+    },
+    {
+        "sentence": "next thursday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-22"  # Thursday of the following week
+            }
+        }
+    },
+
+    {
+        "sentence": "saturday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-17"
+            }
+        }
+    },
+    {
+        "sentence": "sunday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-18"
+            }
+        }
+    },
+
+    # ────────────────
+    # Fuzzy / range expressions
+    # ────────────────
+
+    {
+        "sentence": "next week",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-01-19",  # Monday of next week
+                    "end": "2026-01-25"     # Sunday of next week
+                }
+            }
+        }
+    },
+    {
+        "sentence": "this weekend",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-01-17",  # Saturday
+                    "end": "2026-01-18"     # Sunday
+                }
+            }
+        }
+    },
+
+    # ────────────────
+    # Explicit date formats (standalone temporal inputs)
+    # ────────────────
+
+    {
+        "sentence": "3rd mar by 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03",
+                "time": "15:00"  # 3pm
+            }
+        }
+    },
+    {
+        "sentence": "3rd march",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "march 3",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "mar 2nd",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-02"
+            }
+        }
+    },
+    {
+        "sentence": "04/03",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-04"  # DD/MM format: 04/03 = March 4th
+            }
+        }
+    },
+
+    # ────────────────
+    # Additional date and time format variations
+    # ────────────────
+
+    # Time format variations
+    {
+        "sentence": "3:00pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "3:00 PM",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "15:00",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "3 PM",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "at 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "time": "15:00"
+            }
+        }
+    },
+
+    # Date format variations (capitalized, different separators, year)
+    {
+        "sentence": "March 3rd",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "3 March",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "03/03",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"  # DD/MM format: 03/03 = March 3rd
+            }
+        }
+    },
+    {
+        "sentence": "3/3",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"  # DD/MM format: 3/3 = March 3rd
+            }
+        }
+    },
+    {
+        "sentence": "3-Mar",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "March 3, 2026",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "3rd of March",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "March the 3rd",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "Mar 3rd",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "MAR 3",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+
+    # Combined date + time variations
+    {
+        "sentence": "March 3rd at 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03",
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "3 March at 3:00pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03",
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "03/03 at 15:00",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03",
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "march 3 by 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03",
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "3rd march at 3:00 PM",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03",
+                "time": "15:00"
+            }
+        }
+    },
+
+    # Edge cases
+    {
+        "sentence": "3/03",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"  # DD/MM format: 3/03 = March 3rd
+            }
+        }
+    },
+    {
+        "sentence": "03/3",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"  # DD/MM format: 03/3 = March 3rd
+            }
+        }
+    },
+    {
+        "sentence": "3-Mar-2026",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "March 3rd, 2026 at 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03",
+                "time": "15:00"
+            }
+        }
+    },
+    # ────────────────
+    # UNKNOWN / FRAGMENT INPUTS — SINGLE-TURN CHECK-IN/CHECK-OUT DATE COLLECTION
+    # Testing various date format variations for collecting both dates in one turn
+    # These are explicit date range fragments without booking intent verbs
+    # ────────────────
+    {
+        "sentence": "Mar 5 to 8",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "Mar 5 to Mar 8",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "05/03 to 08/03",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "March 5 to 8",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "March 5 to March 8",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "5th Mar to 8th Mar",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "5 March to 8 March",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "Mar 5th to Mar 8th",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "Mar 5 through 8",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "from Mar 5th through Mar 8th",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    # ────────────────
+    # OPTION-CONSTRAINED RESOLUTION — Clarification turns
+    # ────────────────
+    {
+        "sentence": "1",
+        "booking_mode": "service",
+        "aliases": {},
+        "options": {
+            "type": "service",
+            "slot": "service_id",
+            "choices": [
+                {"id": "service_123", "label": "haircut"},
+                {"id": "service_456", "label": "hairtrim"}
+            ]
+        },
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "service_123"
+            }
+        }
+    },
+    {
+        "sentence": "haircut",
+        "booking_mode": "service",
+        "aliases": {},
+        "options": {
+            "type": "service",
+            "slot": "service_id",
+            "choices": [
+                {"id": "service_123", "label": "haircut"},
+                {"id": "service_456", "label": "hairtrim"}
+            ]
+        },
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "service_123"
+            }
+        }
+    },
+    {
+        "sentence": "hairkut",
+        "booking_mode": "service",
+        "aliases": {},
+        "options": {
+            "type": "service",
+            "slot": "service_id",
+            "choices": [
+                {"id": "service_123", "label": "haircut"},
+                {"id": "service_456", "label": "hairtrim"}
+            ]
+        },
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "service_123"
+            }
+        }
+    },
+    {
+        "sentence": "3",
+        "booking_mode": "service",
+        "aliases": {},
+        "options": {
+            "type": "service",
+            "slot": "service_id",
+            "choices": [
+                {"id": "service_123", "label": "haircut"},
+                {"id": "service_456", "label": "hairtrim"}
+            ]
+        },
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "clarification_reason": "INVALID_OPTION",
+            "clarification": {
+                "reason": "INVALID_OPTION",
+                "slot": "service_id",
+                "options": [
+                    {"id": "service_123", "label": "haircut"},
+                    {"id": "service_456", "label": "hairtrim"}
+                ]
+            }
+        }
+    },
+    {
+        "sentence": "shave",
+        "booking_mode": "service",
+        "aliases": {},
+        "options": {
+            "type": "service",
+            "slot": "service_id",
+            "choices": [
+                {"id": "service_123", "label": "haircut"},
+                {"id": "service_456", "label": "hairtrim"}
+            ]
+        },
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "clarification_reason": "INVALID_OPTION",
+            "clarification": {
+                "reason": "INVALID_OPTION",
+                "slot": "service_id",
+                "options": [
+                    {"id": "service_123", "label": "haircut"},
+                    {"id": "service_456", "label": "hairtrim"}
+                ]
+            }
+        }
+    },
+
 ]

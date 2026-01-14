@@ -31,6 +31,8 @@ except ImportError:
     PYTZ_AVAILABLE = False
 
 
+import logging
+
 from ..clarification import Clarification, ClarificationReason
 from ..extraction.entity_loading import (
     load_relative_date_offsets,
@@ -40,6 +42,8 @@ from ..extraction.entity_loading import (
     load_booking_policy,
 )
 from ..config.core import CREATE_RESERVATION, STATUS_READY
+
+logger = logging.getLogger(__name__)
 from ..config.temporal import (
     ALLOW_BARE_WEEKDAY_BINDING,
     APPOINTMENT_TEMPORAL_TYPE,
@@ -96,7 +100,15 @@ def get_booking_policy() -> Dict[str, bool]:
 
 def _get_month_names() -> Dict[str, int]:
     """Get month name to number mapping from entity_types.date.month.to_number."""
-    return _load_config()["month_names"]
+    month_names = _load_config()["month_names"]
+    logger.debug(
+        "[BINDER] _get_month_names: Retrieved month names",
+        extra={
+            'month_names_keys': list(month_names.keys()) if month_names else [],
+            'month_names': month_names
+        }
+    )
+    return month_names
 
 
 def _normalize_month_name(month_name: str) -> str:
@@ -114,14 +126,31 @@ def _normalize_month_name(month_name: str) -> str:
 
     # Check if it's already canonical
     if month_lower in months_dict:
+        logger.debug(
+            "[BINDER] _normalize_month_name: Found as canonical",
+            extra={'month_name': month_name, 'month_lower': month_lower, 'result': month_lower}
+        )
         return month_lower
 
     # Check if it's a variant
     for canonical, variants in months_dict.items():
         if isinstance(variants, list) and month_lower in variants:
+            logger.debug(
+                "[BINDER] _normalize_month_name: Found as variant",
+                extra={'month_name': month_name, 'month_lower': month_lower, 'canonical': canonical}
+            )
             return canonical
 
     # Not found, return original (will fail lookup later)
+    logger.warning(
+        "[BINDER] _normalize_month_name: Not found, returning lowercased original",
+        extra={
+            'month_name': month_name,
+            'month_lower': month_lower,
+            'months_dict_keys': list(months_dict.keys()) if months_dict else [],
+            'months_dict': months_dict
+        }
+    )
     return month_lower
 
 
@@ -432,12 +461,17 @@ def bind_calendar(
     intent_meta = registry.get(intent_name) if intent_name else None
     temporal_shape = intent_meta.temporal_shape if intent_meta else None
 
+    # Extract date_mode early for week/weekend range detection
+    date_mode = resolved_booking.get("date_mode", DateMode.FLEXIBLE.value)
+    date_refs = resolved_booking.get("date_refs", [])
+    date_modifiers = resolved_booking.get("date_modifiers", []) or []
+
     binder_input = {
         "intent": intent,
         "external_intent": external_intent,
         "temporal_shape": temporal_shape,
-        "date_mode": resolved_booking.get("date_mode", "none"),
-        "date_refs": resolved_booking.get("date_refs", []),
+        "date_mode": date_mode,
+        "date_refs": date_refs,
         "time_mode": resolved_booking.get("time_mode", "none"),
         "time_refs": resolved_booking.get("time_refs", []),
         "time_constraint": resolved_booking.get("time_constraint"),
@@ -445,7 +479,79 @@ def bind_calendar(
     }
 
     # Intent-guarded binding: only bind for specific intents
-    if intent is not None and intent not in BINDING_INTENTS:
+    # Exception: Allow UNKNOWN intents with week/weekend range expressions OR absolute single-day dates
+    has_week_range_expression = False
+    has_absolute_single_day = False
+    if intent == "UNKNOWN":
+        # Check for week/weekend range expressions
+        if date_mode == DateMode.FLEXIBLE.value:
+            logger.info(
+                "[BINDER] Checking for week/weekend range expression (UNKNOWN intent)",
+                extra={
+                    'intent': intent,
+                    'date_mode': date_mode,
+                    'date_refs': date_refs,
+                    'date_refs_len': len(date_refs),
+                    'date_modifiers': date_modifiers
+                }
+            )
+            # Check if this is a week/weekend range expression
+            if len(date_refs) == 1:
+                date_str = str(date_refs[0]).lower()
+                if ("week" in date_str and "weekend" not in date_str) or "weekend" in date_str:
+                    has_week_range_expression = True
+                    logger.info(
+                        "[BINDER] Week/weekend range detected in date_refs",
+                        extra={'date_str': date_str}
+                    )
+            # Also check entities for week/weekend phrases (when date_refs is empty but we'll populate it)
+            if not has_week_range_expression and entities:
+                osentence = entities.get("osentence", "").lower() if isinstance(entities, dict) else ""
+                if osentence:
+                    has_week = "week" in osentence and "weekend" not in osentence
+                    has_weekend = "weekend" in osentence
+                    has_modifier = len(date_modifiers) > 0
+                    logger.info(
+                        "[BINDER] Checking entities for week/weekend",
+                        extra={
+                            'osentence': osentence,
+                            'has_week': has_week,
+                            'has_weekend': has_weekend,
+                            'has_modifier': has_modifier
+                        }
+                    )
+                    if (has_week or has_weekend) and has_modifier:
+                        has_week_range_expression = True
+                        logger.info(
+                            "[BINDER] Week/weekend range detected in entities",
+                            extra={'has_week_range_expression': True}
+                        )
+        
+        # Check for absolute single-day dates
+        if date_mode == DateMode.SINGLE.value:
+            if isinstance(date_refs, list) and len(date_refs) == 1:
+                has_absolute_single_day = True
+                logger.info(
+                    "[BINDER] Absolute single-day date detected (UNKNOWN intent)",
+                    extra={
+                        'intent': intent,
+                        'date_mode': date_mode,
+                        'date_ref': date_refs[0],
+                        'date_refs_len': len(date_refs)
+                    }
+                )
+
+    logger.info(
+        "[BINDER] Intent guard check",
+        extra={
+            'intent': intent,
+            'intent_in_binding_intents': intent in BINDING_INTENTS if intent else False,
+            'has_week_range_expression': has_week_range_expression,
+            'has_absolute_single_day': has_absolute_single_day,
+            'will_reject': intent is not None and intent not in BINDING_INTENTS and not has_week_range_expression and not has_absolute_single_day
+        }
+    )
+    if intent is not None and intent not in BINDING_INTENTS and not has_week_range_expression and not has_absolute_single_day:
         result = CalendarBindingResult(
             calendar_booking={},
             needs_clarification=False,
@@ -497,9 +603,7 @@ def bind_calendar(
     # Guardrail: Do not reject binding if services == []
     # This enables downstream clarification if service is omitted in booking utterances
     services = resolved_booking.get("services", [])
-    date_mode = resolved_booking.get("date_mode", DateMode.FLEXIBLE.value)
-    date_refs = resolved_booking.get("date_refs", [])
-    date_modifiers = resolved_booking.get("date_modifiers", []) or []
+    # date_mode, date_refs, and date_modifiers already extracted above for intent guard check
     # Build a single normalized list for binding: combine modifier + weekday when applicable
     weekdays = {"monday", "tuesday", "wednesday",
                 "thursday", "friday", "saturday", "sunday"}
@@ -521,7 +625,23 @@ def bind_calendar(
 
     # Debug: Log binding inputs
     # Bind dates - assume inputs are approved, just bind what's provided
+    logger.info(
+        "[BINDER] Calling _bind_dates",
+        extra={
+            'date_refs_for_binding': date_refs_for_binding,
+            'date_mode': date_mode,
+            'date_refs_len': len(date_refs_for_binding) if date_refs_for_binding else 0
+        }
+    )
     date_range = _bind_dates(date_refs_for_binding, date_mode, now, tz)
+    logger.info(
+        "[BINDER] _bind_dates returned",
+        extra={
+            'date_range': date_range,
+            'date_range_is_none': date_range is None,
+            'date_range_keys': list(date_range.keys()) if date_range else None
+        }
+    )
 
     # Time binding: use canonical TimeConstraint only (no language parsing here)
     time_range = None
@@ -646,7 +766,22 @@ def bind_calendar(
         calendar_booking["services"] = services
     # Include date_range if present (for reservations)
     if date_range:
+        logger.info(
+            "[BINDER] Adding date_range to calendar_booking",
+            extra={
+                'date_range': date_range,
+                'reservation_temporal_type': RESERVATION_TEMPORAL_TYPE
+            }
+        )
         calendar_booking[RESERVATION_TEMPORAL_TYPE] = date_range
+    else:
+        logger.warning(
+            "[BINDER] date_range is None, not adding to calendar_booking",
+            extra={
+                'date_refs_for_binding': date_refs_for_binding,
+                'date_mode': date_mode
+            }
+        )
     # Include time_range if present
     if time_range:
         calendar_booking["time_range"] = time_range
@@ -724,17 +859,52 @@ def _bind_dates(
 
     if date_mode == DateMode.SINGLE.value:
         date_str = date_refs[0]
-        bound_date = _bind_single_date(date_str, now, tz)
+        # Normalize date string: remove spaces between numbers and ordinal suffixes
+        # e.g., "3 rd march" -> "3rd march"
+        date_str_normalized = re.sub(r'(\d+)\s+(st|nd|rd|th)\b', r'\1\2', date_str, flags=re.IGNORECASE)
+        logger.info(
+            "[BINDER] Normalizing date string in _bind_dates",
+            extra={
+                'original': date_str,
+                'normalized': date_str_normalized,
+                'date_mode': date_mode
+            }
+        )
+        bound_date = _bind_single_date(date_str_normalized, now, tz)
+        logger.info(
+            "[BINDER] _bind_single_date result in _bind_dates",
+            extra={
+                'date_str_normalized': date_str_normalized,
+                'bound_date': bound_date.strftime("%Y-%m-%d") if bound_date else None,
+                'bound_date_is_none': bound_date is None
+            }
+        )
         if bound_date:
-            return {
+            result = {
                 "start_date": bound_date.strftime("%Y-%m-%d"),
                 "end_date": bound_date.strftime("%Y-%m-%d")
             }
+            logger.info(
+                "[BINDER] Returning date_range from _bind_dates",
+                extra={'date_range': result}
+            )
+            return result
+        else:
+            logger.warning(
+                "[BINDER] _bind_single_date returned None in _bind_dates",
+                extra={
+                    'date_str_original': date_str,
+                    'date_str_normalized': date_str_normalized
+                }
+            )
 
     elif date_mode == DateMode.RANGE.value:
         if len(date_refs) >= 2:
-            start_date = _bind_single_date(date_refs[0], now, tz)
-            end_date = _bind_single_date(date_refs[1], now, tz)
+            # Normalize date strings: remove spaces between numbers and ordinal suffixes
+            start_date_str = re.sub(r'(\d+)\s+(st|nd|rd|th)\b', r'\1\2', date_refs[0], flags=re.IGNORECASE)
+            end_date_str = re.sub(r'(\d+)\s+(st|nd|rd|th)\b', r'\1\2', date_refs[1], flags=re.IGNORECASE)
+            start_date = _bind_single_date(start_date_str, now, tz)
+            end_date = _bind_single_date(end_date_str, now, tz)
             if start_date and end_date:
                 # Fix year drift: If start_date > end_date, re-normalize start_date using end_date.year
                 # This handles cases where dates are normalized independently (e.g., "jan 10 to jan 15")
@@ -751,7 +921,69 @@ def _bind_dates(
                     "end_date": end_date.strftime("%Y-%m-%d")
                 }
 
-    # flexible mode or invalid refs
+    elif date_mode == DateMode.FLEXIBLE.value:
+        # Handle flexible mode for week/weekend range expressions
+        # When date_refs contains week/weekend phrases, treat as range
+        if len(date_refs) == 1:
+            date_str = date_refs[0].lower().strip()
+            
+            # Handle "next week" / "this week" → Monday to Sunday
+            if "week" in date_str and "weekend" not in date_str:
+                # Bind the start of the week (Monday)
+                if "next" in date_str:
+                    # Next week: find next Monday
+                    days_until_monday = (7 - now.weekday()) % 7
+                    if days_until_monday == 0:
+                        days_until_monday = 7  # If today is Monday, next week is 7 days away
+                    start_date = now + timedelta(days=days_until_monday)
+                else:
+                    # This week: find this Monday (or today if Monday)
+                    days_until_monday = (7 - now.weekday()) % 7
+                    if days_until_monday == 7:
+                        days_until_monday = 0  # Today is Monday
+                    start_date = now + timedelta(days=days_until_monday)
+                
+                # End of week is Sunday (6 days after Monday)
+                end_date = start_date + timedelta(days=6)
+                
+                start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                end_date = end_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                
+                return {
+                    "start_date": start_date.strftime("%Y-%m-%d"),
+                    "end_date": end_date.strftime("%Y-%m-%d")
+                }
+            
+            # Handle "this weekend" / "next weekend" → Saturday to Sunday
+            elif "weekend" in date_str:
+                # Weekend is Saturday (5) to Sunday (6)
+                today_weekday = now.weekday()
+                
+                if "next" in date_str:
+                    # Next weekend: find next Saturday
+                    days_until_saturday = (5 - today_weekday) % 7
+                    if days_until_saturday == 0:
+                        days_until_saturday = 7  # If today is Saturday, next weekend is 7 days away
+                    start_date = now + timedelta(days=days_until_saturday)
+                else:
+                    # This weekend: find this Saturday (or today if Saturday)
+                    days_until_saturday = (5 - today_weekday) % 7
+                    if days_until_saturday == 7:
+                        days_until_saturday = 0  # Today is Saturday
+                    start_date = now + timedelta(days=days_until_saturday)
+                
+                # End of weekend is Sunday (1 day after Saturday)
+                end_date = start_date + timedelta(days=1)
+                
+                start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                end_date = end_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                
+                return {
+                    "start_date": start_date.strftime("%Y-%m-%d"),
+                    "end_date": end_date.strftime("%Y-%m-%d")
+                }
+
+    # Invalid refs or unhandled flexible mode
     return None
 
 
@@ -785,6 +1017,10 @@ def _bind_single_date(date_str: str, now: datetime, tz: Any) -> Optional[datetim
             pass
 
     date_str_lower = date_str.lower().strip()
+    logger.info(
+        "[BINDER] _bind_single_date: checking patterns",
+        extra={'date_str': date_str, 'date_str_lower': date_str_lower}
+    )
 
     # Handle "<weekday>" (bare), "this <weekday>", "next <weekday>"
     # Guard: Do not bind bare weekdays unless ALLOW_BARE_WEEKDAY_BINDING is True
@@ -801,11 +1037,19 @@ def _bind_single_date(date_str: str, now: datetime, tz: Any) -> Optional[datetim
         today_weekday = now.weekday()
         target_weekday = weekday_map.get(weekday_str)
         if target_weekday is not None:
+            # Compute nearest future occurrence (base)
+            # This ensures no past dates: if weekday <= today, resolve to next week
+            days_ahead = (target_weekday - today_weekday) % 7
+            if days_ahead == 0:
+                days_ahead = 7  # If today is the target weekday, resolve to next week
+            
+            # Apply modifier
             if modifier == "next":
-                days_ahead = ((target_weekday - today_weekday) % 7) + 7
-            else:
-                # bare or "this" → upcoming occurrence (today if same)
-                days_ahead = (target_weekday - today_weekday) % 7
+                # "next" → add 7 days to base (week after nearest future occurrence)
+                days_ahead = days_ahead + 7
+            # else: bare weekday or "this" → use base (nearest future occurrence)
+            # "this" is treated as no-op, same as bare weekday
+            
             target_date = now + timedelta(days=days_ahead)
             return target_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -818,7 +1062,18 @@ def _bind_single_date(date_str: str, now: datetime, tz: Any) -> Optional[datetim
 
     # Parse absolute dates
     # Format: "15th dec" or "15 dec" or "dec 15" or "15/12" or "15/12/2025"
+    logger.info(
+        "[BINDER] _bind_single_date: calling _parse_absolute_date",
+        extra={'date_str_lower': date_str_lower}
+    )
     bound_date = _parse_absolute_date(date_str_lower, now, tz)
+    logger.info(
+        "[BINDER] _bind_single_date: _parse_absolute_date returned",
+        extra={
+            'bound_date': bound_date.strftime("%Y-%m-%d") if bound_date else None,
+            'bound_date_is_none': bound_date is None
+        }
+    )
     return bound_date
 
 
@@ -834,41 +1089,180 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
 
     Prefers future dates. If date has passed this year, use next year.
     """
-    # Pattern 1: "15th dec" or "15 dec" or "15th january" or "15 january"
+    logger.warning(
+        "[BINDER] _parse_absolute_date: ENTRY",
+        extra={
+            'date_str': date_str,
+            'date_str_repr': repr(date_str),
+            'date_str_len': len(date_str) if date_str else 0
+        }
+    )
+    # Pattern 1: "15th dec" or "15 dec" or "15th january" or "15 january" or "3 rd of march"
     # Regex matches both abbreviations and full names, then normalizes to canonical
-    pattern1 = r"(\d{1,2})(?:st|nd|rd|th)?\s+(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)(?:\s+(\d{4}))?"
+    # Also handles "of" in the middle: "3rd of march" or "3 rd of march"
+    pattern1 = r"(\d{1,2})\s*(?:st|nd|rd|th)?\s+(?:of\s+)?(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)(?:\s+(\d{4}))?"
     match = re.search(pattern1, date_str)
+    logger.warning(
+        "[BINDER] _parse_absolute_date: Pattern1 check",
+        extra={
+            'date_str': date_str,
+            'date_str_repr': repr(date_str),
+            'pattern1_matched': match is not None,
+            'match_groups': match.groups() if match else None,
+            'pattern1_regex': pattern1
+        }
+    )
     if match:
         day = int(match.group(1))
         month_name_raw = match.group(2).lower()
         year_str = match.group(3)
+        logger.info(
+            "[BINDER] _parse_absolute_date: Pattern1 matched, extracting values",
+            extra={
+                'day': day,
+                'month_name_raw': month_name_raw,
+                'year_str': year_str,
+                'match_groups': match.groups()
+            }
+        )
         # Normalize month name to canonical form (jan -> january)
-        month_name = _normalize_month_name(month_name_raw)
         month_names = _get_month_names()
+        month_name = _normalize_month_name(month_name_raw)
+        
+        # Fallback: If normalization failed and month_name is not in month_names,
+        # try to find a matching month by checking if month_name_raw is a prefix
+        # of any month name in month_names (e.g., "mar" matches "march")
+        if month_name not in month_names:
+            # Try direct lookup first (in case it's already canonical)
+            if month_name_raw in month_names:
+                month_name = month_name_raw
+            else:
+                # Try prefix matching: "mar" should match "march"
+                for canonical_month in month_names.keys():
+                    if canonical_month.startswith(month_name_raw):
+                        month_name = canonical_month
+                        logger.info(
+                            "[BINDER] _parse_absolute_date: Found month via prefix match",
+                            extra={
+                                'month_name_raw': month_name_raw,
+                                'matched_canonical': canonical_month
+                            }
+                        )
+                        break
+        
         month = month_names.get(month_name)
         if month:
             year = int(year_str) if year_str else None
-            return _resolve_year_month_day(year, month, day, now, tz)
+            result = _resolve_year_month_day(year, month, day, now, tz)
+            logger.info(
+                "[BINDER] _parse_absolute_date: Pattern1 result",
+                extra={
+                    'day': day,
+                    'month': month,
+                    'year': year,
+                    'result': result.strftime("%Y-%m-%d") if result else None
+                }
+            )
+            return result
+        else:
+            logger.warning(
+                "[BINDER] _parse_absolute_date: Pattern1 matched but month not found",
+                extra={'month_name': month_name}
+            )
 
-    # Pattern 2: "dec 15" or "december 15" or "jan 5" or "january 5"
+    # Pattern 2: "dec 15" or "december 15" or "jan 5" or "january 5" or "march the 3rd" or "march the 3 rd"
     # Regex matches both abbreviations and full names, then normalizes to canonical
-    pattern2 = r"(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)\s+(\d{1,2})(?:st|nd|rd|th)?(?:\s+(\d{4}))?"
+    # Also handles "the" in the middle: "march the 3rd" or "march the 3 rd"
+    pattern2 = r"(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)\s+(?:the\s+)?(\d{1,2})\s*(?:st|nd|rd|th)?(?:\s+(\d{4}))?"
     match = re.search(pattern2, date_str)
+    logger.warning(
+        "[BINDER] _parse_absolute_date: Pattern2 check",
+        extra={
+            'date_str': date_str,
+            'date_str_repr': repr(date_str),
+            'pattern2_matched': match is not None,
+            'match_groups': match.groups() if match else None,
+            'pattern2_regex': pattern2
+        }
+    )
     if match:
         month_name_raw = match.group(1).lower()
         day = int(match.group(2))
         year_str = match.group(3)
         # Normalize month name to canonical form (jan -> january)
-        month_name = _normalize_month_name(month_name_raw)
         month_names = _get_month_names()
+        month_name = _normalize_month_name(month_name_raw)
+        
+        # Fallback: If normalization failed and month_name is not in month_names,
+        # try to find a matching month by checking if month_name_raw is a prefix
+        # of any month name in month_names (e.g., "mar" matches "march")
+        if month_name not in month_names:
+            # Try direct lookup first (in case it's already canonical)
+            if month_name_raw in month_names:
+                month_name = month_name_raw
+            else:
+                # Try prefix matching: "mar" should match "march"
+                for canonical_month in month_names.keys():
+                    if canonical_month.startswith(month_name_raw):
+                        month_name = canonical_month
+                        logger.info(
+                            "[BINDER] _parse_absolute_date: Found month via prefix match (Pattern2)",
+                            extra={
+                                'month_name_raw': month_name_raw,
+                                'matched_canonical': canonical_month
+                            }
+                        )
+                        break
+        
         month = month_names.get(month_name)
+        if not month:
+            logger.warning(
+                "[BINDER] _parse_absolute_date: Month lookup failed after all attempts (Pattern2)",
+                extra={
+                    'month_name_raw': month_name_raw,
+                    'month_name_normalized': month_name,
+                    'month_names_keys': list(month_names.keys()) if month_names else []
+                }
+            )
+        logger.info(
+            "[BINDER] _parse_absolute_date: Pattern2 matched, resolving",
+            extra={
+                'day': day,
+                'month_name_raw': month_name_raw,
+                'month_name_normalized': month_name,
+                'month': month,
+                'year_str': year_str
+            }
+        )
         if month:
             year = int(year_str) if year_str else None
-            return _resolve_year_month_day(year, month, day, now, tz)
+            result = _resolve_year_month_day(year, month, day, now, tz)
+            logger.info(
+                "[BINDER] _parse_absolute_date: Pattern2 result",
+                extra={
+                    'result': result.strftime("%Y-%m-%d") if result else None
+                }
+            )
+            return result
+        else:
+            logger.warning(
+                "[BINDER] _parse_absolute_date: Pattern2 matched but month not found",
+                extra={'month_name': month_name}
+            )
 
     # Pattern 3: "15/12" or "15/12/2025" or "15-12" or "15-12-2025"
     pattern3 = r"(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?"
     match = re.search(pattern3, date_str)
+    logger.warning(
+        "[BINDER] _parse_absolute_date: Pattern3 check",
+        extra={
+            'date_str': date_str,
+            'date_str_repr': repr(date_str),
+            'pattern3_matched': match is not None,
+            'match_groups': match.groups() if match else None,
+            'pattern3_regex': pattern3
+        }
+    )
     if match:
         day = int(match.group(1))
         month = int(match.group(2))
@@ -877,8 +1271,83 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
         if year and year < 100:
             # Two-digit year: assume 20xx
             year = 2000 + year
-        return _resolve_year_month_day(year, month, day, now, tz)
+        result = _resolve_year_month_day(year, month, day, now, tz)
+        logger.info(
+            "[BINDER] _parse_absolute_date: Pattern3 result",
+            extra={
+                'day': day,
+                'month': month,
+                'year': year,
+                'result': result.strftime("%Y-%m-%d") if result else None
+            }
+        )
+        return result
 
+    # Pattern 4: "3-Mar" or "3-Mar-2026" - hyphen-separated with month name (single token from extraction)
+    # This handles cases where the tokenizer keeps "3-Mar" as a single token
+    pattern4 = r"(\d{1,2})-([a-z]{3,9})(?:-(\d{2,4}))?"
+    match = re.search(pattern4, date_str)
+    logger.warning(
+        "[BINDER] _parse_absolute_date: Pattern4 check (hyphen with month name)",
+        extra={
+            'date_str': date_str,
+            'date_str_repr': repr(date_str),
+            'pattern4_matched': match is not None,
+            'match_groups': match.groups() if match else None,
+            'pattern4_regex': pattern4
+        }
+    )
+    if match:
+        day = int(match.group(1))
+        month_name_raw = match.group(2).lower()
+        year_str = match.group(3)
+        month_names = _get_month_names()
+        month_name = _normalize_month_name(month_name_raw)
+        
+        # Fallback: If normalization failed and month_name is not in month_names,
+        # try to find a matching month by checking if month_name_raw is a prefix
+        if month_name not in month_names:
+            if month_name_raw in month_names:
+                month_name = month_name_raw
+            else:
+                for canonical_month in month_names.keys():
+                    if canonical_month.startswith(month_name_raw):
+                        month_name = canonical_month
+                        logger.info(
+                            "[BINDER] _parse_absolute_date: Found month via prefix match (Pattern4)",
+                            extra={
+                                'month_name_raw': month_name_raw,
+                                'matched_canonical': canonical_month
+                            }
+                        )
+                        break
+        
+        month = month_names.get(month_name)
+        if month:
+            year = int(year_str) if year_str else None
+            result = _resolve_year_month_day(year, month, day, now, tz)
+            logger.info(
+                "[BINDER] _parse_absolute_date: Pattern4 result",
+                extra={
+                    'day': day,
+                    'month': month,
+                    'year': year,
+                    'result': result.strftime("%Y-%m-%d") if result else None
+                }
+            )
+            return result
+
+    logger.warning(
+        "[BINDER] _parse_absolute_date: No pattern matched",
+        extra={
+            'date_str': date_str,
+            'date_str_repr': repr(date_str),
+            'pattern1_tried': True,
+            'pattern2_tried': True,
+            'pattern3_tried': True,
+            'pattern4_tried': True
+        }
+    )
     return None
 
 

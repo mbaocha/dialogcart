@@ -843,6 +843,41 @@ def build_absolute_date_patterns(entity_types: Dict[str, Any]) -> List[Dict[str,
                         {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
                     ]
                 })
+                # Pattern: "3rd of March" - day + ordinal + "of" + month
+                patterns.append({
+                    "label": "DATE_ABSOLUTE",
+                    "pattern": [
+                        {"TEXT": {"REGEX": "^\\d{1,2}$"}},
+                        {"OP": "?", "LOWER": {"IN": ["st", "nd", "rd", "th"]}},
+                        {"LOWER": "of"},
+                        {"LOWER": {
+                            "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"}},
+                        {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
+                    ]
+                })
+                # Pattern: "3rd of March" - day with joined ordinal + "of" + month
+                patterns.append({
+                    "label": "DATE_ABSOLUTE",
+                    "pattern": [
+                        {"TEXT": {"REGEX": "^\\d{1,2}(?:st|nd|rd|th)$"}},
+                        {"LOWER": "of"},
+                        {"LOWER": {
+                            "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"}},
+                        {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
+                    ]
+                })
+                # Pattern: "3-Mar" or "3-Mar-2026" - day + hyphen + month + optional hyphen + year
+                patterns.append({
+                    "label": "DATE_ABSOLUTE",
+                    "pattern": [
+                        {"TEXT": {"REGEX": "^\\d{1,2}$"}},
+                        {"TEXT": "-"},
+                        {"LOWER": {
+                            "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"}},
+                        {"OP": "?", "TEXT": "-"},
+                        {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
+                    ]
+                })
             elif pattern_id == "month_day_text":
                 # Pattern: "dec 15", "dec 15th", "december 15", "dec 15th 2025"
                 # After tokenization with digit-letter split: "dec 15th" → ["dec", "15", "th"]
@@ -867,6 +902,29 @@ def build_absolute_date_patterns(entity_types: Dict[str, Any]) -> List[Dict[str,
                         {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
                     ]
                 })
+                # Pattern: "March the 3rd" - month + "the" + day + ordinal
+                patterns.append({
+                    "label": "DATE_ABSOLUTE",
+                    "pattern": [
+                        {"LOWER": {
+                            "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"}},
+                        {"LOWER": "the"},
+                        {"TEXT": {"REGEX": "^\\d{1,2}$"}},
+                        {"OP": "?", "LOWER": {"IN": ["st", "nd", "rd", "th"]}},
+                        {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
+                    ]
+                })
+                # Pattern: "March the 3rd" - month + "the" + day with joined ordinal
+                patterns.append({
+                    "label": "DATE_ABSOLUTE",
+                    "pattern": [
+                        {"LOWER": {
+                            "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"}},
+                        {"LOWER": "the"},
+                        {"TEXT": {"REGEX": "^\\d{1,2}(?:st|nd|rd|th)$"}},
+                        {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
+                    ]
+                })
             elif pattern_id == "numeric_date":
                 # Pattern: "15/12", "15/12/2025", "15-12-2025"
                 # After tokenization: "15/12" → ["15/12"] (single token with separator)
@@ -874,6 +932,12 @@ def build_absolute_date_patterns(entity_types: Dict[str, Any]) -> List[Dict[str,
                 patterns.append({
                     "label": "DATE_ABSOLUTE",
                     "pattern": [{"TEXT": {"REGEX": "^\\d{1,2}[/-]\\d{1,2}(?:[/-]\\d{2,4})?$"}}]
+                })
+                # Also handle hyphen-separated dates with month names: "3-Mar", "3-Mar-2026"
+                # These are tokenized as single tokens: ["3-Mar"], ["3-Mar-2026"]
+                patterns.append({
+                    "label": "DATE_ABSOLUTE",
+                    "pattern": [{"TEXT": {"REGEX": "^\\d{1,2}-[a-z]{3,9}(?:-\\d{2,4})?$"}}]
                 })
 
     return patterns

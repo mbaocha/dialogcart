@@ -1,3 +1,4 @@
+import os
 import requests
 import random
 import json
@@ -16,8 +17,22 @@ from luma.config.core import STATUS_READY
 API_BASE = "http://localhost:9001/resolve"
 USER_ID_PREFIX = "t_user_"
 
+# Fixed test date for deterministic testing
+# Set to 2026-01-13 (Wednesday) so relative dates are predictable:
+# - "tomorrow" = 2026-01-14
+# - "wednesday" = 2026-01-14 (nearest future Wednesday)
+# - "next week" = 2026-01-19 to 2026-01-25
+TEST_NOW = "2026-01-13T10:00:00Z"
 
-def call_luma(sentence, booking_mode, user_id=None, aliases=None):
+# Set environment variable for deterministic date testing
+# This ensures tests pass regardless of when they're run
+# NOTE: If running the server separately (python -m luma.api), start it with:
+#   LUMA_TEST_NOW=2026-01-13T10:00:00Z python -m luma.api
+# Or set the env var before starting the server
+os.environ["LUMA_TEST_NOW"] = TEST_NOW
+
+
+def call_luma(sentence, booking_mode, user_id=None, aliases=None, options=None):
     """
     Call luma API with the given sentence and booking mode.
 
@@ -26,6 +41,7 @@ def call_luma(sentence, booking_mode, user_id=None, aliases=None):
         booking_mode: "service" or "reservation"
         user_id: Optional user_id. If None, generates a random one.
         aliases: Optional dict of tenant aliases. If None, uses default aliases.
+        options: Optional options dict for option-constrained resolution.
 
     Returns:
         Tuple of (response_data, status_code, raw_text)
@@ -50,14 +66,20 @@ def call_luma(sentence, booking_mode, user_id=None, aliases=None):
         "presidential room": "room",
     }
 
+    tenant_context = {
+        "booking_mode": booking_mode,
+        "aliases": aliases if aliases is not None else default_aliases,
+    }
+
+    # Add options if provided
+    if options is not None:
+        tenant_context["options"] = options
+
     payload = {
         "text": sentence,
         "domain": domain,
         "user_id": user_id,
-        "tenant_context": {
-            "booking_mode": booking_mode,
-            "aliases": aliases if aliases is not None else default_aliases,
-        },
+        "tenant_context": tenant_context,
     }
 
     resp = requests.post(API_BASE, json=payload, timeout=30)
@@ -106,12 +128,14 @@ def _normalize_service_id(svc_id: str) -> str:
 def assert_response(resp, expected):
     assert resp["intent"]["name"] == expected["intent"]
     assert resp["status"] == expected["status"]
-    
+
     # Assert invariants (additive safety nets - check after basic assertions)
     intent_name = resp.get("intent", {}).get("name")
     assert_invariants(resp, intent_name=intent_name)
-    
+
     # For UNKNOWN intents: enforce stateless behavior - no intent promotion, no missing_slots, no clarification
+    # EXCEPTION: Option-constrained resolution (INVALID_OPTION) is allowed to have clarification_reason
+    # because it's a special clarification turn, not intent promotion
     if intent_name == "UNKNOWN":
         # UNKNOWN intents must NOT have missing_slots (no intent promotion)
         actual_issues = resp.get("issues", {})
@@ -124,28 +148,36 @@ def assert_response(resp, expected):
             f"Got missing_slots: {derived_missing_slots}, issues: {actual_issues}"
         )
         # UNKNOWN intents must NOT have clarification_reason
-        assert resp.get("clarification_reason") is None, (
-            f"UNKNOWN intent must not have clarification_reason. "
-            f"Got: {resp.get('clarification_reason')}"
-        )
+        # EXCEPTION: INVALID_OPTION from option-constrained resolution is allowed
+        clarification_reason = resp.get("clarification_reason")
+        if clarification_reason is not None:
+            assert clarification_reason == "INVALID_OPTION", (
+                f"UNKNOWN intent must not have clarification_reason (except INVALID_OPTION). "
+                f"Got: {clarification_reason}"
+            )
+            # For INVALID_OPTION, ensure clarification object is present
+            assert resp.get("clarification") is not None, (
+                f"UNKNOWN intent with INVALID_OPTION must have clarification object"
+            )
         # UNKNOWN intents must NOT have booking block (no booking payload)
         assert "booking" not in resp or resp.get("booking") is None, (
             f"UNKNOWN intent must not have booking block (no booking payload). "
             f"Got: {resp.get('booking')}"
         )
-        
+
         # For UNKNOWN intents: check that all expected slots match actual slots (extraction-only)
         # This ensures Luma only returns extracted slots, not inferred or promoted slots
         expected_slots = expected.get("slots", {})
         actual_slots = resp.get("slots", {})
-        
+
         # Check each expected slot (date, time, date_range, service_id, etc.)
         for slot_name, expected_value in expected_slots.items():
             actual_value = actual_slots.get(slot_name)
             if slot_name == "date_range":
                 # Special handling for date_range (dict comparison)
                 assert actual_value is not None, f"Expected {slot_name} in slots for UNKNOWN intent"
-                assert isinstance(actual_value, dict), f"{slot_name} must be a dict, got {type(actual_value)}"
+                assert isinstance(
+                    actual_value, dict), f"{slot_name} must be a dict, got {type(actual_value)}"
                 assert actual_value == expected_value, (
                     f"{slot_name} mismatch: got {actual_value}, expected {expected_value}"
                 )
@@ -158,7 +190,7 @@ def assert_response(resp, expected):
     if expected["status"] == STATUS_READY:
         assert resp["intent"][
             "confidence"] >= 0.7, f"low confidence: {resp['intent'].get('confidence')}"
-        
+
         # Booking block should be present ONLY for intents that produce_booking_payload
         # MODIFY_BOOKING and CANCEL_BOOKING do NOT produce booking_payload (intent-specific semantics)
         intent_name = resp.get("intent", {}).get("name")
@@ -169,14 +201,14 @@ def assert_response(resp, expected):
             intent_meta = registry.get(intent_name)
             if intent_meta:
                 produces_booking = intent_meta.produces_booking_payload is True
-        
+
         if produces_booking:
             # Booking block should be present for ready status (but minimal, only confirmation_state)
             assert "booking" in resp and resp["booking"], "booking should be present when ready"
             booking = resp["booking"]
             # Booking block should be minimal - only confirmation_state (temporal/service data is in slots)
             assert "confirmation_state" in booking, "booking should contain confirmation_state"
-            
+
             # Check confirmation_state matches expected value if specified
             expected_booking = expected.get("booking", {})
             if isinstance(expected_booking, dict) and "confirmation_state" in expected_booking:
@@ -186,7 +218,7 @@ def assert_response(resp, expected):
                     f"confirmation_state mismatch: got '{actual_confirmation_state}', "
                     f"expected '{expected_confirmation_state}'"
                 )
-            
+
             # Ensure booking doesn't contain temporal/service fields (they're in slots)
             assert "services" not in booking, "booking.services should not be present (exposed via slots.service_id)"
             assert "date_range" not in booking, "booking.date_range should not be present (exposed via slots.date_range)"
@@ -216,7 +248,7 @@ def assert_response(resp, expected):
             actual_date_range = resp.get("slots", {}).get("date_range")
             assert actual_date_range is not None, "Expected date_range in slots for reservation"
             expected_date_range = slots["date_range"]
-            
+
             # Handle placeholder dates (e.g., "<resolved_date>") - just check that date_range exists and has start/end
             if expected_date_range.get("start") == "<resolved_date>" or expected_date_range.get("end") == "<resolved_date>":
                 # For placeholder dates, just verify date_range structure exists
@@ -225,8 +257,10 @@ def assert_response(resp, expected):
                 # Verify dates are valid ISO format dates
                 import re
                 date_pattern = r'^\d{4}-\d{2}-\d{2}$'
-                assert re.match(date_pattern, actual_date_range["start"]), f"date_range.start must be ISO date format, got {actual_date_range['start']}"
-                assert re.match(date_pattern, actual_date_range["end"]), f"date_range.end must be ISO date format, got {actual_date_range['end']}"
+                assert re.match(
+                    date_pattern, actual_date_range["start"]), f"date_range.start must be ISO date format, got {actual_date_range['start']}"
+                assert re.match(
+                    date_pattern, actual_date_range["end"]), f"date_range.end must be ISO date format, got {actual_date_range['end']}"
             else:
                 # Exact match for specific dates
                 assert actual_date_range == expected_date_range, (
@@ -237,7 +271,7 @@ def assert_response(resp, expected):
         if slots.get("has_datetime"):
             actual_datetime_range = resp.get("slots", {}).get("datetime_range")
             assert actual_datetime_range is not None, "Expected datetime_range in slots for appointment with has_datetime"
-        
+
         # Check booking_id for MODIFY_BOOKING/CANCEL_BOOKING
         if slots.get("booking_id"):
             actual_booking_id = resp.get("slots", {}).get("booking_id")
@@ -245,7 +279,7 @@ def assert_response(resp, expected):
             assert actual_booking_id == expected_booking_id, (
                 f"booking_id mismatch: got '{actual_booking_id}', expected '{expected_booking_id}'"
             )
-        
+
         # Check start_date/end_date for MODIFY_BOOKING date-range modifications
         if slots.get("start_date"):
             actual_start_date = resp.get("slots", {}).get("start_date")
@@ -253,14 +287,14 @@ def assert_response(resp, expected):
             assert actual_start_date == expected_start_date, (
                 f"start_date mismatch: got '{actual_start_date}', expected '{expected_start_date}'"
             )
-        
+
         if slots.get("end_date"):
             actual_end_date = resp.get("slots", {}).get("end_date")
             expected_end_date = slots["end_date"]
             assert actual_end_date == expected_end_date, (
                 f"end_date mismatch: got '{actual_end_date}', expected '{expected_end_date}'"
             )
-        
+
         # Check has_datetime flag for MODIFY_BOOKING time-only modifications
         if "has_datetime" in slots:
             actual_has_datetime = resp.get("slots", {}).get("has_datetime")
@@ -285,6 +319,38 @@ def assert_response(resp, expected):
                 f"expected '{expected_clarification_reason}'"
             )
 
+        # Check clarification structure if expected (for option-constrained resolution)
+        expected_clarification = expected.get("clarification")
+        if expected_clarification:
+            actual_clarification = resp.get("clarification")
+            assert actual_clarification is not None, "Expected clarification object in response"
+            assert isinstance(actual_clarification,
+                              dict), "clarification must be a dict"
+
+            # Check each field in expected clarification
+            for field, expected_value in expected_clarification.items():
+                actual_value = actual_clarification.get(field)
+                if field == "options":
+                    # For options, check that it's a list with the same structure
+                    assert isinstance(
+                        actual_value, list), "clarification.options must be a list"
+                    assert len(actual_value) == len(expected_value), (
+                        f"clarification.options length mismatch: got {len(actual_value)}, "
+                        f"expected {len(expected_value)}"
+                    )
+                    # Check that all expected options are present (order may vary)
+                    actual_ids = {
+                        opt.get("id") for opt in actual_value if isinstance(opt, dict)}
+                    expected_ids = {
+                        opt.get("id") for opt in expected_value if isinstance(opt, dict)}
+                    assert actual_ids == expected_ids, (
+                        f"clarification.options mismatch: got IDs {actual_ids}, expected {expected_ids}"
+                    )
+                else:
+                    assert actual_value == expected_value, (
+                        f"clarification.{field} mismatch: got '{actual_value}', expected '{expected_value}'"
+                    )
+
         # Always derive missing_slots from issues (Fix #1)
         # Luma emits issues → { slot_name: "missing" }, not missing_slots
         actual_issues = resp.get("issues", {})
@@ -292,7 +358,7 @@ def assert_response(resp, expected):
             slot for slot, issue in actual_issues.items()
             if issue == "missing" or (isinstance(issue, dict) and issue.get("type") == "missing")
         ])
-        
+
         # Check for issues (new structure) or missing_slots (legacy test format)
         expected_issues = expected.get("issues")
         expected_missing_slots = expected.get("missing_slots") or []
@@ -318,7 +384,7 @@ def assert_response(resp, expected):
                     assert actual_issue == expected_issue, (
                         f"Issue mismatch for '{slot}': got '{actual_issue}', expected '{expected_issue}'"
                     )
-        
+
         # If expected_missing_slots is provided (legacy test format), validate against derived slots
         if expected_missing_slots:
             assert derived_missing_slots == sorted(expected_missing_slots), (
@@ -341,8 +407,10 @@ def test_cases(scenarios_to_run=None):
     for i, case in enumerate(scenarios_to_run, start=1):
         # Get scenario-specific aliases if provided, otherwise use None (default aliases)
         scenario_aliases = case.get("aliases", None)
+        # Get scenario-specific options if provided
+        scenario_options = case.get("options", None)
         resp, resp_status, resp_raw = call_luma(
-            case["sentence"], case["booking_mode"], aliases=scenario_aliases)
+            case["sentence"], case["booking_mode"], aliases=scenario_aliases, options=scenario_options)
         try:
             if resp_status != 200 or resp is None:
                 raise AssertionError(f"HTTP {resp_status}, body={resp_raw}")
@@ -432,35 +500,38 @@ def test_no_canonical_service_id_in_response():
 def test_output_independent_of_previous_requests():
     """
     Invariant test: Assert that Luma output must not depend on previous requests.
-    
+
     Luma is stateless - each request is processed independently without any memory
     or context from previous requests. This test verifies that:
     1. Same input with same user_id produces identical output regardless of prior requests
     2. Different inputs with same user_id produce outputs that depend only on the current input
     3. Fragmentary inputs like "tomorrow" or "at 3pm" without booking verbs return UNKNOWN
        regardless of any prior requests with the same user_id
-    
+
     This invariant ensures that Luma never infers intent or slots from previous turns.
     """
     # Use a fixed user_id to test statelessness
     fixed_user_id = f"{USER_ID_PREFIX}stateless_test"
-    
+
     # Test 1: Same input should produce identical output regardless of prior requests
     test_input_1 = "book haircut tomorrow at 3pm"
-    
+
     # Make first request
-    resp1, status1, raw1 = call_luma(test_input_1, "service", user_id=fixed_user_id)
+    resp1, status1, raw1 = call_luma(
+        test_input_1, "service", user_id=fixed_user_id)
     assert status1 == 200 and resp1 is not None, f"First request failed: HTTP {status1}, body={raw1}"
-    
+
     # Make a different request with the same user_id
     test_input_2 = "what times are available"
-    resp2, status2, raw2 = call_luma(test_input_2, "service", user_id=fixed_user_id)
+    resp2, status2, raw2 = call_luma(
+        test_input_2, "service", user_id=fixed_user_id)
     assert status2 == 200 and resp2 is not None, f"Second request failed: HTTP {status2}, body={raw2}"
-    
+
     # Make the same first request again - should produce identical output
-    resp3, status3, raw3 = call_luma(test_input_1, "service", user_id=fixed_user_id)
+    resp3, status3, raw3 = call_luma(
+        test_input_1, "service", user_id=fixed_user_id)
     assert status3 == 200 and resp3 is not None, f"Third request failed: HTTP {status3}, body={raw3}"
-    
+
     # Assert that resp1 and resp3 are identical (same input = same output)
     assert resp1 == resp3, (
         f"INVARIANT VIOLATION: Same input with same user_id produced different outputs. "
@@ -468,7 +539,7 @@ def test_output_independent_of_previous_requests():
         f"First response: {json.dumps(resp1, indent=2)}, "
         f"Third response: {json.dumps(resp3, indent=2)}"
     )
-    
+
     # Test 2: Fragmentary inputs without booking verbs should return UNKNOWN
     # regardless of any prior requests with the same user_id
     fragmentary_inputs = [
@@ -477,11 +548,12 @@ def test_output_independent_of_previous_requests():
         "at 10",
         "in the morning",
     ]
-    
+
     for fragment in fragmentary_inputs:
-        resp, status, raw = call_luma(fragment, "service", user_id=fixed_user_id)
+        resp, status, raw = call_luma(
+            fragment, "service", user_id=fixed_user_id)
         assert status == 200 and resp is not None, f"Request failed for '{fragment}': HTTP {status}, body={raw}"
-        
+
         intent_name = resp.get("intent", {}).get("name", "")
         assert intent_name == "UNKNOWN", (
             f"INVARIANT VIOLATION: Fragmentary input '{fragment}' without booking verb "
@@ -489,13 +561,14 @@ def test_output_independent_of_previous_requests():
             f"This violates statelessness - Luma must not infer intent from previous turns. "
             f"Response: {json.dumps(resp, indent=2)}"
         )
-    
+
     # Test 3: Explicit booking inputs should work regardless of prior fragmentary inputs
     # This ensures that prior UNKNOWN responses don't affect valid booking requests
     explicit_booking = "book haircut tomorrow at 3pm"
-    resp4, status4, raw4 = call_luma(explicit_booking, "service", user_id=fixed_user_id)
+    resp4, status4, raw4 = call_luma(
+        explicit_booking, "service", user_id=fixed_user_id)
     assert status4 == 200 and resp4 is not None, f"Request failed for '{explicit_booking}': HTTP {status4}, body={raw4}"
-    
+
     intent_name_4 = resp4.get("intent", {}).get("name", "")
     assert intent_name_4 == "CREATE_APPOINTMENT", (
         f"INVARIANT VIOLATION: Explicit booking input should return CREATE_APPOINTMENT "
@@ -503,7 +576,7 @@ def test_output_independent_of_previous_requests():
         f"This violates statelessness - Luma must not let prior UNKNOWN responses affect valid requests. "
         f"Response: {json.dumps(resp4, indent=2)}"
     )
-    
+
     print("✓ Invariant test passed: Luma output is independent of previous requests (stateless)")
 
 
@@ -559,25 +632,30 @@ Examples:
                         start = int(parts[0].strip())
                         end = int(parts[1].strip())
                         if start > end:
-                            print(f"Invalid range: '{arg}'. Start ({start}) must be <= end ({end}).")
+                            print(
+                                f"Invalid range: '{arg}'. Start ({start}) must be <= end ({end}).")
                             sys.exit(1)
                         # Expand range (inclusive on both ends)
                         test_indices.extend(range(start, end + 1))
                     else:
-                        print(f"Invalid range syntax: '{arg}'. Expected format: 'start-end' (e.g., '100-105').")
+                        print(
+                            f"Invalid range syntax: '{arg}'. Expected format: 'start-end' (e.g., '100-105').")
                         sys.exit(1)
                 except ValueError:
-                    print(f"Invalid range: '{arg}'. Both start and end must be integers.")
+                    print(
+                        f"Invalid range: '{arg}'. Both start and end must be integers.")
                     sys.exit(1)
             # Split by comma if comma-separated
             elif ',' in arg:
-                test_indices.extend([int(x.strip()) for x in arg.split(',') if x.strip()])
+                test_indices.extend([int(x.strip())
+                                    for x in arg.split(',') if x.strip()])
             else:
                 # Single integer
                 try:
                     test_indices.append(int(arg))
                 except ValueError:
-                    print(f"Invalid test index: '{arg}'. Must be an integer, range (e.g., '100-105'), or comma-separated list.")
+                    print(
+                        f"Invalid test index: '{arg}'. Must be an integer, range (e.g., '100-105'), or comma-separated list.")
                     sys.exit(1)
 
     if test_indices:
@@ -593,8 +671,10 @@ Examples:
             single_case = scenarios_to_run[idx - 1]
             # Get scenario-specific aliases if provided, otherwise use None (default aliases)
             scenario_aliases = single_case.get("aliases", None)
+            # Get scenario-specific options if provided
+            scenario_options = single_case.get("options", None)
             single_resp, single_status, single_raw = call_luma(
-                single_case["sentence"], single_case["booking_mode"], aliases=scenario_aliases)
+                single_case["sentence"], single_case["booking_mode"], aliases=scenario_aliases, options=scenario_options)
             try:
                 if single_status != 200 or single_resp is None:
                     raise AssertionError(
@@ -618,7 +698,7 @@ Examples:
                 except (TypeError, ValueError) as dump_err:
                     print(f"  (could not dump actual json: {dump_err})")
                 failures.append((idx, single_case, e))
-        
+
         if failures:
             print(f"\n{len(failures)} test(s) failed:")
             for idx, case, err in failures:
@@ -632,19 +712,19 @@ Examples:
 
         # Run invariant tests
         print("\nRunning invariant tests...")
-        
+
         print("\n  Running invariant: No canonical service IDs in responses...")
         try:
             test_no_canonical_service_id_in_response()
         except AssertionError as e:
             print(f"✗ Invariant test failed: {e}")
             sys.exit(1)
-        
+
         print("\n  Running invariant: Output independent of previous requests...")
         try:
             test_output_independent_of_previous_requests()
         except AssertionError as e:
             print(f"✗ Invariant test failed: {e}")
             sys.exit(1)
-        
+
         print("\n✓ All invariant tests passed")

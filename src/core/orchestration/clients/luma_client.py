@@ -128,6 +128,14 @@ class LumaClient:
         except httpx.HTTPStatusError as e:
             status_code = e.response.status_code
             error_text = e.response.text[:200] if e.response.text else ""
+            # For 404, this endpoint doesn't exist in Luma (non-critical lifecycle update)
+            # Return a graceful response instead of raising an error
+            if status_code == 404:
+                return {
+                    "success": False,
+                    "error": "endpoint_not_found",
+                    "message": "Luma /notify_execution endpoint not available (404). This is a non-critical lifecycle update."
+                }
             raise UpstreamError(
                 f"Luma API returned error {status_code}: {error_text}"
             ) from e
