@@ -1304,6 +1304,19 @@ booking_scenarios = [
             "missing_slots": ["booking_id", "time"]
         }
     },
+    {
+        "sentence": "change my booking to 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "slots": {
+                "time": "15:00"
+            },
+            "missing_slots": ["booking_id", "date"]
+        }
+    },
     # ────────────────
     # CANCEL_BOOKING — NEEDS_CLARIFICATION (MISSING BOOKING_ID)
     # ────────────────
@@ -1463,10 +1476,64 @@ booking_scenarios = [
         }
     },
     # ────────────────
+    # MODIFY_BOOKING — TEMPORAL EXTRACTION REGRESSION TESTS
+    # ────────────────
+    # These tests ensure that Luma always extracts temporal values explicitly in slots,
+    # and that MODIFY_BOOKING does not infer start_date/end_date roles incorrectly.
+    # Invariants:
+    # - Luma must always emit extracted temporal values in `slots`
+    # - MODIFY_BOOKING must not infer start_date / end_date (use explicit date or date_range)
+    # 1) MODIFY_BOOKING — implicit booking reference, time only
+    {
+        "sentence": "change my booking to 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "slots": {
+                "time": "15:00"
+            },
+            "missing_slots": ["booking_id", "date"]
+        }
+    },
+    # 2) MODIFY_BOOKING — explicit booking_id, time only (READY)
+    {
+        "sentence": "change the time for booking PQR678 to 4pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "PQR678",
+                "time": "16:00"
+            }
+        }
+    },
+    # 3) MODIFY_BOOKING — reservation, single date (no role inference)
+    {
+        "sentence": "change my reservation ABC123 to feb 9",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "slots": {
+                "booking_id": "ABC123",
+                "date": "2026-02-09"
+            },
+            "missing_slots": ["end_date"]
+        }
+    },
+    # ────────────────
     # UNKNOWN / FRAGMENT INPUTS
     # ────────────────
     # These tests enforce that Luma does NOT promote intent, does NOT invent missing_slots,
     # only returns extracted slots, and remains stateless for inputs without booking intent verbs.
+    # Invariants:
+    # - Luma must always emit extracted temporal values in `slots`
+    # - UNKNOWN intent must bypass booking clarification logic entirely
     {
         "sentence": "feb 12th",
         "booking_mode": "service",

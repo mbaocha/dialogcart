@@ -11,8 +11,8 @@ src_path = Path(__file__).parent.parent.parent.parent
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-from core.execution.test_backend import TestExecutionBackend
-from core.execution.config import get_execution_mode, EXECUTION_MODE_TEST, EXECUTION_MODE_PRODUCTION
+from core.routing.execution.test_backend import TestExecutionBackend
+from core.routing.execution.config import get_execution_mode, EXECUTION_MODE_TEST, EXECUTION_MODE_PRODUCTION
 
 
 def test_test_backend_create_service_booking():

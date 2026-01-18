@@ -3007,6 +3007,315 @@ def resolve_message(
                 public_clarification_reason = ClarificationReason.MISSING_DATE.value
 
         # ============================================================
+        # MODIFY_BOOKING TEMPORAL SLOT PROJECTION (needs_clarification)
+        # ============================================================
+        # Project explicitly resolved temporal values into slots for MODIFY_BOOKING
+        # even when status = needs_clarification. This ensures extracted time/date values
+        # are surfaced in slots, not just in semantic/context layers.
+        # 
+        # Rules:
+        # 1. If time_refs exist → project normalized time into slots.time (e.g., "15:00")
+        # 2. If date_refs exist (single_day) → project normalized date into slots.date
+        # 3. If date_range exists → project into slots.date_range
+        # 
+        # This projection happens EVEN IF booking_id is missing or status = needs_clarification.
+        # It's a projection fix, not an extraction fix - extraction already happened.
+        if not is_unknown_intent and intent_payload_name == "MODIFY_BOOKING" and needs_clarification:
+            # Get semantic_booking from merged_semantic_result
+            semantic_booking = merged_semantic_result.resolved_booking if merged_semantic_result else {}
+            
+            # Project time from time_refs (if available)
+            # Priority: calendar_booking.datetime_range (bound time) > time_refs (semantic reference)
+            time_refs = semantic_booking.get("time_refs", [])
+            time_mode = semantic_booking.get("time_mode")
+            
+            # First, try to extract bound time from calendar_booking (if available)
+            time_projected = False
+            if calendar_booking and calendar_booking.get("datetime_range"):
+                dt_start = calendar_booking["datetime_range"].get("start", "")
+                if dt_start:
+                    try:
+                        # Extract time portion from ISO datetime string (e.g., "2026-01-13T15:00:00Z")
+                        if "T" in dt_start:
+                            time_part = dt_start.split("T")[1].split("+")[0].split("-")[0].split("Z")[0]
+                            # Extract HH:MM portion (first 5 characters)
+                            if ":" in time_part:
+                                hour_min = ":".join(time_part.split(":")[:2])
+                                slots["time"] = hour_min
+                                time_projected = True
+                                logger.debug(f"[MODIFY_BOOKING] Projected time from calendar_booking: {slots['time']}", extra={'request_id': request_id})
+                    except Exception as e:
+                        logger.debug(f"[MODIFY_BOOKING] Time extraction from calendar_booking failed: {str(e)}", extra={'request_id': request_id})
+            
+            # Fallback: Extract time from time_refs (semantic reference)
+            # If calendar binding didn't produce normalized time, normalize time_refs using bind_times
+            if not time_projected and time_refs and time_mode == "exact":
+                try:
+                    # Try to normalize time_refs using bind_times (if calendar binding was skipped)
+                    tz = get_timezone(timezone)
+                    if now.tzinfo is None:
+                        now_tz_aware = _localize_datetime(now, tz)
+                    else:
+                        now_tz_aware = now
+                    
+                    time_windows = extraction_result.get("time_windows", []) if extraction_result else []
+                    time_result = bind_times(
+                        time_refs,
+                        time_mode,
+                        now_tz_aware,
+                        tz,
+                        time_windows=time_windows
+                    )
+                    
+                    if time_result and time_result.get("start_time"):
+                        # Extract HH:MM from normalized time (e.g., "15:00:00" -> "15:00")
+                        start_time = time_result.get("start_time")
+                        if isinstance(start_time, str):
+                            if ":" in start_time:
+                                hour_min = ":".join(start_time.split(":")[:2])
+                                slots["time"] = hour_min
+                                time_projected = True
+                                logger.debug(f"[MODIFY_BOOKING] Projected time from normalized time_refs: {slots['time']}", extra={'request_id': request_id})
+                except Exception as e:
+                    logger.debug(f"[MODIFY_BOOKING] Time normalization from time_refs failed: {str(e)}", extra={'request_id': request_id})
+                    pass
+            
+            # Project date from date_refs or date_range (if available)
+            # Use date_roles to determine if dates should be projected as start_date/end_date or date
+            date_mode = semantic_booking.get("date_mode")
+            date_refs = semantic_booking.get("date_refs", [])
+            date_roles = semantic_booking.get("date_roles", [])
+            
+            # Check if any dates have explicit roles (START_DATE or END_DATE)
+            # For MODIFY_BOOKING: if date_roles are present, use start_date/end_date slots instead of date
+            # CRITICAL: For MODIFY_BOOKING single dates, date_roles should be empty [] after normalization guard
+            # Only assign to end_date/start_date if explicit roles are present
+            has_start_role = len(date_roles) > 0 and date_roles[0] == "START_DATE"
+            has_end_role = len(date_roles) > 1 and date_roles[1] == "END_DATE"
+            # Also check if first date is END_DATE (single date with end_date role)
+            has_end_role_single = len(date_roles) > 0 and date_roles[0] == "END_DATE"
+            
+            # MODIFY_BOOKING single date normalization: NEVER use end_date/start_date slots for single dates
+            # This prevents missing_slots=["end_date"] from causing role leakage
+            # CRITICAL: Force empty roles for ALL MODIFY_BOOKING single dates, regardless of semantic date_roles
+            # This is a rule-removal fix: single dates in MODIFY_BOOKING must be treated as generic "date"
+            is_modify_booking_single_date = (
+                intent_payload_name == "MODIFY_BOOKING" and
+                len(date_refs) == 1 and
+                date_mode == "single_day"
+            )
+            if is_modify_booking_single_date:
+                # Force empty roles - do not assign to end_date/start_date based on date_roles
+                # This overrides any incorrect role assignment from the semantic layer
+                has_start_role = False
+                has_end_role = False
+                has_end_role_single = False
+                logger.debug(
+                    f"[MODIFY_BOOKING] Single date normalization guard: Forcing empty roles. "
+                    f"date_roles={date_roles}, date_refs={date_refs}",
+                    extra={'request_id': request_id, 'date_roles': date_roles, 'date_refs': date_refs}
+                )
+            
+            # Check if calendar_booking has resolved dates (from calendar binding)
+            if calendar_booking:
+                # For single-day dates, extract from datetime_range or date_range
+                if date_mode == "single_day":
+                    resolved_date = None
+                    # Try datetime_range first (appointments)
+                    if calendar_booking.get("datetime_range"):
+                        dt_start = calendar_booking["datetime_range"].get("start", "")
+                        if dt_start and "T" in dt_start:
+                            resolved_date = dt_start.split("T")[0]
+                    # Fallback to date_range (reservations or date-only)
+                    elif calendar_booking.get("date_range"):
+                        date_range = calendar_booking["date_range"]
+                        start_date = date_range.get("start_date") or date_range.get("start")
+                        if start_date:
+                            resolved_date = start_date.split("T")[0] if "T" in start_date else start_date
+                    
+                    # Project based on date_roles (if present)
+                    if resolved_date:
+                        if has_end_role_single:
+                            # Single date with END_DATE role → use end_date slot
+                            slots["end_date"] = resolved_date
+                            logger.debug(f"[MODIFY_BOOKING] Projected single date with END_DATE role to end_date: {resolved_date}", extra={'request_id': request_id})
+                        elif has_start_role:
+                            # Single date with START_DATE role → use start_date slot
+                            slots["start_date"] = resolved_date
+                            logger.debug(f"[MODIFY_BOOKING] Projected single date with START_DATE role to start_date: {resolved_date}", extra={'request_id': request_id})
+                        else:
+                            # No explicit role → use date slot
+                            slots["date"] = resolved_date
+                            logger.debug(f"[MODIFY_BOOKING] Projected single date to date slot: {resolved_date}", extra={'request_id': request_id})
+                
+                # For date ranges, extract from date_range
+                elif date_mode == "range" and calendar_booking.get("date_range"):
+                    date_range = calendar_booking["date_range"]
+                    start_date = date_range.get("start_date") or date_range.get("start")
+                    end_date = date_range.get("end_date") or date_range.get("end")
+                    if start_date and end_date:
+                        # Normalize dates (remove time portion if present)
+                        start_date_clean = start_date.split("T")[0] if "T" in start_date else start_date
+                        end_date_clean = end_date.split("T")[0] if "T" in end_date else end_date
+                        
+                        # Check if dates have explicit roles
+                        if has_start_role and has_end_role:
+                            # Both roles present → use start_date and end_date slots
+                            slots["start_date"] = start_date_clean
+                            slots["end_date"] = end_date_clean
+                            logger.debug(f"[MODIFY_BOOKING] Projected date range with roles to start_date/end_date: {start_date_clean}, {end_date_clean}", extra={'request_id': request_id})
+                        elif start_date_clean == end_date_clean:
+                            # Single date (start == end) → use date slot
+                            slots["date"] = start_date_clean
+                            logger.debug(f"[MODIFY_BOOKING] Projected single date from range to date slot: {start_date_clean}", extra={'request_id': request_id})
+                        else:
+                            # Date range without explicit roles → use date_range slot
+                            slots["date_range"] = {
+                                "start": start_date_clean,
+                                "end": end_date_clean
+                            }
+                            logger.debug(f"[MODIFY_BOOKING] Projected date range to date_range slot: {start_date_clean}-{end_date_clean}", extra={'request_id': request_id})
+            
+            # Fallback: If calendar binding didn't produce dates, try semantic_booking.date_range
+            if not slots.get("date") and not slots.get("date_range") and not slots.get("start_date") and not slots.get("end_date"):
+                if semantic_booking.get("date_range"):
+                    date_range_sem = semantic_booking["date_range"]
+                    if isinstance(date_range_sem, dict):
+                        start_date = date_range_sem.get("start_date") or date_range_sem.get("start")
+                        end_date = date_range_sem.get("end_date") or date_range_sem.get("end")
+                        if start_date and end_date:
+                            # Normalize dates (remove time portion if present)
+                            start_date_clean = start_date.split("T")[0] if "T" in start_date else start_date
+                            end_date_clean = end_date.split("T")[0] if "T" in end_date else end_date
+                            
+                            # Check if dates have explicit roles
+                            if has_start_role and has_end_role:
+                                # Both roles present → use start_date and end_date slots
+                                slots["start_date"] = start_date_clean
+                                slots["end_date"] = end_date_clean
+                                logger.debug(f"[MODIFY_BOOKING] Projected semantic date_range with roles to start_date/end_date: {start_date_clean}, {end_date_clean}", extra={'request_id': request_id})
+                            elif start_date_clean == end_date_clean:
+                                # Single date (start == end) → use date slot
+                                slots["date"] = start_date_clean
+                                logger.debug(f"[MODIFY_BOOKING] Projected single date from semantic date_range to date slot: {start_date_clean}", extra={'request_id': request_id})
+                            else:
+                                # Date range → use date_range slot
+                                slots["date_range"] = {
+                                    "start": start_date_clean,
+                                    "end": end_date_clean
+                                }
+                                logger.debug(f"[MODIFY_BOOKING] Projected semantic date_range to date_range slot: {start_date_clean}-{end_date_clean}", extra={'request_id': request_id})
+            
+            # Final fallback: If still no dates projected and we have date_refs, bind them directly
+            if not slots.get("date") and not slots.get("date_range") and not slots.get("start_date") and not slots.get("end_date"):
+                if date_refs and date_mode == "single_day":
+                    # Single date: bind the first date_ref
+                    try:
+                        tz = get_timezone(timezone)
+                        if now.tzinfo is None:
+                            now_tz_aware = _localize_datetime(now, tz)
+                        else:
+                            now_tz_aware = now
+                        
+                        bound_date = _bind_single_date(date_refs[0], now_tz_aware, tz)
+                        if bound_date:
+                            resolved_date = bound_date.strftime("%Y-%m-%d")
+                            # Project based on date_roles (if present)
+                            if has_end_role_single:
+                                slots["end_date"] = resolved_date
+                                logger.debug(f"[MODIFY_BOOKING] Projected bound date_ref with END_DATE role to end_date: {resolved_date}", extra={'request_id': request_id})
+                            elif has_start_role:
+                                slots["start_date"] = resolved_date
+                                logger.debug(f"[MODIFY_BOOKING] Projected bound date_ref with START_DATE role to start_date: {resolved_date}", extra={'request_id': request_id})
+                            else:
+                                # No explicit role → use date slot
+                                slots["date"] = resolved_date
+                                logger.debug(f"[MODIFY_BOOKING] Projected bound date_ref to date slot: {resolved_date}", extra={'request_id': request_id})
+                        else:
+                            # Binding failed (e.g., ambiguous weekday like "friday") → project raw date_ref as fallback
+                            # This ensures extracted dates are surfaced in slots even if binding fails
+                            date_ref_raw = date_refs[0]
+                            if has_end_role_single:
+                                slots["end_date"] = date_ref_raw
+                                logger.debug(f"[MODIFY_BOOKING] Projected raw date_ref (binding failed) with END_DATE role to end_date: {date_ref_raw}", extra={'request_id': request_id})
+                            elif has_start_role:
+                                slots["start_date"] = date_ref_raw
+                                logger.debug(f"[MODIFY_BOOKING] Projected raw date_ref (binding failed) with START_DATE role to start_date: {date_ref_raw}", extra={'request_id': request_id})
+                            else:
+                                # No explicit role → use date slot
+                                slots["date"] = date_ref_raw
+                                logger.debug(f"[MODIFY_BOOKING] Projected raw date_ref (binding failed) to date slot: {date_ref_raw}", extra={'request_id': request_id})
+                    except Exception as e:
+                        logger.debug(f"[MODIFY_BOOKING] Failed to bind date_ref: {str(e)}", extra={'request_id': request_id})
+                        # Fallback: project raw date_ref even if binding exception occurred
+                        if date_refs and len(date_refs) > 0:
+                            date_ref_raw = date_refs[0]
+                            if not has_end_role_single and not has_start_role:
+                                slots["date"] = date_ref_raw
+                                logger.debug(f"[MODIFY_BOOKING] Projected raw date_ref (exception fallback) to date slot: {date_ref_raw}", extra={'request_id': request_id})
+                elif date_refs and date_mode == "range" and len(date_refs) >= 2:
+                    # Date range: bind both date_refs
+                    try:
+                        tz = get_timezone(timezone)
+                        if now.tzinfo is None:
+                            now_tz_aware = _localize_datetime(now, tz)
+                        else:
+                            now_tz_aware = now
+                        
+                        start_date_dt = _bind_single_date(date_refs[0], now_tz_aware, tz)
+                        end_date_dt = _bind_single_date(date_refs[1], now_tz_aware, tz)
+                        if start_date_dt and end_date_dt:
+                            start_date_clean = start_date_dt.strftime("%Y-%m-%d")
+                            end_date_clean = end_date_dt.strftime("%Y-%m-%d")
+                            
+                            # Check if dates have explicit roles
+                            if has_start_role and has_end_role:
+                                slots["start_date"] = start_date_clean
+                                slots["end_date"] = end_date_clean
+                                logger.debug(f"[MODIFY_BOOKING] Projected bound date_refs with roles to start_date/end_date: {start_date_clean}, {end_date_clean}", extra={'request_id': request_id})
+                            elif start_date_clean == end_date_clean:
+                                # Single date (start == end) → use date slot
+                                slots["date"] = start_date_clean
+                                logger.debug(f"[MODIFY_BOOKING] Projected single date from bound date_refs to date slot: {start_date_clean}", extra={'request_id': request_id})
+                            else:
+                                # Date range → use date_range slot
+                                slots["date_range"] = {
+                                    "start": start_date_clean,
+                                    "end": end_date_clean
+                                }
+                                logger.debug(f"[MODIFY_BOOKING] Projected bound date_refs to date_range slot: {start_date_clean}-{end_date_clean}", extra={'request_id': request_id})
+                    except Exception as e:
+                        logger.debug(f"[MODIFY_BOOKING] Failed to bind date_refs: {str(e)}", extra={'request_id': request_id})
+            
+            # Final normalization guard: MODIFY_BOOKING single date → force date slot
+            # This ensures that even if missing_slots contains "end_date", we materialize as "date" slot
+            # This guard runs AFTER all projection logic to prevent role leakage
+            # CRITICAL: Apply to ALL MODIFY_BOOKING single dates, regardless of semantic date_roles
+            if (intent_payload_name == "MODIFY_BOOKING" and
+                date_refs and len(date_refs) == 1 and 
+                date_mode == "single_day"):
+                # Single date → prefer date slot over end_date/start_date
+                # Check if we incorrectly assigned to end_date or start_date
+                if slots.get("end_date") and not slots.get("date"):
+                    # Move end_date to date slot
+                    resolved_date_value = slots.pop("end_date")
+                    slots["date"] = resolved_date_value
+                    logger.debug(
+                        f"[MODIFY_BOOKING] Post-projection normalization guard: Moved single date from end_date to date slot. "
+                        f"date_roles={date_roles}, date_refs={date_refs}",
+                        extra={'request_id': request_id, 'date_roles': date_roles, 'date_refs': date_refs}
+                    )
+                elif slots.get("start_date") and not slots.get("date"):
+                    # Move start_date to date slot
+                    resolved_date_value = slots.pop("start_date")
+                    slots["date"] = resolved_date_value
+                    logger.debug(
+                        f"[MODIFY_BOOKING] Post-projection normalization guard: Moved single date from start_date to date slot. "
+                        f"date_roles={date_roles}, date_refs={date_refs}",
+                        extra={'request_id': request_id, 'date_roles': date_roles, 'date_refs': date_refs}
+                    )
+
+        # ============================================================
         # CENTRALIZED MODIFY_BOOKING OUTPUT SHAPING (critical)
         # ============================================================
         # This runs AFTER decision == RESOLVED and BEFORE response return.

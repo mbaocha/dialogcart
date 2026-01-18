@@ -4,7 +4,7 @@ Core Session Follow-up Scenarios
 Multi-turn conversation scenarios to test Redis-backed session behavior.
 Each scenario tests session persistence, merge, and cleanup across turns.
 
-50 scenarios covering:
+81 scenarios covering:
 - service → date → time follow-ups
 - service → time → date follow-ups
 - reservation check-in → check-out completion
@@ -12,6 +12,9 @@ Each scenario tests session persistence, merge, and cleanup across turns.
 - ambiguous follow-ups ("tomorrow", "evening", "next friday")
 - UNKNOWN → becomes booking via follow-up
 - follow-up that switches intent (should reset session)
+- negative guardrail tests for awaiting_slot routing (IDs 51-55)
+- negative safety-net tests for slot inference prevention (IDs 56-75)
+- reservation contract enforcement tests (IDs 76-81)
 """
 
 followup_scenarios = [
@@ -139,7 +142,7 @@ followup_scenarios = [
             {"sentence": "next friday", "expected": {
                 "status": "NEEDS_CLARIFICATION", "missing_slots": ["time"]}},
             # Luma does NOT extract time from "noon" into slots["time"]
-            # Core does NOT receive time, so status remains NEEDS_CLARIFICATION
+            # Even with awaiting_slot routing, if time_constraint is not present, status remains NEEDS_CLARIFICATION
             {"sentence": "noon", "expected": {
                 "status": "NEEDS_CLARIFICATION", "missing_slots": ["time"]}}
         ]
@@ -742,6 +745,495 @@ followup_scenarios = [
             # has_datetime is NOT for reservations (only service appointments with time)
             {"sentence": "to the 5th", "expected": {
                 "status": "NEEDS_CLARIFICATION", "missing_slots": ["end_date"]}}
+        ]
+    },
+    # Negative guardrail tests: awaiting_slot routing must NOT infer or over-route (IDs 51-55)
+    # These tests ensure awaiting_slot logic is deterministic and non-inferential
+    {
+        "id": 51,
+        "name": "awaiting_time_rejects_date",
+        "domain": "service",
+        "aliases": {"haircut": "haircut"},
+        "turns": [
+            {"sentence": "book haircut", "expected": {"intent": "CREATE_APPOINTMENT",
+                                                      "status": "NEEDS_CLARIFICATION", "missing_slots": ["date", "time"]}},
+            {"sentence": "tomorrow", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["time"]}},
+            # Guardrail: awaiting_slot=time must NOT accept date values
+            # "next week" is a date, not a time - must remain NEEDS_CLARIFICATION with missing_slots=["time"]
+            {"sentence": "next week", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["time"]}}
+        ]
+    },
+    {
+        "id": 52,
+        "name": "awaiting_date_rejects_time",
+        "domain": "service",
+        "aliases": {"massage": "massage"},
+        "turns": [
+            {"sentence": "book massage at 3pm", "expected": {"intent": "CREATE_APPOINTMENT",
+                                                             "status": "NEEDS_CLARIFICATION", "missing_slots": ["date"]}},
+            # Guardrail: awaiting_slot=date must NOT accept time values
+            # "5pm" is a time, not a date - must remain NEEDS_CLARIFICATION with missing_slots=["date"]
+            {"sentence": "5pm", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["date"]}}
+        ]
+    },
+    {
+        "id": 53,
+        "name": "awaiting_slot_cleared_on_intent_switch",
+        "domain": "service",
+        "aliases": {"haircut": "haircut"},
+        "turns": [
+            {"sentence": "book haircut", "expected": {"intent": "CREATE_APPOINTMENT",
+                                                      "status": "NEEDS_CLARIFICATION", "missing_slots": ["date", "time"]}},
+            {"sentence": "tomorrow", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["time"]}},
+            # Guardrail: Intent switch must clear awaiting_slot
+            # CANCEL_BOOKING has different missing_slots - awaiting_slot from CREATE_APPOINTMENT must not leak
+            {"sentence": "cancel booking", "expected": {"intent": "CANCEL_BOOKING",
+                                                        "status": "NEEDS_CLARIFICATION", "missing_slots": ["booking_id"]}}
+        ]
+    },
+    {
+        "id": 54,
+        "name": "awaiting_slot_not_used_for_modify_booking",
+        "domain": "service",
+        "aliases": {"haircut": "haircut"},
+        "turns": [
+            # Guardrail: MODIFY_BOOKING must NOT use awaiting_slot routing
+            # MODIFY_BOOKING requires explicit dimensions - awaiting_slot logic is CREATE_APPOINTMENT only
+            {"sentence": "change booking", "expected": {"intent": "MODIFY_BOOKING",
+                                                        "status": "NEEDS_CLARIFICATION", "missing_slots": ["booking_id", "date", "time"]}},
+            # "tomorrow" should NOT be routed via awaiting_slot for MODIFY_BOOKING
+            # Missing booking_id blocks resolution - date alone doesn't satisfy MODIFY_BOOKING
+            {"sentence": "tomorrow", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["booking_id"]}}
+        ]
+    },
+    {
+        "id": 55,
+        "name": "awaiting_slot_does_not_route_booking_id",
+        "domain": "service",
+        "aliases": {"massage": "massage"},
+        "turns": [
+            {"sentence": "book massage", "expected": {"intent": "CREATE_APPOINTMENT",
+                                                      "status": "NEEDS_CLARIFICATION", "missing_slots": ["date", "time"]}},
+            # Guardrail: awaiting_slot must NEVER route booking_id
+            # booking_id is never inferred or routed - only explicitly extracted slots apply
+            # "booking 123" should NOT be routed to date or time slots
+            {"sentence": "booking 123", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["date", "time"]}}
+        ]
+    },
+    # ========================================================================
+    # Negative Safety-Net Tests: Slot Inference Prevention (IDs 56-65)
+    # ========================================================================
+    # These tests ensure Core NEVER infers slots that must be explicitly extracted
+    {
+        "id": 56,
+        "name": "booking_id_not_inferred_from_phrase",
+        "domain": "service",
+        "aliases": {"haircut": "haircut"},
+        "turns": [
+            {"sentence": "cancel my booking", "expected": {"intent": "CANCEL_BOOKING",
+                                                           "status": "NEEDS_CLARIFICATION", "missing_slots": ["booking_id"]}},
+            # Guardrail: Core must NOT infer booking_id from phrases like "booking abc123"
+            # Luma may not extract booking_id from this phrase - Core must NOT infer it
+            {"sentence": "booking abc123", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["booking_id"]}}
+        ]
+    },
+    {
+        "id": 57,
+        "name": "booking_id_not_inferred_from_reservation_phrase",
+        "domain": "reservation",
+        "aliases": {"room": "room"},
+        "turns": [
+            {"sentence": "cancel reservation", "expected": {"intent": "CANCEL_BOOKING",
+                                                            "status": "NEEDS_CLARIFICATION", "missing_slots": ["booking_id"]}},
+            # Guardrail: Core must NOT infer booking_id from "reservation xyz789"
+            # Luma may not extract booking_id - Core must NOT infer it
+            {"sentence": "reservation xyz789", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["booking_id"]}}
+        ]
+    },
+    {
+        "id": 58,
+        "name": "end_date_not_inferred_from_second_date",
+        "domain": "reservation",
+        "aliases": {"suite": "room"},
+        "turns": [
+            {"sentence": "reserve suite", "expected": {"intent": "CREATE_RESERVATION",
+                                                       "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}},
+            {"sentence": "from nov 1st", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["end_date"]}},
+            # Guardrail: Core must NOT infer end_date from a second date slot
+            # If Luma emits only "date" (not "end_date"), Core must NOT infer end_date
+            # Core does NOT assume a second date means end_date
+            {"sentence": "nov 5th", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["end_date"]}}
+        ]
+    },
+    {
+        "id": 59,
+        "name": "end_date_not_inferred_from_date_range_phrase",
+        "domain": "reservation",
+        "aliases": {"room": "room"},
+        "turns": [
+            {"sentence": "book room", "expected": {"intent": "CREATE_RESERVATION",
+                                                   "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}},
+            {"sentence": "from dec 10th", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["end_date"]}},
+            # Guardrail: Core must NOT infer end_date from phrases like "to dec 15th"
+            # If Luma does not emit end_date slot, Core must NOT infer it
+            {"sentence": "to dec 15th", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["end_date"]}}
+        ]
+    },
+    {
+        "id": 60,
+        "name": "start_date_not_inferred_from_date_for_reservation",
+        "domain": "reservation",
+        "aliases": {"deluxe": "room"},
+        "turns": [
+            {"sentence": "reserve deluxe", "expected": {"intent": "CREATE_RESERVATION",
+                                                        "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}},
+            # Guardrail: Core must NOT infer start_date from a generic "date" slot
+            # For reservations, Luma must emit "start_date" explicitly
+            # If Luma emits only "date", Core must NOT infer start_date
+            {"sentence": "jan 5th", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}}
+        ]
+    },
+    # ========================================================================
+    # Negative Safety-Net Tests: Execution Blocking (IDs 61-65)
+    # ========================================================================
+    # These tests ensure Core NEVER executes with insufficient slots
+    {
+        "id": 61,
+        "name": "create_appointment_blocked_without_date",
+        "domain": "service",
+        "aliases": {"massage": "massage"},
+        "turns": [
+            {"sentence": "book massage at 3pm", "expected": {"intent": "CREATE_APPOINTMENT",
+                                                             "status": "NEEDS_CLARIFICATION", "missing_slots": ["date"]}},
+            # Guardrail: Core must NOT execute (status must NOT become READY) without date
+            # Even if time is provided, missing date blocks execution
+            {"sentence": "what times are available", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["date"]}}
+        ]
+    },
+    {
+        "id": 62,
+        "name": "create_appointment_blocked_without_time",
+        "domain": "service",
+        "aliases": {"haircut": "haircut"},
+        "turns": [
+            {"sentence": "book haircut tomorrow", "expected": {"intent": "CREATE_APPOINTMENT",
+                                                               "status": "NEEDS_CLARIFICATION", "missing_slots": ["time"]}},
+            # Guardrail: Core must NOT execute (status must NOT become READY) without time
+            # Even if date is provided, missing time blocks execution
+            {"sentence": "what services do you offer", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["time"]}}
+        ]
+    },
+    {
+        "id": 63,
+        "name": "create_reservation_blocked_without_end_date",
+        "domain": "reservation",
+        "aliases": {"room": "room"},
+        "turns": [
+            {"sentence": "book room", "expected": {"intent": "CREATE_RESERVATION",
+                                                   "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}},
+            {"sentence": "from feb 1st", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["end_date"]}},
+            # Guardrail: Core must NOT execute (status must NOT become READY) without end_date
+            # Even if start_date is provided, missing end_date blocks execution
+            {"sentence": "what rooms are available", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["end_date"]}}
+        ]
+    },
+    {
+        "id": 64,
+        "name": "modify_booking_blocked_without_booking_id",
+        "domain": "service",
+        "aliases": {"haircut": "haircut"},
+        "turns": [
+            {"sentence": "change booking to friday", "expected": {"intent": "MODIFY_BOOKING",
+                                                                  "status": "NEEDS_CLARIFICATION", "missing_slots": ["booking_id", "time"]}},
+            # Guardrail: Core must NOT execute (status must NOT become READY) without booking_id
+            # Even if date is provided, missing booking_id blocks execution
+            {"sentence": "at 2pm", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["booking_id"]}}
+        ]
+    },
+    {
+        "id": 65,
+        "name": "cancel_booking_blocked_without_booking_id",
+        "domain": "service",
+        "aliases": {},
+        "turns": [
+            {"sentence": "cancel my booking", "expected": {"intent": "CANCEL_BOOKING",
+                                                           "status": "NEEDS_CLARIFICATION", "missing_slots": ["booking_id"]}},
+            # Guardrail: Core must NOT execute (status must NOT become READY) without booking_id
+            # Cancellation requires booking_id - no other slots can substitute
+            {"sentence": "the one tomorrow", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["booking_id"]}}
+        ]
+    },
+    # ========================================================================
+    # Negative Safety-Net Tests: Ambiguous Temporal Phrase Rejection (IDs 66-70)
+    # ========================================================================
+    # These tests ensure Core NEVER auto-resolves ambiguous temporal phrases
+    {
+        "id": 66,
+        "name": "tomorrow_rejected_when_awaiting_time",
+        "domain": "service",
+        "aliases": {"facial": "facial"},
+        "turns": [
+            {"sentence": "book facial", "expected": {"intent": "CREATE_APPOINTMENT",
+                                                     "status": "NEEDS_CLARIFICATION", "missing_slots": ["date", "time"]}},
+            {"sentence": "tomorrow", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["time"]}},
+            # Guardrail: "tomorrow" is a date, not a time
+            # When awaiting_slot=time, Core must NOT accept "tomorrow" as time
+            # Core must remain NEEDS_CLARIFICATION with missing_slots=["time"]
+            {"sentence": "tomorrow", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["time"]}}
+        ]
+    },
+    {
+        "id": 67,
+        "name": "next_week_rejected_when_awaiting_time",
+        "domain": "service",
+        "aliases": {"waxing": "waxing"},
+        "turns": [
+            {"sentence": "book waxing", "expected": {"intent": "CREATE_APPOINTMENT",
+                                                     "status": "NEEDS_CLARIFICATION", "missing_slots": ["date", "time"]}},
+            {"sentence": "next monday", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["time"]}},
+            # Guardrail: "next week" is a date, not a time
+            # When awaiting_slot=time, Core must NOT accept "next week" as time
+            {"sentence": "next week", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["time"]}}
+        ]
+    },
+    {
+        "id": 68,
+        "name": "time_phrase_rejected_when_awaiting_date",
+        "domain": "service",
+        "aliases": {"manicure": "manicure"},
+        "turns": [
+            {"sentence": "book manicure at 3pm", "expected": {"intent": "CREATE_APPOINTMENT",
+                                                              "status": "NEEDS_CLARIFICATION", "missing_slots": ["date"]}},
+            # Guardrail: "5pm" is a time, not a date
+            # When awaiting_slot=date, Core must NOT accept "5pm" as date
+            {"sentence": "5pm", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["date"]}}
+        ]
+    },
+    {
+        "id": 69,
+        "name": "evening_rejected_when_awaiting_date",
+        "domain": "service",
+        "aliases": {"pedicure": "pedicure"},
+        "turns": [
+            {"sentence": "book pedicure at evening", "expected": {"intent": "CREATE_APPOINTMENT",
+                                                                  "status": "NEEDS_CLARIFICATION", "missing_slots": ["date"]}},
+            # Guardrail: "morning" is a time phrase, not a date
+            # When awaiting_slot=date, Core must NOT accept "morning" as date
+            {"sentence": "morning", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["date"]}}
+        ]
+    },
+    {
+        "id": 70,
+        "name": "ambiguous_phrase_not_auto_resolved",
+        "domain": "service",
+        "aliases": {"coloring": "coloring"},
+        "turns": [
+            {"sentence": "book coloring", "expected": {"intent": "CREATE_APPOINTMENT",
+                                                       "status": "NEEDS_CLARIFICATION", "missing_slots": ["date", "time"]}},
+            # Guardrail: Ambiguous phrases like "this weekend" must NOT auto-resolve
+            # If Luma does not extract clear date/time, Core must NOT infer it
+            {"sentence": "this weekend", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["date", "time"]}}
+        ]
+    },
+    # ========================================================================
+    # Negative Safety-Net Tests: Cross-Domain Leakage Prevention (IDs 71-75)
+    # ========================================================================
+    # These tests ensure service and reservation domain rules do NOT leak
+    {
+        "id": 71,
+        "name": "service_date_time_not_applied_to_reservation",
+        "domain": "reservation",
+        "aliases": {"room": "room"},
+        "turns": [
+            {"sentence": "book room", "expected": {"intent": "CREATE_RESERVATION",
+                                                   "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}},
+            # Guardrail: Service domain uses date+time, reservation uses start_date+end_date
+            # Core must NOT accept "date" + "time" as satisfying reservation requirements
+            # Reservation requires start_date + end_date, not date + time
+            {"sentence": "tomorrow at 3pm", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}}
+        ]
+    },
+    {
+        "id": 72,
+        "name": "reservation_date_range_not_applied_to_service",
+        "domain": "service",
+        "aliases": {"haircut": "haircut"},
+        "turns": [
+            {"sentence": "book haircut", "expected": {"intent": "CREATE_APPOINTMENT",
+                                                      "status": "NEEDS_CLARIFICATION", "missing_slots": ["date", "time"]}},
+            # Guardrail: Reservation domain uses start_date+end_date, service uses date+time
+            # Core must NOT accept "start_date" + "end_date" as satisfying service requirements
+            # Service requires date + time, not start_date + end_date
+            {"sentence": "from nov 1st to nov 5th", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["date", "time"]}}
+        ]
+    },
+    {
+        "id": 73,
+        "name": "awaiting_slot_not_leaked_across_domains",
+        "domain": "service",
+        "aliases": {"massage": "massage"},
+        "turns": [
+            {"sentence": "book massage", "expected": {"intent": "CREATE_APPOINTMENT",
+                                                      "status": "NEEDS_CLARIFICATION", "missing_slots": ["date", "time"]}},
+            {"sentence": "tomorrow", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["time"]}},
+            # Guardrail: If domain switches (e.g., service → reservation), awaiting_slot must be cleared
+            # This test verifies awaiting_slot does not leak if domain context changes
+            # (Note: Actual domain switch would require different test setup, but this tests the principle)
+            {"sentence": "reserve room", "expected": {"intent": "CREATE_RESERVATION",
+                                                      "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}}
+        ]
+    },
+    {
+        "id": 74,
+        "name": "service_has_datetime_not_applied_to_reservation",
+        "domain": "reservation",
+        "aliases": {"suite": "room"},
+        "turns": [
+            {"sentence": "book suite", "expected": {"intent": "CREATE_RESERVATION",
+                                                    "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}},
+            # Guardrail: Service domain uses has_datetime (date+time), reservation does NOT
+            # Core must NOT set has_datetime for reservations
+            # Reservation requires start_date + end_date, not date + time
+            {"sentence": "nov 1st at 2pm", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}}
+        ]
+    },
+    {
+        "id": 75,
+        "name": "reservation_date_range_not_satisfies_service_date",
+        "domain": "service",
+        "aliases": {"facial": "facial"},
+        "turns": [
+            {"sentence": "book facial", "expected": {"intent": "CREATE_APPOINTMENT",
+                                                     "status": "NEEDS_CLARIFICATION", "missing_slots": ["date", "time"]}},
+            # Guardrail: Reservation date_range does NOT satisfy service date requirement
+            # Service requires explicit "date" slot, not "date_range" or "start_date"
+            {"sentence": "dec 10 to 15", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["date", "time"]}}
+        ]
+    },
+    # ========================================================================
+    # Reservation Contract Enforcement Tests (IDs 76-81)
+    # ========================================================================
+    # These tests verify the fixes applied to session_merge.py to enforce
+    # strict reservation slot contracts (no inference, role-specific slots)
+    {
+        "id": 76,
+        "name": "reservation_date_does_not_satisfy_start_date",
+        "domain": "reservation",
+        "aliases": {"suite": "room"},
+        "turns": [
+            {"sentence": "book suite", "expected": {"intent": "CREATE_RESERVATION",
+                                                    "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}},
+            # Guardrail: Generic "date" slot does NOT satisfy "start_date" requirement
+            # Luma may return slots.date, but Core must remove it and NOT set slots.start_date
+            # This verifies the fix that removes date → start_date mapping
+            {"sentence": "tomorrow", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}}
+        ]
+    },
+    {
+        "id": 77,
+        "name": "reservation_single_date_does_not_infer_end_date",
+        "domain": "reservation",
+        "aliases": {"deluxe": "room"},
+        "turns": [
+            {"sentence": "reserve deluxe from jan 15", "expected": {"intent": "CREATE_RESERVATION",
+                                                                    "status": "NEEDS_CLARIFICATION", "missing_slots": ["end_date"]}},
+            # Guardrail: Single date with START_DATE role does NOT infer end_date
+            # Even if start_date is set, end_date must be explicitly provided
+            # This verifies the fix that removed single date → end_date inference
+            {"sentence": "confirm", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["end_date"]}}
+        ]
+    },
+    {
+        "id": 78,
+        "name": "reservation_generic_date_slot_removed",
+        "domain": "reservation",
+        "aliases": {"penthouse": "room"},
+        "turns": [
+            {"sentence": "book penthouse", "expected": {"intent": "CREATE_RESERVATION",
+                                                        "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}},
+            # Guardrail: Generic "date" slot from Luma must be removed for reservations
+            # Core must NOT keep slots.date, and must NOT infer slots.start_date from it
+            # This verifies the fix that deletes generic date slot for CREATE_RESERVATION
+            {"sentence": "jan 20th", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}}
+        ]
+    },
+    {
+        "id": 79,
+        "name": "reservation_range_mode_requires_both_dates",
+        "domain": "reservation",
+        "aliases": {"villa": "room"},
+        "turns": [
+            {"sentence": "reserve villa", "expected": {"intent": "CREATE_RESERVATION",
+                                                       "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}},
+            # Guardrail: Range mode with single date does NOT infer start_date or end_date
+            # Both dates must be explicitly provided in date_refs
+            # This verifies the fix that blocks single-date promotion in range mode
+            {"sentence": "from jan 10", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}}
+        ]
+    },
+    {
+        "id": 80,
+        "name": "service_appointment_date_extraction_unchanged",
+        "domain": "service",
+        "aliases": {"haircut": "haircut"},
+        "turns": [
+            {"sentence": "book haircut", "expected": {"intent": "CREATE_APPOINTMENT",
+                                                      "status": "NEEDS_CLARIFICATION", "missing_slots": ["date", "time"]}},
+            # Guardrail: Service appointment behavior must remain unchanged
+            # Generic "date" slot extraction still works for CREATE_APPOINTMENT
+            # This verifies that reservation fixes don't break service appointments
+            {"sentence": "tomorrow", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["time"]}}
+        ]
+    },
+    {
+        "id": 81,
+        "name": "reservation_safety_assertion_restores_missing_slots",
+        "domain": "reservation",
+        "aliases": {"suite": "room"},
+        "turns": [
+            {"sentence": "book suite", "expected": {"intent": "CREATE_RESERVATION",
+                                                    "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}},
+            # Guardrail: Safety assertion must restore missing_slots if incorrectly cleared
+            # If Luma incorrectly returns empty missing_slots, Core must restore start_date and end_date
+            # This verifies the safety assertion added to session_merge.py
+            {"sentence": "ok", "expected": {
+                "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}}
         ]
     }
 ]

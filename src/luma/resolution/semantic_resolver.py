@@ -1997,14 +1997,21 @@ def _detect_date_role(
         "START_DATE", "END_DATE", or None
     """
     # Use existing logger (already imported at module level)
-    # Only apply to CREATE_RESERVATION or BOOK_APPOINTMENT (which may become CREATE_RESERVATION)
+    # Apply to CREATE_RESERVATION, BOOK_APPOINTMENT (which may become CREATE_RESERVATION), or MODIFY_BOOKING
     # The merge logic in resolve_service.py will filter out appointments, so we can safely detect roles for BOOK_APPOINTMENT
-    if intent_name not in ("CREATE_RESERVATION", "BOOK_APPOINTMENT"):
+    if intent_name not in ("CREATE_RESERVATION", "BOOK_APPOINTMENT", "MODIFY_BOOKING"):
         logger.debug(
-            f"[date_role] Skipping detection: intent={intent_name} (not CREATE_RESERVATION or BOOK_APPOINTMENT)",
+            f"[date_role] Skipping detection: intent={intent_name} (not CREATE_RESERVATION, BOOK_APPOINTMENT, or MODIFY_BOOKING)",
             extra={'intent': intent_name, 'date_index': date_index}
         )
         return None
+    
+    # For MODIFY_BOOKING, apply stricter rules:
+    # - Assign start_date/end_date ONLY if:
+    #   a) Two dates + range syntax (from X to Y), OR
+    #   b) Explicit role keyword is present
+    # - Never infer roles from intent alone (no default position-based assignment)
+    is_modify_booking = (intent_name == "MODIFY_BOOKING")
 
     osentence = str(entities.get("osentence", "")).lower()
     if not osentence:
@@ -2020,16 +2027,45 @@ def _detect_date_role(
         extra={'intent': intent_name, 'date_index': date_index}
     )
 
-    # START_DATE signals (normalized)
+    # START_DATE signals (range syntax and role keywords)
     start_signals = ["from", "starting", "beginning", "since"]
-    # END_DATE signals (normalized)
+    start_role_keywords = ["start date", "start_date", "check-in date", "check-in", "checkin date", "arrival date"]
+    
+    # END_DATE signals (range syntax and role keywords)
     end_signals = ["to", "until", "till", "through", "ending"]
-
+    end_role_keywords = ["end date", "end_date", "check-out date", "check-out", "checkout date", "check out date", "departure date"]
+    
     # Find date positions in sentence
     # Note: date_index refers to position in the final date_refs list, not in all_dates
     # We need to check both dates and dates_absolute, but prioritize absolute
     dates = entities.get("dates", [])
     dates_absolute = entities.get("dates_absolute", [])
+    
+    # For MODIFY_BOOKING: check if we have two dates with range syntax
+    dates_count = len(dates) + len(dates_absolute)
+    has_range_syntax = False
+    if is_modify_booking:
+        # Check for range syntax: "from X to Y" or "between X and Y"
+        range_patterns = [
+            r'\bfrom\s+.*?\s+to\s+.*',
+            r'\bbetween\s+.*?\s+and\s+.*'
+        ]
+        for pattern in range_patterns:
+            if re.search(pattern, osentence, re.IGNORECASE):
+                has_range_syntax = True
+                break
+
+    # EARLY GUARD: MODIFY_BOOKING single date without explicit range cue → return None immediately
+    # This prevents any role assignment (END_DATE/START_DATE) for single dates without explicit range cues
+    # Rule-subtractive fix: single dates in MODIFY_BOOKING must be treated as generic "date", not "end_date" or "start_date"
+    if is_modify_booking and dates_count == 1:
+        if not _has_explicit_range_cue(osentence):
+            logger.info(
+                f"[date_role] MODIFY_BOOKING early guard: Single date without explicit range cue → returning None. "
+                f"dates_count={dates_count}, has_range_syntax={has_range_syntax}, osentence='{osentence}'",
+                extra={'intent': intent_name, 'date_index': date_index, 'dates_count': dates_count, 'osentence': osentence}
+            )
+            return None
 
     logger.info(
         f"[date_role] Entity check: dates_count={len(dates)}, dates_absolute_count={len(dates_absolute)}, "
@@ -2112,7 +2148,102 @@ def _detect_date_role(
             extra={'intent': intent_name, 'date_index': date_index}
         )
 
-    # Check for START_DATE signals
+    # For MODIFY_BOOKING: Check explicit role keywords FIRST (highest priority)
+    # If role keyword is present, assign ONLY that role to dates that appear after it
+    # Ignore dates that appear before the role keyword as contextual
+    if is_modify_booking:
+        # Check entire sentence for explicit role keywords (not just before date)
+        sentence_for_role_check = osentence  # Use full sentence for role keyword detection
+        
+        # Check for START_DATE role keywords (e.g., "start date", "check-in date")
+        for keyword in start_role_keywords:
+            pattern = rf"\b{re.escape(keyword)}\b"
+            match = re.search(pattern, sentence_for_role_check, re.IGNORECASE)
+            if match:
+                keyword_pos = match.start()
+                keyword_end = match.end()
+                # Only assign role if date appears AFTER the role keyword (ignore dates before it as contextual)
+                if date_char_start >= 0:
+                    # Date found in sentence - check if it appears after the role keyword
+                    if keyword_end <= date_char_start <= keyword_end + 150:
+                        # Date appears after role keyword - assign START_DATE role
+                        logger.info(
+                            f"[date_role] MODIFY_BOOKING: Detected START_DATE role keyword '{keyword}' for date_index={date_index} "
+                            f"(keyword at {keyword_pos}-{keyword_end}, date at {date_char_start} - date appears after keyword)",
+                            extra={'sentence': osentence, 'date_entity': date_entity.get('text', ''), 'keyword': keyword}
+                        )
+                        return "START_DATE"
+                    else:
+                        # Date appears before role keyword - ignore as contextual (don't assign role)
+                        logger.debug(
+                            f"[date_role] MODIFY_BOOKING: Ignoring date before START_DATE role keyword '{keyword}' (date at {date_char_start}, keyword at {keyword_pos}-{keyword_end})",
+                            extra={'intent': intent_name, 'date_index': date_index, 'keyword': keyword}
+                        )
+                        return None
+                else:
+                    # Date text not found - check if we have only one date (single date with role keyword)
+                    # CRITICAL: For MODIFY_BOOKING, only assign role if explicit range cue exists
+                    # Single dates with role keywords should NOT get roles assigned unless there's explicit range syntax
+                    if dates_count == 1:
+                        # For single dates, only assign role if explicit range cue is present
+                        if _has_explicit_range_cue(osentence):
+                            logger.info(
+                                f"[date_role] MODIFY_BOOKING: Detected START_DATE role keyword '{keyword}' for single date with explicit range cue (date_index={date_index})",
+                                extra={'sentence': osentence, 'date_entity': date_entity.get('text', ''), 'keyword': keyword}
+                            )
+                            return "START_DATE"
+                        else:
+                            logger.debug(
+                                f"[date_role] MODIFY_BOOKING: Ignoring START_DATE role keyword '{keyword}' for single date - no explicit range cue",
+                                extra={'sentence': osentence, 'date_entity': date_entity.get('text', ''), 'keyword': keyword, 'dates_count': dates_count}
+                            )
+                            return None
+        
+        # Check for END_DATE role keywords (e.g., "end date", "check-out date")
+        for keyword in end_role_keywords:
+            pattern = rf"\b{re.escape(keyword)}\b"
+            match = re.search(pattern, sentence_for_role_check, re.IGNORECASE)
+            if match:
+                keyword_pos = match.start()
+                keyword_end = match.end()
+                # Only assign role if date appears AFTER the role keyword (ignore dates before it as contextual)
+                if date_char_start >= 0:
+                    # Date found in sentence - check if it appears after the role keyword
+                    if keyword_end <= date_char_start <= keyword_end + 150:
+                        # Date appears after role keyword - assign END_DATE role
+                        logger.info(
+                            f"[date_role] MODIFY_BOOKING: Detected END_DATE role keyword '{keyword}' for date_index={date_index} "
+                            f"(keyword at {keyword_pos}-{keyword_end}, date at {date_char_start} - date appears after keyword)",
+                            extra={'sentence': osentence, 'date_entity': date_entity.get('text', ''), 'keyword': keyword}
+                        )
+                        return "END_DATE"
+                    else:
+                        # Date appears before role keyword - ignore as contextual (don't assign role)
+                        logger.debug(
+                            f"[date_role] MODIFY_BOOKING: Ignoring date before END_DATE role keyword '{keyword}' (date at {date_char_start}, keyword at {keyword_pos}-{keyword_end})",
+                            extra={'intent': intent_name, 'date_index': date_index, 'keyword': keyword}
+                        )
+                        return None
+                else:
+                    # Date text not found - check if we have only one date (single date with role keyword)
+                    # CRITICAL: For MODIFY_BOOKING, only assign role if explicit range cue exists
+                    # Single dates with role keywords should NOT get roles assigned unless there's explicit range syntax
+                    if dates_count == 1:
+                        # For single dates, only assign role if explicit range cue is present
+                        if _has_explicit_range_cue(osentence):
+                            logger.info(
+                                f"[date_role] MODIFY_BOOKING: Detected END_DATE role keyword '{keyword}' for single date with explicit range cue (date_index={date_index})",
+                                extra={'sentence': osentence, 'date_entity': date_entity.get('text', ''), 'keyword': keyword}
+                            )
+                            return "END_DATE"
+                        else:
+                            logger.debug(
+                                f"[date_role] MODIFY_BOOKING: Ignoring END_DATE role keyword '{keyword}' for single date - no explicit range cue",
+                                extra={'sentence': osentence, 'date_entity': date_entity.get('text', ''), 'keyword': keyword, 'dates_count': dates_count}
+                            )
+                            return None
+    
+    # Check for START_DATE range signals (from, starting, beginning, since)
     logger.info(
         f"[date_role] Checking START_DATE signals: {start_signals}, in '{sentence_before_date}'",
         extra={'intent': intent_name, 'date_index': date_index}
@@ -2127,14 +2258,29 @@ def _detect_date_role(
                    'date_index': date_index, 'signal': signal}
         )
         if match:
-            logger.info(
-                f"[date_role] ✓ Detected START_DATE signal '{signal}' for date_index={date_index}",
-                extra={'sentence': osentence, 'date_entity': date_entity.get(
-                    'text', ''), 'signal': signal}
-            )
-            return "START_DATE"
+            # For MODIFY_BOOKING: only assign if we have range syntax (two dates + range syntax)
+            if is_modify_booking:
+                if has_range_syntax and dates_count >= 2:
+                    logger.info(
+                        f"[date_role] MODIFY_BOOKING: Detected START_DATE signal '{signal}' with range syntax for date_index={date_index}",
+                        extra={'sentence': osentence, 'date_entity': date_entity.get('text', ''), 'signal': signal}
+                    )
+                    return "START_DATE"
+                else:
+                    logger.debug(
+                        f"[date_role] MODIFY_BOOKING: Ignoring START_DATE signal '{signal}' - no range syntax or insufficient dates",
+                        extra={'intent': intent_name, 'date_index': date_index, 'has_range_syntax': has_range_syntax, 'dates_count': dates_count}
+                    )
+                    # Don't return - continue to check other signals
+            else:
+                # For CREATE_RESERVATION: use signal as-is
+                logger.info(
+                    f"[date_role] ✓ Detected START_DATE signal '{signal}' for date_index={date_index}",
+                    extra={'sentence': osentence, 'date_entity': date_entity.get('text', ''), 'signal': signal}
+                )
+                return "START_DATE"
 
-    # Check for END_DATE signals
+    # Check for END_DATE range signals (to, until, till, through, ending)
     logger.info(
         f"[date_role] Checking END_DATE signals: {end_signals}, in '{sentence_before_date}'",
         extra={'intent': intent_name, 'date_index': date_index}
@@ -2148,36 +2294,182 @@ def _detect_date_role(
                    'date_index': date_index, 'signal': signal}
         )
         if match:
+            # For MODIFY_BOOKING: only assign if we have range syntax (two dates + range syntax)
+            # CRITICAL: For single dates, "to" is ambiguous (e.g., "change X to Y" is not a date range)
+            # Only assign END_DATE role if we have explicit range syntax ("from X to Y" or "between X and Y")
+            if is_modify_booking:
+                # For single dates (dates_count == 1), NEVER assign roles based on standalone signals like "to"
+                # Standalone "to" in "change X to Y" does NOT indicate a date range
+                if dates_count == 1:
+                    logger.debug(
+                        f"[date_role] MODIFY_BOOKING: Ignoring END_DATE signal '{signal}' - single date detected (ambiguous, not a range)",
+                        extra={'intent': intent_name, 'date_index': date_index, 'signal': signal, 'dates_count': dates_count, 'osentence': osentence}
+                    )
+                    # Don't return - continue to check defaults, which will return None for single dates
+                elif has_range_syntax and dates_count >= 2:
+                    logger.info(
+                        f"[date_role] MODIFY_BOOKING: Detected END_DATE signal '{signal}' with range syntax for date_index={date_index}",
+                        extra={'sentence': osentence, 'date_entity': date_entity.get('text', ''), 'signal': signal}
+                    )
+                    return "END_DATE"
+                else:
+                    logger.debug(
+                        f"[date_role] MODIFY_BOOKING: Ignoring END_DATE signal '{signal}' - no range syntax or insufficient dates",
+                        extra={'intent': intent_name, 'date_index': date_index, 'has_range_syntax': has_range_syntax, 'dates_count': dates_count}
+                    )
+                    # Don't return - continue to check defaults
+            else:
+                # For CREATE_RESERVATION: use signal as-is
+                logger.info(
+                    f"[date_role] ✓ Detected END_DATE signal '{signal}' for date_index={date_index}",
+                    extra={'sentence': osentence, 'date_entity': date_entity.get('text', ''), 'signal': signal}
+                )
+                return "END_DATE"
+
+    # Default behavior: depends on intent
+    if is_modify_booking:
+        # For MODIFY_BOOKING: Never infer roles from intent alone (no default assignment)
+        # Only assign if we have range syntax with two dates
+        if has_range_syntax and dates_count >= 2:
+            # Range syntax with two dates: assign by position
+            if date_index == 0:
+                logger.info(
+                    f"[date_role] MODIFY_BOOKING: Default START_DATE for date_index=0 (range syntax with two dates)",
+                    extra={'intent': intent_name, 'date_index': date_index}
+                )
+                return "START_DATE"
+            elif date_index == 1:
+                logger.info(
+                    f"[date_role] MODIFY_BOOKING: Default END_DATE for date_index=1 (range syntax with two dates)",
+                    extra={'intent': intent_name, 'date_index': date_index}
+                )
+                return "END_DATE"
+        
+        # No range syntax or insufficient dates: return None (no role assignment)
+        logger.info(
+            f"[date_role] MODIFY_BOOKING: No role assigned - no explicit role keyword, no range syntax, or insufficient dates",
+            extra={'intent': intent_name, 'date_index': date_index, 'has_range_syntax': has_range_syntax, 'dates_count': dates_count}
+        )
+        return None
+    else:
+        # For CREATE_RESERVATION: Default by position (first = START_DATE, second = END_DATE)
+        logger.info(
+            f"[date_role] No signals found, using default: date_index={date_index}",
+            extra={'intent': intent_name, 'date_index': date_index}
+        )
+        if date_index == 0:
             logger.info(
-                f"[date_role] ✓ Detected END_DATE signal '{signal}' for date_index={date_index}",
-                extra={'sentence': osentence, 'date_entity': date_entity.get(
-                    'text', ''), 'signal': signal}
+                f"[date_role] Default: returning START_DATE for date_index=0",
+                extra={'intent': intent_name, 'date_index': date_index}
+            )
+            return "START_DATE"
+        elif date_index == 1:
+            logger.info(
+                f"[date_role] Default: returning END_DATE for date_index=1",
+                extra={'intent': intent_name, 'date_index': date_index}
             )
             return "END_DATE"
-
-    # Default: first date is START_DATE, second is END_DATE (for ranges)
-    logger.info(
-        f"[date_role] No signals found, using default: date_index={date_index}",
-        extra={'intent': intent_name, 'date_index': date_index}
-    )
-    if date_index == 0:
-        logger.info(
-            f"[date_role] Default: returning START_DATE for date_index=0",
-            extra={'intent': intent_name, 'date_index': date_index}
-        )
-        return "START_DATE"
-    elif date_index == 1:
-        logger.info(
-            f"[date_role] Default: returning END_DATE for date_index=1",
-            extra={'intent': intent_name, 'date_index': date_index}
-        )
-        return "END_DATE"
 
     logger.warning(
         f"[date_role] No role determined: date_index={date_index} (not 0 or 1)",
         extra={'intent': intent_name, 'date_index': date_index}
     )
     return None
+
+
+def _has_explicit_range_cue(osentence: str) -> bool:
+    """
+    Check if sentence has explicit range cues that would justify date role assignment.
+    
+    Explicit cues include:
+    - Range syntax: "from...to", "between...and"
+    - Role keywords: "start date", "end date", "check-in date", "check-out date"
+    - End signals: "until", "till", "through"
+    
+    Args:
+        osentence: Original sentence to check
+        
+    Returns:
+        True if explicit range cue is present, False otherwise
+    """
+    osentence_lower = osentence.lower()
+    
+    # Check for range syntax (must be complete patterns, not standalone words)
+    # "from X to Y" or "between X and Y" - these indicate date ranges
+    range_patterns = [
+        r'\bfrom\s+.*?\s+to\s+',  # "from date1 to date2"
+        r'\bbetween\s+.*?\s+and\s+'  # "between date1 and date2"
+    ]
+    for pattern in range_patterns:
+        if re.search(pattern, osentence_lower, re.IGNORECASE):
+            return True
+    
+    # Check for role keywords (explicit date role mentions)
+    role_keywords = [
+        "start date", "start_date", "check-in date", "check-in", "checkin date", "arrival date",
+        "end date", "end_date", "check-out date", "check-out", "checkout date", "check out date", "departure date"
+    ]
+    for keyword in role_keywords:
+        pattern = rf"\b{re.escape(keyword)}\b"
+        if re.search(pattern, osentence_lower, re.IGNORECASE):
+            return True
+    
+    # Check for end signals (these are range cues, but NOT standalone "to")
+    # "to" alone is ambiguous (can be "change X to Y" which doesn't indicate a range)
+    # Only check unambiguous end signals that clearly indicate ranges
+    end_signals = ["until", "till", "through"]
+    for signal in end_signals:
+        pattern = rf"\b{re.escape(signal)}\b"
+        if re.search(pattern, osentence_lower, re.IGNORECASE):
+            return True
+    
+    return False
+
+
+def _normalize_date_roles_for_modify_booking(
+    date_roles: List[Optional[str]],
+    date_refs: List[str],
+    intent_name: Optional[str],
+    osentence: str
+) -> List[Optional[str]]:
+    """
+    Final normalization guard for MODIFY_BOOKING single dates.
+    
+    If intent == MODIFY_BOOKING AND len(date_refs) == 1 AND NOT has_explicit_range_cue,
+    force date_roles = [] to prevent role leakage.
+    
+    This guard runs AFTER all role inference paths to ensure no downstream logic
+    can reintroduce roles for single dates without explicit range cues.
+    
+    Args:
+        date_roles: Current date_roles list (may contain START_DATE/END_DATE)
+        date_refs: List of date references
+        intent_name: Intent name
+        osentence: Original sentence
+        
+    Returns:
+        Normalized date_roles list (empty if MODIFY_BOOKING single date without explicit cue)
+    """
+    if intent_name != "MODIFY_BOOKING":
+        return date_roles
+    
+    if len(date_refs) != 1:
+        return date_roles
+    
+    if _has_explicit_range_cue(osentence):
+        return date_roles
+    
+    # Guard: MODIFY_BOOKING single date without explicit range cue → force empty roles
+    original_roles = date_roles.copy()
+    date_roles_normalized = []
+    
+    logger.debug(
+        f"[date_role] MODIFY_BOOKING normalization guard: Stripping roles for single date without explicit cue. "
+        f"Original: {original_roles}, Normalized: {date_roles_normalized}",
+        extra={'intent': intent_name, 'date_refs': date_refs, 'osentence': osentence, 'original_roles': original_roles}
+    )
+    
+    return date_roles_normalized
 
 
 def _resolve_date_semantics(
@@ -2265,6 +2557,7 @@ def _resolve_date_semantics(
         for idx in range(len(shorthand_refs)):
             role = _detect_date_role(entities, idx, intent_name)
             date_roles.append(role)
+        # Note: Shorthand ranges are always multi-date, so normalization guard doesn't apply
         return {
             "mode": DateMode.RANGE.value,
             "refs": shorthand_refs,
@@ -2285,13 +2578,35 @@ def _resolve_date_semantics(
                 f"date_refs={[normalized_absolute[0]]} "
                 f"date_modifiers={date_modifiers}"
             )
-            # Detect date_role for single absolute date
-            date_role = _detect_date_role(entities, 0, intent_name)
+            # EARLY GUARD: MODIFY_BOOKING single date → skip role detection, force date_roles = []
+            # This prevents role leakage (e.g., "to" token causing END_DATE assignment)
+            # Rule-removal fix: single dates in MODIFY_BOOKING must be treated as generic "date", not "end_date" or "start_date"
+            date_refs_computed = [normalized_absolute[0]]
+            if intent_name == "MODIFY_BOOKING" and len(date_refs_computed) == 1:
+                date_roles = []
+                logger.info(
+                    f"[date_role] MODIFY_BOOKING early guard: Single date detected → skipping role detection, date_roles=[]",
+                    extra={'intent': intent_name, 'date_text': date_text, 'date_refs': date_refs_computed}
+                )
+            else:
+                # For CREATE_* intents or multi-date cases: call _detect_date_role as usual
+                date_role = _detect_date_role(entities, 0, intent_name)
+                date_roles = [date_role] if date_role else []
+            
+            # Final normalization guard: MODIFY_BOOKING single date without explicit cue → force empty roles
+            osentence = entities.get("osentence", "")
+            date_roles = _normalize_date_roles_for_modify_booking(
+                date_roles,
+                [normalized_absolute[0]],
+                intent_name,
+                osentence
+            )
+            
             return {
                 "mode": DateMode.SINGLE.value,
                 "refs": [normalized_absolute[0]],  # Use normalized text
                 "modifiers": date_modifiers,
-                "date_roles": [date_role] if date_role else []
+                "date_roles": date_roles
             }
         elif len(dates_absolute) >= 2:
             # Multiple absolute dates → check for range marker
@@ -2321,26 +2636,53 @@ def _resolve_date_semantics(
         if len(dates) == 1:
             date_text = normalized_dates[0]
 
-            # Detect date_role for single relative date
-            date_role = _detect_date_role(entities, 0, intent_name)
+            # EARLY GUARD: MODIFY_BOOKING single date → skip role detection, force date_role = None
+            # This prevents role leakage (e.g., "to" token causing END_DATE assignment)
+            # Rule-removal fix: single dates in MODIFY_BOOKING must be treated as generic "date", not "end_date" or "start_date"
+            date_refs_computed = [normalized_dates[0]]
+            if intent_name == "MODIFY_BOOKING" and len(date_refs_computed) == 1:
+                date_role = None
+                logger.info(
+                    f"[date_role] MODIFY_BOOKING early guard: Single date detected → skipping role detection, date_role=None",
+                    extra={'intent': intent_name, 'date_text': date_text, 'date_refs': date_refs_computed}
+                )
+            else:
+                # For CREATE_* intents or multi-date cases: call _detect_date_role as usual
+                date_role = _detect_date_role(entities, 0, intent_name)
 
             # Check for fine-grained modifiers (early/mid/end) → always range
             if _has_fine_grained_modifier(date_text):
+                single_date_roles = [date_role] if date_role else []
+                osentence = entities.get("osentence", "")
+                single_date_roles = _normalize_date_roles_for_modify_booking(
+                    single_date_roles,
+                    [normalized_dates[0]],
+                    intent_name,
+                    osentence
+                )
                 return {
                     "mode": DateMode.RANGE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
                     "modifiers": date_modifiers,
-                    "date_roles": [date_role] if date_role else []
+                    "date_roles": single_date_roles
                 }
 
             # Specific weekday → single_day
             # Check this FIRST (before week-based) so "next week Wednesday" is caught correctly
             if _is_specific_weekday(date_text):
+                single_date_roles = [date_role] if date_role else []
+                osentence = entities.get("osentence", "")
+                single_date_roles = _normalize_date_roles_for_modify_booking(
+                    single_date_roles,
+                    [normalized_dates[0]],
+                    intent_name,
+                    osentence
+                )
                 return {
                     "mode": DateMode.SINGLE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
                     "modifiers": date_modifiers,
-                    "date_roles": [date_role] if date_role else []
+                    "date_roles": single_date_roles
                 }
 
             # Week-based → range (only if has concrete anchor)
@@ -2348,11 +2690,19 @@ def _resolve_date_semantics(
             # Check week-based AFTER specific weekday to avoid false matches
             if _is_week_based(date_text):
                 if _has_concrete_date_anchor(date_text, entities):
+                    single_date_roles = [date_role] if date_role else []
+                    osentence = entities.get("osentence", "")
+                    single_date_roles = _normalize_date_roles_for_modify_booking(
+                        single_date_roles,
+                        [normalized_dates[0]],
+                        intent_name,
+                        osentence
+                    )
                     return {
                         "mode": DateMode.RANGE.value,
                         "refs": [normalized_dates[0]],  # Use normalized text
                         "modifiers": date_modifiers,
-                        "date_roles": [date_role] if date_role else []
+                        "date_roles": single_date_roles
                     }
                 else:
                     # No concrete anchor → don't resolve, will trigger clarification
@@ -2367,31 +2717,55 @@ def _resolve_date_semantics(
             # Simple relative days → single_day
             # Check this AFTER week-based to avoid false matches
             if _is_simple_relative_day(date_text):
+                single_date_roles = [date_role] if date_role else []
+                osentence = entities.get("osentence", "")
+                single_date_roles = _normalize_date_roles_for_modify_booking(
+                    single_date_roles,
+                    [normalized_dates[0]],
+                    intent_name,
+                    osentence
+                )
                 return {
                     "mode": DateMode.SINGLE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
                     "modifiers": date_modifiers,
-                    "date_roles": [date_role] if date_role else []
+                    "date_roles": single_date_roles
                 }
 
             # Weekend → range
             if _is_weekend_reference(date_text):
+                single_date_roles = [date_role] if date_role else []
+                osentence = entities.get("osentence", "")
+                single_date_roles = _normalize_date_roles_for_modify_booking(
+                    single_date_roles,
+                    [normalized_dates[0]],
+                    intent_name,
+                    osentence
+                )
                 return {
                     "mode": DateMode.RANGE.value,
                     "refs": [normalized_dates[0]],  # Use normalized text
                     "modifiers": date_modifiers,
-                    "date_roles": [date_role] if date_role else []
+                    "date_roles": single_date_roles
                 }
 
             # Month-relative → range (full month) (only if has concrete anchor)
             # Guard: Vague phrases like "next month" without weekday/date require clarification
             if _is_month_relative(date_text):
                 if _has_concrete_date_anchor(date_text, entities):
+                    single_date_roles = [date_role] if date_role else []
+                    osentence = entities.get("osentence", "")
+                    single_date_roles = _normalize_date_roles_for_modify_booking(
+                        single_date_roles,
+                        [normalized_dates[0]],
+                        intent_name,
+                        osentence
+                    )
                     return {
                         "mode": DateMode.RANGE.value,
                         "refs": [normalized_dates[0]],  # Use normalized text
                         "modifiers": date_modifiers,
-                        "date_roles": [date_role] if date_role else []
+                        "date_roles": single_date_roles
                     }
                 else:
                     # No concrete anchor → don't resolve, will trigger clarification
@@ -2404,11 +2778,19 @@ def _resolve_date_semantics(
                     }
 
             # Default: single_day
+            single_date_roles = [date_role] if date_role else []
+            osentence = entities.get("osentence", "")
+            single_date_roles = _normalize_date_roles_for_modify_booking(
+                single_date_roles,
+                [normalized_dates[0]],
+                intent_name,
+                osentence
+            )
             return {
                 "mode": DateMode.SINGLE.value,
                 "refs": [normalized_dates[0]],  # Use normalized text
                 "modifiers": date_modifiers,
-                "date_roles": [date_role] if date_role else []
+                "date_roles": single_date_roles
             }
         elif len(dates) >= 2:
             # Multiple relative dates → check for range marker
@@ -2448,11 +2830,19 @@ def _resolve_date_semantics(
     if dates_absolute and dates:
         # Absolute takes precedence
         date_role = _detect_date_role(entities, 0, intent_name)
+        single_date_roles = [date_role] if date_role else []
+        osentence = entities.get("osentence", "")
+        single_date_roles = _normalize_date_roles_for_modify_booking(
+            single_date_roles,
+            [normalized_absolute[0]],
+            intent_name,
+            osentence
+        )
         return {
             "mode": DateMode.SINGLE.value,
             "refs": [normalized_absolute[0]],  # Use normalized text
             "modifiers": date_modifiers,
-            "date_roles": [date_role] if date_role else []
+            "date_roles": single_date_roles
         }
 
     # Rule 5: No dates

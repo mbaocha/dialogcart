@@ -323,4 +323,3 @@ class TestExecutionBackend:
         This is a test utility method, not part of the execution interface.
         """
         cls._booking_counter = 0
-

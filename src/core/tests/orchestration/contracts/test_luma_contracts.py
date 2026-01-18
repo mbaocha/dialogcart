@@ -4,7 +4,7 @@ Tests for Luma Contract Assertions
 
 import pytest
 
-from core.orchestration.contracts.luma_contracts import assert_luma_contract
+from core.orchestration.nlu.luma_contracts import assert_luma_contract
 from core.orchestration.errors import ContractViolation
 
 

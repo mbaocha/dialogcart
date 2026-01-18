@@ -19,7 +19,7 @@ from core.tests.integration.test_appointment_e2e import (
     get_customer_details
 )
 from core.tests.session.followup import followup_scenarios
-from core.session import get_session, clear_session, save_session
+from core.orchestration.session import get_session, clear_session, save_session
 from core.orchestration.orchestrator import handle_message
 from core.orchestration.api.session_merge import build_session_state_from_outcome
 import os
@@ -134,11 +134,16 @@ def assert_turn_expectations(
     Returns:
         Error message if assertion fails, None if passes
     """
+    if not result or not isinstance(result, dict):
+        return f"Turn {turn_index + 1} failed: result is None or not a dict: {result}"
+    
     if not result.get("success"):
         error_msg = result.get("error", "Unknown error")
         return f"Turn {turn_index + 1} failed: {error_msg}"
 
     outcome = result.get("outcome", {})
+    if not isinstance(outcome, dict):
+        return f"Turn {turn_index + 1} failed: outcome is not a dict: {outcome}"
 
     # Assert intent if provided
     expected_intent = expected.get("intent")
@@ -284,20 +289,40 @@ def test_scenario(
                 text=sentence,
                 domain=domain,
                 timezone="UTC",
-                phone_number=customer_details.get('phone_number'),
-                email=customer_details.get('email'),
-                customer_id=customer_details.get('customer_id'),
+                phone_number=customer_details.get('phone_number') if customer_details else None,
+                email=customer_details.get('email') if customer_details else None,
+                customer_id=customer_details.get('customer_id') if customer_details else None,
                 luma_client=luma_client,
                 catalog_client=catalog_client,
                 session_state=session_state,
                 planning_only=True  # Stop at READY, don't execute
             )
+            
+            if not result or not isinstance(result, dict):
+                error_msg = f"Turn {turn_index + 1} failed: handle_message returned None or not a dict: {result}"
+                # Print minimal snapshot on failure
+                print(f"\n{'='*70}")
+                print(f"FAIL_SNAPSHOT: scenario={scenario_name} turn={turn_index + 1} user_id={user_id}")
+                print(f"{'='*70}")
+                fail_snapshot = {
+                    "expected": expected,
+                    "got": {"error": "handle_message returned None or not a dict", "result": result},
+                    "session_before": session_state,
+                    "session_after": None,
+                    "merged_luma_response": None,
+                    "final_plan": {},
+                    "facts": {}
+                }
+                print(json.dumps(fail_snapshot, indent=2, default=str))
+                print(f"{'='*70}\n")
+                return False, error_msg
 
             if verbose:
                 print(f"\nResult:")
                 print(json.dumps(result, indent=2, default=str))
 
             # Save session after response (same logic as API endpoint)
+            # Note: result already validated above
             outcome = result.get("outcome")
             if outcome and isinstance(outcome, dict):
                 outcome_status = outcome.get("status")
@@ -331,9 +356,48 @@ def test_scenario(
                     print(
                         f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - NOT SAVED (status={outcome_status})")
 
+            # Capture data for failure snapshot after save, before assertions
+            session_state_before = session_state
+            session_state_after = None
+            merged_luma_response_for_snapshot = result.get("_merged_luma_response")
+            plan_for_snapshot = outcome.get("plan", {}) if outcome else {}
+            facts_for_snapshot = outcome.get("facts", {}) if outcome else {}
+            
+            # Get session after save (if saved) - session was saved above if NEEDS_CLARIFICATION
+            if outcome and isinstance(outcome, dict):
+                outcome_status_snapshot = outcome.get("status")
+                if outcome_status_snapshot == "NEEDS_CLARIFICATION":
+                    # Session was saved - get it for snapshot
+                    session_state_after = get_session(user_id)
+            
             # Assert expectations
             error_msg = assert_turn_expectations(result, expected, turn_index)
             if error_msg:
+                # Print compact FAIL_SNAPSHOT on assertion failure
+                actual_outcome = result.get("outcome", {}) if result else {}
+                actual_json = {
+                    "intent": actual_outcome.get("intent_name"),
+                    "status": actual_outcome.get("status"),
+                    "missing_slots": actual_outcome.get("facts", {}).get("missing_slots", []),
+                    "slots": actual_outcome.get("facts", {}).get("slots", {})
+                }
+                
+                fail_snapshot = {
+                    "expected": expected,
+                    "got": actual_json,
+                    "session_before": session_state_before,
+                    "session_after": session_state_after,
+                    "merged_luma_response": merged_luma_response_for_snapshot,
+                    "final_plan": plan_for_snapshot,
+                    "facts": facts_for_snapshot
+                }
+                
+                print(f"\n{'='*70}")
+                print(f"FAIL_SNAPSHOT: scenario={scenario_name} turn={turn_index + 1} user_id={user_id}")
+                print(f"{'='*70}")
+                print(json.dumps(fail_snapshot, indent=2, default=str))
+                print(f"{'='*70}\n")
+                
                 return False, error_msg
 
         # After all turns, check that session is cleared if final status was READY/EXECUTED/AWAITING_CONFIRMATION
@@ -344,15 +408,63 @@ def test_scenario(
         if final_status == "READY":
             session_state = get_session(user_id)
             if session_state is not None:
-                return False, f"Session not cleared after READY status. Session state: {session_state}"
+                error_msg = f"Session not cleared after READY status. Session state: {session_state}"
+                # Print FAIL_SNAPSHOT on session not cleared
+                fail_snapshot = {
+                    "expected": {"status": "READY", "session_cleared": True},
+                    "got": {"status": "READY", "session_cleared": False, "session_state": session_state},
+                    "session_before": None,
+                    "session_after": session_state,
+                    "merged_luma_response": None,
+                    "final_plan": {},
+                    "facts": {}
+                }
+                print(f"\n{'='*70}")
+                print(f"FAIL_SNAPSHOT: scenario={scenario_name} turn=FINAL user_id={user_id}")
+                print(f"{'='*70}")
+                print(json.dumps(fail_snapshot, indent=2, default=str))
+                print(f"{'='*70}\n")
+                return False, error_msg
 
         if verbose:
             print(f"\n✓ Scenario {scenario_id} passed")
 
         return True, None
 
-    except Exception as e:
-        return False, f"Exception in scenario {scenario_id}: {str(e)}"
+    except (AssertionError, Exception) as e:
+        # Print FAIL_SNAPSHOT on exception/assertion
+        # Try to capture last turn's state if available
+        session_state_before = None
+        session_state_after = None
+        merged_luma_response_for_snapshot = None
+        plan_for_snapshot = {}
+        facts_for_snapshot = {}
+        
+        try:
+            session_state_before = get_session(user_id)
+            # For exceptions, we might not have turn data, but try to get what we can
+        except Exception:
+            pass
+        
+        fail_snapshot = {
+            "expected": "Exception occurred - no expected data available",
+            "got": {"error": str(e)},
+            "session_before": session_state_before,
+            "session_after": session_state_after,
+            "merged_luma_response": merged_luma_response_for_snapshot,
+            "final_plan": plan_for_snapshot,
+            "facts": facts_for_snapshot
+        }
+        
+        print(f"\n{'='*70}")
+        print(f"FAIL_SNAPSHOT: scenario={scenario_name} turn=EXCEPTION user_id={user_id}")
+        print(f"{'='*70}")
+        print(json.dumps(fail_snapshot, indent=2, default=str))
+        print(f"{'='*70}\n")
+        
+        import traceback
+        tb = traceback.format_exc()
+        return False, f"Exception in scenario {scenario_id}: {str(e)}\n{tb}"
     finally:
         # Always clear session after test
         clear_session(user_id)
@@ -371,7 +483,7 @@ def cleanup_test_sessions(verbose: bool = False) -> None:
     try:
         # Import here to avoid circular dependencies
         import redis
-        from core.session.session_manager import _get_redis_url, SESSION_KEY_PREFIX
+        from core.orchestration.session.session_manager import _get_redis_url, SESSION_KEY_PREFIX
 
         redis_url = _get_redis_url()
         if not redis_url:
@@ -430,9 +542,11 @@ def run_all_scenarios(
     failed = 0
     skipped = 0
     failures = []
+    failing_scenario_names = []
 
     for scenario in scenarios:
         scenario_id = scenario.get("id")
+        scenario_name = scenario.get("name", f"scenario_{scenario_id}")
         if scenario_id is None:
             skipped += 1
             continue
@@ -445,8 +559,41 @@ def run_all_scenarios(
         else:
             failed += 1
             failures.append((scenario_id, error_msg or "Unknown error"))
+            failing_scenario_names.append(scenario_name)
 
-    return passed, failed, skipped, failures
+    return passed, failed, skipped, failures, failing_scenario_names
+
+
+class TeeOutput:
+    """Write to both file and stdout."""
+    def __init__(self, file_path, verbose=True):
+        self.file = open(file_path, 'w', encoding='utf-8')
+        self.stdout = sys.stdout
+        self.verbose = verbose
+    
+    def write(self, text):
+        self.file.write(text)
+        if self.verbose:
+            self.stdout.write(text)
+        self.file.flush()
+        if self.verbose:
+            self.stdout.flush()
+    
+    def flush(self):
+        self.file.flush()
+        if self.verbose:
+            self.stdout.flush()
+    
+    def close(self):
+        if self.file:
+            self.file.close()
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
 
 
 def main():
@@ -463,6 +610,7 @@ Examples:
   python -m core.tests.session.test_session 22,24
   python -m core.tests.session.test_session 30-33
   python -m core.tests.session.test_session 22,24,30-33
+  python -m core.tests.session.test_session --v -o result.txt
         """
     )
     parser.add_argument(
@@ -475,69 +623,93 @@ Examples:
         action="store_true",
         help="Verbose output"
     )
+    parser.add_argument(
+        "-o", "--output",
+        type=str,
+        help="Save output to file"
+    )
 
     args = parser.parse_args()
 
-    # Parse scenario IDs
-    scenario_ids = parse_scenario_args(args.scenarios)
-
-    # Filter scenarios
-    scenarios_to_run = filter_scenarios_by_id(followup_scenarios, scenario_ids)
-
-    if not scenarios_to_run:
-        print("No scenarios to run!")
-        sys.exit(1)
-
-    # Get customer details
-    customer_details = get_customer_details()
-
-    # Print header
-    if not args.verbose:
-        scenarios_count = len(scenarios_to_run)
-        print(
-            f"Running session follow-up tests ({scenarios_count} scenario{'s' if scenarios_count != 1 else ''})...")
+    # Set up output redirection if -o is provided
+    output_file = args.output
+    original_stdout = sys.stdout
+    exit_code = 0
+    
+    # Use context manager for file output
+    if output_file:
+        tee = TeeOutput(output_file, verbose=args.verbose)
+        sys.stdout = tee
     else:
-        print("="*70)
-        print("CORE SESSION FOLLOW-UP TEST SUITE")
-        print("="*70)
-        print(f"Total scenarios: {len(followup_scenarios)}")
-        if len(scenarios_to_run) != len(followup_scenarios):
+        tee = None
+
+    try:
+        # Parse scenario IDs
+        scenario_ids = parse_scenario_args(args.scenarios)
+
+        # Filter scenarios
+        scenarios_to_run = filter_scenarios_by_id(followup_scenarios, scenario_ids)
+
+        if not scenarios_to_run:
+            print("No scenarios to run!")
+            exit_code = 1
+        else:
+            # Get customer details
+            customer_details = get_customer_details()
+
+            # Print header
+            if not args.verbose:
+                scenarios_count = len(scenarios_to_run)
+                print(
+                    f"Running session follow-up tests ({scenarios_count} scenario{'s' if scenarios_count != 1 else ''})...")
+            else:
+                print("="*70)
+                print("CORE SESSION FOLLOW-UP TEST SUITE")
+                print("="*70)
+                print(f"Total scenarios: {len(followup_scenarios)}")
+                if len(scenarios_to_run) != len(followup_scenarios):
+                    print(
+                        f"Running: {len(scenarios_to_run)} scenario{'s' if len(scenarios_to_run) != 1 else ''}")
+
+            # Run scenarios
+            passed, failed, skipped, failures, failing_scenario_names = run_all_scenarios(
+                scenarios_to_run,
+                customer_details,
+                verbose=args.verbose
+            )
+
+            # Print summary
+            if args.verbose:
+                print("\n" + "="*70)
+                print("TEST SUMMARY")
+                print("="*70)
+            else:
+                print()
+
             print(
-                f"Running: {len(scenarios_to_run)} scenario{'s' if len(scenarios_to_run) != 1 else ''}")
+                f"Total: {len(scenarios_to_run)} | Passed: {passed} | Failed: {failed} | Skipped: {skipped}")
 
-    # Run scenarios
-    passed, failed, skipped, failures = run_all_scenarios(
-        scenarios_to_run,
-        customer_details,
-        verbose=args.verbose
-    )
+            # Print final summary: TOTAL FAILURES and failing scenario names only
+            if failures:
+                print(f"\nTOTAL FAILURES: {failed}")
+                if failing_scenario_names:
+                    print("Failing scenarios:")
+                    for scenario_name in failing_scenario_names:
+                        print(f"  - {scenario_name}")
 
-    # Print summary
-    if args.verbose:
-        print("\n" + "="*70)
-        print("TEST SUMMARY")
-        print("="*70)
-    else:
-        print()
+            if args.verbose:
+                print("="*70)
 
-    print(
-        f"Total: {len(scenarios_to_run)} | Passed: {passed} | Failed: {failed} | Skipped: {skipped}")
-
-    if failures:
-        print("\nFailures:")
-        for scenario_id, error_msg in failures:
-            scenario = next(
-                (s for s in followup_scenarios if s.get("id") == scenario_id), {})
-            print(f"  Scenario {scenario_id}: {scenario.get('name', 'N/A')}")
-            print(f"    Error: {error_msg}")
-
-    if args.verbose:
-        print("="*70)
-
-    if failed > 0:
-        sys.exit(1)
-    else:
-        sys.exit(0)
+            exit_code = 1 if failed > 0 else 0
+    finally:
+        # Restore stdout and close file
+        if tee:
+            sys.stdout = original_stdout
+            tee.close()
+            if not args.verbose and exit_code == 0:
+                print(f"Output saved to: {output_file}")
+    
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

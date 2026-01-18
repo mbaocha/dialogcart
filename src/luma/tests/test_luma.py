@@ -392,6 +392,28 @@ def assert_response(resp, expected):
                 f"Derived from issues structure: {actual_issues}"
             )
 
+        # Check slots for needs_clarification status (e.g., extracted time/date that should be in slots)
+        # This ensures Luma surfaces extracted temporal values in slots, not just in semantic/context layers
+        expected_slots = expected.get("slots", {})
+        if expected_slots:
+            actual_slots = resp.get("slots", {})
+            # Check each expected slot (date, time, date_range, service_id, booking_id, etc.)
+            for slot_name, expected_value in expected_slots.items():
+                actual_value = actual_slots.get(slot_name)
+                if slot_name == "date_range":
+                    # Special handling for date_range (dict comparison)
+                    assert actual_value is not None, f"Expected {slot_name} in slots for needs_clarification status"
+                    assert isinstance(
+                        actual_value, dict), f"{slot_name} must be a dict, got {type(actual_value)}"
+                    assert actual_value == expected_value, (
+                        f"{slot_name} mismatch: got {actual_value}, expected {expected_value}"
+                    )
+                else:
+                    # Direct value comparison for other slots (date, time, service_id, booking_id, etc.)
+                    assert actual_value == expected_value, (
+                        f"Slot '{slot_name}' mismatch: got '{actual_value}', expected '{expected_value}'"
+                    )
+
 
 def test_cases(scenarios_to_run=None):
     """

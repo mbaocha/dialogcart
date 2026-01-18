@@ -4,7 +4,7 @@ Tests for workflow registry and registration.
 
 import pytest
 
-from core.workflows import (
+from core.routing.workflows import (
     WorkflowRegistry,
     register_workflow,
     get_workflow,

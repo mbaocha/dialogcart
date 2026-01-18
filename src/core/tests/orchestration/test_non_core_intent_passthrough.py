@@ -9,7 +9,7 @@ import pytest
 from unittest.mock import Mock, patch
 
 from core.orchestration.orchestrator import handle_message, _handle_non_core_intent
-from core.intents.base_intents import CORE_BASE_INTENTS
+from core.routing.intents.base_intents import CORE_BASE_INTENTS
 
 
 class TestNonCoreIntentPassthrough:
@@ -93,7 +93,7 @@ class TestNonCoreIntentPassthrough:
         # This is a sanity check - core intents should not be passed through
         for intent in CORE_BASE_INTENTS:
             # Just verify the intent is recognized as core
-            from core.intents.base_intents import is_core_intent
+            from core.routing.intents.base_intents import is_core_intent
             assert is_core_intent(intent) is True
     
     def test_non_core_intent_preserves_luma_data(self):
@@ -213,10 +213,10 @@ class TestNonCoreIntentInvariants:
     
     def test_core_intents_not_affected(self):
         """Verify core intents are not affected by non-core intent handling."""
-        from core.intents.base_intents import CORE_BASE_INTENTS
+        from core.routing.intents.base_intents import CORE_BASE_INTENTS
         
         # All core intents should still be recognized as core
         for intent in CORE_BASE_INTENTS:
-            from core.intents.base_intents import is_core_intent
+            from core.routing.intents.base_intents import is_core_intent
             assert is_core_intent(intent) is True
 

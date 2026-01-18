@@ -1,28 +1,22 @@
 """
-Example Workflow: Payment Prompt
+Payment Prompt Workflow Example
 
-A minimal example workflow that injects a payment prompt into the outcome
-after a booking is successfully created.
-
-This demonstrates:
-- Workflow registration
-- Outcome mutation (injecting data into facts.context)
-- No core edits required
+Example workflow that injects a payment prompt after booking creation.
+This demonstrates how workflows can enrich outcomes without modifying core logic.
 """
 
 from typing import Dict, Any
-
 from core.routing.workflows import Workflow
+
+# from core.routing.workflows import register_workflow
 
 
 class PaymentPromptWorkflow:
     """
     Example workflow that adds a payment prompt after booking creation.
     
-    This workflow:
-    - Observes CREATE_APPOINTMENT execution outcomes
-    - Injects a payment prompt into facts.context
-    - Does NOT change orchestration state or outcome status
+    This workflow observes CREATE_APPOINTMENT outcomes and injects
+    a payment prompt into facts.context for rendering.
     """
     
     intent_name = "CREATE_APPOINTMENT"
@@ -32,10 +26,10 @@ class PaymentPromptWorkflow:
         Inject payment prompt into outcome facts.context.
         
         Args:
-            outcome: Outcome dictionary with status "EXECUTED"
+            outcome: Outcome dictionary with status="EXECUTED"
             
         Returns:
-            Outcome with enriched facts.context containing payment_prompt
+            Outcome with payment_prompt added to facts.context
         """
         # Ensure facts structure exists
         if "facts" not in outcome:
@@ -43,15 +37,14 @@ class PaymentPromptWorkflow:
         if "context" not in outcome["facts"]:
             outcome["facts"]["context"] = {}
         
-        # Inject payment prompt into context
+        # Inject payment prompt
         outcome["facts"]["context"]["payment_prompt"] = (
-            "Do you want to pay now or later?"
+            "Your booking is confirmed! Would you like to pay now or later?"
         )
         
         return outcome
 
 
-# Example registration (commented out - workflows should be registered by application)
-# from core.routing.workflows import register_workflow
+# Example: Register workflow (commented out to avoid auto-registration)
 # register_workflow(PaymentPromptWorkflow())
 

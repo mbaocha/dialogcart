@@ -13,7 +13,7 @@ Usage:
 """
 
 from core.orchestration.orchestrator import handle_message
-from core.orchestration.clients.luma_client import LumaClient
+from core.orchestration.nlu import LumaClient
 import json
 import os
 import sys

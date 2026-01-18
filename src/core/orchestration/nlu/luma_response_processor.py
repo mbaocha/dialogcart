@@ -16,6 +16,7 @@ Responsibilities:
 """
 
 import logging
+import json
 import threading
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Set
@@ -24,6 +25,7 @@ import yaml
 
 from core.routing import get_template_key, get_action_name
 from core.orchestration.errors import UnsupportedIntentError
+from core.orchestration.api.turn_state import TurnState, DecisionReason
 from luma.clarification.reasons import ClarificationReason
 
 logger = logging.getLogger(__name__)
@@ -80,21 +82,21 @@ def _normalize_modify_booking_missing_slots(
     luma_response: Dict[str, Any]
 ) -> List[str]:
     """
-    Normalize MODIFY_BOOKING missing_slots according to test contract.
+    Normalize MODIFY_BOOKING missing_slots according to planning contract.
     
-    MODIFY_BOOKING contract (tests define truth):
-    - On turn 1: missing_slots must be ONLY ["booking_id"] OR ["change"]
-    - Core must NOT require date/time if a change intent exists
+    ARCHITECTURAL CHANGE: Planning vs execution slot contracts are now separated.
+    - Planning contract: ["booking_id", "date"] (if time provided, date required)
+    - Execution contract: ["booking_id"] (checked later, not used for planning)
     
-    A "change intent" exists when slots contain date/time information.
-    If a change intent exists, filter out date/time from missing_slots.
+    This function now preserves planning-required slots (date) in missing_slots.
+    It only filters out execution-specific slots that shouldn't appear in planning.
     
     Args:
-        missing_slots: Raw missing slots list
-        luma_response: Luma API response (to check for change intent)
+        missing_slots: Raw missing slots list (computed from planning contract)
+        luma_response: Luma API response (for context)
         
     Returns:
-        Normalized missing slots list
+        Normalized missing slots list (preserves planning requirements)
     """
     # Check if this is MODIFY_BOOKING
     intent = luma_response.get("intent", {})
@@ -102,79 +104,83 @@ def _normalize_modify_booking_missing_slots(
     if intent_name != "MODIFY_BOOKING":
         return missing_slots
     
-    # Check slots for change intent and booking_id
+    # Planning contract for MODIFY_BOOKING: ["booking_id", "date"]
+    # If time is provided, date becomes required (handled in compute_missing_slots)
+    # We preserve all planning-required slots in missing_slots
+    # Only filter out execution-specific or invalid slots
+    
+    # Check slots for context
     slots = luma_response.get("slots", {})
     if not isinstance(slots, dict):
         slots = {}
     
-    # Date/time slot names that indicate a change intent
-    datetime_slots = {"date", "time", "start_date", "end_date", "datetime_range", "date_range"}
-    has_change_intent = any(slot in slots for slot in datetime_slots)
+    # Planning-required slots that should be preserved
+    planning_slots = {"booking_id", "date"}
     
-    # Check if booking_id is in slots (not missing)
-    has_booking_id = "booking_id" in slots or "booking_code" in slots or "code" in slots
-    
-    # Normalize missing_slots according to test contract
+    # Filter: keep planning-required slots and remove only invalid/execution-specific ones
     normalized = []
-    
-    # If change intent exists, filter out date/time from missing_slots
-    if has_change_intent:
-        # Remove date/time slots from missing_slots
-        filtered = [slot for slot in missing_slots if slot not in datetime_slots]
-        # Only keep booking_id or change (test contract)
-        if "booking_id" in filtered and not has_booking_id:
-            normalized.append("booking_id")
-        if "change" in filtered:
-            normalized.append("change")
-        # If neither booking_id nor change in filtered, keep filtered as-is
-        if not normalized:
-            normalized = filtered
-    else:
-        # No change intent - keep missing_slots as-is but ensure booking_id/change only
-        if "booking_id" in missing_slots and not has_booking_id:
-            normalized.append("booking_id")
-        if "change" in missing_slots:
-            normalized.append("change")
-        # Keep other non-datetime slots
-        for slot in missing_slots:
-            if slot not in datetime_slots and slot not in ("booking_id", "change"):
-                if slot not in normalized:
-                    normalized.append(slot)
+    for slot in missing_slots:
+        if slot in planning_slots:
+            # Preserve planning-required slots
+            normalized.append(slot)
+        elif slot not in ("change", "time", "start_date", "end_date", "datetime_range", "date_range"):
+            # Keep other valid slots (but not execution-specific datetime slots)
+            normalized.append(slot)
+        # Filter out: "change" (test artifact), execution-specific datetime slots
     
     return normalized if normalized else missing_slots
 
 
-def _extract_missing_slots(luma_response: Dict[str, Any]) -> List[str]:
+def _extract_missing_slots(luma_response: Dict[str, Any]) -> Optional[List[str]]:
     """
+    DEPRECATED: This function is no longer used in the main processing path.
+    
+    The authoritative source of missing_slots is now the recomputed value from
+    effective_collected_slots (computed by finalize_turn_state). This function
+    is kept for backward compatibility but should not be used for new code.
+    
     Extract missing slots from Luma response.
     
-    Checks multiple sources:
-    1. Direct missing_slots field in response
+    Priority order:
+    1. Direct missing_slots field in response (computed by merge) - even if []
     2. Intent result missing_slots
-    3. Issues dict (slots with "missing" value)
+    3. Issues dict (slots with "missing" value) - only if missing_slots not set
+    
+    CRITICAL: If missing_slots==[], return [] (not None) - it means "no missing slots"
+    Only return None if missing_slots is truly not set.
     
     Args:
-        luma_response: Luma API response
+        luma_response: Luma API response (may have merged missing_slots)
         
     Returns:
-        List of missing slot names (normalized for MODIFY_BOOKING)
+        List of missing slot names (normalized for MODIFY_BOOKING) or None if not set
     """
-    missing_slots: List[str] = []
-    
-    # Check direct missing_slots field
+    # PRIORITY 1: Check direct missing_slots field (computed by merge from intent contract)
+    # This is the authoritative source - use it even if []
     if "missing_slots" in luma_response:
         direct_missing = luma_response.get("missing_slots")
         if isinstance(direct_missing, list):
-            missing_slots.extend(direct_missing)
+            # missing_slots is set (even if []) - use it directly
+            # [] means "no missing slots" (all required slots satisfied)
+            missing_slots = direct_missing.copy()
+            # Normalize MODIFY_BOOKING missing_slots according to test contract
+            missing_slots = _normalize_modify_booking_missing_slots(missing_slots, luma_response)
+            return missing_slots
     
-    # Check intent result
+    # PRIORITY 2: Check intent result
     intent = luma_response.get("intent", {})
     if isinstance(intent, dict) and "missing_slots" in intent:
         intent_missing = intent.get("missing_slots")
         if isinstance(intent_missing, list):
-            missing_slots.extend(intent_missing)
+            missing_slots = intent_missing.copy()
+            # Normalize MODIFY_BOOKING missing_slots according to test contract
+            missing_slots = _normalize_modify_booking_missing_slots(missing_slots, luma_response)
+            return missing_slots
     
-    # Check issues dict (slots with "missing" value)
+    # PRIORITY 3: Check issues dict (slots with "missing" value)
+    # Only use issues if missing_slots not explicitly set in response
+    # This handles cases where Luma hasn't been through merge yet
+    missing_slots: List[str] = []
     issues = luma_response.get("issues", {})
     if isinstance(issues, dict):
         for slot_name, slot_value in issues.items():
@@ -187,7 +193,10 @@ def _extract_missing_slots(luma_response: Dict[str, Any]) -> List[str]:
     # Normalize MODIFY_BOOKING missing_slots according to test contract
     missing_slots = _normalize_modify_booking_missing_slots(missing_slots, luma_response)
     
-    return missing_slots
+    # INVARIANT: Always return a list, never None
+    # Return [] if no missing slots found (empty list is valid)
+    # This ensures missing_slots is always a list throughout the codebase
+    return missing_slots if isinstance(missing_slots, list) else []
 
 
 def _evaluate_fallbacks(
@@ -268,8 +277,33 @@ def _build_decision_plan(
     intent_configs = _load_intent_execution_config()
     intent_config = intent_configs.get(intent_name, {})
     
-    # Extract missing slots
-    missing_slots = _extract_missing_slots(luma_response)
+    # CRITICAL: Get missing_slots from luma_response (recomputed from effective_collected_slots)
+    # This is the ONLY source of truth - missing_slots was recomputed by finalize_turn_state
+    # before calling build_plan, and MUST NOT be overridden or filtered here
+    # missing_slots = [] is VALID and means all required slots are satisfied
+    missing_slots = luma_response.get("missing_slots")
+    
+    # INVARIANT CHECK: missing_slots must be a list (never None after recomputation)
+    if missing_slots is None:
+        # This should never happen if recomputation ran correctly
+        logger.error(
+            f"[MISSING_SLOTS] VIOLATION: missing_slots is None after recomputation! "
+            f"intent={intent_name}, luma_response_keys={list(luma_response.keys())}"
+        )
+        # Fail-safe: use empty list (but this indicates a bug)
+        missing_slots = []
+    elif not isinstance(missing_slots, list):
+        # This should never happen if recomputation ran correctly
+        logger.error(
+            f"[MISSING_SLOTS] VIOLATION: missing_slots is not a list! "
+            f"type={type(missing_slots)}, value={missing_slots}, intent={intent_name}"
+        )
+        # Fail-safe: convert to list (but this indicates a bug)
+        missing_slots = list(missing_slots) if missing_slots else []
+    
+    # CRITICAL: missing_slots is the ONLY source of truth after recomputation
+    # It was computed by finalize_turn_state from effective_collected_slots
+    # missing_slots = [] is valid and means all required slots are satisfied
     
     # Determine status
     needs_clarification = luma_response.get("needs_clarification", False)
@@ -281,7 +315,8 @@ def _build_decision_plan(
     
     # CRITICAL: If missing_slots is non-empty, status MUST be NEEDS_CLARIFICATION
     # This is the authoritative rule - missing slots drive clarification, not Luma flags
-    if missing_slots:
+    # NEVER use `if not missing_slots` - only check length (empty list is valid)
+    if len(missing_slots) > 0:
         status = "NEEDS_CLARIFICATION"
         print(f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots={missing_slots}")
     elif needs_clarification:
@@ -305,22 +340,23 @@ def _build_decision_plan(
     # CRITICAL: If missing_slots exist, block ALL actions (including fallbacks)
     # Planner must never see READY if missing_slots exist
     # Executing fallback actions while missing slots is a bug
-    if missing_slots:
+    # NEVER use `if not missing_slots` - only check length (empty list is valid)
+    if len(missing_slots) > 0:
         # Block all actions when missing_slots exist
         if commit_action:
             blocked_actions.append(commit_action)
         # Do NOT evaluate fallbacks - they should not execute while clarifying
     else:
-        # Only evaluate fallbacks if no missing slots
+        # Only evaluate fallbacks if no missing slots (missing_slots = [])
         fallback_actions = _evaluate_fallbacks(intent_config, missing_slots)
         allowed_actions.extend(fallback_actions)
         
         # Commit action blocking rules
         if commit_action:
-            # CRITICAL: If missing_slots is empty, allow commit immediately
+            # CRITICAL: If missing_slots is empty ([]), allow commit immediately
             # Tests expect READY state to execute without confirmation when slots are complete
             # Do NOT require confirmation_state == "confirmed" when all slots are filled
-            if missing_slots:
+            if len(missing_slots) > 0:
                 # Still have missing slots - block commit
                 blocked_actions.append(commit_action)
             elif needs_clarification:
@@ -345,6 +381,91 @@ def _build_decision_plan(
         awaiting_slot = missing_slots[0]
         logger.debug(f"Set awaiting_slot={awaiting_slot} (exactly one missing slot)")
     
+    # CRITICAL INVARIANT: awaiting_slot lifecycle management
+    # - awaiting_slot from session must be cleared ONLY when the awaited slot is explicitly satisfied in current turn
+    # - Do NOT clear awaiting_slot merely because missing_slots becomes empty
+    # - Keep invariant: if awaiting_slot is not None → status cannot be READY until awaited slot is fulfilled
+    awaiting_slot_from_session = luma_response.get("awaiting_slot")
+    
+    # Get current turn's collected slots to check if awaited slot is satisfied
+    # Use _effective_collected_slots if available (post-promotion slots), otherwise use slots
+    current_slots = luma_response.get("_effective_collected_slots", luma_response.get("slots", {}))
+    if not isinstance(current_slots, dict):
+        current_slots = {}
+    
+    print(
+        f"[AWAITING_SLOT_DEBUG] Before status check: "
+        f"awaiting_slot_from_session={awaiting_slot_from_session}, "
+        f"awaiting_slot_new={awaiting_slot}, "
+        f"missing_slots={missing_slots}, "
+        f"status={status}, "
+        f"current_slots_keys={list(current_slots.keys())}"
+    )
+    
+    # Check if awaited slot from session is satisfied in current turn
+    # Only clear awaiting_slot if the specific awaited slot key is present in current slots
+    # Do NOT clear awaiting_slot merely because missing_slots becomes empty
+    effective_awaiting_slot = None
+    if awaiting_slot_from_session:
+        if awaiting_slot_from_session in current_slots:
+            # The awaited slot has been satisfied in this turn - clear it
+            logger.info(
+                f"[AWAITING_SLOT_CLEAR] Cleared awaiting_slot={awaiting_slot_from_session} because it is now "
+                f"present in current turn slots: {list(current_slots.keys())}"
+            )
+            print(
+                f"[AWAITING_SLOT_CLEAR] Cleared awaiting_slot={awaiting_slot_from_session} because it is now "
+                f"present in current turn slots: {list(current_slots.keys())}"
+            )
+            # Clear awaiting_slot_from_session - it's been satisfied
+            # But check if there's a newly computed awaiting_slot for this turn
+            effective_awaiting_slot = awaiting_slot if awaiting_slot else None
+        else:
+            # Awaited slot is NOT satisfied - preserve it
+            effective_awaiting_slot = awaiting_slot_from_session
+    else:
+        # No awaiting_slot from session - use newly computed one
+        effective_awaiting_slot = awaiting_slot
+    
+    print(
+        f"[AWAITING_SLOT_DEBUG] effective_awaiting_slot={effective_awaiting_slot}, "
+        f"status={status}, "
+        f"will_force_needs_clarification={effective_awaiting_slot and status == 'READY'}"
+    )
+    
+    # CRITICAL: Only force NEEDS_CLARIFICATION if awaited slot is NOT satisfied
+    # If awaiting_slot was cleared above (because slot was satisfied), don't force NEEDS_CLARIFICATION
+    if effective_awaiting_slot and status == "READY":
+        # awaiting_slot is set and slot is NOT satisfied - force NEEDS_CLARIFICATION
+        status = "NEEDS_CLARIFICATION"
+        logger.info(
+            f"[AWAITING_SLOT] Forcing status=NEEDS_CLARIFICATION because awaiting_slot={effective_awaiting_slot} is set "
+            f"and NOT satisfied in current turn (missing_slots is empty, but awaiting slot still pending)"
+        )
+        print(
+            f"[AWAITING_SLOT] Forcing status=NEEDS_CLARIFICATION because awaiting_slot={effective_awaiting_slot} is set "
+            f"and NOT satisfied in current turn (missing_slots is empty, but awaiting slot still pending)"
+        )
+        # Recompute awaiting_slot since status changed to NEEDS_CLARIFICATION
+        if not awaiting_slot and len(missing_slots) == 1:
+            awaiting_slot = missing_slots[0]
+        elif not awaiting_slot:
+            # Use the effective awaiting_slot (may be from session if not satisfied)
+            awaiting_slot = effective_awaiting_slot
+    else:
+        # Either no awaiting_slot, or awaiting_slot was satisfied (cleared above)
+        # Use the effective awaiting_slot (which may be None if satisfied)
+        awaiting_slot = effective_awaiting_slot
+    
+    print(
+        f"[AWAITING_SLOT_DEBUG] Final plan: "
+        f"status={status}, "
+        f"awaiting_slot={awaiting_slot}, "
+        f"missing_slots={missing_slots}"
+    )
+    
+    # Return awaiting_slot (which may be None if it was cleared due to satisfaction)
+    # This ensures the cleared awaiting_slot is propagated back to the session
     return {
         "status": status,
         "allowed_actions": allowed_actions,
@@ -549,6 +670,133 @@ def _build_clarify_outcome(
     }
 
 
+def _build_turn_state(
+    intent_name: str,
+    raw_luma_slots: Dict[str, Any],
+    merged_session_slots: Dict[str, Any],
+    promoted_slots: Dict[str, Any],
+    effective_collected_slots: Dict[str, Any],
+    required_slots: List[str],
+    missing_slots: List[str],
+    awaiting_slot_before: Optional[str],
+    awaiting_slot_after: Optional[str],
+    plan: Dict[str, Any]
+) -> TurnState:
+    """
+    Build TurnState object at end of turn processing.
+    
+    This is the single source of truth for turn state, containing all slot states,
+    status, and decision reasoning.
+    """
+    from core.orchestration.api.slot_contract import get_required_slots_for_intent
+    
+    final_status = plan.get("status", "")
+    
+    # Determine decision_reason based on status and conditions
+    decision_reason = DecisionReason.CLARIFICATION_REQUIRED
+    if final_status == "READY":
+        if len(missing_slots) == 0 and awaiting_slot_after is None:
+            decision_reason = DecisionReason.READY_ALL_SATISFIED
+        else:
+            decision_reason = DecisionReason.READY_ALL_SATISFIED  # Should not happen
+    elif final_status == "AWAITING_CONFIRMATION":
+        decision_reason = DecisionReason.NEEDS_CONFIRMATION
+    elif final_status == "NEEDS_CLARIFICATION":
+        if awaiting_slot_after is not None:
+            decision_reason = DecisionReason.AWAITING_SLOT_BLOCK
+        elif len(missing_slots) > 0:
+            decision_reason = DecisionReason.MISSING_REQUIRED_SLOTS
+        else:
+            decision_reason = DecisionReason.CLARIFICATION_REQUIRED
+    
+    return TurnState(
+        intent=intent_name,
+        raw_luma_slots=raw_luma_slots,
+        merged_session_slots=merged_session_slots,
+        promoted_slots=promoted_slots,
+        effective_collected_slots=effective_collected_slots,
+        required_slots=required_slots if required_slots else (get_required_slots_for_intent(intent_name) if intent_name else []),
+        missing_slots=missing_slots,
+        awaiting_slot_before=awaiting_slot_before,
+        awaiting_slot_after=awaiting_slot_after,
+        status=final_status,
+        decision_reason=decision_reason.value
+    )
+
+
+def _log_turn_outcome_snapshot(
+    intent_name: str,
+    awaiting_slot: Optional[str],
+    required_slots: List[str],
+    raw_luma_slots: Dict[str, Any],
+    merged_session_slots: Dict[str, Any],
+    promoted_slots: Dict[str, Any],
+    effective_collected_slots: Dict[str, Any],
+    computed_missing_slots: List[str],
+    final_status: str
+) -> None:
+    """
+    Log structured debug snapshot of final turn outcome.
+    
+    ONLY logs when tests are running or DEBUG_TURN_OUTCOME flag is set.
+    Makes violations obvious (e.g., missing_slots contains a key already in effective_collected_slots,
+    or status=READY while awaiting_slot != None).
+    
+    Args:
+        intent_name: Intent name
+        awaiting_slot: Awaiting slot (if any)
+        required_slots: Required slots for intent
+        raw_luma_slots: Raw slots from Luma response
+        merged_session_slots: Merged session slots (after merge, before promotion)
+        promoted_slots: Promoted slots (after promotion)
+        effective_collected_slots: Effective collected slots (filtered by required slots)
+        computed_missing_slots: Computed missing slots
+        final_status: Final status (READY, NEEDS_CLARIFICATION, etc.)
+    """
+    import os
+    import sys
+    import json
+    
+    DEBUG_TURN_OUTCOME = (
+        os.getenv("DEBUG_TURN_OUTCOME", "0") == "1" or 
+        "pytest" in sys.modules or 
+        "_pytest" in sys.modules
+    )
+    
+    if not DEBUG_TURN_OUTCOME:
+        return
+    
+    turn_outcome_snapshot = {
+        "intent": intent_name,
+        "awaiting_slot": awaiting_slot,
+        "required_slots": required_slots,
+        "raw_luma_slots": {
+            "keys": list(raw_luma_slots.keys()) if isinstance(raw_luma_slots, dict) else [],
+            "values": {k: str(v)[:50] for k, v in raw_luma_slots.items()} if isinstance(raw_luma_slots, dict) else {}
+        },
+        "merged_session_slots": {
+            "keys": list(merged_session_slots.keys()),
+            "values": {k: str(v)[:50] for k, v in merged_session_slots.items()}
+        },
+        "promoted_slots": {
+            "keys": list(promoted_slots.keys()),
+            "values": {k: str(v)[:50] for k, v in promoted_slots.items()}
+        },
+        "effective_collected_slots": {
+            "keys": list(effective_collected_slots.keys()),
+            "values": {k: str(v)[:50] for k, v in effective_collected_slots.items()}
+        },
+        "computed_missing_slots": computed_missing_slots,
+        "final_status": final_status
+    }
+    
+    logger.info(
+        f"[TURN_OUTCOME_SNAPSHOT] Final turn outcome: intent={intent_name}, "
+        f"status={final_status}, missing_slots={computed_missing_slots}, awaiting_slot={awaiting_slot}"
+    )
+    print(f"[TURN_OUTCOME_SNAPSHOT] {json.dumps(turn_outcome_snapshot, indent=2)}")
+
+
 def process_luma_response(
     luma_response: Dict[str, Any],
     domain: str,
@@ -607,7 +855,15 @@ def process_luma_response(
     # SLOT NORMALIZATION: Extract time from all possible sources and write to slots["time"]
     # This ensures resolved time expressions (noon, morning, 3pm, etc.) are written to slots["time"] before filtering
     # Planning must rely only on slots, never context
-    slots_for_filtering = luma_response.get("slots", {})
+    
+    # Capture slot states for turn outcome snapshot (before normalization)
+    # These represent the states after merge/promotion but before normalization
+    promoted_slots_before_normalization = luma_response.get("slots", {})
+    if not isinstance(promoted_slots_before_normalization, dict):
+        promoted_slots_before_normalization = {}
+    merged_session_slots_for_logging = promoted_slots_before_normalization.copy()  # After merge+promotion, before normalization
+    
+    slots_for_filtering = promoted_slots_before_normalization.copy()
     if not isinstance(slots_for_filtering, dict):
         slots_for_filtering = {}
     
@@ -714,143 +970,78 @@ def process_luma_response(
             luma_response["slots"] = slots_for_filtering
             logger.info(f"Temporal slot normalization: promoted time={time_value} from context to slots before filtering (mode={time_mode})")
     
-    # CRITICAL: Filter missing_slots BEFORE building decision plan
-    # This ensures plan status is based on filtered (accurate) missing_slots
-    # Extract and filter missing_slots early so plan status is correct
-    raw_missing_slots = _extract_missing_slots(luma_response)
-    booking_for_filtering = luma_response.get("booking", {})
+    # RIGHT BEFORE build_plan: Recompute missing_slots from effective_collected_slots
+    # Use centralized finalize_turn_state to ensure consistency across all callers
+    from core.orchestration.api.turn_state import finalize_turn_state
+    import json
     
-    # Extract service_id from booking.services if needed (same logic as below)
-    if isinstance(booking_for_filtering, dict) and booking_for_filtering.get("services"):
-        booking_services = booking_for_filtering.get("services")
-        if isinstance(booking_services, list) and len(booking_services) > 0:
-            if "service_id" not in slots_for_filtering:
-                first_service = booking_services[0]
-                if isinstance(first_service, dict) and first_service.get("text"):
-                    slots_for_filtering["service_id"] = first_service["text"]
-                    logger.info(
-                        f"[FILTER_DEBUG] Pre-plan: Extracted service_id from booking.services: {first_service['text']}"
-                    )
+    # Get awaiting_slot from session (if present)
+    awaiting_slot = luma_response.get("awaiting_slot")
     
-    # Filter missing_slots before building plan
-    filtered_missing_slots_pre_plan = []
-    for slot_name in raw_missing_slots:
-        slot_satisfied = False
-        if slot_name in slots_for_filtering:
-            slot_satisfied = True
-        elif slot_name == "service" or slot_name == "service_id":
-            has_service_id = "service_id" in slots_for_filtering and slots_for_filtering.get("service_id") is not None
-            has_booking_services = (
-                isinstance(booking_for_filtering, dict) and 
-                isinstance(booking_for_filtering.get("services"), list) and 
-                len(booking_for_filtering.get("services", [])) > 0
-            )
-            if has_service_id or has_booking_services:
-                slot_satisfied = True
-        elif slot_name == "date":
-            if "date" in slots_for_filtering or "start_date" in slots_for_filtering or "date_range" in slots_for_filtering:
-                slot_satisfied = True
-        elif slot_name == "start_date":
-            if "start_date" in slots_for_filtering:
-                slot_satisfied = True
-            else:
-                intent = luma_response.get("intent", {})
-                intent_name_check = intent.get("name", "") if isinstance(intent, dict) else ""
-                if intent_name_check == "CREATE_RESERVATION" and "date" in slots_for_filtering:
-                    slot_satisfied = True
-        elif slot_name == "end_date" and "end_date" in slots_for_filtering:
-            slot_satisfied = True
-        elif slot_name == "time":
-            # time is satisfied if time exists in slots (after normalization)
-            if "time" in slots_for_filtering and slots_for_filtering.get("time"):
-                slot_satisfied = True
-        
-        if not slot_satisfied:
-            filtered_missing_slots_pre_plan.append(slot_name)
+    # STRUCTURED DEBUG: Slot state transitions before finalization
+    # This trace object allows debugging slot transformations without stepping through code
+    # Note: slots_for_filtering is the merged_session_slots after normalization (time from context)
+    slot_state_trace_before_finalization = {
+        "intent": intent_name,
+        "merged_session_slots": {
+            "keys": list(slots_for_filtering.keys()),
+            "values": {k: str(v)[:50] for k, v in slots_for_filtering.items()}
+        },
+        "awaiting_slot": awaiting_slot
+    }
     
-    # Update luma_response with filtered missing_slots for plan building
-    # This ensures _build_decision_plan sees the filtered (accurate) missing_slots
-    # CRITICAL: Also update issues dict to match filtered missing_slots
-    # because _extract_missing_slots checks issues dict as well
-    luma_response_for_plan = luma_response.copy()
-    luma_response_for_plan["missing_slots"] = filtered_missing_slots_pre_plan
+    # Finalize turn state: compute effective_slots, missing_slots, and base status
+    turn_state = finalize_turn_state(
+        intent_name=intent_name,
+        merged_session_slots=slots_for_filtering,  # Use normalized slots (after time normalization)
+        awaiting_slot=awaiting_slot
+    )
     
-    # Update issues dict to only include filtered missing slots
-    # This prevents _extract_missing_slots from finding extra missing slots from issues
-    if "issues" in luma_response_for_plan:
-        issues = luma_response_for_plan.get("issues", {})
-        if isinstance(issues, dict):
-            # Create new issues dict with only filtered missing slots
-            filtered_issues = {}
-            for slot_name in filtered_missing_slots_pre_plan:
-                # Preserve the issue value if it exists, otherwise set to "missing"
-                if slot_name in issues:
-                    filtered_issues[slot_name] = issues[slot_name]
-                else:
-                    filtered_issues[slot_name] = "missing"
-            luma_response_for_plan["issues"] = filtered_issues
-            logger.info(
-                f"[FILTER_DEBUG] Updated issues dict: original_issues_keys={list(issues.keys())}, "
-                f"filtered_issues_keys={list(filtered_issues.keys())}"
-            )
+    effective_collected_slots = turn_state["effective_slots"]
+    missing_slots = turn_state["missing_slots"]
+    # Note: turn_state["status"] is the base status, but build_plan may override based on
+    # needs_clarification or confirmation_state
     
-    # DEBUG: Log extraction result and merged state RIGHT BEFORE build_plan
-    print(f"\n[PRE_PLAN_DEBUG] user_id={user_id} RIGHT BEFORE build_plan:")
-    print(f"  extraction_result.slots={luma_response_for_plan.get('slots', {})}")
-    print(f"  extraction_result.context={luma_response_for_plan.get('context', {})}")
-    context_debug = luma_response_for_plan.get('context', {})
-    if isinstance(context_debug, dict):
-        print(f"  context.time_constraint={context_debug.get('time_constraint')}")
-        print(f"  context.time_ref={context_debug.get('time_ref')}")
-        print(f"  context.time_mode={context_debug.get('time_mode')}")
-    # Check trace/semantic
-    trace_debug = luma_response_for_plan.get('trace', {})
-    if isinstance(trace_debug, dict):
-        semantic_debug = trace_debug.get('semantic', {})
-        if isinstance(semantic_debug, dict):
-            print(f"  trace.semantic.time_constraint={semantic_debug.get('time_constraint')}")
-            print(f"  trace.semantic.time_mode={semantic_debug.get('time_mode')}")
-    print(f"  merged_session_slots (after normalization)={list(slots_for_filtering.keys())}")
-    print(f"  slots.time={slots_for_filtering.get('time')}")
+    # Complete slot state trace with finalization results
+    slot_state_trace_before_finalization.update({
+        "effective_collected_slots": {
+            "keys": list(effective_collected_slots.keys()),
+            "values": {k: str(v)[:50] for k, v in effective_collected_slots.items()}
+        },
+        "missing_slots": missing_slots,
+        "status": turn_state["status"]
+    })
     
     logger.info(
-        f"[FILTER_DEBUG] Pre-plan filtering: raw={raw_missing_slots}, "
-        f"filtered={filtered_missing_slots_pre_plan}, "
-        f"slots_keys={list(slots_for_filtering.keys())}"
+        f"[SLOT_STATE_TRACE] Before finalization: intent={intent_name}, "
+        f"merged_session_slots_keys={list(slots_for_filtering.keys())}, "
+        f"effective_collected_slots_keys={list(effective_collected_slots.keys())}, "
+        f"missing_slots={missing_slots}, awaiting_slot={awaiting_slot}, status={turn_state['status']}"
     )
-    print(f"[FILTER_DEBUG] Pre-plan filtering: raw={raw_missing_slots}, filtered={filtered_missing_slots_pre_plan}, slots_keys={list(slots_for_filtering.keys())}")
+    print(f"[SLOT_STATE_TRACE] Before finalization: {json.dumps(slot_state_trace_before_finalization, indent=2)}")
     
-    # DEBUG: Log extraction result RIGHT BEFORE build_plan
-    # This helps trace where time expressions like "noon" are parsed
-    print(f"[PRE_PLAN_DEBUG] user_id={user_id} RIGHT BEFORE build_plan:")
-    print(f"  extraction_result.slots={slots_for_filtering}")
-    context_debug = luma_response.get("context", {})
-    print(f"  extraction_result.context.time_constraint={context_debug.get('time_constraint')}")
-    print(f"  extraction_result.context.time_mode={context_debug.get('time_mode')}")
-    print(f"  extraction_result.context.time_ref={context_debug.get('time_ref')}")
-    # Check trace.semantic for time info
-    trace_debug = luma_response.get("trace", {})
-    if isinstance(trace_debug, dict):
-        semantic_debug = trace_debug.get("semantic", {})
-        if isinstance(semantic_debug, dict):
-            print(f"  trace.semantic.time_constraint={semantic_debug.get('time_constraint')}")
-            print(f"  trace.semantic.time_mode={semantic_debug.get('time_mode')}")
-    # Check stages for semantic data
-    stages_debug = luma_response.get("stages", [])
-    if isinstance(stages_debug, list):
-        for idx, stage in enumerate(stages_debug):
-            if isinstance(stage, dict):
-                semantic_stage = stage.get("semantic", {})
-                if isinstance(semantic_stage, dict):
-                    resolved_booking = semantic_stage.get("resolved_booking", {})
-                    if isinstance(resolved_booking, dict):
-                        print(f"  stages[{idx}].semantic.resolved_booking.time_constraint={resolved_booking.get('time_constraint')}")
-                        print(f"  stages[{idx}].semantic.resolved_booking.time_mode={resolved_booking.get('time_mode')}")
-    # Show merged slots after normalization
-    print(f"  merged_session_slots_after_normalization={list(slots_for_filtering.keys())}")
-    print(f"  merged_session_slots.time={slots_for_filtering.get('time')}")
+    logger.info(
+        f"[PRE_PLAN] Finalized turn state: "
+        f"intent={intent_name}, "
+        f"effective_collected={list(effective_collected_slots.keys())}, "
+        f"missing_slots={missing_slots}, "
+        f"awaiting_slot={awaiting_slot}"
+    )
+    print(
+        f"[PRE_PLAN] Finalized turn state: "
+        f"intent={intent_name}, "
+        f"effective_collected={list(effective_collected_slots.keys())}, "
+        f"missing_slots={missing_slots}, "
+        f"awaiting_slot={awaiting_slot}"
+    )
     
-    # Build decision plan with FILTERED missing_slots
+    # CRITICAL: Update luma_response_for_plan with recomputed missing_slots
+    # This is the ONLY source of truth - missing_slots computed from effective_collected_slots
+    # MUST NOT be overridden or filtered after this point
+    luma_response_for_plan = luma_response.copy()
+    luma_response_for_plan["missing_slots"] = missing_slots
+    
+    # Build decision plan with recomputed missing_slots (ONLY source of truth)
     plan = _build_decision_plan(intent_name, luma_response_for_plan, domain)
     
     # Check if Luma indicates clarification is needed
@@ -861,72 +1052,42 @@ def process_luma_response(
         booking = luma_response.get("booking")
         clarification_data = luma_response.get("clarification_data")
         
-        # Extract missing_slots from issues keys (keys where value is "missing")
-        # BUT only if the slot is not actually satisfied in merged slots or booking
-        slots = luma_response.get("slots", {})
-        booking = luma_response.get("booking", {})
-        missing_slots_from_issues = []
-        if isinstance(issues, dict):
-            for slot_name, slot_value in issues.items():
-                if slot_value == "missing":
-                    # Check if slot is actually satisfied in merged slots or booking
-                    slot_satisfied = False
-                    
-                    # Direct slot match
-                    if slot_name in slots:
-                        slot_satisfied = True
-                    # Service/service_id satisfaction mapping
-                    elif slot_name == "service" or slot_name == "service_id":
-                        # service is satisfied if service_id exists in slots OR services exist in booking
-                        # Check both conditions explicitly (not elif) to be more robust
-                        has_service_id = "service_id" in slots and slots.get("service_id") is not None
-                        has_booking_services = (
-                            isinstance(booking, dict) and 
-                            isinstance(booking.get("services"), list) and 
-                            len(booking.get("services", [])) > 0
-                        )
-                        if has_service_id or has_booking_services:
-                            slot_satisfied = True
-                            logger.debug(
-                                f"Service slot satisfied (clarification path): service_id_in_slots={has_service_id}, "
-                                f"booking_has_services={has_booking_services}, slots_keys={list(slots.keys())}"
-                            )
-                    # Date slot satisfaction mapping
-                    elif slot_name == "date":
-                        # date is satisfied if date, start_date, or date_range exists
-                        if "date" in slots or "start_date" in slots or "date_range" in slots:
-                            slot_satisfied = True
-                    elif slot_name == "start_date":
-                        # start_date is satisfied if start_date exists, OR if date exists and intent is CREATE_RESERVATION
-                        if "start_date" in slots:
-                            slot_satisfied = True
-                        else:
-                            # Check intent to see if this is a reservation
-                            intent = luma_response.get("intent", {})
-                            intent_name = intent.get("name", "") if isinstance(intent, dict) else ""
-                            if intent_name == "CREATE_RESERVATION" and "date" in slots:
-                                slot_satisfied = True
-                    elif slot_name == "end_date" and "end_date" in slots:
-                        slot_satisfied = True
-                    elif slot_name == "time" and "time" in slots:
-                        slot_satisfied = True
-                    
-                    # Only add to missing if not satisfied
-                    if not slot_satisfied:
-                        missing_slots_from_issues.append(slot_name)
-                # For rich time issues, still consider "time" as missing if present
-                elif slot_name == "time" and isinstance(slot_value, dict):
-                    if "time" not in slots:
-                        missing_slots_from_issues.append("time")
+        # CRITICAL: Use ONLY the recomputed missing_slots from effective_collected_slots
+        # DO NOT extract missing_slots from issues or any other source - the recomputed
+        # missing_slots is the ONLY source of truth after finalize_turn_state
+        # This ensures slots present in effective_collected_slots (e.g., time from normalization)
+        # are not listed as missing
+        facts_missing_slots = missing_slots  # Use recomputed missing_slots from above
         
-        # Extract facts container (passthrough data from Luma)
-        # ALWAYS set missing_slots from issues keys when needs_clarification == true
-        # BUT filter out slots that are actually satisfied
         facts = {
-            "slots": slots,
-            "missing_slots": missing_slots_from_issues,
+            "slots": slots_for_filtering,  # Use normalized slots (includes normalized time)
+            "missing_slots": facts_missing_slots,
             "context": context  # context is already extracted above
         }
+
+        # Build TurnState at end of turn (single source of truth)
+        from core.orchestration.api.slot_contract import get_required_slots_for_intent
+        raw_luma_slots = luma_response.get("_raw_luma_slots", {})
+        merged_session_slots = merged_session_slots_for_logging
+        promoted_slots = promoted_slots_before_normalization
+        required_slots = get_required_slots_for_intent(intent_name)
+        awaiting_slot_final = turn_state.get("awaiting_slot_after") or plan.get("awaiting_slot")
+        
+        turn_state_obj = _build_turn_state(
+            intent_name=intent_name,
+            raw_luma_slots=raw_luma_slots,
+            merged_session_slots=merged_session_slots,
+            promoted_slots=promoted_slots,
+            effective_collected_slots=effective_collected_slots,
+            required_slots=required_slots,
+            missing_slots=facts_missing_slots,
+            awaiting_slot_before=turn_state.get("awaiting_slot_before"),
+            awaiting_slot_after=awaiting_slot_final,
+            plan=plan
+        )
+        
+        # ONE unconditional debug print/log at end of turn
+        print(f"TURN_STATE: {json.dumps(turn_state_obj.to_dict(), indent=2, default=str)}")
 
         return {
             "outcome": _build_clarify_outcome(
@@ -970,35 +1131,28 @@ def process_luma_response(
     # Return execution instruction with decision plan
     booking = luma_response.get("booking", {})
     
-    # Use the pre-filtered missing_slots from plan building (already filtered above)
-    # This ensures consistency - plan status and facts use the same filtered missing_slots
-    filtered_missing_slots = filtered_missing_slots_pre_plan
+    # CRITICAL: Use ONLY the recomputed missing_slots from effective_collected_slots
+    # This is the ONLY source of truth - missing_slots MUST NOT be overridden or filtered
+    # This ensures slots present in effective_collected_slots (e.g., time from normalization)
+    # are not listed as missing
     
-    # Get slots (may have been updated during pre-plan filtering)
-    slots = slots_for_filtering.copy()  # Use the slots we filtered with
-    booking = luma_response.get("booking", {})
+    # Use normalized slots (includes normalized time)
+    slots = slots_for_filtering.copy()
     
-    logger.info(
-        f"[FILTER_DEBUG] Non-clarification path: using pre-filtered missing_slots={filtered_missing_slots}, "
-        f"slots_keys={list(slots.keys())}"
-    )
-    print(f"[FILTER_DEBUG] Non-clarification path: filtered_missing_slots={filtered_missing_slots}, slots_keys={list(slots.keys())}, booking_services={booking.get('services') if isinstance(booking, dict) else None}")
-    
-    # Update luma_response slots with extracted service_id (if we extracted it from booking)
-    # This ensures service_id is available for downstream processing
-    if "service_id" in slots and "slots" in luma_response:
+    # Update luma_response slots with normalized slots (includes normalized time)
+    if "slots" in luma_response:
         luma_response["slots"] = slots
     
     facts = {
         "slots": slots,
-        "missing_slots": filtered_missing_slots,
+        "missing_slots": missing_slots,  # Use recomputed missing_slots (ONLY source of truth)
         "context": luma_response.get("context", {})
     }
     
     # Add debug info to facts for troubleshooting
     facts["_debug"] = {
-        "original_missing_slots": raw_missing_slots,
-        "filtered_missing_slots": filtered_missing_slots,
+        "recomputed_missing_slots": missing_slots,
+        "effective_collected_slots": list(effective_collected_slots.keys()),
         "slots_keys": list(slots.keys()),
         "booking_has_services": (
             isinstance(booking, dict) and 
@@ -1008,6 +1162,30 @@ def process_luma_response(
         "service_id_in_slots": "service_id" in slots,
         "service_id_value": slots.get("service_id")
     }
+    
+    # Build TurnState at end of turn (single source of truth)
+    from core.orchestration.api.slot_contract import get_required_slots_for_intent
+    raw_luma_slots = luma_response.get("_raw_luma_slots", {})
+    merged_session_slots = merged_session_slots_for_logging
+    promoted_slots = promoted_slots_before_normalization
+    required_slots = get_required_slots_for_intent(intent_name)
+    awaiting_slot_final = turn_state.get("awaiting_slot_after") or plan.get("awaiting_slot")
+    
+    turn_state_obj = _build_turn_state(
+        intent_name=intent_name,
+        raw_luma_slots=raw_luma_slots,
+        merged_session_slots=merged_session_slots,
+        promoted_slots=promoted_slots,
+        effective_collected_slots=effective_collected_slots,
+        required_slots=required_slots,
+        missing_slots=missing_slots,
+        awaiting_slot_before=turn_state.get("awaiting_slot_before"),
+        awaiting_slot_after=awaiting_slot_final,
+        plan=plan
+    )
+    
+    # ONE unconditional debug print/log at end of turn
+    print(f"TURN_STATE: {json.dumps(turn_state_obj.to_dict(), indent=2, default=str)}")
     
     return {
         "intent_name": intent_name,

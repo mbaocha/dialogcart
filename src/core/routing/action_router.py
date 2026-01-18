@@ -71,7 +71,7 @@ def validate_commit_action_handlers() -> List[str]:
     Raises:
         RuntimeError: If any commit actions are missing handlers (fail fast)
     """
-    from core.orchestration.luma_response_processor import _load_intent_execution_config
+    from core.orchestration.nlu.luma_response_processor import _load_intent_execution_config
     
     intent_configs = _load_intent_execution_config()
     missing_handlers = []

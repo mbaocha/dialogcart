@@ -22,10 +22,10 @@ Usage:
 """
 
 from core.rendering.whatsapp_renderer import render_outcome_to_whatsapp
-from core.orchestration.clients.luma_client import LumaClient
+from core.orchestration.nlu import LumaClient
 from core.orchestration.clients.catalog_client import CatalogClient
 from core.orchestration.orchestrator import handle_message
-from core.execution.test_backend import TestExecutionBackend
+from core.routing.execution.test_backend import TestExecutionBackend
 from core.tests.integration.followup_scenarios import core_followup_scenarios
 from core.tests.integration.test_appointment_e2e import (
     TestLumaClient,

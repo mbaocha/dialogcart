@@ -19,7 +19,7 @@ import core.app  # noqa: F401
 
 from core.orchestration.orchestrator import handle_message
 from core.orchestration.errors import ContractViolation, UpstreamError
-from core.session import get_session, save_session, clear_session
+from core.orchestration.session import get_session, save_session, clear_session
 from core.orchestration.api.session_merge import build_session_state_from_outcome
 
 router = APIRouter()
@@ -81,6 +81,10 @@ async def post_message(request: MessageRequest):
         if session_state and session_state.get("status") != "NEEDS_CLARIFICATION":
             session_state = None
         
+        # Note: missing_slots are NOT persisted in session anymore
+        # They are computed fresh from intent contract + collected slots
+        # No snapshot needed for missing_slots
+        
         # Call handle_message with session state (merge happens inside)
         result = handle_message(
             user_id=request.user_id,
@@ -101,8 +105,9 @@ async def post_message(request: MessageRequest):
                 # Save session state for follow-up
                 # Extract merged Luma response from result (private field)
                 merged_luma_response = result.get("_merged_luma_response")
+                # Pass previous session state for context (intent change detection, etc.)
                 new_session_state = build_session_state_from_outcome(
-                    outcome, outcome_status, merged_luma_response
+                    outcome, outcome_status, merged_luma_response, session_state
                 )
                 if new_session_state:
                     save_session(request.user_id, new_session_state)
