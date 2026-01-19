@@ -148,3 +148,4 @@ To verify the fix:
 2. Check Turn 1: `missing_slots` should be `["booking_id", "date"]` (not include "time")
 3. Check Turn 2: `missing_slots` should be `["booking_id"]` (date persists from Turn 1)
 
+

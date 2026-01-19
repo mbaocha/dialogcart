@@ -1072,6 +1072,47 @@ followup_scenarios = [
         "aliases": {"room": "room"},
         "turns": [
             {"sentence": "book room", "expected": {"intent": "CREATE_RESERVATION",
+Explanation of Test Failures
+Category 1: Reservation scenarios losing start_date(Scenarios 21-25, 30, 50, 58, 59, 63)
+Pattern: Turn 2 expected['end_date'] but got['end_date', 'start_date']
+Root cause: start_date is being lost between turns.
+What happens:
+Turn 1: "reserve room" → missing["start_date", "end_date"]
+Turn 2: "from october 5th" → Luma extracts date with date_roles = ["START_DATE"]
+Promotes to start_date → missing becomes["end_date"] ✓
+Persists {start_date: "october 5th", date: "october 5th", service_id: "room"}
+Turn 3: "to october 9th" → Luma extracts date(likely without date_roles or with END_DATE)
+Merge: merged_slots = {start_date: "october 5th", date: "october 9th", ...}
+Promotion: promote_slots_for_intent() only promotes date → start_date if "START_DATE" in date_roles
+If date_roles is empty or ["END_DATE"], promotion doesn't run
+promoted_slots may not include start_date if it's not explicitly preserved
+Result: start_date is missing from promoted_slots, so it reappears in missing_slots
+The bug: promote_slots_for_intent() starts with promoted = raw_slots.copy(), so if start_date exists in merged_slots (from session), it should be preserved. However, if merged_slots doesn't contain start_date (e.g., it was filtered out or not merged correctly), it won't be in promoted_slots.
+Likely issue: The merge or persistence step is not preserving start_date correctly, or start_date is being filtered out before promotion.
+Category 2: Service scenarios losing date (Scenarios 70, 72, 75)
+Pattern: Expected ['date', 'time'] but got ['time']
+Root cause: date is being lost between turns.
+What happens:
+Turn 1: "book haircut" → missing ["date", "time"]
+Turn 2: User provides something that should satisfy date (e.g., "from nov 1st to nov 5th" in reservation context)
+The test expects date to still be missing, but the system thinks it's satisfied
+This suggests date is being incorrectly promoted or persisted when it shouldn't be
+The bug: For service appointments, date is a required slot. If a reservation-style input (with start_date/end_date) is provided, it shouldn't satisfy the service date requirement. The system may be incorrectly treating start_date as satisfying date, or the slot filtering on intent change isn't working.
+Category 3: Intent change slot leakage (Scenario 73)
+Pattern: Turn 3 expected ['start_date', 'end_date'] but got ['date', 'time']
+Root cause: Slots from the previous intent (CREATE_APPOINTMENT) are leaking into the new intent (CREATE_RESERVATION).
+What happens:
+Turn 1: "book massage" (CREATE_APPOINTMENT) → missing ["date", "time"]
+Turn 2: "tomorrow" → satisfies date → missing ["time"]
+Turn 3: "reserve room" → intent changes to CREATE_RESERVATION
+Expected: Filter out service slots, missing ["start_date", "end_date"]
+Actual: Got ["date", "time"] — service slots are still present
+The bug: filter_collected_slots_for_intent() should remove date and time when switching from CREATE_APPOINTMENT to CREATE_RESERVATION, but it's keeping them. The filter logic at line 96-99 keeps {"date", "time", "service_id"} as "raw slots that can be promoted", but for CREATE_RESERVATION, date and time are not valid slots and shouldn't be kept.
+Summary
+start_date not preserved: When start_date is persisted in session, it's not being included in promoted_slots on the next turn if promotion conditions aren't met.
+date incorrectly satisfied: Service date requirement is being incorrectly satisfied by reservation-style inputs.
+Slot filtering on intent change: filter_collected_slots_for_intent() keeps date and time as "raw slots that can be promoted", but they shouldn't be kept when switching to CREATE_RESERVATION.
+The core issue is that promote_slots_for_intent() relies on promotion rules to add slots, but it should also preserve existing effective_collected_slots from the session even when promotion conditions aren't met in the current turn.
                                                    "status": "NEEDS_CLARIFICATION", "missing_slots": ["start_date", "end_date"]}},
             # Guardrail: Service domain uses date+time, reservation uses start_date+end_date
             # Core must NOT accept "date" + "time" as satisfying reservation requirements
