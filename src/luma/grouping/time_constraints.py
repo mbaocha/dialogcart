@@ -165,3 +165,5 @@ def _parse_range_from_text(value: Optional[str]) -> tuple[Optional[str], Optiona
         return f"{h1:02d}:00", f"{h2:02d}:00"
     return None, None
 
+
+

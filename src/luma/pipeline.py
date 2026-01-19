@@ -295,6 +295,7 @@ class LumaPipeline:
             tenant_context: Optional tenant context with aliases
             booking_mode: Optional booking mode override ("service" or "reservation")
             request_id: Optional request ID for logging
+            debug_mode: Enable debug mode for contract validation
             
         Returns:
             Dictionary with stage results:
@@ -352,10 +353,21 @@ class LumaPipeline:
             effective_booking_mode = tenant_context.get("booking_mode", "service") or "service"
         if not effective_booking_mode:
             effective_booking_mode = "service"
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(
+            f"[PIPELINE] Intent resolution: booking_mode_param={booking_mode}, "
+            f"tenant_context_booking_mode={tenant_context.get('booking_mode') if tenant_context and isinstance(tenant_context, dict) else None}, "
+            f"effective_booking_mode={effective_booking_mode}"
+        )
 
         with StageTimer(results["execution_trace"], "intent", request_id=request_id):
+            # Use osentence from extraction_result (typo-corrected, extraction-normalized)
+            # Fallback to raw text if osentence is not available
+            osentence = extraction_result.get("osentence", text)
             intent, confidence = self.intent_resolver.resolve_intent(
-                text, extraction_result, booking_mode=effective_booking_mode
+                osentence, extraction_result, booking_mode=effective_booking_mode
             )
             intent_resp = self.intent_resolver._build_response(
                 intent, confidence, extraction_result
@@ -542,7 +554,9 @@ class LumaPipeline:
             calendar_result = CalendarBindingResult(
                 calendar_booking={},
                 needs_clarification=False,
-                clarification=None
+                clarification=None,
+                _binding_success=False,
+                _binding_error="skipped_by_pipeline_decision"
             )
             results["stages"]["calendar"] = calendar_result
             # Add trace indicating binder was skipped

@@ -55,8 +55,6 @@ from luma.config.temporal import (  # noqa: E402
 )
 from luma.config.intent_meta import validate_required_slots  # noqa: E402
 from luma.config.logging import setup_logging, generate_request_id  # noqa: E402
-from luma.memory import RedisMemoryStore  # noqa: E402
-from luma.memory.merger import merge_booking_state, extract_memory_state_for_response  # noqa: E402
 from luma.decision import decide_booking_status  # noqa: E402
 from luma.clarification import ClarificationReason  # noqa: E402
 from luma.pipeline import LumaPipeline  # noqa: E402
@@ -64,9 +62,6 @@ from luma.trace import validate_stable_fields, TRACE_VERSION  # noqa: E402
 from luma.perf import StageTimer  # noqa: E402
 from luma.config.core import STATUS_READY, STATUS_NEEDS_CLARIFICATION  # noqa: E402
 from luma.app.resolve_service import resolve_message  # noqa: E402
-
-# Internal intent (never returned in API, never persisted)
-CONTEXTUAL_UPDATE = "CONTEXTUAL_UPDATE"
 
 # Check for required dependencies at startup
 
@@ -111,7 +106,6 @@ logger = setup_logging(
 # Global pipeline components
 entity_matcher = None
 intent_resolver = None
-memory_store = None
 
 # Structured stage logger
 
@@ -295,7 +289,8 @@ def plan_clarification(
     intent_result: Dict[str, Any],
     entities: Dict[str, Any],
     semantic_result: Optional[Any],
-    decision_result: Optional[Any] = None
+    decision_result: Optional[Any] = None,
+    decision_trace: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Plan clarification payload based on resolver slots and semantic clarifications.
@@ -305,6 +300,7 @@ def plan_clarification(
         entities: extraction entities
         semantic_result: SemanticResolutionResult or None
         decision_result: DecisionResult or None
+        decision_trace: Optional decision trace containing missing_slots from temporal shape validation
 
     Returns:
         Dict with status, missing_slots, and clarification_reason
@@ -313,7 +309,53 @@ def plan_clarification(
     missing_slots = intent_result.get("missing_slots", []) or []
     clarification_reason = None
 
-    # Prefer semantic clarifications (e.g., SERVICE_VARIANT) if present
+    # CRITICAL: Merge decision layer's missing_slots FIRST (before semantic clarifications)
+    # This ensures temporal shape validation results are preserved even when semantic clarifications exist
+    # For MODIFY_BOOKING: decision layer's specific deltas (date/time or start_date/end_date) take precedence
+    # over intent resolver's generic "change" marker
+    if decision_trace and isinstance(decision_trace, dict):
+        decision_missing = decision_trace.get("missing_slots", [])
+        if decision_missing:
+            # Extract intent name to check if it's MODIFY_BOOKING
+            intent_name = intent_result.get("intent")
+            if isinstance(intent_name, dict):
+                intent_name = intent_name.get("name")
+            elif not isinstance(intent_name, str):
+                intent_name = None
+            
+            # For MODIFY_BOOKING: decision layer is authoritative for missing_slots
+            # Decision layer handles generic vs specific wording correctly based on booking_mode
+            # Use decision layer's missing_slots directly, only merge with intent resolver's if decision layer didn't provide any
+            if intent_name == "MODIFY_BOOKING":
+                # Decision layer is authoritative for MODIFY_BOOKING missing_slots
+                # It correctly handles generic wording (["change"]) vs specific wording (["date", "time"] or ["start_date", "end_date"])
+                # Use decision layer's missing_slots directly, but also include booking_id if present from intent resolver
+                if decision_missing:
+                    # Decision layer provided missing_slots - use those as authoritative
+                    # Remove "change" from intent resolver's missing_slots if decision layer provided specific deltas
+                    specific_deltas = {"date", "time", "start_date", "end_date"}
+                    decision_has_specific_deltas = any(slot in specific_deltas for slot in decision_missing)
+                    decision_has_change = "change" in decision_missing
+                    
+                    if decision_has_specific_deltas:
+                        # Decision layer returned specific deltas - use those, remove "change" from intent resolver's
+                        missing_slots = [s for s in missing_slots if s != "change"]  # Remove "change" if present
+                        missing_slots = list(set(missing_slots + decision_missing))  # Merge with decision deltas
+                    elif decision_has_change:
+                        # Decision layer returned ["change"] for generic wording - use that, remove specific deltas from intent resolver's
+                        # Remove any specific deltas that might have been added by intent resolver
+                        intent_specific_deltas = {"date", "time", "start_date", "end_date"}
+                        missing_slots = [s for s in missing_slots if s not in intent_specific_deltas]
+                        missing_slots = list(set(missing_slots + decision_missing))  # Merge with decision ["change"]
+                    else:
+                        # Decision layer provided other missing_slots (e.g., ["booking_id", "date", "time"])
+                        # Merge with intent resolver's missing_slots
+                        missing_slots = list(set(missing_slots + decision_missing))
+            else:
+                # For other intents: standard merge
+                missing_slots = list(set(missing_slots + decision_missing))
+
+    # Prefer semantic clarifications (e.g., MULTIPLE_MATCHES, MISSING_DATE_RANGE) if present
     if semantic_result and getattr(semantic_result, "needs_clarification", False):
         sem_dict = semantic_result.to_dict()
         sem_clar = sem_dict.get("clarification") or {}
@@ -325,6 +367,15 @@ def plan_clarification(
             elif hasattr(reason, "value"):
                 # ClarificationReason enum
                 clarification_reason = reason.value
+            
+            # Extract missing_slots from clarification data and merge
+            # This ensures MISSING_DATE_RANGE properly normalizes missing slots
+            clar_data = sem_clar.get("data", {})
+            clar_missing_slots = clar_data.get("missing_slots", [])
+            if clar_missing_slots:
+                # Merge semantic clarification's missing_slots with intent resolver's
+                missing_slots = list(set(missing_slots + clar_missing_slots))
+            
             status = STATUS_NEEDS_CLARIFICATION
 
     # Check for ambiguous meridiem in time_issues FIRST (before decision layer)
@@ -334,43 +385,76 @@ def plan_clarification(
         time_issues = resolved_booking.get("time_issues", [])
         for issue in time_issues:
             if issue.get("kind") == "ambiguous_meridiem":
-                clarification_reason = "AMBIGUOUS_TIME_MERIDIEM"
+                clarification_reason = ClarificationReason.AMBIGUOUS_TIME_MERIDIEM.value
                 status = STATUS_NEEDS_CLARIFICATION
                 break
 
     # Check decision layer for temporal shape violations
+    # NOTE: We still check decision layer even if semantic clarification exists, to merge missing_slots
     if decision_result and decision_result.status == "NEEDS_CLARIFICATION":
         decision_reason = decision_result.reason
         if decision_reason and not clarification_reason:  # Only use if no more specific reason set
             # Map decision layer reasons to ClarificationReason enum values
             if decision_reason == "MISSING_TIME":
-                clarification_reason = "MISSING_TIME"
+                clarification_reason = ClarificationReason.MISSING_TIME.value
             elif decision_reason == "MISSING_DATE":
-                clarification_reason = "MISSING_DATE"
+                clarification_reason = ClarificationReason.MISSING_DATE.value
             elif decision_reason == "MISSING_START_DATE":
-                clarification_reason = "MISSING_DATE"  # Use MISSING_DATE for start
+                # Use MISSING_DATE for start
+                clarification_reason = ClarificationReason.MISSING_DATE.value
             elif decision_reason == "MISSING_END_DATE":
-                clarification_reason = "MISSING_DATE"  # Could add MISSING_END_DATE if needed
+                # Could add MISSING_END_DATE if needed
+                clarification_reason = ClarificationReason.MISSING_DATE.value
             elif decision_reason == "temporal_shape_not_satisfied":
                 # Determine which slot is missing from missing_slots
                 if "time" in missing_slots:
-                    clarification_reason = "MISSING_TIME"
+                    clarification_reason = ClarificationReason.MISSING_TIME.value
                 elif "date" in missing_slots:
-                    clarification_reason = "MISSING_DATE"
+                    clarification_reason = ClarificationReason.MISSING_DATE.value
             else:
                 clarification_reason = decision_reason  # Use as-is if it matches enum
             status = STATUS_NEEDS_CLARIFICATION
 
+    # Check for MISSING_DATE_RANGE first (specific reason for weekday-only ranges)
+    # This takes priority over generic missing slot mapping
+    if clarification_reason == ClarificationReason.MISSING_DATE_RANGE.value:
+        # Ensure both start_date and end_date are in missing_slots
+        if "start_date" not in missing_slots:
+            missing_slots.append("start_date")
+        if "end_date" not in missing_slots:
+            missing_slots.append("end_date")
+    
     # Fallback: map missing slots to reasons
     if not clarification_reason and missing_slots:
-        if "time" in missing_slots:
-            clarification_reason = "MISSING_TIME"
-        elif "date" in missing_slots:
-            clarification_reason = "MISSING_DATE"
-        elif "service_id" in missing_slots or "service" in missing_slots:
-            clarification_reason = "MISSING_SERVICE"
-        elif "booking_id" in missing_slots:
-            clarification_reason = "MISSING_BOOKING_REFERENCE"
+        # MODIFY_BOOKING delta semantics: "change" placeholder means booking_id exists but no deltas
+        # This indicates at least one delta slot (date, time, service_id, etc.) is required
+        # Keep "change" in missing_slots to indicate what needs clarification
+        if "change" in missing_slots:
+            # Extract intent name to check if it's MODIFY_BOOKING
+            intent_name = intent_result.get("intent")
+            if isinstance(intent_name, dict):
+                intent_name = intent_name.get("name")
+            elif not isinstance(intent_name, str):
+                intent_name = None
+            
+            if intent_name == "MODIFY_BOOKING":
+                # booking_id is present but no deltas - indicate clarification needed
+                # Use MISSING_CONTEXT since we're asking "what should be modified?" (not missing booking_id)
+                clarification_reason = ClarificationReason.MISSING_CONTEXT.value
+                # Keep "change" in missing_slots - it indicates what needs clarification
+        
+        if not clarification_reason:
+            if "time" in missing_slots:
+                clarification_reason = ClarificationReason.MISSING_TIME.value
+            elif "date" in missing_slots:
+                clarification_reason = ClarificationReason.MISSING_DATE.value
+            elif "service_id" in missing_slots or "service" in missing_slots:
+                clarification_reason = ClarificationReason.MISSING_SERVICE.value
+            elif "booking_id" in missing_slots:
+                clarification_reason = ClarificationReason.MISSING_BOOKING_REFERENCE.value
+            elif "start_date" in missing_slots and "end_date" in missing_slots:
+                # If both start_date and end_date are missing, use MISSING_DATE_RANGE
+                clarification_reason = ClarificationReason.MISSING_DATE_RANGE.value
 
     return {
         "status": status,
@@ -379,97 +463,9 @@ def plan_clarification(
     }
 
 
-def _merge_semantic_results(
-    memory_booking: Dict[str, Any],
-    current_resolved_booking: Dict[str, Any]
-) -> Dict[str, Any]:
-    """
-    Merge semantic results from memory and current input.
-
-    Rules:
-    - SERVICES: Keep from memory if present, otherwise use current
-    - DATE: Keep from memory if present, otherwise use current
-    - TIME: Use current if present, otherwise keep from memory
-    - DURATION: Use current if present, otherwise keep from memory
-    - TIME_CONSTRAINT: Use current if present, otherwise keep from memory
-
-    This preserves existing fields and fills missing ones only.
-    """
-    merged = {}
-
-    # SERVICES: Prefer memory (existing booking), fallback to current
-    # CRITICAL: If current has no services, preserve memory services (services are sticky)
-    memory_services = memory_booking.get("services", [])
-    current_services = current_resolved_booking.get("services", [])
-    if current_services:
-        # Current input has services → use current (explicit change)
-        merged["services"] = current_services
-    else:
-        # Current input has no services → preserve memory services (sticky)
-        merged["services"] = memory_services if memory_services else []
-
-    # DATE: Prefer memory if present, otherwise use current (promote current if memory is empty)
-    # CRITICAL: If memory has NO date and current provides date, promote current date
-    # This enables "time only" → "date only" → RESOLVED flow
-    memory_date_mode = memory_booking.get("date_mode", "none")
-    memory_date_refs = memory_booking.get("date_refs", [])
-    current_date_mode = current_resolved_booking.get("date_mode", "none")
-    current_date_refs = current_resolved_booking.get("date_refs", [])
-
-    if memory_date_refs and memory_date_mode != "none":
-        # Memory has date → keep memory date
-        merged["date_mode"] = memory_date_mode
-        merged["date_refs"] = memory_date_refs
-        merged["date_modifiers"] = memory_booking.get("date_modifiers", [])
-    elif current_date_refs and current_date_mode != "none":
-        # Memory has no date, current has date → promote current date
-        merged["date_mode"] = current_date_mode
-        merged["date_refs"] = current_date_refs
-        merged["date_modifiers"] = current_resolved_booking.get(
-            "date_modifiers", [])
-    else:
-        # Neither has date
-        merged["date_mode"] = "none"
-        merged["date_refs"] = []
-        merged["date_modifiers"] = []
-
-    # TIME: Prefer current (new input), fallback to memory
-    memory_time_mode = memory_booking.get("time_mode", "none")
-    memory_time_refs = memory_booking.get("time_refs", [])
-    current_time_mode = current_resolved_booking.get("time_mode", "none")
-    current_time_refs = current_resolved_booking.get("time_refs", [])
-
-    if current_time_refs and current_time_mode != "none":
-        merged["time_mode"] = current_time_mode
-        merged["time_refs"] = current_time_refs
-    elif memory_time_refs and memory_time_mode != "none":
-        merged["time_mode"] = memory_time_mode
-        merged["time_refs"] = memory_time_refs
-    else:
-        merged["time_mode"] = "none"
-        merged["time_refs"] = []
-
-    # TIME_CONSTRAINT: Prefer current, fallback to memory
-    current_time_constraint = current_resolved_booking.get("time_constraint")
-    memory_time_constraint = memory_booking.get("time_constraint")
-    merged["time_constraint"] = current_time_constraint if current_time_constraint else memory_time_constraint
-
-    # DURATION: Prefer current, fallback to memory
-    current_duration = current_resolved_booking.get("duration")
-    memory_duration = memory_booking.get("duration")
-    merged["duration"] = current_duration if current_duration is not None else memory_duration
-
-    # TIME_ISSUES: Prefer current (new parsing issues), fallback to memory
-    current_time_issues = current_resolved_booking.get("time_issues", [])
-    memory_time_issues = memory_booking.get("time_issues", [])
-    merged["time_issues"] = current_time_issues if current_time_issues else memory_time_issues
-
-    return merged
-
-
 def init_pipeline():
     """Initialize the pipeline components."""
-    global entity_matcher, intent_resolver, memory_store  # noqa: PLW0603
+    global entity_matcher, intent_resolver  # noqa: PLW0603
 
     logger.info("=" * 60)
     logger.info("Initializing Luma Service/Reservation Booking Pipeline")
@@ -477,10 +473,6 @@ def init_pipeline():
     try:
         # Initialize intent resolver (lightweight, no file I/O)
         intent_resolver = ReservationIntentResolver()
-
-        # Initialize memory store (required for multi-turn conversations)
-        memory_store = RedisMemoryStore()
-        logger.info("Memory store initialized successfully")
 
         # Pre-load vocabularies to avoid first-request latency
         from luma.resolution.semantic_resolver import initialize_vocabularies
@@ -583,13 +575,10 @@ def resolve():
         request=request,
         # Module globals
         intent_resolver=intent_resolver,
-        memory_store=memory_store,
         logger=logger,
         # Constants
         APPOINTMENT_TEMPORAL_TYPE_CONST=APPOINTMENT_TEMPORAL_TYPE,
-        MEMORY_TTL=config.MEMORY_TTL,
         # Helper functions
-        _merge_semantic_results=_merge_semantic_results,
         _localize_datetime=_localize_datetime,
         find_normalization_dir=find_normalization_dir,
         _get_business_categories=_get_business_categories,
@@ -637,20 +626,6 @@ def main():
     logger.info("Luma Service/Reservation Booking API")
     logger.info(f"Starting server on http://localhost:{PORT}")
     logger.info("=" * 60)
-
-    # TEMPORARY: Log Redis configuration at startup
-    redis_password_masked = "***" if config.REDIS_PASSWORD else None
-    logger.info(
-        f"Redis Config: host={config.REDIS_HOST}, port={config.REDIS_PORT}, "
-        f"db={config.REDIS_DB}, password={redis_password_masked}, ttl={config.MEMORY_TTL}s",
-        extra={
-            "redis_host": config.REDIS_HOST,
-            "redis_port": config.REDIS_PORT,
-            "redis_db": config.REDIS_DB,
-            "redis_password": redis_password_masked,
-            "memory_ttl": config.MEMORY_TTL
-        }
-    )
 
     # Initialize pipeline
     if not init_pipeline():

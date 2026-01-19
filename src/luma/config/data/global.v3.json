@@ -299,6 +299,32 @@
                         ]
                     }
                 },
+                "booking_verbs": {
+                    "reserve": {
+                        "synonyms": [],
+                        "typos": [
+                            "reserv",
+                            "resrve",
+                            "resreve"
+                        ]
+                    },
+                    "book": {
+                        "synonyms": [],
+                        "typos": [
+                            "bok",
+                            "boook",
+                            "boo"
+                        ]
+                    },
+                    "schedule": {
+                        "synonyms": [],
+                        "typos": [
+                            "scedule",
+                            "schedul",
+                            "scheduel"
+                        ]
+                    }
+                },
                 "date_modifiers": [
                     "this",
                     "next",

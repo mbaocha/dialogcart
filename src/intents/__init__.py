@@ -1,3 +1,0 @@
-"""
-Intent classification service package
-"""

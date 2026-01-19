@@ -136,13 +136,13 @@ Luma runs six ordered stages. Each stage enriches the payload that is exposed un
 - Loads vocab/entity types once (cached) to normalize date/time variants and detect unresolved patterns.
 - Time semantics precedence: exact > range > window > none; windows discarded if an exact time co-exists. Fuzzy hours need a window or trigger ambiguity.
 - Date semantics precedence: absolute > relative; guards conflicting modifier+relative combos.
-- Tenant alias support: builds `variants_by_family` from tenant aliases, tracks explicit alias matches, and flags `SERVICE_VARIANT` ambiguity when multiple aliases map to the same family without an explicit match.
+- Tenant alias support: builds `variants_by_family` from tenant aliases, tracks explicit alias matches, and flags `MULTIPLE_MATCHES` ambiguity when multiple aliases map to the same family without an explicit match.
 - Ambiguity checks: multiple times without range, bare weekdays, fuzzy hours without windows, missing services, conflicting signals, unresolved weekday-like text.
 - Example resolutions:
   - Services `[haircut]`, date `tomorrow`, time `2pm` → date_mode=relative, time_mode=exact, refs=`["2pm"]`, needs_clarification=False.
   - Time window `morning` + exact time `9am` → time_mode=exact (window dropped), refs=`["9am"]`.
   - Fuzzy hour `"around 6ish"` with no window → needs_clarification=True (ambiguity).
-  - Aliases: tenant aliases map to canonical; if multiple aliases for same family and none explicitly used → `SERVICE_VARIANT` clarification with options.
+  - Aliases: tenant aliases map to canonical; if multiple aliases for same family and none explicitly used → `MULTIPLE_MATCHES` clarification with options.
 - Disambiguation:
   - Conflicting modifier+relative date (e.g., “next tomorrow”) → clarification.
   - Multiple times without range → ambiguity; window+exact resolves to exact.

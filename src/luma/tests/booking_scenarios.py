@@ -8,6 +8,9 @@ booking_scenarios = [
     {
         "sentence": "book me in for delux rom from oct 5th to 9th",
         "booking_mode": "reservation",
+        "aliases": {
+            "delux": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -23,6 +26,9 @@ booking_scenarios = [
     {
         "sentence": "reserve standard room october 12 to 14",
         "booking_mode": "reservation",
+        "aliases": {
+            "standard": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -38,6 +44,9 @@ booking_scenarios = [
     {
         "sentence": "book delux room from nov 1st to 3rd",
         "booking_mode": "reservation",
+        "aliases": {
+            "delux": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -53,6 +62,9 @@ booking_scenarios = [
     {
         "sentence": "book me a room dec 20 2026 to dec 25 2026",
         "booking_mode": "reservation",
+        "aliases": {
+            "room": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -66,16 +78,19 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "reserve a suite from january 1st to january 5th",
+        "sentence": "reserve a suite from feb 1st to fe 5th",
         "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
             "slots": {
                 "service_id": "suite",  # Single tenant alias for suite
                 "date_range": {
-                    "start": "2026-01-01",
-                    "end": "2026-01-05"
+                    "start": "2026-02-01",
+                    "end": "2026-02-05"
                 }
             }
         }
@@ -83,6 +98,9 @@ booking_scenarios = [
     {
         "sentence": "book standard room from feb 10 to feb 15",
         "booking_mode": "reservation",
+        "aliases": {
+            "standard": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -98,6 +116,9 @@ booking_scenarios = [
     {
         "sentence": "reserve delux room march 1 to march 5",
         "booking_mode": "reservation",
+        "aliases": {
+            "delux": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -113,6 +134,9 @@ booking_scenarios = [
     {
         "sentence": "book a room from april 10th to april 15th",
         "booking_mode": "reservation",
+        "aliases": {
+            "room": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -128,6 +152,9 @@ booking_scenarios = [
     {
         "sentence": "reserve suite may 5 to may 10",
         "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -146,6 +173,9 @@ booking_scenarios = [
     {
         "sentence": "book hair cut tomorrow at 3pm",
         "booking_mode": "service",
+        "aliases": {
+            "hair cut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -156,8 +186,11 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "schedule beerd trim friday at noon",
+        "sentence": "schedule beerd trim this friday at noon",
         "booking_mode": "service",
+        "aliases": {
+            "beerd": "beard grooming"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -170,6 +203,9 @@ booking_scenarios = [
     {
         "sentence": "book massage next monday at 10am",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -182,6 +218,7 @@ booking_scenarios = [
     {
         "sentence": "schedule facial tomorrow evening",
         "booking_mode": "service",
+        # No aliases - facial is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -192,6 +229,9 @@ booking_scenarios = [
     {
         "sentence": "book haircut for next friday at 2pm",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -205,6 +245,9 @@ booking_scenarios = [
     {
         "sentence": "schedule massage tomorrow at 9am",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -215,8 +258,11 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "book beard trim on monday at 11am",
+        "sentence": "book beard trim this monday at 11am",
         "booking_mode": "service",
+        "aliases": {
+            "beard": "beard grooming"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -230,6 +276,7 @@ booking_scenarios = [
     {
         "sentence": "schedule facial next tuesday at 3pm",
         "booking_mode": "service",
+        # No aliases - facial is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -240,6 +287,9 @@ booking_scenarios = [
     {
         "sentence": "book massage tomorrow at 2pm",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -250,8 +300,11 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "schedule haircut friday at 4pm",
+        "sentence": "schedule haircut this friday at 4pm",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -265,6 +318,9 @@ booking_scenarios = [
     {
         "sentence": "book hair cut tomorrow at 2pm",
         "booking_mode": "service",
+        "aliases": {
+            "hair cut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -277,6 +333,9 @@ booking_scenarios = [
     {
         "sentence": "book beerd trim tomorrow at 11am",
         "booking_mode": "service",
+        "aliases": {
+            "beerd": "beard grooming"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -289,6 +348,9 @@ booking_scenarios = [
     {
         "sentence": "book massage tomorrow at 4pm",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -301,6 +363,7 @@ booking_scenarios = [
     {
         "sentence": "book facial tomorrow at 1pm",
         "booking_mode": "service",
+        # No aliases - facial is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -311,6 +374,9 @@ booking_scenarios = [
     {
         "sentence": "schedule massage next monday at 9am",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -323,6 +389,9 @@ booking_scenarios = [
     {
         "sentence": "book haircut next friday at 3pm",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -334,8 +403,11 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "schedule massage friday after 3pm",
+        "sentence": "schedule massage this friday after 3pm",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -348,6 +420,7 @@ booking_scenarios = [
     {
         "sentence": "book facial monday before 11am",
         "booking_mode": "service",
+        # No aliases - facial is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -358,6 +431,9 @@ booking_scenarios = [
     {
         "sentence": "book haircut tomorrow evening",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -369,8 +445,11 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "schedule massage friday morning",
+        "sentence": "schedule massage this friday morning",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -383,6 +462,9 @@ booking_scenarios = [
     {
         "sentence": "book delux room nov 5 to 7 at night",
         "booking_mode": "reservation",
+        "aliases": {
+            "delux": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -398,6 +480,9 @@ booking_scenarios = [
     {
         "sentence": "reserve standard room from dec 1 to dec 5 in the morning",
         "booking_mode": "reservation",
+        "aliases": {
+            "standard": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -413,6 +498,9 @@ booking_scenarios = [
     {
         "sentence": "book suite jan 10 to jan 15 evening",
         "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -428,6 +516,9 @@ booking_scenarios = [
     {
         "sentence": "reserve room from feb 20 to feb 25 afternoon",
         "booking_mode": "reservation",
+        "aliases": {
+            "room": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -443,6 +534,9 @@ booking_scenarios = [
     {
         "sentence": "book haircut tomorrow at noon",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -456,6 +550,9 @@ booking_scenarios = [
     {
         "sentence": "schedule massage tomorrow at midnight",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -466,11 +563,87 @@ booking_scenarios = [
         }
     },
     # ────────────────
+    # EXPLICIT ALIAS MATCHING — Multiple aliases for same canonical
+    # ────────────────
+    {
+        "sentence": "book premium haircut tomorrow at 2pm",
+        "booking_mode": "service",
+        "aliases": {
+            "premium haircut": "haircut",
+            "standard haircut": "haircut",
+            "express haircut": "haircut"
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "premium haircut",  # Explicitly mentioned tenant alias
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "schedule standard haircut next friday at 10am",
+        "booking_mode": "service",
+        "aliases": {
+            "premium haircut": "haircut",
+            "standard haircut": "haircut",
+            "express haircut": "haircut"
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "standard haircut",  # Explicitly mentioned tenant alias
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "book premium haircut tomorrow at 2pm",
+        "booking_mode": "service",
+        "aliases": {
+            "premium spa treatment": "spa_treatment",
+            "premium haircut": "haircut",
+            "flexi haircut + prunning": "haircut",
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "status": STATUS_READY,
+            "slots": {
+                # Explicitly mentioned tenant alias (short canonical form normalized to full)
+                "service_id": "premium haircut",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "book premium haircut tomorrow at 2pm",
+        "booking_mode": "service",
+        "aliases": {
+            "premium spa treatment": "beauty_and_wellness.spa_treatment",
+            "premium haircut": "beauty_and_wellness.haircut",
+            "flexi haircut + prunning": "beauty_and_wellness.haircut",
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "status": STATUS_READY,
+            "slots": {
+                # Explicitly mentioned tenant alias (full canonical form)
+                "service_id": "premium haircut",
+                "has_datetime": True
+            }
+        }
+    },
+    # ────────────────
     # NEEDS_CLARIFICATION — MISSING SLOTS
     # ────────────────
     {
         "sentence": "book a room",
         "booking_mode": "reservation",
+        "aliases": {
+            "room": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -480,6 +653,9 @@ booking_scenarios = [
     {
         "sentence": "reserve a suite",
         "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -489,6 +665,9 @@ booking_scenarios = [
     {
         "sentence": "book a haircut",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -498,6 +677,9 @@ booking_scenarios = [
     {
         "sentence": "schedule a massage",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -507,6 +689,7 @@ booking_scenarios = [
     {
         "sentence": "book facial",
         "booking_mode": "service",
+        # No aliases - facial is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -516,6 +699,9 @@ booking_scenarios = [
     {
         "sentence": "reserve room for tomorrow",
         "booking_mode": "reservation",
+        "aliases": {
+            "room": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -525,6 +711,9 @@ booking_scenarios = [
     {
         "sentence": "book suite from october 10th",
         "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -534,6 +723,9 @@ booking_scenarios = [
     {
         "sentence": "book haircut tomorrow",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -543,6 +735,9 @@ booking_scenarios = [
     {
         "sentence": "schedule massage friday",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -552,6 +747,7 @@ booking_scenarios = [
     {
         "sentence": "book facial at 3pm",
         "booking_mode": "service",
+        # No aliases - facial is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -561,6 +757,9 @@ booking_scenarios = [
     {
         "sentence": "schedule massage at 10am",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -573,6 +772,9 @@ booking_scenarios = [
     {
         "sentence": "book me in for premium suite from oct 5th to 9th",
         "booking_mode": "reservation",
+        "aliases": {
+            "premum suite": "room"  # Tenant typo alias for fuzzy matching
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -588,6 +790,9 @@ booking_scenarios = [
     {
         "sentence": "reserve premum suite october 12 to 14",
         "booking_mode": "reservation",
+        "aliases": {
+            "premum suite": "room"  # Tenant typo alias
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -606,6 +811,9 @@ booking_scenarios = [
     {
         "sentence": "i need a hair cut tomorow at 3pm",
         "booking_mode": "service",
+        "aliases": {
+            "hair cut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -619,6 +827,9 @@ booking_scenarios = [
     {
         "sentence": "can u book me a massge for next friday morning",
         "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -630,8 +841,11 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "i'd like to schedual a beard trim on monday at 11am",
+        "sentence": "i'd like to schedual a beard trim this monday at 11am",
         "booking_mode": "service",
+        "aliases": {
+            "beard": "beard grooming"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -644,11 +858,14 @@ booking_scenarios = [
     {
         "sentence": "reserv a presidental rom from dec 15th to dec 20th",
         "booking_mode": "reservation",
+        "aliases": {
+            "presidential room": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
             "slots": {
-                # Fuzzy match to "standard" (typo: "standrd", "reserv")
+                # Fuzzy match to "presidential room" (typos: "presidental", "rom", "reserv")
                 "service_id": "presidential room",
                 "date_range": {
                     "start": "2026-12-15",
@@ -660,11 +877,14 @@ booking_scenarios = [
     {
         "sentence": "book me a presdential room november 1st through november 5th",
         "booking_mode": "reservation",
+        "aliases": {
+            "presidential room": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
             "slots": {
-                # Fuzzy match to "delux" (user says "deluxe")
+                # Fuzzy match to "presidential room" (typo: "presdential")
                 "service_id": "presidential room",
                 "date_range": {
                     "start": "2026-11-01",
@@ -674,8 +894,11 @@ booking_scenarios = [
         }
     },
     {
-        "sentence": "i want to make an apointment for a haircut tuesday at 2pm",
+        "sentence": "i want to make an apointment for a haircut this tuesday at 2pm",
         "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_READY,
@@ -688,6 +911,9 @@ booking_scenarios = [
     {
         "sentence": "can i get a suite from jan 10 to jan 15 please",
         "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
         "expected": {
             "intent": "CREATE_RESERVATION",
             "status": STATUS_READY,
@@ -704,6 +930,7 @@ booking_scenarios = [
     {
         "sentence": "book me a facial treatment next wednesday at 4pm",
         "booking_mode": "service",
+        # No aliases - facial is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
@@ -714,11 +941,1506 @@ booking_scenarios = [
     {
         "sentence": "schedule a manicure for friday afternoon",
         "booking_mode": "service",
+        # No aliases - manicure is not in tenant aliases (UNSUPPORTED_SERVICE test)
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "status": STATUS_NEEDS_CLARIFICATION,
             # Note: "manicure" is in global canonical but NOT in tenant context
             "clarification_reason": "UNSUPPORTED_SERVICE"
+        }
+    },
+    # ────────────────
+    # MODIFY_BOOKING — RESCHEDULING EXISTING BOOKINGS
+    # ────────────────
+    {
+        "sentence": "reschedule my booking ABC123 to tomorrow at 3pm",
+        "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "ABC123",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "change my appointment XYZ789 to next friday at 10am",
+        "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "XYZ789",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "move my reservation DEF456 from oct 5th to oct 10th",
+        "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "DEF456",
+                "date_range": {
+                    "start": "2026-10-10",
+                    "end": "2026-10-10"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "update booking GHI789 to dec 15 to dec 20",
+        "booking_mode": "reservation",
+        "aliases": {
+            "delux": "room"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "GHI789",
+                "date_range": {
+                    "start": "2026-12-15",
+                    "end": "2026-12-20"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "postpone my booking JKL012 to next monday at 2pm",
+        "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "JKL012",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "modify reservation MNO345 to november 1st through november 5th",
+        "booking_mode": "reservation",
+        "aliases": {
+            "standard": "room"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "MNO345",
+                "date_range": {
+                    "start": "2026-11-01",
+                    "end": "2026-11-05"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "change the time for booking PQR678 to 4pm",
+        "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "PQR678",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "reschedule appointment STU901 to this friday evening",
+        "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "STU901",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "update my room booking VWX234 to jan 10 to jan 15",
+        "booking_mode": "reservation",
+        "aliases": {
+            "premium suite": "room"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "VWX234",
+                "date_range": {
+                    "start": "2026-01-10",
+                    "end": "2026-01-15"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "change booking YZA567 time to tomorrow at noon",
+        "booking_mode": "service",
+        "aliases": {
+            "beard": "beard grooming"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "YZA567",
+                "has_datetime": True
+            }
+        }
+    },
+    # ────────────────
+    # CANCEL_BOOKING — CANCELLING EXISTING BOOKINGS
+    # ────────────────
+    {
+        "sentence": "cancel my booking BCD890",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "BCD890"
+            }
+        }
+    },
+    {
+        "sentence": "cancel booking EFG123",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "EFG123"
+            }
+        }
+    },
+    {
+        "sentence": "delete my reservation HIJ456",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "HIJ456"
+            }
+        }
+    },
+    {
+        "sentence": "cancel my appointment KLM789",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "KLM789"
+            }
+        }
+    },
+    {
+        "sentence": "i need to cancel booking NOP012",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "NOP012"
+            }
+        }
+    },
+    {
+        "sentence": "please cancel reservation QRS345",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "QRS345"
+            }
+        }
+    },
+    {
+        "sentence": "delete booking TUV678",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "TUV678"
+            }
+        }
+    },
+    {
+        "sentence": "cancel my room reservation WXY901",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "WXY901"
+            }
+        }
+    },
+    {
+        "sentence": "i want to cancel appointment ZAB234",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "ZAB234"
+            }
+        }
+    },
+    {
+        "sentence": "can't make it, cancel booking CDE567",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "CDE567"
+            }
+        }
+    },
+    # ────────────────
+    # MODIFY_BOOKING — NEEDS_CLARIFICATION (MISSING BOOKING_ID OR NEW TIME)
+    # ────────────────
+    {
+        "sentence": "reschedule my booking",
+        "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id", "date", "time"]
+        }
+    },
+    {
+        "sentence": "change my appointment",
+        "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id", "date", "time"]
+        }
+    },
+    {
+        "sentence": "modify booking FGH890",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["date", "time"]
+        }
+    },
+    {
+        "sentence": "reschedule reservation IJK123",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["start_date", "end_date"]
+        }
+    },
+    {
+        "sentence": "change booking time to 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id", "date"]
+        }
+    },
+    {
+        "sentence": "move booking to tomorrow",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id", "time"]
+        }
+    },
+    {
+        "sentence": "change my booking to 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "slots": {
+                "time": "15:00"
+            },
+            "missing_slots": ["booking_id", "date"]
+        }
+    },
+    # ────────────────
+    # CANCEL_BOOKING — NEEDS_CLARIFICATION (MISSING BOOKING_ID)
+    # ────────────────
+    {
+        "sentence": "cancel my booking",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id"]
+        }
+    },
+    {
+        "sentence": "delete my reservation",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id"]
+        }
+    },
+    {
+        "sentence": "i need to cancel",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id"]
+        }
+    },
+    {
+        "sentence": "cancel my appointment",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id"]
+        }
+    },
+    {
+        "sentence": "please cancel",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "CANCEL_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["booking_id"]
+        }
+    },
+    # ────────────────
+    # MODIFY_BOOKING — FUZZY MATCHING (TYPOS IN BOOKING_ID)
+    # ────────────────
+    {
+        "sentence": "reschedule booking LMN456 to tomorrow at 2pm",
+        "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "LMN456",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "change apointment OPQ789 to next friday",
+        "booking_mode": "service",
+        "aliases": {
+            "massage": "massage"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "OPQ789",
+                "has_datetime": True
+            }
+        }
+    },
+    {
+        "sentence": "modify reservtion RST012 to dec 20 to dec 25",
+        "booking_mode": "reservation",
+        "aliases": {
+            "suite": "room"
+        },
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "RST012",
+                "date_range": {
+                    "start": "2026-12-20",
+                    "end": "2026-12-25"
+                }
+            }
+        }
+    },
+    # ────────────────
+    # MODIFY_BOOKING — DELTA BEHAVIOR INVARIANT TESTS
+    # ────────────────
+    # 1) Full date-range modification
+    {
+        "sentence": "change my reservation ABC123 to feb 9 to feb 11",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "ABC123",
+                "start_date": "2026-02-09",
+                "end_date": "2026-02-11"
+            }
+        }
+    },
+    # 2) Partial modification
+    {
+        "sentence": "change my reservation ABC123 to feb 9",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["end_date"]
+        }
+    },
+    # 3) Time-only modification
+    {
+        "sentence": "move my booking ABC123 to 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "ABC123",
+                "has_datetime": True
+            }
+        }
+    },
+    # 4) No-delta modification
+    {
+        "sentence": "reschedule my booking ABC123",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "missing_slots": ["change"]
+        }
+    },
+    # ────────────────
+    # MODIFY_BOOKING — TEMPORAL EXTRACTION REGRESSION TESTS
+    # ────────────────
+    # These tests ensure that Luma always extracts temporal values explicitly in slots,
+    # and that MODIFY_BOOKING does not infer start_date/end_date roles incorrectly.
+    # Invariants:
+    # - Luma must always emit extracted temporal values in `slots`
+    # - MODIFY_BOOKING must not infer start_date / end_date (use explicit date or date_range)
+    # 1) MODIFY_BOOKING — implicit booking reference, time only
+    {
+        "sentence": "change my booking to 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "slots": {
+                "time": "15:00"
+            },
+            "missing_slots": ["booking_id", "date"]
+        }
+    },
+    # 2) MODIFY_BOOKING — explicit booking_id, time only (READY)
+    {
+        "sentence": "change the time for booking PQR678 to 4pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_READY,
+            "slots": {
+                "booking_id": "PQR678",
+                "time": "16:00"
+            }
+        }
+    },
+    # 3) MODIFY_BOOKING — reservation, single date (no role inference)
+    {
+        "sentence": "change my reservation ABC123 to feb 9",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "MODIFY_BOOKING",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "slots": {
+                "booking_id": "ABC123",
+                "date": "2026-02-09"
+            },
+            "missing_slots": ["end_date"]
+        }
+    },
+    # ────────────────
+    # UNKNOWN / FRAGMENT INPUTS
+    # ────────────────
+    # These tests enforce that Luma does NOT promote intent, does NOT invent missing_slots,
+    # only returns extracted slots, and remains stateless for inputs without booking intent verbs.
+    # Invariants:
+    # - Luma must always emit extracted temporal values in `slots`
+    # - UNKNOWN intent must bypass booking clarification logic entirely
+    {
+        "sentence": "feb 12th",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-02-12"
+            }
+        }
+    },
+    {
+        "sentence": "3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "feb 12th at 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-02-12",
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "from april 12th to april 16th",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-04-12",
+                    "end": "2026-04-16"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "deluxe room",
+        "booking_mode": "reservation",
+        "aliases": {"deluxe room": "room"},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "deluxe room"
+            }
+        }
+    },
+    {
+        "sentence": "haircut tomorrow",
+        "booking_mode": "service",
+        "aliases": {"haircut": "haircut"},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "haircut",
+                "date": "2026-01-14"
+            }
+        }
+    },
+    # ────────────────
+    # FOLLOW-UP DATE INPUTS — Weekday phrases from Core session tests
+    # ────────────────
+    # These test that Luma extracts dates from weekday phrases when provided as standalone follow-ups
+    # ────────────────
+    # Standalone weekday follow-ups (AUTHORITATIVE)
+    # ────────────────
+
+    {
+        "sentence": "friday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-16"  # Nearest future Friday
+            }
+        }
+    },
+    {
+        "sentence": "this friday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-16"  # Same as bare weekday
+            }
+        }
+    },
+    {
+        "sentence": "next friday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-23"  # Friday of the following week
+            }
+        }
+    },
+
+    {
+        "sentence": "monday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-19"  # Nearest future Monday
+            }
+        }
+    },
+    {
+        "sentence": "this monday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-19"  # Identical to bare weekday
+            }
+        }
+    },
+    {
+        "sentence": "next monday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-26"  # Monday of the following week
+            }
+        }
+    },
+
+    {
+        "sentence": "tuesday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-20"  # Not today; next Tuesday
+            }
+        }
+    },
+    {
+        "sentence": "wednesday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-14"  # Upcoming this week
+            }
+        }
+    },
+    {
+        "sentence": "thursday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-15"  # Upcoming this week
+            }
+        }
+    },
+    {
+        "sentence": "next thursday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-22"  # Thursday of the following week
+            }
+        }
+    },
+
+    {
+        "sentence": "saturday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-17"
+            }
+        }
+    },
+    {
+        "sentence": "sunday",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-01-18"
+            }
+        }
+    },
+
+    # ────────────────
+    # Fuzzy / range expressions
+    # ────────────────
+
+    {
+        "sentence": "next week",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-01-19",  # Monday of next week
+                    "end": "2026-01-25"     # Sunday of next week
+                }
+            }
+        }
+    },
+    {
+        "sentence": "this weekend",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-01-17",  # Saturday
+                    "end": "2026-01-18"     # Sunday
+                }
+            }
+        }
+    },
+
+    # ────────────────
+    # Explicit date formats (standalone temporal inputs)
+    # ────────────────
+
+    {
+        "sentence": "3rd mar by 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03",
+                "time": "15:00"  # 3pm
+            }
+        }
+    },
+    {
+        "sentence": "3rd march",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "march 3",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "mar 2nd",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-02"
+            }
+        }
+    },
+    {
+        "sentence": "04/03",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-04"  # DD/MM format: 04/03 = March 4th
+            }
+        }
+    },
+
+    # ────────────────
+    # Additional date and time format variations
+    # ────────────────
+
+    # Time format variations
+    {
+        "sentence": "3:00pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "3:00 PM",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "15:00",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "3 PM",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "at 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "time": "15:00"
+            }
+        }
+    },
+
+    # Date format variations (capitalized, different separators, year)
+    {
+        "sentence": "March 3rd",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "3 March",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "03/03",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"  # DD/MM format: 03/03 = March 3rd
+            }
+        }
+    },
+    {
+        "sentence": "3/3",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"  # DD/MM format: 3/3 = March 3rd
+            }
+        }
+    },
+    {
+        "sentence": "3-Mar",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "March 3, 2026",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "3rd of March",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "March the 3rd",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "Mar 3rd",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "MAR 3",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+
+    # Combined date + time variations
+    {
+        "sentence": "March 3rd at 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03",
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "3 March at 3:00pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03",
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "03/03 at 15:00",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03",
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "march 3 by 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03",
+                "time": "15:00"
+            }
+        }
+    },
+    {
+        "sentence": "3rd march at 3:00 PM",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03",
+                "time": "15:00"
+            }
+        }
+    },
+
+    # Edge cases
+    {
+        "sentence": "3/03",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"  # DD/MM format: 3/03 = March 3rd
+            }
+        }
+    },
+    {
+        "sentence": "03/3",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"  # DD/MM format: 03/3 = March 3rd
+            }
+        }
+    },
+    {
+        "sentence": "3-Mar-2026",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03"
+            }
+        }
+    },
+    {
+        "sentence": "March 3rd, 2026 at 3pm",
+        "booking_mode": "service",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date": "2026-03-03",
+                "time": "15:00"
+            }
+        }
+    },
+    # ────────────────
+    # UNKNOWN / FRAGMENT INPUTS — SINGLE-TURN CHECK-IN/CHECK-OUT DATE COLLECTION
+    # Testing various date format variations for collecting both dates in one turn
+    # These are explicit date range fragments without booking intent verbs
+    # ────────────────
+    {
+        "sentence": "Mar 5 to 8",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "Mar 5 to Mar 8",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "05/03 to 08/03",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "March 5 to 8",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "March 5 to March 8",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "5th Mar to 8th Mar",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "5 March to 8 March",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "Mar 5th to Mar 8th",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "Mar 5 through 8",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    {
+        "sentence": "from Mar 5th through Mar 8th",
+        "booking_mode": "reservation",
+        "aliases": {},
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "date_range": {
+                    "start": "2026-03-05",
+                    "end": "2026-03-08"
+                }
+            }
+        }
+    },
+    # ────────────────
+    # OPTION-CONSTRAINED RESOLUTION — Clarification turns
+    # ────────────────
+    {
+        "sentence": "1",
+        "booking_mode": "service",
+        "aliases": {},
+        "options": {
+            "type": "service",
+            "slot": "service_id",
+            "choices": [
+                {"id": "service_123", "label": "haircut"},
+                {"id": "service_456", "label": "hairtrim"}
+            ]
+        },
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "service_123"
+            }
+        }
+    },
+    {
+        "sentence": "haircut",
+        "booking_mode": "service",
+        "aliases": {},
+        "options": {
+            "type": "service",
+            "slot": "service_id",
+            "choices": [
+                {"id": "service_123", "label": "haircut"},
+                {"id": "service_456", "label": "hairtrim"}
+            ]
+        },
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "service_123"
+            }
+        }
+    },
+    {
+        "sentence": "hairkut",
+        "booking_mode": "service",
+        "aliases": {},
+        "options": {
+            "type": "service",
+            "slot": "service_id",
+            "choices": [
+                {"id": "service_123", "label": "haircut"},
+                {"id": "service_456", "label": "hairtrim"}
+            ]
+        },
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_READY,
+            "slots": {
+                "service_id": "service_123"
+            }
+        }
+    },
+    {
+        "sentence": "3",
+        "booking_mode": "service",
+        "aliases": {},
+        "options": {
+            "type": "service",
+            "slot": "service_id",
+            "choices": [
+                {"id": "service_123", "label": "haircut"},
+                {"id": "service_456", "label": "hairtrim"}
+            ]
+        },
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "clarification_reason": "INVALID_OPTION",
+            "clarification": {
+                "reason": "INVALID_OPTION",
+                "slot": "service_id",
+                "options": [
+                    {"id": "service_123", "label": "haircut"},
+                    {"id": "service_456", "label": "hairtrim"}
+                ]
+            }
+        }
+    },
+    {
+        "sentence": "shave",
+        "booking_mode": "service",
+        "aliases": {},
+        "options": {
+            "type": "service",
+            "slot": "service_id",
+            "choices": [
+                {"id": "service_123", "label": "haircut"},
+                {"id": "service_456", "label": "hairtrim"}
+            ]
+        },
+        "expected": {
+            "intent": "UNKNOWN",
+            "status": STATUS_NEEDS_CLARIFICATION,
+            "clarification_reason": "INVALID_OPTION",
+            "clarification": {
+                "reason": "INVALID_OPTION",
+                "slot": "service_id",
+                "options": [
+                    {"id": "service_123", "label": "haircut"},
+                    {"id": "service_456", "label": "hairtrim"}
+                ]
+            }
         }
     },
 
