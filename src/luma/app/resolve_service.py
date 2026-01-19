@@ -1046,7 +1046,7 @@ def resolve_message(
             # MANDATORY: Calendar binding only runs when decision_state == RESOLVED
             # EXCEPTION: Also allow binding when date is present but time is missing
             # (to provide bound date in clarification context)
-            # The decision layer enforces temporal shape completeness, so RESOLVED
+            # EXTRACTION-ONLY: Calendar binding runs for all intents (no decision layer)
             # guarantees that temporal shape requirements are satisfied
             # UNKNOWN intents are already handled above - skip this section
             if is_unknown_intent:
@@ -1061,14 +1061,9 @@ def resolve_message(
                 # UNKNOWN intents already handled in the block above (lines 714-805)
                 # Do not overwrite calendar_result here
                 pass
-            elif decision_result and (decision_result.status == "RESOLVED" or (
-                decision_result.status == "NEEDS_CLARIFICATION" and
-                decision_result.reason == "temporal_shape_not_satisfied" and
-                len(execution_trace.get("decision", {}).get("missing_slots", [])) == 1 and
-                execution_trace.get("decision", {}).get("missing_slots", []) == ["time"] and
-                (merged_semantic_result and merged_semantic_result.resolved_booking.get(
-                    "date_refs"))
-            )):
+            # EXTRACTION-ONLY: Calendar binding runs for all non-UNKNOWN intents
+            # (UNKNOWN intents handled above)
+            elif not is_unknown_intent:
                 # Proceed with calendar binding
                 # Use effective_intent for calendar binding
                 # Luma is stateless - use current semantic result directly
@@ -1078,14 +1073,12 @@ def resolve_message(
                     "external_intent")
                 try:
                     # BINDER layer: Structured DEBUG log (before binding)
-                    # Legacy log - downgraded to DEBUG as part of logging refactor
-                    reason_str = 'decision=RESOLVED' if decision_result.status == "RESOLVED" else 'decision=NEEDS_CLARIFICATION (date-only binding)'
                     logger.debug(
                         "BINDER_GATE",
                         extra={
                             'request_id': request_id,
                             'run': True,
-                            'reason': reason_str
+                            'reason': 'extraction-only: calendar binding'
                         }
                     )
                     # Time calendar binding re-run (with merged semantic result)
@@ -1102,9 +1095,8 @@ def resolve_message(
                     # Update execution_trace with binder trace (overwrites pipeline's trace with merged semantic result)
                     execution_trace.update(binder_trace)
 
-                    # Guardrail: READY requires binder output
-                    # If decision is READY but binder didn't produce required bound field, downgrade to NEEDS_CLARIFICATION
-                    if decision_result and decision_result.status == "RESOLVED":
+                    # EXTRACTION-ONLY: Calendar binding validation (no decision layer)
+                    if True:  # Always validate (no decision_result check needed)
                         calendar_booking = calendar_result.calendar_booking if calendar_result else {}
                         required_bound_field_present = False
 
@@ -1209,17 +1201,7 @@ def resolve_message(
                     )
                     return jsonify({"success": False, "data": results}), 500
             elif not is_unknown_intent:
-                # decision_state != RESOLVED - skip calendar binding
-                # Temporal shape incomplete or other clarification needed
-                # UNKNOWN intents are already handled above - do not overwrite calendar_result
-                reason = f"decision={decision_result.status if decision_result else 'NONE'}"
-                calendar_result = CalendarBindingResult(
-                    calendar_booking={},
-                    needs_clarification=False,
-                    clarification=None,
-                    _binding_success=False,
-                    _binding_error=f"skipped_due_to_decision_state: {reason}"
-                )
+                # EXTRACTION-ONLY: This branch removed (calendar binding always runs above)
                 results["stages"]["calendar"] = calendar_result.to_dict()
                 # Binder was skipped - add trace with input even though not called
                 semantic_for_binder = merged_semantic_result.resolved_booking if merged_semantic_result else semantic_result.resolved_booking
@@ -1257,8 +1239,6 @@ def resolve_message(
             "calendar_booking", {}) if calendar_dict else {}
         cal_clar_dict = calendar_dict.get(
             "clarification") if calendar_dict else None
-        cal_needs_clarification = bool(calendar_dict.get(
-            "needs_clarification")) if calendar_dict else False
 
         # EXTRACTION-ONLY: No clarification planning - all intents are extraction-only
         # Clarification planning removed - Luma only extracts facts, no validation
@@ -1273,12 +1253,6 @@ def resolve_message(
         needs_clarification = False
         missing_slots = []
         clarification_reason = None
-
-        # EXTRACTION-ONLY: No semantic clarification handling - removed all validation
-        semantic_clarification_present = False
-        semantic_missing_slots = []
-        semantic_clarification_reason = None
-        normalized_weekday_range = False
 
         # EXTRACTION-ONLY: All validation logic removed - no missing slot computation, no temporal enforcement
         # EXTRACTION-ONLY: No clarification handling - removed all semantic validation
@@ -1335,7 +1309,7 @@ def resolve_message(
         is_creates_booking = (is_booking_intent_flag and
                               effective_intent not in {"MODIFY_BOOKING", "CANCEL_BOOKING", "UNKNOWN"})
 
-        if not is_unknown_intent and is_creates_booking and not needs_clarification:
+        if not is_unknown_intent and is_creates_booking:
             # Use current_booking directly (stateless - no memory merging)
             booking_payload = current_booking.copy() if current_booking else {}
             # Add booking_state = "RESOLVED" for resolved bookings
@@ -1352,8 +1326,7 @@ def resolve_message(
                             for service in current_services
                             if isinstance(service, dict)
                         ]
-            # INVARIANT: Do not resurrect missing booking state by rebuilding it silently
-            # If booking_payload is missing or incomplete, log and let decision layer handle clarification
+            # EXTRACTION-ONLY: If booking_payload is missing or incomplete, log warning
             if not booking_payload or (not booking_payload.get("services") and not booking_payload.get("datetime_range") and
                                        not booking_payload.get("start_date") and not booking_payload.get("end_date")):
                 logger.warning(
@@ -1362,208 +1335,12 @@ def resolve_message(
                         'request_id': request_id,
                         'intent': api_intent,
                         'has_calendar_booking': bool(calendar_booking),
-                        'note': 'Decision layer should have handled this - forcing clarification'
+                        'note': 'EXTRACTION-ONLY: booking_payload may be incomplete'
                     }
                 )
-                # Force clarification instead of silently rebuilding
-                needs_clarification = True
+                # EXTRACTION-ONLY: Log warning but don't force clarification
                 booking_payload = None
-        elif is_creates_booking and needs_clarification:
-            # For booking intents that need clarification, return lightweight context only
-            resolved_booking = merged_semantic_result.resolved_booking
-            services = resolved_booking.get("services", [])
-            if not services:
-                service_families = _get_business_categories(extraction_result)
-                services = [
-                    format_service_for_response(service)
-                    for service in service_families
-                    if isinstance(service, dict) and service.get("text")
-                ]
-            else:
-                services = [
-                    format_service_for_response(service)
-                    for service in services
-                    if isinstance(service, dict)
-                ]
-            date_refs = resolved_booking.get("date_refs") or []
-            time_refs = resolved_booking.get("time_refs", [])
-            date_roles = resolved_booking.get("date_roles", [])
-
-            # Debug: Log what we're getting from resolved_booking
-            logger.info(
-                f"[context] Building context: date_refs={date_refs}, date_roles={date_roles}, "
-                f"resolved_booking_keys={list(resolved_booking.keys())}",
-                extra={'request_id': request_id, 'user_id': user_id}
-            )
-
-            context_payload = {}
-            if services:
-                context_payload["services"] = services
-            if date_refs:
-                # Semantic reference (what user said)
-                context_payload["start_date_ref"] = date_refs[0]
-                if len(date_refs) >= 2:
-                    context_payload["end_date_ref"] = date_refs[1]
-
-                # Include date_roles if available (for debugging and client logic)
-                # Always include date_roles array (even if empty) for consistency
-                context_payload["date_roles"] = date_roles
-
-                # Bound/processed date (ISO format) from calendar binding
-                # Extract from calendar_booking if available
-                bound_start_date = None
-                bound_end_date = None
-                if calendar_booking:
-                    # Try date_range first (for reservations or date-only)
-                    if calendar_booking.get("date_range"):
-                        bound_start_date = calendar_booking["date_range"].get(
-                            "start_date")
-                        bound_end_date = calendar_booking["date_range"].get(
-                            "end_date")
-                    # Fallback to datetime_range (extract date part)
-                    elif calendar_booking.get("datetime_range"):
-                        dt_start = calendar_booking["datetime_range"].get(
-                            "start", "")
-                        dt_end = calendar_booking["datetime_range"].get(
-                            "end", "")
-                        if dt_start:
-                            bound_start_date = dt_start.split("T")[0]
-                        if dt_end:
-                            bound_end_date = dt_end.split("T")[0]
-                    # Also check direct start_date/end_date fields (for reservations)
-                    if not bound_start_date and calendar_booking.get("start_date"):
-                        bound_start_date = calendar_booking.get("start_date")
-                    if not bound_end_date and calendar_booking.get("end_date"):
-                        bound_end_date = calendar_booking.get("end_date")
-
-                # FIX: For date-only turns (CREATE_APPOINTMENT with date but no time),
-                # always resolve the date immediately and persist it in context
-                # This ensures context never carries only symbolic temporal values
-                # Date-only ≠ fully resolved appointment, but resolved dates must always be concrete
-                # Detect date-only turn: CREATE_APPOINTMENT with date_refs but no time_refs
-                is_date_only_turn = (
-                    intent_payload_name == "CREATE_APPOINTMENT" and
-                    date_refs and
-                    not time_refs and
-                    needs_clarification
-                )
-
-                # For date-only turns, always resolve date to ensure context has concrete values
-                # This ensures context never carries only symbolic temporal values
-                # For other cases, resolve if not already bound
-                if (is_date_only_turn or (not bound_start_date and date_refs)):
-                    # Resolve date directly using binder's date resolution
-                    # This treats date-only as a valid partial state, not an error
-                    from luma.calendar.calendar_binder import _bind_dates
-                    # get_timezone is already imported at module level (line 37)
-
-                    # Get timezone and now from function scope (set earlier in resolve_message)
-                    tz = get_timezone(timezone)
-                    # Use now from pipeline context (injected, not system time)
-
-                    # Get date_mode from resolved_booking
-                    date_mode = resolved_booking.get("date_mode", "single_day")
-
-                    # Resolve dates immediately - treat as partially resolved appointment
-                    # For date-only turns, always resolve even if calendar_booking has it
-                    # This ensures context always contains concrete resolved dates
-                    resolved_date_range = _bind_dates(
-                        date_refs, date_mode, now, tz)
-                    if resolved_date_range:
-                        # For date-only turns, always use resolved date (even if calendar_booking had it)
-                        # This ensures context never carries only symbolic temporal values
-                        if is_date_only_turn:
-                            bound_start_date = resolved_date_range.get(
-                                "start_date")
-                            bound_end_date = resolved_date_range.get(
-                                "end_date")
-                        elif not bound_start_date:
-                            # For non-date-only turns, only use resolved date if not already bound
-                            bound_start_date = resolved_date_range.get(
-                                "start_date")
-                            bound_end_date = resolved_date_range.get(
-                                "end_date")
-                        logger.info(
-                            f"[context] Resolved date for {'date-only turn' if is_date_only_turn else 'follow-up'}: {date_refs[0]} -> {bound_start_date}",
-                            extra={'request_id': request_id, 'date_mode': date_mode,
-                                   'is_date_only_turn': is_date_only_turn}
-                        )
-
-                # CRITICAL: For date-only turns, always persist resolved date in context
-                # Context must never carry only symbolic temporal values
-                # Use bound date if available, otherwise fallback to semantic reference
-                # For date-only turns, bound_start_date should always be set after resolution above
-                context_payload["start_date"] = bound_start_date if bound_start_date else date_refs[0]
-                if len(date_refs) >= 2:
-                    context_payload["end_date"] = bound_end_date if bound_end_date else date_refs[1]
-
-            # Add time information to context (similar to date handling)
-            time_refs = resolved_booking.get("time_refs", [])
-            time_mode = resolved_booking.get("time_mode", "none")
-            time_constraint = resolved_booking.get("time_constraint")
-
-            if time_refs or time_mode != "none" or time_constraint:
-                # Semantic reference (what user said)
-                if time_refs:
-                    # For exact time, use first time_ref
-                    if time_mode == "exact" and time_refs:
-                        context_payload["time_ref"] = time_refs[0]
-                    # For window/fuzzy, use first ref or all refs
-                    elif time_refs:
-                        context_payload["time_ref"] = time_refs[0] if len(
-                            time_refs) == 1 else time_refs
-
-                # Include time_mode for client logic
-                if time_mode != "none":
-                    context_payload["time_mode"] = time_mode
-
-                # Include time_constraint if present (e.g., "after 10am", "by 6pm")
-                if time_constraint:
-                    context_payload["time_constraint"] = time_constraint
-
-                # Resolved time from calendar binding (if available)
-                # Similar to how dates are bound, extract from calendar_booking
-                if calendar_booking and calendar_booking.get("datetime_range"):
-                    dt_start = calendar_booking["datetime_range"].get(
-                        "start", "")
-                    if dt_start:
-                        # Extract time portion and convert to 12-hour format
-                        # dt_start format: "2026-01-01T15:00:00+00:00"
-                        try:
-                            # Handle both ISO format with timezone and without
-                            dt_str = dt_start.replace('Z', '+00:00')
-                            if '+' in dt_str or dt_str.endswith('Z'):
-                                dt = datetime.fromisoformat(
-                                    dt_str.replace('Z', '+00:00'))
-                            else:
-                                dt = datetime.fromisoformat(dt_str)
-                            # Format as 12-hour time (e.g., "3:00 PM")
-                            time_str = dt.strftime("%I:%M %p")
-                            # Remove leading zero from hour (e.g., "03:00 PM" -> "3:00 PM")
-                            if time_str.startswith('0'):
-                                time_str = time_str[1:]
-                            context_payload["time"] = time_str
-                        except (ValueError, AttributeError):
-                            # Fallback: extract time portion directly and convert
-                            if "T" in dt_start:
-                                time_part = dt_start.split(
-                                    "T")[1].split("+")[0].split("-")[0]
-                                # Convert 24h to 12h format
-                                try:
-                                    hour, minute = time_part.split(":")[:2]
-                                    hour_int = int(hour)
-                                    minute_str = minute[:2]  # Get MM part
-                                    if hour_int == 0:
-                                        context_payload["time"] = f"12:{minute_str} AM"
-                                    elif hour_int < 12:
-                                        context_payload["time"] = f"{hour_int}:{minute_str} AM"
-                                    elif hour_int == 12:
-                                        context_payload["time"] = f"12:{minute_str} PM"
-                                    else:
-                                        context_payload["time"] = f"{hour_int - 12}:{minute_str} PM"
-                                except (ValueError, IndexError):
-                                    # If parsing fails, just use the time part as-is
-                                    pass
+        # EXTRACTION-ONLY: Removed needs_clarification branch (always False)
 
         # Extract entities for non-booking intents (DISCOVERY, QUOTE, DETAILS, etc.)
         # Booking intents and MODIFY_BOOKING should not include entities field
@@ -1592,39 +1369,18 @@ def resolve_message(
             "times": [t.get("text", "") if isinstance(t, dict) else str(t) for t in extraction_result.get("times", [])]
         }
 
-        # Add response trace (build issues for trace too)
+        # Add response trace (EXTRACTION-ONLY: no issues, no clarification)
         issues_for_trace: Dict[str, Any] = {}
-        if needs_clarification:
-            time_issues_for_trace = None
-            if merged_semantic_result:
-                time_issues_for_trace = merged_semantic_result.resolved_booking.get(
-                    "time_issues", [])
-            elif semantic_result:
-                time_issues_for_trace = semantic_result.resolved_booking.get(
-                    "time_issues", [])
-            issues_for_trace = build_issues(
-                missing_slots, time_issues_for_trace)
 
         execution_trace["response"] = {
-            "status": STATUS_NEEDS_CLARIFICATION if needs_clarification else STATUS_READY,
+            "status": STATUS_READY,  # EXTRACTION-ONLY: always READY
             "intent": api_intent,
-            "issues": issues_for_trace if issues_for_trace else {},
+            "issues": {},
             "has_booking": booking_payload is not None,
-            "has_clarification": needs_clarification
+            "has_clarification": False  # EXTRACTION-ONLY: always False
         }
 
-        # Build final response summary (with issues)
-        final_response_issues: Dict[str, Any] = {}
-        if needs_clarification:
-            time_issues_for_final = None
-            if merged_semantic_result:
-                time_issues_for_final = merged_semantic_result.resolved_booking.get(
-                    "time_issues", [])
-            elif semantic_result:
-                time_issues_for_final = semantic_result.resolved_booking.get(
-                    "time_issues", [])
-            final_response_issues = build_issues(
-                missing_slots, time_issues_for_final)
+        # EXTRACTION-ONLY: Removed final_response_issues (always empty)
 
         # Build facts directly from semantic output (single source of truth)
         facts_from_semantic: Dict[str, Any] = {}
@@ -2016,15 +1772,13 @@ def resolve_message(
                 extra={
                     'request_id': request_id,
                     'intent': api_intent,
-                    'decision_status': decision_result.status if decision_result else None,
+                    'decision_status': None,  # EXTRACTION-ONLY: no decision layer
                     'has_calendar_booking': bool(calendar_booking),
                     'produces_booking_payload': produces_booking,
-                    'note': 'This should not happen - decision/binder should have produced booking_payload'
+                    'note': 'EXTRACTION-ONLY: booking_payload may be None'
                 }
             )
-            # Force clarification instead of silently rebuilding
-            needs_clarification = True
-            clarification_reason = "INCOMPLETE_BOOKING_STATE"
+            # EXTRACTION-ONLY: Log error but don't force clarification
 
         # booking_payload is already set above for both RESOLVED and PARTIAL cases
         # For non-booking intents, booking_payload may be None (which is fine)
@@ -2039,12 +1793,10 @@ def resolve_message(
                 request_id=request_id
             )
 
-        # Build issues object from missing_slots and time_issues
+        # EXTRACTION-ONLY: No issues building (always empty)
         issues: Dict[str, Any] = {}
-        # POLICY: If decision.state == RESOLVED, skip issue construction entirely
-        # Decision layer is authoritative - no issues should be reported for RESOLVED requests
-        # UNKNOWN intents skip issues building (pure extraction, no validation)
-        if not is_unknown_intent and needs_clarification and not (decision_result and decision_result.status == "RESOLVED"):
+        # Dead code - kept for structure reference
+        if False:
             # Get time_issues from resolved_booking if available
             time_issues_for_issues = None
             if merged_semantic_result:
@@ -2511,21 +2263,7 @@ def resolve_message(
                     "datetime_range")
                 if datetime_range_from_calendar:  # Only use if truthy
                     resolved_datetime_range = datetime_range_from_calendar
-        elif needs_clarification:
-            # Clarification case: try to get resolved data from semantic result or decision trace
-            # Service resolution: check decision trace for resolved tenant_service_id
-            resolved_tenant_service_id = results.get("stages", {}).get(
-                "decision", {}).get("resolved_tenant_service_id")
-            if resolved_tenant_service_id:
-                # Service was resolved (even if other fields are missing)
-                resolved_services = [
-                    {"tenant_service_id": resolved_tenant_service_id}]
-
-            # Temporal data: check calendar_booking if available (may have partial binding)
-            if calendar_booking:
-                resolved_date_range = calendar_booking.get("date_range")
-                resolved_datetime_range = calendar_booking.get(
-                    "datetime_range")
+        # EXTRACTION-ONLY: Removed needs_clarification branch (always False)
 
         # For CREATE_RESERVATION, ensure date_range is set from calendar_booking if not already set
         if intent_payload_name == "CREATE_RESERVATION":
@@ -3218,7 +2956,8 @@ def resolve_message(
         # This logic exists in ONE place only (final response shaping),
         # not in semantic or decision layers.
         # UNKNOWN intents skip all output-shaping cleanup (pure extraction)
-        if not is_unknown_intent and intent_payload_name == "MODIFY_BOOKING" and decision_result and decision_result.status == "RESOLVED":
+        # EXTRACTION-ONLY: Removed decision_result check (always None)
+        if not is_unknown_intent and intent_payload_name == "MODIFY_BOOKING":
             # Ensure booking_id is always included (should already be set earlier, but verify)
             if extraction_result and extraction_result.get("booking_id") and not slots.get("booking_id"):
                 slots["booking_id"] = extraction_result["booking_id"]
@@ -3431,18 +3170,6 @@ def resolve_message(
         # Initialize slots safely
         slots = slots or {}
         
-        # Aggregate extraction facts from extraction_result and slots
-        # Single extraction aggregation step before building response
-        facts = aggregate_extraction_facts(
-            extraction_result=extraction_result,
-            slots=slots
-        )
-        
-        # Remove date_time_pairs from facts if present (date_time_pairs removed from Luma output)
-        # Always emit dates and times independently, never paired
-        if facts:
-            facts.pop("date_time_pairs", None)
-        
         # Build response body from extracted facts and intent only
         # Response is built ONLY from facts + intent - NOT from decision layer
         # Use facts built directly from semantic output (single source of truth)
@@ -3450,9 +3177,20 @@ def resolve_message(
         # Remove date_time_pairs from semantic_facts_for_response if present
         if semantic_facts_for_response:
             semantic_facts_for_response.pop("date_time_pairs", None)
+        
+        # Fallback to aggregate_extraction_facts only if semantic_facts_for_response is not available
+        facts_for_response = semantic_facts_for_response
+        if not facts_for_response:
+            facts_for_response = aggregate_extraction_facts(
+                extraction_result=extraction_result,
+                slots=slots
+            )
+            if facts_for_response:
+                facts_for_response.pop("date_time_pairs", None)
+        
         response_body = response_builder.build_response_body(
             intent_payload=intent_payload,
-            facts=semantic_facts_for_response if semantic_facts_for_response else (facts if facts else None),
+            facts=facts_for_response,
             debug_data=results if debug_mode else None
         )
 
