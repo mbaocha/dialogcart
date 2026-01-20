@@ -200,8 +200,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "hair cut",
-                "dates": ["2026-01-14"],
-                "times": ["15:00"]
+                "dates": ["2026-01-14"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "15:00",
+                "end": "15:00",
+                "label": None
             }
         }
     },
@@ -215,8 +220,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "beerd",
-                "dates": ["2026-01-16"],
-                "times": ["12:00"]
+                "dates": ["2026-01-16"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "12:00",
+                "end": "12:00",
+                "label": None
             }
         }
     },
@@ -230,8 +240,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "massage",
-                "dates": ["2026-01-19"],
-                "times": ["10:00"]
+                "dates": ["2026-01-19"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "10:00",
+                "end": "10:00",
+                "label": None
             }
         }
     },
@@ -245,8 +260,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "haircut",
-                "dates": ["2026-01-23"],
-                "times": ["14:00"]
+                "dates": ["2026-01-23"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "14:00",
+                "end": "14:00",
+                "label": None
             }
         }
     },
@@ -260,8 +280,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "massage",
-                "dates": ["2026-01-14"],
-                "times": ["09:00"]
+                "dates": ["2026-01-14"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "09:00",
+                "end": "09:00",
+                "label": None
             }
         }
     },
@@ -275,8 +300,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "beard",
-                "dates": ["2026-01-19"],
-                "times": ["11:00"]
+                "dates": ["2026-01-19"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "11:00",
+                "end": "11:00",
+                "label": None
             }
         }
     },
@@ -290,8 +320,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "massage",
-                "dates": ["2026-01-14"],
-                "times": ["14:00"]
+                "dates": ["2026-01-14"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "14:00",
+                "end": "14:00",
+                "label": None
             }
         }
     },
@@ -305,8 +340,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "haircut",
-                "dates": ["2026-01-16"],
-                "times": ["16:00"]
+                "dates": ["2026-01-16"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "16:00",
+                "end": "16:00",
+                "label": None
             }
         }
     },
@@ -320,8 +360,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "hair cut",
-                "dates": ["2026-01-14"],
-                "times": ["14:00"]
+                "dates": ["2026-01-14"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "14:00",
+                "end": "14:00",
+                "label": None
             }
         }
     },
@@ -335,8 +380,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "beerd",
-                "dates": ["2026-01-14"],
-                "times": ["11:00"]
+                "dates": ["2026-01-14"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "11:00",
+                "end": "11:00",
+                "label": None
             }
         }
     },
@@ -350,8 +400,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "massage",
-                "dates": ["2026-01-14"],
-                "times": ["16:00"]
+                "dates": ["2026-01-14"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "16:00",
+                "end": "16:00",
+                "label": None
             }
         }
     },
@@ -365,8 +420,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "massage",
-                "dates": ["2026-01-19"],
-                "times": ["09:00"]
+                "dates": ["2026-01-19"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "09:00",
+                "end": "09:00",
+                "label": None
             }
         }
     },
@@ -380,8 +440,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "haircut",
-                "dates": ["2026-01-23"],
-                "times": ["15:00"]
+                "dates": ["2026-01-23"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "15:00",
+                "end": "15:00",
+                "label": None
             }
         }
     },
@@ -395,8 +460,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "massage",
-                "dates": ["2026-01-16"],
-                "times": ["15:00"]
+                "dates": ["2026-01-16"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "15:00",
+                "end": "15:00",
+                "label": None
             }
         }
     },
@@ -411,6 +481,14 @@ booking_scenarios = [
             "facts": {
                 "service_id": "haircut",
                 "dates": ["2026-01-14"]
+            },
+            # STAGE 4: Assert time_constraint for fuzzy time instead of slots.time
+            # start/end are populated from FUZZY_TIME_WINDOWS
+            "time_constraint": {
+                "mode": "fuzzy",
+                "label": "evening",
+                "start": "17:00",
+                "end": "21:59"
             }
         }
     },
@@ -425,6 +503,14 @@ booking_scenarios = [
             "facts": {
                 "service_id": "massage",
                 "dates": ["2026-01-16"]
+            },
+            # STAGE 4: Assert time_constraint for fuzzy time instead of slots.time
+            # start/end are populated from FUZZY_TIME_WINDOWS
+            "time_constraint": {
+                "mode": "fuzzy",
+                "label": "morning",
+                "start": "00:00",
+                "end": "11:59"
             }
         }
     },
@@ -438,8 +524,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "haircut",
-                "dates": ["2026-01-14"],
-                "times": ["12:00"]
+                "dates": ["2026-01-14"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "12:00",
+                "end": "12:00",
+                "label": None
             }
         }
     },
@@ -453,8 +544,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "massage",
-                "dates": ["2026-01-14"],
-                "times": ["00:00"]
+                "dates": ["2026-01-14"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "00:00",
+                "end": "00:00",
+                "label": None
             }
         }
     },
@@ -473,8 +569,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "premium haircut",
-                "dates": ["2026-01-14"],
-                "times": ["14:00"]
+                "dates": ["2026-01-14"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "14:00",
+                "end": "14:00",
+                "label": None
             }
         }
     },
@@ -490,8 +591,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "standard haircut",
-                "dates": ["2026-01-23"],
-                "times": ["10:00"]
+                "dates": ["2026-01-23"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "10:00",
+                "end": "10:00",
+                "label": None
             }
         }
     },
@@ -507,8 +613,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "premium haircut",
-                "dates": ["2026-01-14"],
-                "times": ["14:00"]
+                "dates": ["2026-01-14"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "14:00",
+                "end": "14:00",
+                "label": None
             }
         }
     },
@@ -524,8 +635,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "premium haircut",
-                "dates": ["2026-01-14"],
-                "times": ["14:00"]
+                "dates": ["2026-01-14"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "14:00",
+                "end": "14:00",
+                "label": None
             }
         }
     },
@@ -573,8 +689,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "hair cut",
-                "dates": ["2026-01-14"],
-                "times": ["15:00"]
+                "dates": ["2026-01-14"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "15:00",
+                "end": "15:00",
+                "label": None
             }
         }
     },
@@ -589,6 +710,14 @@ booking_scenarios = [
             "facts": {
                 "service_id": "massage",
                 "dates": ["2026-01-23"]
+            },
+            # STAGE 4: Assert time_constraint for fuzzy time instead of slots.time
+            # start/end are populated from FUZZY_TIME_WINDOWS
+            "time_constraint": {
+                "mode": "fuzzy",
+                "label": "morning",
+                "start": "00:00",
+                "end": "11:59"
             }
         }
     },
@@ -602,8 +731,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "beard",
-                "dates": ["2026-01-19"],
-                "times": ["11:00"]
+                "dates": ["2026-01-19"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "11:00",
+                "end": "11:00",
+                "label": None
             }
         }
     },
@@ -645,8 +779,13 @@ booking_scenarios = [
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "haircut",
-                "dates": ["2026-01-20"],
-                "times": ["14:00"]
+                "dates": ["2026-01-20"]
+            },
+            "time_constraint": {
+                "mode": "exact",
+                "start": "14:00",
+                "end": "14:00",
+                "label": None
             }
         }
     },
@@ -779,6 +918,14 @@ booking_scenarios = [
             "facts": {
                 "booking_id": "STU901",
                 "dates": ["2026-01-16"]
+            },
+            # STAGE 4: Assert time_constraint for fuzzy time instead of slots.time
+            # start/end are populated from FUZZY_TIME_WINDOWS
+            "time_constraint": {
+                "mode": "fuzzy",
+                "label": "evening",
+                "start": "17:00",
+                "end": "21:59"
             }
         }
     },
@@ -1766,6 +1913,30 @@ booking_scenarios = [
             "facts": {
                 "dates": ["2026-04-03", "2026-04-08"],
                 "times": ["14:00", "15:00"]
+            }
+        }
+    },
+    # STAGE 4: Explicit test for fuzzy time - should produce time_constraint.mode == "fuzzy"
+    {
+        "sentence": "book haircut friday evening",
+        "booking_mode": "service",
+        "aliases": {
+            "haircut": "haircut"
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "facts": {
+                "service_id": "haircut",
+                "dates": ["2026-01-16"]  # Next Friday from test date
+            },
+            # STAGE 4: Assert time_constraint for fuzzy time (evening)
+            # This should NOT set has_datetime=True (Stage 2 requirement)
+            # start/end are populated from FUZZY_TIME_WINDOWS
+            "time_constraint": {
+                "mode": "fuzzy",
+                "label": "evening",
+                "start": "17:00",
+                "end": "21:59"
             }
         }
     },

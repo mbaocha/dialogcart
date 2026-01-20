@@ -41,7 +41,7 @@ def _load_intent_execution_config() -> Dict[str, Any]:
     for subsequent calls. Zero YAML I/O on request path after initial load.
     
     Returns:
-        Dictionary with intent execution config (intents -> commit, fallbacks)
+        Dictionary with intent execution config (intents -> commit action mapping only)
     """
     global _intent_execution_cache
     
@@ -190,52 +190,9 @@ def _extract_missing_slots(luma_response: Dict[str, Any]) -> List[str]:
     return missing_slots
 
 
-def _evaluate_fallbacks(
-    intent_config: Dict[str, Any],
-    missing_slots: List[str]
-) -> List[str]:
-    """
-    Evaluate fallback actions based on missing slots.
-    
-    Matches fallback.when_missing.any_of against missing_slots.
-    Returns list of action names for matching fallbacks.
-    
-    Args:
-        intent_config: Intent config from intent_execution.yaml
-        missing_slots: List of missing slot names from Luma
-        
-    Returns:
-        List of allowed fallback action names
-    """
-    allowed_actions: List[str] = []
-    fallbacks = intent_config.get("fallbacks", [])
-    
-    if not isinstance(fallbacks, list):
-        return allowed_actions
-    
-    missing_slots_set = set(missing_slots)
-    
-    for fallback in fallbacks:
-        if not isinstance(fallback, dict):
-            continue
-        
-        action = fallback.get("action")
-        if not action:
-            continue
-        
-        when_missing = fallback.get("when_missing", {})
-        if not isinstance(when_missing, dict):
-            continue
-        
-        any_of = when_missing.get("any_of", [])
-        if not isinstance(any_of, list):
-            continue
-        
-        # Check if any of the required slots are missing
-        if any(slot in missing_slots_set for slot in any_of):
-            allowed_actions.append(action)
-    
-    return allowed_actions
+# REMOVED: _evaluate_fallbacks
+# Planning logic (executable_actions) is now computed ONLY by the planner from intent_planning.yaml.
+# This function violated the planning boundary by using intent_execution.yaml for slot-based decisions.
 
 
 def _build_decision_plan(
@@ -244,17 +201,21 @@ def _build_decision_plan(
     domain: str
 ) -> Dict[str, Any]:
     """
-    Build a decision plan from Luma response and intent execution config.
+    Build a decision plan from Luma response.
+    
+    PLANNING BOUNDARY:
+    - missing_slots MUST come from planner (intent_planning.yaml)
+    - executable_actions MUST come from planner (intent_planning.yaml)
+    - intent_execution.yaml is ONLY for action → handler routing (no slot logic)
     
     Applies rules:
-    - commit.action is the irreversible commit step
-    - Block commit when needs_clarification == true OR booking.confirmation_state != "confirmed"
-    - Evaluate fallbacks by matching when_missing.any_of against missing_slots
-    - Allow matching fallback actions (non-destructive)
+    - commit.action is the irreversible commit step (from intent_execution.yaml)
+    - Block commit when needs_clarification == true
+    - executable_actions come from planner (partial execution with subsets of slots)
     
     Args:
         intent_name: Intent name from Luma
-        luma_response: Luma API response
+        luma_response: Luma API response (must have missing_slots from planner)
         domain: Domain for template key routing
         
     Returns:
@@ -302,28 +263,36 @@ def _build_decision_plan(
     allowed_actions: List[str] = []
     blocked_actions: List[str] = []
     
-    # CRITICAL: If missing_slots exist, block ALL actions (including fallbacks)
-    # Planner must never see READY if missing_slots exist
-    # Executing fallback actions while missing slots is a bug
+    # Get executable_actions from planner (ONLY source of truth for partial execution)
+    # Planner computes executable_actions from intent_planning.yaml based on collected slots
+    executable_actions = []
+    if intent_name:
+        from core.planning.planner import plan_intent, load_planning_policy
+        # Use effective_collected_slots if available (more accurate), otherwise use slots
+        effective_slots = luma_response.get("_effective_collected_slots")
+        if effective_slots is None:
+            effective_slots = luma_response.get("slots", {})
+        policy = load_planning_policy()
+        planner_result = plan_intent(intent_name, effective_slots, policy)
+        executable_actions = planner_result.get("executable_actions", [])
+    
+    # CRITICAL: If missing_slots exist, block ALL actions (including executable_actions from planner)
+    # Planner's executable_actions are for partial execution, but we block them when missing required slots
     if missing_slots:
         # Block all actions when missing_slots exist
         if commit_action:
             blocked_actions.append(commit_action)
-        # Do NOT evaluate fallbacks - they should not execute while clarifying
+        # Do NOT allow executable_actions while clarifying - all actions blocked
     else:
-        # Only evaluate fallbacks if no missing slots
-        fallback_actions = _evaluate_fallbacks(intent_config, missing_slots)
-        allowed_actions.extend(fallback_actions)
+        # No missing slots - allow executable_actions from planner (partial execution)
+        allowed_actions.extend(executable_actions)
         
         # Commit action blocking rules
         if commit_action:
             # CRITICAL: If missing_slots is empty, allow commit immediately
             # Tests expect READY state to execute without confirmation when slots are complete
             # Do NOT require confirmation_state == "confirmed" when all slots are filled
-            if missing_slots:
-                # Still have missing slots - block commit
-                blocked_actions.append(commit_action)
-            elif needs_clarification:
+            if needs_clarification:
                 # Luma explicitly says needs clarification - block commit
                 blocked_actions.append(commit_action)
             else:
@@ -338,19 +307,11 @@ def _build_decision_plan(
     # Determine awaiting
     awaiting = "USER_CONFIRMATION" if confirmation_state == "pending" else None
     
-    # AWAITING_SLOT: Set when status == NEEDS_CLARIFICATION and exactly one slot is missing
-    # This allows Core to route user-provided values into the slot it's currently asking for
-    awaiting_slot = None
-    if status == "NEEDS_CLARIFICATION" and len(missing_slots) == 1:
-        awaiting_slot = missing_slots[0]
-        logger.debug(f"Set awaiting_slot={awaiting_slot} (exactly one missing slot)")
-    
     return {
         "status": status,
         "allowed_actions": allowed_actions,
         "blocked_actions": blocked_actions,
-        "awaiting": awaiting,
-        "awaiting_slot": awaiting_slot
+        "awaiting": awaiting
     }
 
 

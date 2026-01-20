@@ -505,9 +505,9 @@ const ensureOrganization = async () => {
         console.warn(`   2. Manually create organization with ID ${ORG_ID} in database`);
         throw new Error(`Organization ID mismatch: expected ${ORG_ID}, got ${createdId}. Please update ORG_ID or create org ${ORG_ID} manually.`);
       }
-      console.log(`✓ Created test organization with ID ${ORG_ID}`);
+      console.log(`[OK] Created test organization with ID ${ORG_ID}`);
     } else {
-      console.log(`✓ Organization ${ORG_ID} (${existing.rows[0].business_name}) already exists`);
+      console.log(`[OK] Organization ${ORG_ID} (${existing.rows[0].business_name}) already exists`);
     }
   } finally {
     await client.end();
@@ -557,7 +557,7 @@ const ensureAvailabilitySettings = async () => {
          VALUES (gen_random_uuid(), $1, $2::jsonb)`,
         [ORG_ID, JSON.stringify(settings)],
       );
-      console.log(`✓ Created permissive availability settings for organization ${ORG_ID}`);
+      console.log(`[OK] Created permissive availability settings for organization ${ORG_ID}`);
     } else {
       // Update existing settings to be more permissive for testing
       await client.query(
@@ -569,7 +569,7 @@ const ensureAvailabilitySettings = async () => {
          WHERE organization_id = $1`,
         [ORG_ID],
       );
-      console.log(`✓ Updated availability settings for organization ${ORG_ID} to be more permissive`);
+      console.log(`[OK] Updated availability settings for organization ${ORG_ID} to be more permissive`);
     }
   } finally {
     await client.end();
@@ -647,10 +647,10 @@ const ensureStaffData = async () => {
         [ORG_ID, 'Integration Test Staff', 'therapist', '09:00', '17:00'],
       );
       staffIdResult = result.rows[0].id;
-      console.log(`✓ Created staff member with ID ${staffIdResult}`);
+      console.log(`[OK] Created staff member with ID ${staffIdResult}`);
     } else {
       staffIdResult = existing.rows[0].id;
-      console.log(`✓ Staff member already exists with ID ${staffIdResult}`);
+      console.log(`[OK] Staff member already exists with ID ${staffIdResult}`);
     }
 
     // Get service catalog ID
@@ -677,9 +677,9 @@ const ensureStaffData = async () => {
          VALUES ($1, $2)`,
         [staffIdResult, serviceId],
       );
-      console.log(`✓ Linked staff ${staffIdResult} to service ${serviceId}`);
+      console.log(`[OK] Linked staff ${staffIdResult} to service ${serviceId}`);
     } else {
-      console.log(`✓ Staff-service link already exists`);
+      console.log(`[OK] Staff-service link already exists`);
     }
 
     return staffIdResult;
@@ -824,7 +824,7 @@ describe('Internal API integration workflows', () => {
       if (orgCheck.rowCount === 0) {
         throw new Error(`Organization ${ORG_ID} does not exist. Please create it manually or update ORG_ID constant.`);
       }
-      console.log(`✓ Verified organization ${ORG_ID} exists: ${orgCheck.rows[0].business_name}`);
+      console.log(`[OK] Verified organization ${ORG_ID} exists: ${orgCheck.rows[0].business_name}`);
     } finally {
       await client.end();
     }
@@ -848,7 +848,7 @@ describe('Internal API integration workflows', () => {
     if (!staffId) {
       throw new Error('Staff member was not seeded correctly');
     }
-    console.log('✓ Test data setup complete');
+    console.log('[OK] Test data setup complete');
   });
 
   beforeEach(async () => {

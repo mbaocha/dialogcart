@@ -17,54 +17,52 @@ def assert_luma_contract(response: Dict[str, Any]) -> None:
     """
     Assert strict contract on Luma /resolve response.
     
-    Contract rules:
-    1. success=true ⇒ intent.name exists
-    2. needs_clarification=true ⇒ clarification_reason exists (string)
-    3. needs_clarification=false ⇒ booking block may exist (format depends on intent)
+    FACT-ONLY CONTRACT: Only requires intent.name to exist.
+    - intent.name MUST exist (required for planning)
+    - facts MAY be empty or partial (missing facts are NOT errors)
+    - Missing slots are NOT errors (planner computes missing_slots)
+    - Legacy fields (success, status) are NOT required
+    
+    Only treat Luma as failed if:
+    - intent is missing
+    - response is unparsable (not a dict)
+    - explicit error field is present
     
     Args:
         response: Luma API response dictionary
         
     Raises:
-        ContractViolation: If any contract rule is violated
+        ContractViolation: If intent.name is missing, response is malformed, or explicit error field is present
     """
     if not isinstance(response, dict):
         raise ContractViolation(
             f"Response must be a dict, got {type(response)}"
         )
     
-    success = response.get("success", False)
+    # Check for explicit error field - if present, this is a Luma error
+    if "error" in response:
+        error_msg = response.get("error")
+        error_message = response.get("message", str(error_msg))
+        raise ContractViolation(
+            f"Luma API returned explicit error: {error_message}"
+        )
     
-    # Rule 1: success=true ⇒ intent.name exists
-    if success:
-        intent = response.get("intent")
-        if not intent:
-            raise ContractViolation(
-                "Contract violation: success=true but intent is missing"
-            )
-        if not isinstance(intent, dict):
-            raise ContractViolation(
-                f"Contract violation: intent must be a dict, got {type(intent)}"
-            )
-        if "name" not in intent:
-            raise ContractViolation(
-                "Contract violation: success=true but intent.name is missing"
-            )
+    # ONLY REQUIRED FIELD: intent.name must exist for planning to proceed
+    intent = response.get("intent")
+    if not intent:
+        raise ContractViolation(
+            "Contract violation: intent is missing (required for planning)"
+        )
+    if not isinstance(intent, dict):
+        raise ContractViolation(
+            f"Contract violation: intent must be a dict, got {type(intent)}"
+        )
+    if "name" not in intent:
+        raise ContractViolation(
+            "Contract violation: intent.name is missing (required for planning)"
+        )
     
-    # Rule 2: needs_clarification=true ⇒ clarification_reason exists
-    needs_clarification = response.get("needs_clarification", False)
-    
-    if needs_clarification:
-        clarification_reason = response.get("clarification_reason")
-        if not clarification_reason:
-            raise ContractViolation(
-                "Contract violation: needs_clarification=true but clarification_reason is missing"
-            )
-        if not isinstance(clarification_reason, str):
-            raise ContractViolation(
-                f"Contract violation: clarification_reason must be a string, got {type(clarification_reason)}"
-            )
-    
-    # Rule 3: For resolved bookings (needs_clarification=false), booking structure is validated
-    # by downstream code. The contract only validates the top-level structure here.
+    # facts is optional - empty or partial facts are valid
+    # Missing slots are NOT errors - planner will compute missing_slots
+    # Legacy fields (success, status, needs_clarification) are NOT required
 

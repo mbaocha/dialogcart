@@ -43,7 +43,8 @@ from datetime import datetime, timezone as dt_timezone, timedelta
 
 def aggregate_extraction_facts(
     extraction_result: Optional[Dict[str, Any]] = None,
-    slots: Optional[Dict[str, Any]] = None
+    slots: Optional[Dict[str, Any]] = None,
+    intent: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Aggregate extraction facts from extraction_result and slots.
@@ -123,22 +124,26 @@ def aggregate_extraction_facts(
             seen = set()
             facts["dates"] = [d for d in unpaired_dates if d not in seen and not seen.add(d)]
     
-    # Collect times[] from slots (normalized times)
-    # EXCLUDE times that are part of date_time_pairs
-    # Support both single time string and list of times
-    times_list = []
-    time_slot = slots.get("time")
-    if time_slot:
-        if isinstance(time_slot, list):
-            times_list.extend(time_slot)
-        else:
-            times_list.append(time_slot)
-    
-    # Filter out paired times
-    if times_list:
-        unpaired_times = [t for t in times_list if t not in paired_times]
-        if unpaired_times:
-            facts["times"] = unpaired_times
+    # APPOINTMENT INTENT RULE: Do NOT emit facts.times or facts.time for appointment intents
+    # All temporal information for appointments should ONLY appear in time_constraint
+    # Skip facts.times emission entirely for CREATE_APPOINTMENT intents
+    if intent != "CREATE_APPOINTMENT":
+        # Collect times[] from slots (normalized times)
+        # EXCLUDE times that are part of date_time_pairs
+        # Support both single time string and list of times
+        times_list = []
+        time_slot = slots.get("time")
+        if time_slot:
+            if isinstance(time_slot, list):
+                times_list.extend(time_slot)
+            else:
+                times_list.append(time_slot)
+        
+        # Filter out paired times
+        if times_list:
+            unpaired_times = [t for t in times_list if t not in paired_times]
+            if unpaired_times:
+                facts["times"] = unpaired_times
     
     # Collect service_id from slots (resolved service)
     if slots.get("service_id"):
@@ -280,6 +285,42 @@ def is_booking_intent(intent: str) -> bool:
     return intent in {"CREATE_APPOINTMENT", "CREATE_RESERVATION"}
 
 
+def _try_normalize_weekday(date_str: str, now_tz_aware: datetime, tz: Any) -> Optional[str]:
+    """
+    Try to normalize a date string as a weekday if it matches weekday patterns.
+    
+    This ensures raw weekday tokens like "friday" are always normalized to ISO dates
+    and never leak into facts.dates as raw tokens.
+    
+    Args:
+        date_str: Date string to normalize (e.g., "friday", "monday")
+        now_tz_aware: Current datetime (timezone-aware)
+        tz: Timezone object
+        
+    Returns:
+        ISO date string (YYYY-MM-DD) if normalization succeeds, None otherwise
+    """
+    if not date_str or not isinstance(date_str, str):
+        return None
+    
+    weekday_map = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, 
+                  "friday": 4, "saturday": 5, "sunday": 6}
+    date_lower = date_str.lower().strip()
+    
+    if date_lower in weekday_map:
+        # Normalize bare weekday to next occurrence
+        target_weekday = weekday_map[date_lower]
+        today_weekday = now_tz_aware.weekday()
+        days_ahead = (target_weekday - today_weekday) % 7
+        if days_ahead == 0:
+            days_ahead = 7
+        import datetime as dt_module
+        target_date = now_tz_aware + dt_module.timedelta(days=days_ahead)
+        return target_date.strftime("%Y-%m-%d")
+    
+    return None
+
+
 def build_datetime_range_for_api(
     slots: Dict[str, Any],
     semantic_booking: Dict[str, Any],
@@ -327,14 +368,23 @@ def build_datetime_range_for_api(
                 semantic_booking.get("date_mode") != "none" and
                 semantic_booking.get("date_refs"))
 
-    # Check if time is present (time_mode != "none" and time_refs exist, or time_constraint exists)
-    has_time = ((semantic_booking.get("time_mode") is not None and
-                semantic_booking.get("time_mode") != "none" and
-                semantic_booking.get("time_refs")) or
-                semantic_booking.get("time_constraint"))
+    # STAGE 2: Gate has_datetime on time_constraint.mode == "exact" AND date present
+    # Fuzzy inputs like "morning", "evening", "by 5am" must NOT set has_datetime = True
+    time_constraint = semantic_booking.get("time_constraint")
+    has_exact_time_constraint = (
+        time_constraint is not None
+        and isinstance(time_constraint, dict)
+        and time_constraint.get("mode") == "exact"
+    )
 
-    # Set has_datetime if already set, or if time/date is present
-    if slots.get("has_datetime") or has_time or has_date:
+    # Set has_datetime ONLY if:
+    # 1. time_constraint exists AND mode == "exact" (exact time)
+    # 2. AND date is present
+    # This prevents fuzzy times (morning/evening/window constraints) from setting has_datetime
+    has_datetime_condition = has_exact_time_constraint and has_date
+
+    # Set has_datetime if already set, or if exact time constraint + date is present
+    if slots.get("has_datetime") or has_datetime_condition:
         # Set has_datetime if not already set
         if not slots.get("has_datetime"):
             slots["has_datetime"] = True
@@ -1459,18 +1509,31 @@ def resolve_message(
                             # Fallback to individual normalization
                             if start_date:
                                 normalized_dates.append(start_date.strftime("%Y-%m-%d"))
-                            else:
-                                normalized_dates.append(date_refs[0])
+                            # If normalization failed, try harder - never append raw date_ref
+                            elif len(date_refs) > 0:
+                                # Try normalizing the raw date_ref as a weekday
+                                normalized_start = _try_normalize_weekday(date_refs[0], now_tz_aware, tz)
+                                if normalized_start:
+                                    normalized_dates.append(normalized_start)
                             if end_date:
                                 normalized_dates.append(end_date.strftime("%Y-%m-%d"))
-                            else:
-                                normalized_dates.append(date_refs[1])
+                            # If normalization failed, try harder - never append raw date_ref
+                            elif len(date_refs) > 1:
+                                normalized_end = _try_normalize_weekday(date_refs[1], now_tz_aware, tz)
+                                if normalized_end:
+                                    normalized_dates.append(normalized_end)
                     except Exception as e:
                         logger.debug(f"[final_response] Range date normalization failed: {str(e)}", extra={
                                      'request_id': request_id})
-                        # Fallback to individual normalization
-                        normalized_dates.append(date_refs[0])
-                        normalized_dates.append(date_refs[1])
+                        # Try harder to normalize - never append raw date_refs
+                        if len(date_refs) > 0:
+                            normalized_start = _try_normalize_weekday(date_refs[0], now_tz_aware, tz)
+                            if normalized_start:
+                                normalized_dates.append(normalized_start)
+                        if len(date_refs) > 1:
+                            normalized_end = _try_normalize_weekday(date_refs[1], now_tz_aware, tz)
+                            if normalized_end:
+                                normalized_dates.append(normalized_end)
                 else:
                     # For single dates or flexible mode, normalize individually
                     for idx, date_ref in enumerate(date_refs):
@@ -1490,40 +1553,28 @@ def resolve_message(
                                     # Normalization succeeded → use ISO string
                                     normalized_dates.append(bound_date.strftime("%Y-%m-%d"))
                                 else:
-                                    # Normalization failed - for UNKNOWN intents, try bare weekday normalization
-                                    # even if ALLOW_BARE_WEEKDAY_BINDING is False
-                                    from luma.config.temporal import ALLOW_BARE_WEEKDAY_BINDING
-                                    # api_intent is a string (intent name), not a dict
-                                    intent_name = api_intent if isinstance(api_intent, str) else (api_intent.get("name") if isinstance(api_intent, dict) else None)
-                                    if not ALLOW_BARE_WEEKDAY_BINDING and intent_name == "UNKNOWN":
-                                        # Try normalizing as bare weekday for UNKNOWN intents
-                                        weekday_map = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, 
-                                                      "friday": 4, "saturday": 5, "sunday": 6}
-                                        date_lower = date_ref.lower().strip()
-                                        if date_lower in weekday_map:
-                                            # Force bare weekday normalization for UNKNOWN intents
-                                            target_weekday = weekday_map[date_lower]
-                                            today_weekday = now_tz_aware.weekday()
-                                            days_ahead = (target_weekday - today_weekday) % 7
-                                            if days_ahead == 0:
-                                                days_ahead = 7
-                                            # Use datetime.timedelta directly to avoid local variable shadowing from later imports
-                                            import datetime as dt_module
-                                            target_date = now_tz_aware + dt_module.timedelta(days=days_ahead)
-                                            normalized_dates.append(target_date.strftime("%Y-%m-%d"))
-                                        else:
-                                            normalized_dates.append(date_ref)
-                                    else:
-                                        # Use raw date_ref text (not combined string)
-                                        normalized_dates.append(date_ref)
+                                    # Normalization failed - try harder to normalize, never append raw date_ref
+                                    # Always try weekday normalization for any intent
+                                    normalized_date = _try_normalize_weekday(date_ref, now_tz_aware, tz)
+                                    if normalized_date:
+                                        normalized_dates.append(normalized_date)
+                                    # If still can't normalize, skip it (don't append raw date_ref)
+                                    # This ensures facts.dates only contains normalized ISO dates
                             except Exception as e:
-                                # Normalization exception → use raw date_ref text
+                                # Normalization exception → try harder, never use raw date_ref
                                 logger.debug(f"[final_response] Date normalization failed for '{date_str_to_normalize}': {str(e)}", extra={
                                              'request_id': request_id, 'date_ref': date_ref, 'date_str_to_normalize': date_str_to_normalize})
-                                normalized_dates.append(date_ref)
+                                # Try weekday normalization as fallback
+                                normalized_date = _try_normalize_weekday(date_ref, now_tz_aware, tz)
+                                if normalized_date:
+                                    normalized_dates.append(normalized_date)
+                                # If still can't normalize, skip it (don't append raw date_ref)
                         else:
-                            # Non-string date_ref → convert to string
-                            normalized_dates.append(str(date_ref))
+                            # Non-string date_ref → try to normalize, never append raw
+                            date_str = str(date_ref)
+                            normalized_date = _try_normalize_weekday(date_str, now_tz_aware, tz)
+                            if normalized_date:
+                                normalized_dates.append(normalized_date)
                 
                 # Remove duplicates while preserving order
                 if normalized_dates:
@@ -1532,124 +1583,167 @@ def resolve_message(
                     if unique_dates:
                         facts_from_semantic["dates"] = unique_dates
                 
-                # Post-process: For UNKNOWN intents, normalize any remaining raw weekday strings
-                # This handles cases where normalization failed but we still have weekday strings
-                # api_intent is a string (intent name), not a dict
-                intent_name = api_intent if isinstance(api_intent, str) else (api_intent.get("name") if isinstance(api_intent, dict) else None)
-                if intent_name == "UNKNOWN" and facts_from_semantic.get("dates"):
-                    from luma.config.temporal import ALLOW_BARE_WEEKDAY_BINDING
-                    if not ALLOW_BARE_WEEKDAY_BINDING:
-                        # Ensure now_tz_aware is available (reuse from date normalization above)
-                        tz = get_timezone(timezone)
-                        if now.tzinfo is None:
-                            now_tz_aware_post = _localize_datetime(now, tz)
-                        else:
-                            now_tz_aware_post = now
-                        
-                        # Check if any dates are raw weekday strings
-                        weekday_map = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3, 
-                                      "friday": 4, "saturday": 5, "sunday": 6}
-                        processed_dates = []
-                        for date_str in facts_from_semantic["dates"]:
-                            if isinstance(date_str, str):
-                                date_lower = date_str.lower().strip()
-                                if date_lower in weekday_map:
-                                    # Normalize bare weekday to next occurrence
-                                    target_weekday = weekday_map[date_lower]
-                                    today_weekday = now_tz_aware_post.weekday()
-                                    days_ahead = (target_weekday - today_weekday) % 7
-                                    if days_ahead == 0:
-                                        days_ahead = 7
-                                    # Use datetime.timedelta directly to avoid local variable shadowing from later imports
-                                    import datetime as dt_module
-                                    target_date = now_tz_aware_post + dt_module.timedelta(days=days_ahead)
-                                    processed_dates.append(target_date.strftime("%Y-%m-%d"))
-                                else:
-                                    processed_dates.append(date_str)
-                            else:
-                                processed_dates.append(date_str)
-                        if processed_dates:
-                            facts_from_semantic["dates"] = processed_dates
-            
-            # Extract times from semantic.time_refs (normalize to HH:MM)
-            # Also check time_constraint for exact times (e.g., "noon" -> "12:00")
-            # Collect ALL times, not just the first one
-            time_refs = semantic_booking.get("time_refs", [])
-            time_mode = semantic_booking.get("time_mode", "none")
-            time_constraint = semantic_booking.get("time_constraint")
-            normalized_times = []
-            
-            # If time_constraint has an exact time (e.g., "noon" normalized to "12:00"), include it
-            if time_constraint and isinstance(time_constraint, dict):
-                constraint_mode = time_constraint.get("mode")
-                if constraint_mode == "exact":
-                    constraint_start = time_constraint.get("start")
-                    if constraint_start and isinstance(constraint_start, str) and ":" in constraint_start:
-                        # Already in HH:MM format (e.g., "12:00" from "noon")
-                        normalized_times.append(constraint_start)
-            
-            # Always process time_refs if they exist, regardless of time_mode
-            # This ensures times are extracted even for UNKNOWN intents
-            if time_refs:
-                try:
+                # Post-process: Normalize any remaining raw weekday strings (safety net)
+                # This handles edge cases where normalization might have failed earlier
+                # DATE NORMALIZATION RULE: Always normalize dates to ISO, never store raw tokens
+                if facts_from_semantic.get("dates"):
+                    # Ensure now_tz_aware is available (reuse from date normalization above)
                     tz = get_timezone(timezone)
                     if now.tzinfo is None:
-                        now_tz_aware = _localize_datetime(now, tz)
+                        now_tz_aware_post = _localize_datetime(now, tz)
                     else:
-                        now_tz_aware = now
+                        now_tz_aware_post = now
                     
-                    time_windows = extraction_result.get("time_windows", []) if extraction_result else []
-                    # Normalize ALL time_refs - collect all times, not just the first one
-                    # For exact mode, bind_times only processes first time, so we need to parse each time_ref
-                    if time_mode == "exact":
-                        # For exact times, parse each time_ref individually
-                        from luma.calendar.calendar_binder import _parse_time
-                        for time_ref in time_refs:
-                            if isinstance(time_ref, str):
-                                bound_time, _ = _parse_time(time_ref)
-                                if bound_time:
-                                    time_hhmm = bound_time.strftime("%H:%M")
-                                    normalized_times.append(time_hhmm)
-                    else:
-                        # For window/range mode, use bind_times (handles multiple times)
-                        time_result = bind_times(
-                            time_refs,
-                            time_mode,
-                            now_tz_aware,
-                            tz,
-                            time_windows=time_windows
-                        )
-                        if time_result:
-                            start_time = time_result.get("start_time")
-                            end_time = time_result.get("end_time")
-                            if start_time:
-                                # Extract HH:MM from normalized time
-                                if isinstance(start_time, str):
-                                    if ":" in start_time:
-                                        hour_min = ":".join(start_time.split(":")[:2])
-                                        normalized_times.append(hour_min)
-                                    else:
-                                        normalized_times.append(start_time)
-                            # For range mode, also include end_time if different
-                            if end_time and end_time != start_time:
-                                if isinstance(end_time, str):
-                                    if ":" in end_time:
-                                        hour_min = ":".join(end_time.split(":")[:2])
-                                        if hour_min not in normalized_times:
+                    # Check if any dates are raw weekday strings or other non-ISO formats
+                    processed_dates = []
+                    for date_str in facts_from_semantic["dates"]:
+                        if isinstance(date_str, str):
+                            # Check if it's already an ISO date (YYYY-MM-DD format)
+                            if re.match(r'^\d{4}-\d{2}-\d{2}$', date_str):
+                                # Already normalized ISO date - keep it
+                                processed_dates.append(date_str)
+                            else:
+                                # Not an ISO date - try to normalize it
+                                # First try weekday normalization
+                                normalized_date = _try_normalize_weekday(date_str, now_tz_aware_post, tz)
+                                if normalized_date:
+                                    processed_dates.append(normalized_date)
+                                else:
+                                    # Try binding as a date string
+                                    try:
+                                        bound_date = _bind_single_date(date_str, now_tz_aware_post, tz)
+                                        if bound_date:
+                                            processed_dates.append(bound_date.strftime("%Y-%m-%d"))
+                                        # If normalization fails, skip it (don't append raw string)
+                                    except Exception:
+                                        # Normalization failed - skip it (don't append raw string)
+                                        logger.debug(f"[final_response] Post-process date normalization failed for '{date_str}', skipping", extra={
+                                                     'request_id': request_id, 'date_str': date_str})
+                        else:
+                            # Non-string date - try to convert and normalize
+                            date_str = str(date_str)
+                            normalized_date = _try_normalize_weekday(date_str, now_tz_aware_post, tz)
+                            if normalized_date:
+                                processed_dates.append(normalized_date)
+                            else:
+                                # Try binding as a date string
+                                try:
+                                    bound_date = _bind_single_date(date_str, now_tz_aware_post, tz)
+                                    if bound_date:
+                                        processed_dates.append(bound_date.strftime("%Y-%m-%d"))
+                                    # If normalization fails, skip it
+                                except Exception:
+                                    # Normalization failed - skip it
+                                    logger.debug(f"[final_response] Post-process date normalization failed for '{date_str}', skipping", extra={
+                                                 'request_id': request_id, 'date_str': date_str})
+                    if processed_dates:
+                        facts_from_semantic["dates"] = processed_dates
+                    elif facts_from_semantic.get("dates"):
+                        # All dates failed normalization - remove the key to avoid leaking raw tokens
+                        facts_from_semantic.pop("dates", None)
+            
+            # APPOINTMENT INTENT RULE: Do NOT emit facts.times or facts.time for appointment intents
+            # All temporal information for appointments should ONLY appear in time_constraint
+            # Skip facts.times emission entirely for CREATE_APPOINTMENT intents
+            if api_intent != "CREATE_APPOINTMENT":
+                # Extract times from semantic.time_refs (normalize to HH:MM)
+                # FUZZY TIME RULE: Do NOT emit facts.times for fuzzy times (morning, evening, etc.)
+                # Fuzzy times should ONLY appear in time_constraint, not in facts.times
+                time_refs = semantic_booking.get("time_refs", [])
+                time_mode = semantic_booking.get("time_mode", "none")
+                time_constraint = semantic_booking.get("time_constraint")
+                normalized_times = []
+                
+                # Check if this is a fuzzy time - if so, skip facts.times emission
+                # FUZZY TIME RULE: Do NOT emit facts.times for fuzzy times (morning, evening, etc.)
+                is_fuzzy_time = False
+                if time_constraint and isinstance(time_constraint, dict):
+                    constraint_mode = time_constraint.get("mode")
+                    if constraint_mode == "fuzzy":
+                        # Fuzzy time (morning, evening, etc.) - do NOT emit facts.times
+                        is_fuzzy_time = True
+                    elif constraint_mode == "exact":
+                        # Exact time constraint - include in facts.times
+                        constraint_start = time_constraint.get("start")
+                        if constraint_start and isinstance(constraint_start, str) and ":" in constraint_start:
+                            # Already in HH:MM format (e.g., "12:00" from "noon")
+                            normalized_times.append(constraint_start)
+                
+                # Also check if time_mode == "window" with fuzzy window names (morning, evening, etc.)
+                # These should NOT be converted to discrete times in facts.times
+                if not is_fuzzy_time and time_mode == "window" and time_refs:
+                    # Check if time_refs contain fuzzy window names (not explicit time ranges)
+                    from luma.calendar.calendar_binder import _get_time_window_bounds
+                    time_window_bounds = _get_time_window_bounds()
+                    fuzzy_window_names = set(time_window_bounds.keys())
+                    # If first time_ref is a fuzzy window name, treat as fuzzy
+                    if time_refs and isinstance(time_refs[0], str):
+                        first_ref_lower = time_refs[0].lower().strip()
+                        if first_ref_lower in fuzzy_window_names:
+                            is_fuzzy_time = True
+                
+                # Only process time_refs if NOT a fuzzy time
+                # Fuzzy times should only appear in time_constraint, not facts.times
+                if time_refs and not is_fuzzy_time:
+                    try:
+                        tz = get_timezone(timezone)
+                        if now.tzinfo is None:
+                            now_tz_aware = _localize_datetime(now, tz)
+                        else:
+                            now_tz_aware = now
+                        
+                        time_windows = extraction_result.get("time_windows", []) if extraction_result else []
+                        # Normalize ALL time_refs - collect all times, not just the first one
+                        # For exact mode, bind_times only processes first time, so we need to parse each time_ref
+                        if time_mode == "exact":
+                            # For exact times, parse each time_ref individually
+                            from luma.calendar.calendar_binder import _parse_time
+                            for time_ref in time_refs:
+                                if isinstance(time_ref, str):
+                                    bound_time, _ = _parse_time(time_ref)
+                                    if bound_time:
+                                        time_hhmm = bound_time.strftime("%H:%M")
+                                        normalized_times.append(time_hhmm)
+                        else:
+                            # For window/range mode, use bind_times (handles multiple times)
+                            time_result = bind_times(
+                                time_refs,
+                                time_mode,
+                                now_tz_aware,
+                                tz,
+                                time_windows=time_windows
+                            )
+                            if time_result:
+                                start_time = time_result.get("start_time")
+                                end_time = time_result.get("end_time")
+                                if start_time:
+                                    # Extract HH:MM from normalized time
+                                    if isinstance(start_time, str):
+                                        if ":" in start_time:
+                                            hour_min = ":".join(start_time.split(":")[:2])
                                             normalized_times.append(hour_min)
-                                    else:
-                                        if end_time not in normalized_times:
-                                            normalized_times.append(end_time)
-                    # Remove duplicates while preserving order
-                    if normalized_times:
-                        seen = set()
-                        unique_times = [t for t in normalized_times if t not in seen and not seen.add(t)]
-                        if unique_times:
-                            facts_from_semantic["times"] = unique_times
-                except Exception as e:
-                    logger.debug(f"[final_response] Time normalization failed: {str(e)}", extra={
-                                 'request_id': request_id})
-                    pass
+                                        else:
+                                            normalized_times.append(start_time)
+                                # For range mode, also include end_time if different
+                                if end_time and end_time != start_time:
+                                    if isinstance(end_time, str):
+                                        if ":" in end_time:
+                                            hour_min = ":".join(end_time.split(":")[:2])
+                                            if hour_min not in normalized_times:
+                                                normalized_times.append(hour_min)
+                                        else:
+                                            if end_time not in normalized_times:
+                                                normalized_times.append(end_time)
+                        # Remove duplicates while preserving order
+                        if normalized_times:
+                            seen = set()
+                            unique_times = [t for t in normalized_times if t not in seen and not seen.add(t)]
+                            if unique_times:
+                                facts_from_semantic["times"] = unique_times
+                    except Exception as e:
+                        logger.debug(f"[final_response] Time normalization failed: {str(e)}", extra={
+                                     'request_id': request_id})
+                        pass
             
             # Extract booking_id from extraction_result (for MODIFY_BOOKING, CANCEL_BOOKING, etc.)
             if extraction_result and extraction_result.get("booking_id"):
@@ -3041,27 +3135,29 @@ def resolve_message(
                 date_refs = semantic_booking.get("date_refs", [])
                 date_mode = semantic_booking.get("date_mode")
 
-                # Check if time-related change exists
-                has_time_change = (
-                    semantic_has_datetime or
-                    bool(semantic_datetime_range) or
-                    len(time_refs) > 0 or
-                    time_constraint is not None or
-                    (time_mode and time_mode != "none")
+                # STAGE 2: Gate has_datetime on time_constraint.mode == "exact" AND date present
+                # Check if exact time constraint exists (mode == "exact")
+                has_exact_time_constraint = (
+                    time_constraint is not None
+                    and isinstance(time_constraint, dict)
+                    and time_constraint.get("mode") == "exact"
                 )
 
-                # Check if date-related change exists (for appointments, date-only changes should set has_datetime)
+                # Check if date-related change exists
                 has_date_change = (
                     len(date_refs) > 0 or
                     (date_mode and date_mode != "none" and date_mode != "flexible") or
                     bool(semantic_booking.get("date_range"))
                 )
 
-            # For appointments (service mode), any date OR time change → set has_datetime = true
+            # For appointments (service mode), set has_datetime ONLY if:
+            # 1. time_constraint.mode == "exact" (exact time, not fuzzy/window)
+            # 2. AND date is present
+            # This prevents fuzzy times (morning/evening/window constraints) from setting has_datetime
             # For reservations, only date_range is output (no has_datetime)
             if not is_reservation:
-                # Appointment mode: any date OR time change → has_datetime = true
-                if has_time_change or has_date_change:
+                # Appointment mode: exact time constraint + date change → has_datetime = true
+                if has_exact_time_constraint and has_date_change:
                     slots["has_datetime"] = True
 
                 # For appointments: ensure datetime_range exists when has_datetime=True
@@ -3183,7 +3279,8 @@ def resolve_message(
         if not facts_for_response:
             facts_for_response = aggregate_extraction_facts(
                 extraction_result=extraction_result,
-                slots=slots
+                slots=slots,
+                intent=intent_payload_name
             )
             if facts_for_response:
                 facts_for_response.pop("date_time_pairs", None)
@@ -3192,6 +3289,34 @@ def resolve_message(
             intent_payload=intent_payload,
             facts=facts_for_response,
             debug_data=results if debug_mode else None
+        )
+
+        # Add time_constraint to response payload (shadow output - no behavior change)
+        # Extract time_constraint from semantic_result if available
+        time_constraint_dict = None
+        if semantic_result and hasattr(semantic_result, 'time_constraint') and semantic_result.time_constraint:
+            # Normalize to API format: ensure label is set appropriately
+            time_constraint_dict = semantic_result.time_constraint.copy()
+            # Ensure label is set: "morning|evening|user_exact" or None
+            # For user-specified exact times, use None (or could use "user_exact" if needed)
+            # For fuzzy times (morning/evening), label is already set from time_constraints.py
+            response_body["time_constraint"] = time_constraint_dict
+        elif merged_semantic_result and hasattr(merged_semantic_result, 'time_constraint') and merged_semantic_result.time_constraint:
+            time_constraint_dict = merged_semantic_result.time_constraint.copy()
+            response_body["time_constraint"] = time_constraint_dict
+
+        # STAGE 3: Debug log for time source of truth
+        logger.debug(
+            "[TIME_SOURCE_OF_TRUTH] time_constraint=%s slots.time=%s facts.times=%s",
+            time_constraint_dict,
+            slots.get("time") if slots else None,
+            facts_for_response.get("times") if facts_for_response else None,
+            extra={
+                'request_id': request_id,
+                'time_constraint': time_constraint_dict,
+                'slots_time': slots.get("time") if slots else None,
+                'facts_times': facts_for_response.get("times") if facts_for_response else None
+            }
         )
 
         # Removed per-stage logging - consolidated trace emitted at end

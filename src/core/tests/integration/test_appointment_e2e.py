@@ -321,7 +321,7 @@ def _validate_rendered_response(
 
         if verbose:
             print(
-                f"✓ Rendered response verified: {rendered.get('text', '')[:60]}...")
+                f"[OK] Rendered response verified: {rendered.get('text', '')[:60]}...")
         return True, None
     except Exception as render_error:
         return False, f"Rendering failed: {str(render_error)}"
@@ -462,7 +462,7 @@ def test_scenario_e2e(
                 return False, error_msg
 
             if verbose:
-                print(f"✓ NEEDS_CLARIFICATION verified")
+                print(f"[OK] NEEDS_CLARIFICATION verified")
             return True, None
 
         elif expected_status in (STATUS_EXECUTED, STATUS_AWAITING_CONFIRMATION):
@@ -518,7 +518,7 @@ def test_scenario_e2e(
                     return False, f"After confirmation, expected EXECUTED, got {confirm_status}"
 
                 if verbose:
-                    print(f"✓ Confirmed and executed successfully")
+                    print(f"[OK] Confirmed and executed successfully")
                     if confirm_outcome.get("booking_code"):
                         print(
                             f"  Booking code: {confirm_outcome.get('booking_code')}")
@@ -537,7 +537,7 @@ def test_scenario_e2e(
                     return False, "EXECUTED status but no booking_code in outcome"
 
                 if verbose:
-                    print(f"✓ Executed immediately (no confirmation needed)")
+                    print(f"[OK] Executed immediately (no confirmation needed)")
                     print(f"  Booking code: {outcome.get('booking_code')}")
 
                 # Second assertion: Test rendered response for executed outcome
@@ -627,13 +627,13 @@ def run_all_scenarios(
                 # Only print passing scenarios in verbose mode
                 if verbose:
                     print(
-                        f"✓ Scenario {display_idx}: {scenario.get('sentence', '')[:50]}...")
+                        f"[OK] Scenario {display_idx}: {scenario.get('sentence', '')[:50]}...")
             else:
                 failed += 1
                 failures.append((display_idx, error_msg or "Unknown error"))
                 # Always print failures
                 print(
-                    f"✗ Scenario {display_idx}: {scenario.get('sentence', '')[:50]}...")
+                    f"[FAIL] Scenario {display_idx}: {scenario.get('sentence', '')[:50]}...")
                 if error_msg:
                     print(f"  Error: {error_msg}")
     else:
@@ -655,13 +655,13 @@ def run_all_scenarios(
                 # Only print passing scenarios in verbose mode
                 if verbose:
                     print(
-                        f"✓ Scenario {list_idx}: {scenario.get('sentence', '')[:50]}...")
+                        f"[OK] Scenario {list_idx}: {scenario.get('sentence', '')[:50]}...")
             else:
                 failed += 1
                 failures.append((list_idx, error_msg or "Unknown error"))
                 # Always print failures
                 print(
-                    f"✗ Scenario {list_idx}: {scenario.get('sentence', '')[:50]}...")
+                    f"[FAIL] Scenario {list_idx}: {scenario.get('sentence', '')[:50]}...")
                 if error_msg:
                     print(f"  Error: {error_msg}")
 

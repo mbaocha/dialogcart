@@ -363,7 +363,7 @@ def run_all_examples(verbose: bool = True) -> None:
     print("SUMMARY")
     print("="*60)
     for result in results:
-        status = "✓" if result['success'] else "✗"
+        status = "[OK]" if result['success'] else "[FAIL]"
         outcome = result.get('outcome_type', result.get('error', 'UNKNOWN'))
         print(
             f"{status} Example {result['example_num']:2d}: {result['name']:<40} -> {outcome}")

@@ -11,7 +11,6 @@ Session schema:
     "intent": str,
     "slots": dict,  # Collected slots only - missing_slots are computed fresh
     "status": "READY" | "NEEDS_CLARIFICATION",
-    "awaiting_slot": str (optional, computed when exactly one missing slot exists)
 }
 
 Note: missing_slots are NEVER persisted in session.
@@ -144,7 +143,7 @@ def validate_redis_connection():
 
         # Success - print to stdout and flush immediately
         print(
-            f"✓ Redis connection validated successfully (REDIS_URL={redis_url})", flush=True)
+            f"[OK] Redis connection validated successfully (REDIS_URL={redis_url})", flush=True)
 
     except ImportError:
         print(
@@ -209,7 +208,6 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
             - intent: str
             - slots: dict (collected slots only)
             - status: "READY" | "NEEDS_CLARIFICATION"
-            - awaiting_slot: str (optional, computed)
 
     Note: missing_slots are NOT stored in session - they are computed fresh.
     """

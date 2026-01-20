@@ -279,7 +279,7 @@ def test_followup_scenario_e2e(
                             return False, f"Turn {turn_index + 1} (after confirmation) {error_msg}"
                         
                         if verbose:
-                            print(f"✓ Confirmed and executed successfully")
+                            print(f"[OK] Confirmed and executed successfully")
                     else:
                         # Not last turn - accept AWAITING_CONFIRMATION (next turn will handle confirmation)
                         if verbose:
@@ -309,11 +309,11 @@ def test_followup_scenario_e2e(
                     return False, f"Turn {turn_index + 1} {error_msg}"
 
             if verbose:
-                print(f"✓ Turn {turn_index + 1} passed")
+                print(f"[OK] Turn {turn_index + 1} passed")
 
         # All turns passed
         if verbose:
-            print(f"\n✓ All {len(turns)} turns passed for scenario: {scenario_name}")
+            print(f"\n[OK] All {len(turns)} turns passed for scenario: {scenario_name}")
         return True, None
 
     except Exception as e:
@@ -364,11 +364,11 @@ def run_all_followup_scenarios(
             if success:
                 passed += 1
                 if verbose:
-                    print(f"✓ Scenario {original_idx}: {scenario.get('name', '')[:50]}...")
+                    print(f"[OK] Scenario {original_idx}: {scenario.get('name', '')[:50]}...")
             else:
                 failed += 1
                 failures.append((original_idx, error_msg or "Unknown error"))
-                print(f"✗ Scenario {original_idx}: {scenario.get('name', '')[:50]}...")
+                print(f"[FAIL] Scenario {original_idx}: {scenario.get('name', '')[:50]}...")
                 if error_msg:
                     print(f"  Error: {error_msg}")
     else:
@@ -380,11 +380,11 @@ def run_all_followup_scenarios(
             if success:
                 passed += 1
                 if verbose:
-                    print(f"✓ Scenario {list_idx}: {scenario.get('name', '')[:50]}...")
+                    print(f"[OK] Scenario {list_idx}: {scenario.get('name', '')[:50]}...")
             else:
                 failed += 1
                 failures.append((list_idx, error_msg or "Unknown error"))
-                print(f"✗ Scenario {list_idx}: {scenario.get('name', '')[:50]}...")
+                print(f"[FAIL] Scenario {list_idx}: {scenario.get('name', '')[:50]}...")
                 if error_msg:
                     print(f"  Error: {error_msg}")
 

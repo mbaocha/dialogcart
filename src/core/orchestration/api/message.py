@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 import logging
 import uuid
+import json
 
 # Ensure environment variables are loaded at startup
 # Import app module which loads .env files
@@ -119,10 +120,13 @@ async def post_message(request: MessageRequest):
                         "missing_slots": new_session_state.get("missing_slots", [])
                     })
             elif outcome_status == "READY":
-                # Clear session on completion
-                clear_session(request.user_id)
+                # FIX: Do NOT clear session on READY unless execution has occurred
+                # Sessions should only be cleared after confirmed execution event
+                # This preserves intent + slots for follow-up modification turns (e.g. "make it 4pm")
+                # Keep session state unchanged - clearing will happen after execution
                 logger.info(
-                    f"session_cleared user_id={request.user_id} transaction_id={transaction_id}"
+                    f"session_preserved_on_ready user_id={request.user_id} transaction_id={transaction_id} "
+                    f"(session preserved for follow-up modifications)"
                 )
         
         # Convert to response model

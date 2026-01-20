@@ -1,54 +1,54 @@
 """
-Slot Contract - Required Slots Definition
+Slot Contract - Planning Integration
 
-Defines required slots per intent and computes missing slots.
+DEPRECATED: This module is being phased out in favor of the planner.
+All slot requirements MUST come from intent_planning.yaml via the planner.
 
-This is the single source of truth for what slots are required for each intent.
-missing_slots are computed fresh from intent + collected slots.
+GUARD: This module should NOT compute missing slots directly.
+Use core.planning.planner.plan_intent() instead.
+
+PLANNING BOUNDARY:
+- Planning = intent_planning.yaml + planner code (core.planning.planner)
+- Dialog = dialog_policy.yaml (consumes planner output, does NOT compute missing slots)
+- Execution = intent_execution.yaml (dumb routing only, does NOT reference slots)
+
+This module provides backward-compatible wrappers that delegate to the planner.
 """
 
 import os
 from typing import Dict, List, Set, Any
 
 
-# Execution-required slots per intent (for execution readiness checks)
-# These are checked later, not used for planning missing_slots computation
-EXECUTION_REQUIRED_SLOTS_BY_INTENT: Dict[str, List[str]] = {
+# GUARD: Hardcoded slot definitions are DEPRECATED
+# All slot requirements MUST come from intent_planning.yaml via the planner.
+# This dict is kept for backward compatibility only and should not be extended.
+_EXECUTION_REQUIRED_SLOTS_BY_INTENT: Dict[str, List[str]] = {
     "CREATE_APPOINTMENT": ["service_id", "date", "time"],
     "CREATE_RESERVATION": ["service_id", "start_date", "end_date"],
-    "MODIFY_BOOKING": ["booking_id"],  # Domain-specific slots added by normalizer
+    "MODIFY_BOOKING": ["booking_id"],
     "CANCEL_BOOKING": ["booking_id"],
 }
-
-# Planning-required slots per intent (for missing_slots computation)
-# Tests validate PLANNING behavior, not execution readiness
-# Planning requires more information than execution for some intents
-PLANNING_REQUIRED_SLOTS_BY_INTENT: Dict[str, List[str]] = {
-    "CREATE_APPOINTMENT": ["service_id", "date", "time"],
-    "CREATE_RESERVATION": ["service_id", "start_date", "end_date"],
-    "MODIFY_BOOKING": ["booking_id", "date", "time"],  # Base: ambiguous modify requires both date and time
-    "MODIFY_RESERVATION": ["booking_id", "start_date", "end_date"],  # Planning requires both dates (context-aware)
-    "CANCEL_BOOKING": ["booking_id"],
-}
-
-# Backward compatibility: REQUIRED_SLOTS_BY_INTENT now refers to planning slots
-# (since compute_missing_slots uses planning slots for tests)
-REQUIRED_SLOTS_BY_INTENT = PLANNING_REQUIRED_SLOTS_BY_INTENT
 
 
 def get_required_slots_for_intent(intent_name: str) -> List[str]:
     """
-    Get required slots for an intent from the intent contract.
+    DEPRECATED: Get required slots from planner instead.
     
-    This is the authoritative source for what slots are required.
+    This function is kept for backward compatibility but delegates to the planner.
+    New code should use core.planning.planner.plan_intent() directly.
     
     Args:
         intent_name: Intent name (e.g., "CREATE_APPOINTMENT", "CREATE_RESERVATION")
         
     Returns:
-        List of required slot names for the intent
+        List of required slot names for the intent (from intent_planning.yaml)
     """
-    return REQUIRED_SLOTS_BY_INTENT.get(intent_name, [])
+    # DELEGATE TO PLANNER: intent_planning.yaml is the authoritative source
+    from core.planning.planner import load_planning_policy
+    policy = load_planning_policy()
+    intent_policy = policy.get(intent_name, {})
+    required_slots = intent_policy.get("required_slots", [])
+    return required_slots if isinstance(required_slots, list) else []
 
 
 def get_planning_required_slots_for_intent(
@@ -59,14 +59,18 @@ def get_planning_required_slots_for_intent(
     """
     Get planning-required slots for an intent, context-aware for MODIFY intents.
     
+    GUARD: Base requirements MUST come from intent_planning.yaml via the planner.
+    This function preserves context-aware logic for MODIFY intents but delegates
+    base requirements to the planner.
+    
     For MODIFY_BOOKING (service domain):
-    - Base: ["booking_id"]
+    - Base: ["booking_id"] (from intent_planning.yaml)
     - Time-only change: ["booking_id"] (date NOT required if only time is being modified)
     - Date-only change: ["booking_id", "date"] (date required)
     - Date+time change: ["booking_id", "date", "time"] (both required)
     
     For MODIFY_RESERVATION:
-    - Base: ["booking_id"]
+    - Base: ["booking_id"] (from intent_planning.yaml)
     - Date-only change: ["booking_id", "start_date", "end_date"] (both dates required)
     - Single date provided: ["booking_id"] + whichever date(s) are missing
     
@@ -82,7 +86,13 @@ def get_planning_required_slots_for_intent(
     import logging
     logger = logging.getLogger(__name__)
     
-    base_planning_slots = PLANNING_REQUIRED_SLOTS_BY_INTENT.get(intent_name, [])
+    # DELEGATE TO PLANNER: Get base requirements from intent_planning.yaml
+    from core.planning.planner import load_planning_policy
+    policy = load_planning_policy()
+    intent_policy = policy.get(intent_name, {})
+    base_planning_slots = intent_policy.get("required_slots", [])
+    if not isinstance(base_planning_slots, list):
+        base_planning_slots = []
     
     print(f"[REQUIRED_SLOTS_COMPUTE] ENTRY: intent={intent_name}, base_slots={base_planning_slots}")
     print(f"[REQUIRED_SLOTS_COMPUTE] collected_slots type={type(collected_slots)}, value={collected_slots}")
@@ -220,31 +230,19 @@ def compute_missing_slots(
     session_state: Dict[str, Any] = None
 ) -> List[str]:
     """
-    Compute missing slots fresh from planning contract and collected slots.
+    DEPRECATED: Use core.planning.planner.plan_intent() instead.
     
-    ARCHITECTURAL INVARIANT: missing_slots = PLANNING_REQUIRED_SLOTS(intent) - collected_slots
-    This is a pure function with no side effects.
+    This function is kept for backward compatibility but delegates to the planner.
+    New code should use the planner directly.
     
-    Formula: missing_slots = planning_required_slots - collected_slots
-    
-    Rules:
-    - Uses PLANNING slot contract, not execution contract
-    - Tests validate PLANNING behavior, not execution readiness
-    - No inference
-    - No context-based satisfaction
-    - Slot is satisfied ONLY if explicitly present in collected_slots
-    
-    CRITICAL: collected_slots should be the current-turn effective slot view:
-    - merge(session.slots, promoted_current_turn_slots) after domain filtering
-    - For MODIFY_* intents, this allows context-aware required slot computation
-    
-    Special rules:
-    - MODIFY_BOOKING: Context-aware based on what's being modified (time-only, date-only, etc.)
-    - MODIFY_RESERVATION: Context-aware based on what's being modified
+    GUARD: This function MUST use the planner for base requirements.
+    It preserves context-aware logic for MODIFY intents but delegates to planner.
     
     Args:
         intent_name: Intent name (e.g., "CREATE_APPOINTMENT", "MODIFY_BOOKING")
-        collected_slots: Dictionary of effective collected slots (current-turn view after domain filtering)
+        collected_slots: Dictionary of effective collected slots
+        modification_context: Optional modification context for MODIFY intents
+        session_state: Optional session state (for logging)
         
     Returns:
         Sorted list of missing slot names (empty list if all slots satisfied)
@@ -255,47 +253,38 @@ def compute_missing_slots(
     if not intent_name:
         return []
     
-    # CRITICAL: Use current-turn effective slots for required slot computation
-    # This allows MODIFY_* intents to be context-aware based on what's being modified
-    # collected_slots should be the effective slot view: merge(session.slots, promoted_current_turn_slots)
-    # after domain filtering
-    # CRITICAL: Pass modification_context to get_planning_required_slots_for_intent
+    # DELEGATE TO PLANNER: Use planner for base requirements
+    # For MODIFY intents, apply context-aware logic after getting base requirements
+    from core.planning.planner import plan_intent, load_planning_policy
     
-    # TRACE 3: Right before required-slot computation
-    import json
-    print(json.dumps({
-        "trace_point": "BEFORE_REQUIRED_SLOTS",
-        "intent": intent_name,
-        "modification_context": modification_context,
-        "slots_used_for_computation": collected_slots,
-        "session_slots": session_state.get("slots") if session_state else None,
-    }))
+    # Get base required slots from planner (intent_planning.yaml)
+    policy = load_planning_policy()
+    intent_policy = policy.get(intent_name, {})
+    base_required_slots = intent_policy.get("required_slots", [])
+    if not isinstance(base_required_slots, list):
+        base_required_slots = []
     
-    required_slots = set(get_planning_required_slots_for_intent(intent_name, collected_slots, modification_context))
+    # For MODIFY intents, apply context-aware logic
+    # This preserves existing behavior for MODIFY_BOOKING and MODIFY_RESERVATION
+    required_slots_list = get_planning_required_slots_for_intent(
+        intent_name, collected_slots, modification_context
+    )
+    
+    # Compute missing slots: required_slots - collected_slots
+    required_slots = set(required_slots_list)
     collected_slot_keys = set(collected_slots.keys()) if collected_slots else set()
     
-    # LOG: intent, collected_slots, and computed missing_slots
+    missing = required_slots - collected_slot_keys
+    missing_slots = sorted(missing)
+    
     logger.info(
         f"[MISSING_SLOTS] compute_missing_slots: "
         f"intent={intent_name}, "
         f"collected_slots={list(collected_slot_keys)}, "
-        f"planning_required_slots={list(required_slots)}"
+        f"required_slots={list(required_slots)}, "
+        f"missing_slots={missing_slots}"
     )
-    print(f"[MISSING_SLOTS] compute_missing_slots: intent={intent_name}, collected_slots={list(collected_slot_keys)}, planning_required_slots={list(required_slots)}")
     
-    # missing_slots = planning_required_slots - collected_slots
-    missing = required_slots - collected_slot_keys
-    
-    # Sort for consistency
-    missing_slots = sorted(missing)
-    
-    # LOG: computed missing_slots
-    logger.info(
-        f"[MISSING_SLOTS] compute_missing_slots result: {missing_slots}"
-    )
-    print(f"[MISSING_SLOTS] compute_missing_slots result: {missing_slots}")
-    
-    # INVARIANT CHECK: missing_slots must be a list
     assert isinstance(missing_slots, list), (
         f"missing_slots must be a list, got {type(missing_slots)}: {missing_slots}"
     )
@@ -305,7 +294,8 @@ def compute_missing_slots(
 
 def filter_slots_by_domain(
     slots: Dict[str, Any],
-    intent_name: str
+    intent_name: str,
+    planning_only: bool = False
 ) -> Dict[str, Any]:
     """
     Filter slots to only include those valid for the intent's domain.
@@ -321,15 +311,25 @@ def filter_slots_by_domain(
     This must be called BEFORE computing effective_collected_slots to prevent
     cross-domain slot leakage.
     
+    PLANNING-ONLY MODE: When planning_only=True, skip domain filtering.
+    Planning must proceed with all slots, even if they're "wrong" for the domain.
+    Validation happens in execution layer, not planning.
+    
     Args:
         slots: Slots dictionary to filter
         intent_name: Intent name to determine domain
+        planning_only: If True, skip domain filtering and return all slots
         
     Returns:
-        Filtered slots dictionary (only slots valid for intent domain)
+        Filtered slots dictionary (only slots valid for intent domain, or all slots if planning_only=True)
     """
     import logging
     logger = logging.getLogger(__name__)
+    
+    # PLANNING-ONLY: Skip domain filtering - planning must proceed with all slots
+    if planning_only:
+        logger.debug(f"[DOMAIN_FILTER] PLANNING-ONLY: Skipping domain filter, returning all slots")
+        return slots.copy() if slots else {}
     
     print(f"[DOMAIN_FILTER] ========== ENTRY ==========")
     print(f"[DOMAIN_FILTER] intent_name={intent_name}")
@@ -587,7 +587,6 @@ def promote_slots_for_intent(
         
         # date → start_date (ADD only if date_roles explicitly indicates START_DATE AND start_date doesn't exist)
         # CRITICAL: Generic 'date' must NOT automatically satisfy start_date/end_date
-        # Only route via awaiting_slot, not satisfy required slots
         # date_roles may ADD meaning but must not be required to PRESERVE slots
         # If start_date already exists, preserve it regardless of date_roles
         if "date" in raw_slots and "START_DATE" in date_roles:
@@ -611,7 +610,6 @@ def promote_slots_for_intent(
                 f"(no date_roles this turn, but slot persists)"
             )
         # CRITICAL: Do NOT promote generic 'date' to start_date without explicit START_DATE role
-        # Generic 'date' should only route via awaiting_slot, not satisfy required slots
         
         # date → end_date (ADD only if date_roles explicitly indicates END_DATE AND end_date doesn't exist)
         if "date" in raw_slots and "END_DATE" in date_roles:
@@ -635,7 +633,6 @@ def promote_slots_for_intent(
                 f"(no date_roles this turn, but slot persists)"
             )
         # CRITICAL: Do NOT promote generic 'date' to end_date without explicit END_DATE role
-        # Generic 'date' should only route via awaiting_slot, not satisfy required slots
     
     elif intent_name == "CREATE_APPOINTMENT":
         # Promotion rules for service appointments

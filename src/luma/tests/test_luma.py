@@ -155,6 +155,33 @@ def assert_response(resp, expected):
                 f"facts.{fact_key} mismatch: got '{actual_value}', expected '{expected_value}'"
             )
 
+    # STAGE 4: Assert time_constraint if present in expected (for fuzzy time cases)
+    if "time_constraint" in expected:
+        assert "time_constraint" in resp, "Missing time_constraint in response"
+        expected_tc = expected["time_constraint"]
+        actual_tc = resp["time_constraint"]
+        
+        # Check mode
+        assert actual_tc.get("mode") == expected_tc.get("mode"), (
+            f"time_constraint.mode mismatch: got '{actual_tc.get('mode')}', expected '{expected_tc.get('mode')}'"
+        )
+        
+        # Check label if present in expected
+        if "label" in expected_tc:
+            assert actual_tc.get("label") == expected_tc.get("label"), (
+                f"time_constraint.label mismatch: got '{actual_tc.get('label')}', expected '{expected_tc.get('label')}'"
+            )
+        
+        # Check start/end if present in expected
+        if "start" in expected_tc:
+            assert actual_tc.get("start") == expected_tc.get("start"), (
+                f"time_constraint.start mismatch: got '{actual_tc.get('start')}', expected '{expected_tc.get('start')}'"
+            )
+        if "end" in expected_tc:
+            assert actual_tc.get("end") == expected_tc.get("end"), (
+                f"time_constraint.end mismatch: got '{actual_tc.get('end')}', expected '{expected_tc.get('end')}'"
+            )
+
     # For non-UNKNOWN intents, check confidence is present and reasonable
     if expected["intent"] != "UNKNOWN":
         assert "confidence" in resp["intent"], "Intent should have confidence for non-UNKNOWN intents"
