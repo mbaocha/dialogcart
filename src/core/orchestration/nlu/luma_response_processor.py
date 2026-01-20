@@ -77,6 +77,81 @@ def _load_intent_execution_config() -> Dict[str, Any]:
         return _intent_execution_cache
 
 
+def _convert_time_24h_to_12h(time_24h: str) -> str:
+    """
+    Convert time from 24-hour format (HH:MM) to 12-hour format (h:mmam/pm).
+    
+    For backward compatibility ONLY - derives legacy slots.time from time_constraint.start.
+    
+    Examples:
+    - "14:00" -> "2pm"
+    - "10:00" -> "10am"
+    - "15:00" -> "3pm"
+    - "12:00" -> "12pm"
+    - "00:00" -> "12am"
+    - "14:30" -> "2:30pm"
+    
+    Args:
+        time_24h: Time string in 24-hour format (HH:MM or HH:MM:SS)
+        
+    Returns:
+        Time string in 12-hour format (h:mmam/pm or ham/pm)
+    """
+    if not time_24h or ":" not in time_24h:
+        return time_24h
+    
+    try:
+        parts = time_24h.split(":")
+        hour = int(parts[0])
+        minute = parts[1] if len(parts) > 1 else "00"
+        
+        # Convert to 12-hour format
+        if hour == 0:
+            hour_12 = 12
+            period = "am"
+        elif hour == 12:
+            hour_12 = 12
+            period = "pm"
+        elif hour < 12:
+            hour_12 = hour
+            period = "am"
+        else:
+            hour_12 = hour - 12
+            period = "pm"
+        
+        # Format as "h:mmam/pm" (e.g., "2pm", "10am", "3pm", "2:30pm")
+        if minute == "00" or minute == "0":
+            return f"{hour_12}{period}"
+        else:
+            return f"{hour_12}:{minute}{period}"
+    except (ValueError, IndexError):
+        # If conversion fails, return original
+        return time_24h
+
+
+def _derive_time_from_constraint(time_constraint: Dict[str, Any]) -> Optional[str]:
+    """
+    Derive legacy slots.time string from time_constraint for backward compatibility.
+    
+    Only extracts from time_constraint.start - does not infer or synthesize.
+    
+    Args:
+        time_constraint: Time constraint dict with start/end/mode/label
+        
+    Returns:
+        Time string in 12-hour format (e.g., "2pm", "10am") or None
+    """
+    if not isinstance(time_constraint, dict):
+        return None
+    
+    start_time = time_constraint.get("start")
+    if not start_time:
+        return None
+    
+    # Convert from 24h format to 12h format
+    return _convert_time_24h_to_12h(str(start_time))
+
+
 def _normalize_modify_booking_missing_slots(
     missing_slots: List[str],
     luma_response: Dict[str, Any]
@@ -882,108 +957,10 @@ def process_luma_response(
     if not isinstance(slots_for_filtering, dict):
         slots_for_filtering = {}
     
-    # Normalize time: extract from multiple sources if not in slots
-    # Priority: 1) slots.time (already there), 2) context.time_constraint, 3) trace/semantic data
-    # Handle both string time_constraint and dict time_constraint with start/mode fields
-    if "time" not in slots_for_filtering or not slots_for_filtering.get("time"):
-        time_value = None
-        time_mode = None
-        
-        # Helper to extract time from time_constraint (handles both string and dict)
-        def _extract_time_from_constraint(time_constraint_obj, source_name: str):
-            """Extract time value from time_constraint (string or dict with start/mode).
-            
-            Handles multiple formats:
-            - String: "12:00" -> "12:00"
-            - Dict with start: {"start": "12:00", "mode": "exact"} -> "12:00"
-            - Dict with value: {"value": "12:00", "mode": "exact"} -> "12:00"
-            - Dict with time: {"time": "12:00", "mode": "exact"} -> "12:00"
-            """
-            if not time_constraint_obj:
-                return None, None
-            
-            # If time_constraint is a string, use it directly
-            if isinstance(time_constraint_obj, str):
-                logger.debug(f"Extracting time from {source_name}: string value={time_constraint_obj}")
-                return time_constraint_obj, None
-            
-            # If time_constraint is a dict, extract based on mode
-            if isinstance(time_constraint_obj, dict):
-                constraint_mode = time_constraint_obj.get("mode", "")
-                constraint_start = time_constraint_obj.get("start")
-                
-                # For exact mode, use start (e.g., "12:00" for "noon")
-                if constraint_mode == "exact" and constraint_start:
-                    logger.debug(f"Extracting time from {source_name}: mode=exact, start={constraint_start}")
-                    return constraint_start, "exact"
-                
-                # For other modes or if start exists, use start
-                if constraint_start:
-                    logger.debug(f"Extracting time from {source_name}: start={constraint_start}, mode={constraint_mode}")
-                    return constraint_start, constraint_mode
-                
-                # Fallback: check for "value" field (some formats use "value" instead of "start")
-                constraint_value = time_constraint_obj.get("value")
-                if constraint_value:
-                    logger.debug(f"Extracting time from {source_name}: value={constraint_value}, mode={constraint_mode}")
-                    return constraint_value, constraint_mode
-                
-                # Fallback: check for direct time value
-                if "time" in time_constraint_obj:
-                    time_val = time_constraint_obj["time"]
-                    logger.debug(f"Extracting time from {source_name}: time field={time_val}, mode={constraint_mode}")
-                    return time_val, constraint_mode
-            
-            return None, None
-        
-        # Check context.time_constraint (most common for resolved expressions like "noon", "morning")
-        context = luma_response.get("context", {})
-        if isinstance(context, dict):
-            time_constraint = context.get("time_constraint")
-            if time_constraint:
-                extracted_time, extracted_mode = _extract_time_from_constraint(time_constraint, "context.time_constraint")
-                if extracted_time:
-                    time_value = extracted_time
-                    time_mode = extracted_mode or context.get("time_mode")
-                    logger.debug(f"Normalized time from context.time_constraint to slots.time: {time_value} (mode={time_mode})")
-        
-        # Fallback: Check trace.semantic.time_constraint
-        if not time_value:
-            trace = luma_response.get("trace", {})
-            if isinstance(trace, dict):
-                semantic = trace.get("semantic", {})
-                if isinstance(semantic, dict):
-                    time_constraint = semantic.get("time_constraint")
-                    if time_constraint:
-                        extracted_time, extracted_mode = _extract_time_from_constraint(time_constraint, "trace.semantic.time_constraint")
-                        if extracted_time:
-                            time_value = extracted_time
-                            time_mode = extracted_mode or semantic.get("time_mode")
-                            logger.debug(f"Normalized time from trace.semantic.time_constraint to slots.time: {time_value} (mode={time_mode})")
-        
-        # Fallback: Check stages for semantic data
-        if not time_value:
-            stages = luma_response.get("stages", [])
-            if isinstance(stages, list):
-                for stage in stages:
-                    if isinstance(stage, dict):
-                        semantic = stage.get("semantic", {})
-                        if isinstance(semantic, dict):
-                            time_constraint = semantic.get("time_constraint")
-                            if time_constraint:
-                                extracted_time, extracted_mode = _extract_time_from_constraint(time_constraint, "stages[].semantic.time_constraint")
-                                if extracted_time:
-                                    time_value = extracted_time
-                                    time_mode = extracted_mode or semantic.get("time_mode")
-                                    logger.debug(f"Normalized time from stages[].semantic.time_constraint to slots.time: {time_value} (mode={time_mode})")
-                                    break
-        
-        # Write normalized time to slots
-        if time_value:
-            slots_for_filtering["time"] = time_value
-            # Update luma_response slots to include normalized time
-            luma_response["slots"] = slots_for_filtering
-            logger.info(f"Temporal slot normalization: promoted time={time_value} from context to slots before filtering (mode={time_mode})")
+    # DEPRECATED: Time normalization from context.time_constraint is removed
+    # time_constraint is now authoritative and handled separately in missing_slots computation
+    # slots.time is derived ONLY for backward compatibility AFTER missing_slots computation
+    # This ensures planning decisions are driven by time_constraint mode, not slots.time
     
     # RIGHT BEFORE build_plan: Recompute missing_slots from effective_collected_slots
     # Use centralized finalize_turn_state to ensure consistency across all callers
@@ -1009,6 +986,32 @@ def process_luma_response(
     
     effective_collected_slots = turn_state["effective_slots"]
     missing_slots = turn_state["missing_slots"]
+    
+    # APPOINTMENT INTENT RULE: Only exact time_constraint satisfies the time requirement
+    # mode=exact → satisfies time, mode=fuzzy/window → does NOT satisfy time
+    # This must happen BEFORE plan is built (plan status depends on missing_slots)
+    time_constraint = luma_response.get("time_constraint")
+    if intent_name == "CREATE_APPOINTMENT" and time_constraint is not None:
+        # Check if time_constraint mode is exact (only exact satisfies time requirement)
+        time_constraint_mode = None
+        if isinstance(time_constraint, dict):
+            time_constraint_mode = time_constraint.get("mode")
+        
+        # Only remove "time" from missing_slots if mode is exact
+        if time_constraint_mode == "exact":
+            if "time" in missing_slots:
+                missing_slots = [s for s in missing_slots if s != "time"]
+                logger.info(
+                    f"[MISSING_SLOTS] time_constraint (mode=exact) satisfies time for CREATE_APPOINTMENT - removed 'time' from missing_slots before plan build"
+                )
+                # Update turn_state with corrected missing_slots
+                turn_state["missing_slots"] = missing_slots
+        else:
+            # Fuzzy/window time_constraint does NOT satisfy time requirement
+            logger.debug(
+                f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}) does NOT satisfy time for CREATE_APPOINTMENT - keeping 'time' in missing_slots"
+            )
+    
     # Note: turn_state["status"] is the base status, but build_plan may override based on
     # needs_clarification or confirmation_state
     
@@ -1071,9 +1074,28 @@ def process_luma_response(
         # are not listed as missing
         facts_missing_slots = missing_slots  # Use recomputed missing_slots from above
         
+        # BACKWARD COMPATIBILITY: Derive slots.time from time_constraint ONLY for exact mode
+        # This is for test/UI compatibility ONLY - time_constraint is the primary source of truth
+        # Never use slots.time to drive planning decisions
+        clarification_slots = slots_for_filtering.copy()
+        time_constraint = luma_response.get("time_constraint")
+        if time_constraint is not None and intent_name == "CREATE_APPOINTMENT":
+            # Only derive for exact mode (fuzzy/window don't fully satisfy time)
+            time_constraint_mode = time_constraint.get("mode") if isinstance(time_constraint, dict) else None
+            if time_constraint_mode == "exact":
+                # Only derive if time is not already in slots (don't override explicit time)
+                if "time" not in clarification_slots:
+                    derived_time = _derive_time_from_constraint(time_constraint)
+                    if derived_time:
+                        clarification_slots["time"] = derived_time
+                        logger.debug(
+                            f"[TIME_COMPAT] Derived slots.time={derived_time} from time_constraint.start={time_constraint.get('start')} "
+                            f"(mode=exact) for clarification path - backward compatibility only"
+                        )
+        
         # FACT-ONLY: Use context extracted above (from facts.facts or top level)
         facts = {
-            "slots": slots_for_filtering,  # Use normalized slots (includes normalized time)
+            "slots": clarification_slots,  # Use normalized slots (includes derived time for compatibility)
             "missing_slots": facts_missing_slots,
             "context": context
         }
@@ -1128,9 +1150,29 @@ def process_luma_response(
         # CRITICAL: Missing action_name is NOT an error in planning
         # Still return a valid plan with intent, slots, missing_slots
         # Execution layer will handle unsupported intents
+        
+        # BACKWARD COMPATIBILITY: Derive slots.time from time_constraint ONLY for exact mode
+        # This is for test/UI compatibility ONLY - time_constraint is the primary source of truth
+        # Never use slots.time to drive planning decisions
+        no_action_slots = slots_for_filtering.copy()
+        time_constraint = luma_response.get("time_constraint")
+        if time_constraint is not None and intent_name == "CREATE_APPOINTMENT":
+            # Only derive for exact mode (fuzzy/window don't fully satisfy time)
+            time_constraint_mode = time_constraint.get("mode") if isinstance(time_constraint, dict) else None
+            if time_constraint_mode == "exact":
+                # Only derive if time is not already in slots (don't override explicit time)
+                if "time" not in no_action_slots:
+                    derived_time = _derive_time_from_constraint(time_constraint)
+                    if derived_time:
+                        no_action_slots["time"] = derived_time
+                        logger.debug(
+                            f"[TIME_COMPAT] Derived slots.time={derived_time} from time_constraint.start={time_constraint.get('start')} "
+                            f"(mode=exact) for no-action path - backward compatibility only"
+                        )
+        
         # Extract facts container
         facts = {
-            "slots": slots_for_filtering.copy(),
+            "slots": no_action_slots,
             "missing_slots": missing_slots,
             "context": luma_response.get("context", {})
         }
@@ -1152,6 +1194,24 @@ def process_luma_response(
     
     # Use normalized slots (includes normalized time)
     slots = slots_for_filtering.copy()
+    
+    # BACKWARD COMPATIBILITY: Derive slots.time from time_constraint ONLY for exact mode
+    # This is for test/UI compatibility ONLY - time_constraint is the primary source of truth
+    # Never use slots.time to drive planning decisions
+    time_constraint = luma_response.get("time_constraint")
+    if time_constraint is not None and intent_name == "CREATE_APPOINTMENT":
+        # Only derive for exact mode (fuzzy/window don't fully satisfy time)
+        time_constraint_mode = time_constraint.get("mode") if isinstance(time_constraint, dict) else None
+        if time_constraint_mode == "exact":
+            # Only derive if time is not already in slots (don't override explicit time)
+            if "time" not in slots:
+                derived_time = _derive_time_from_constraint(time_constraint)
+                if derived_time:
+                    slots["time"] = derived_time
+                    logger.debug(
+                        f"[TIME_COMPAT] Derived slots.time={derived_time} from time_constraint.start={time_constraint.get('start')} "
+                        f"(mode=exact) for backward compatibility"
+                    )
     
     # Update luma_response slots with normalized slots (includes normalized time)
     # FACT-ONLY: Update both facts.facts.slots (if present) and legacy slots field

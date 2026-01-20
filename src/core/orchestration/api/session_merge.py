@@ -183,6 +183,19 @@ def merge_luma_with_session(
     # Store raw_luma_slots for turn outcome snapshot logging
     merged["_raw_luma_slots"] = raw_luma_slots.copy()
     
+    # STEP 2.5: Preserve time_constraint from session state if current turn doesn't have one
+    # This ensures time_constraint from previous turns (e.g., "book at 2pm") is preserved
+    # when the next turn only provides date (e.g., "tomorrow")
+    if session_state:
+        session_time_constraint = session_state.get("time_constraint")
+        current_time_constraint = merged.get("time_constraint")
+        if session_time_constraint is not None and current_time_constraint is None:
+            # Preserve time_constraint from session if current turn doesn't override it
+            merged["time_constraint"] = session_time_constraint
+            logger.debug(
+                f"merge_luma_with_session: Preserved time_constraint from session: {session_time_constraint}"
+            )
+    
     # MERGE_RESULT: Log merged slots and their sources
     slot_sources = {}
     for key in raw_luma_slots.keys():
@@ -362,12 +375,20 @@ def merge_luma_with_session(
                 luma_slots["date"] = date_value
                 logger.debug(
                     f"Extracted date from entities.date: {date_value}")
+        # TIME_CONSTRAINT RULE: For CREATE_APPOINTMENT, do NOT extract time from entities
+        # time_constraint is authoritative; slots.time is legacy-only and must not drive planning
         if "time" in entities and "time" not in luma_slots:
-            time_value = entities.get("time")
-            if time_value:
-                luma_slots["time"] = time_value
-                logger.debug(
-                    f"Extracted time from entities.time: {time_value}")
+            # Only extract time for non-CREATE_APPOINTMENT intents
+            # For CREATE_APPOINTMENT, time_constraint is authoritative (handled separately)
+            if merged_intent_name != "CREATE_APPOINTMENT":
+                time_value = entities.get("time")
+                if time_value:
+                    luma_slots["time"] = time_value
+                    logger.debug(
+                        f"Extracted time from entities.time: {time_value}")
+                else:
+                    logger.debug(
+                        f"Skipped time extraction from entities for CREATE_APPOINTMENT (time_constraint is authoritative)")
 
     # Check if semantic data exists but wasn't found in trace/stages (try direct access)
     # Sometimes Luma provides semantic data at root level or in different structure
@@ -431,31 +452,40 @@ def merge_luma_with_session(
                         f"Extracted date from semantic.date_refs (root/found): {date_refs[0]}")
 
         # Process time if found
-        # CRITICAL: Extract time from time_constraint dict (handles both string and dict with start/mode)
+        # TIME_CONSTRAINT RULE: For CREATE_APPOINTMENT, do NOT extract time from time_constraint/time_refs
+        # time_constraint is authoritative; slots.time is legacy-only and must not drive planning
+        # Only derive slots.time AFTER planning for backward compatibility (done in luma_response_processor.py)
         if (time_refs or time_constraint) and "time" not in luma_slots:
-            if time_constraint:
-                # If time_constraint is a dict with start/mode, extract start (e.g., "12:00" for "noon")
-                if isinstance(time_constraint, dict):
-                    constraint_start = time_constraint.get("start")
-                    constraint_mode = time_constraint.get("mode", "")
-                    if constraint_start:
-                        luma_slots["time"] = constraint_start
-                        logger.debug(
-                            f"Extracted time from semantic.time_constraint.start: {constraint_start} (mode={constraint_mode})")
+            # Only extract time for non-CREATE_APPOINTMENT intents
+            # For CREATE_APPOINTMENT, time_constraint is authoritative (handled separately in planning)
+            if merged_intent_name != "CREATE_APPOINTMENT":
+                if time_constraint:
+                    # If time_constraint is a dict with start/mode, extract start (e.g., "12:00" for "noon")
+                    if isinstance(time_constraint, dict):
+                        constraint_start = time_constraint.get("start")
+                        constraint_mode = time_constraint.get("mode", "")
+                        if constraint_start:
+                            luma_slots["time"] = constraint_start
+                            logger.debug(
+                                f"Extracted time from semantic.time_constraint.start: {constraint_start} (mode={constraint_mode})")
+                        else:
+                            # Fallback: use time_constraint dict as-is if no start
+                            luma_slots["time"] = time_constraint
+                            logger.debug(
+                                f"Extracted time from semantic.time_constraint (dict): {time_constraint}")
                     else:
-                        # Fallback: use time_constraint dict as-is if no start
+                        # time_constraint is a string, use directly
                         luma_slots["time"] = time_constraint
                         logger.debug(
-                            f"Extracted time from semantic.time_constraint (dict): {time_constraint}")
-                else:
-                    # time_constraint is a string, use directly
-                    luma_slots["time"] = time_constraint
+                            f"Extracted time from semantic.time_constraint: {time_constraint}")
+                elif time_refs and isinstance(time_refs, list) and len(time_refs) > 0:
+                    luma_slots["time"] = time_refs[0]
                     logger.debug(
-                        f"Extracted time from semantic.time_constraint: {time_constraint}")
-            elif time_refs and isinstance(time_refs, list) and len(time_refs) > 0:
-                luma_slots["time"] = time_refs[0]
+                        f"Extracted time from semantic.time_refs: {time_refs[0]}")
+            else:
+                # CREATE_APPOINTMENT: Skip time extraction - time_constraint is authoritative
                 logger.debug(
-                    f"Extracted time from semantic.time_refs: {time_refs[0]}")
+                    f"Skipped time extraction from time_constraint/time_refs for CREATE_APPOINTMENT (time_constraint is authoritative)")
 
     # Project semantic fields into slots for follow-ups
     # Extract from trace.semantic or stages.semantic.resolved_booking
@@ -519,31 +549,40 @@ def merge_luma_with_session(
                             luma_slots["date"] = date_refs[0]
 
         # If time_refs or time_constraint exists → slots["time"]
-        # CRITICAL: Extract time from time_constraint dict (handles both string and dict with start/mode)
+        # TIME_CONSTRAINT RULE: For CREATE_APPOINTMENT, do NOT extract time from time_constraint/time_refs
+        # time_constraint is authoritative; slots.time is legacy-only and must not drive planning
+        # Only derive slots.time AFTER planning for backward compatibility (done in luma_response_processor.py)
         if (time_refs or time_constraint) and "time" not in luma_slots:
-            if time_constraint:
-                # If time_constraint is a dict with start/mode, extract start (e.g., "12:00" for "noon")
-                if isinstance(time_constraint, dict):
-                    constraint_start = time_constraint.get("start")
-                    constraint_mode = time_constraint.get("mode", "")
-                    if constraint_start:
-                        luma_slots["time"] = constraint_start
-                        logger.debug(
-                            f"Extracted time from semantic.time_constraint.start (projection): {constraint_start} (mode={constraint_mode})")
+            # Only extract time for non-CREATE_APPOINTMENT intents
+            # For CREATE_APPOINTMENT, time_constraint is authoritative (handled separately in planning)
+            if merged_intent_name != "CREATE_APPOINTMENT":
+                if time_constraint:
+                    # If time_constraint is a dict with start/mode, extract start (e.g., "12:00" for "noon")
+                    if isinstance(time_constraint, dict):
+                        constraint_start = time_constraint.get("start")
+                        constraint_mode = time_constraint.get("mode", "")
+                        if constraint_start:
+                            luma_slots["time"] = constraint_start
+                            logger.debug(
+                                f"Extracted time from semantic.time_constraint.start (projection): {constraint_start} (mode={constraint_mode})")
+                        else:
+                            # Fallback: use time_constraint dict as-is if no start
+                            luma_slots["time"] = time_constraint
+                            logger.debug(
+                                f"Extracted time from semantic.time_constraint (dict, projection): {time_constraint}")
                     else:
-                        # Fallback: use time_constraint dict as-is if no start
+                        # time_constraint is a string, use directly
                         luma_slots["time"] = time_constraint
                         logger.debug(
-                            f"Extracted time from semantic.time_constraint (dict, projection): {time_constraint}")
-                else:
-                    # time_constraint is a string, use directly
-                    luma_slots["time"] = time_constraint
+                            f"Extracted time from semantic.time_constraint (projection): {time_constraint}")
+                elif time_refs and isinstance(time_refs, list) and len(time_refs) > 0:
+                    luma_slots["time"] = time_refs[0]
                     logger.debug(
-                        f"Extracted time from semantic.time_constraint (projection): {time_constraint}")
-            elif time_refs and isinstance(time_refs, list) and len(time_refs) > 0:
-                luma_slots["time"] = time_refs[0]
+                        f"Extracted time from semantic.time_refs (projection): {time_refs[0]}")
+            else:
+                # CREATE_APPOINTMENT: Skip time extraction - time_constraint is authoritative
                 logger.debug(
-                    f"Extracted time from semantic.time_refs (projection): {time_refs[0]}")
+                    f"Skipped time extraction from time_constraint/time_refs (projection) for CREATE_APPOINTMENT (time_constraint is authoritative)")
 
     # Additional fallback: Check if Luma provided date/time directly in merged response
     # (Sometimes Luma provides date in slots even without semantic data)
@@ -555,13 +594,22 @@ def merge_luma_with_session(
             logger.debug(
                 f"Extracted date from merged.slots.date: {direct_date}")
 
+    # TIME_CONSTRAINT RULE: For CREATE_APPOINTMENT, do NOT extract time from merged.slots.time
+    # time_constraint is authoritative; slots.time is legacy-only and must not drive planning
     if "time" not in luma_slots:
         # Check if time exists in merged response slots
-        direct_time = merged.get("slots", {}).get("time")
-        if direct_time:
-            luma_slots["time"] = direct_time
+        # Only extract time for non-CREATE_APPOINTMENT intents
+        # For CREATE_APPOINTMENT, time_constraint is authoritative (handled separately in planning)
+        if merged_intent_name != "CREATE_APPOINTMENT":
+            direct_time = merged.get("slots", {}).get("time")
+            if direct_time:
+                luma_slots["time"] = direct_time
+                logger.debug(
+                    f"Extracted time from merged.slots.time: {direct_time}")
+        else:
+            # CREATE_APPOINTMENT: Skip time extraction - time_constraint is authoritative
             logger.debug(
-                f"Extracted time from merged.slots.time: {direct_time}")
+                f"Skipped time extraction from merged.slots.time for CREATE_APPOINTMENT (time_constraint is authoritative)")
 
     # Check booking object for date/time (Luma might provide in booking.datetime_range)
     booking_obj = merged.get("booking")
@@ -1247,6 +1295,29 @@ def merge_luma_with_session(
     plan = plan_intent(effective_intent, durable_slots_for_computation, policy)
     missing_slots = plan["missing_slots"]
     
+    # APPOINTMENT INTENT RULE: time_constraint satisfies the time requirement
+    # APPOINTMENT INTENT RULE: Only exact time_constraint satisfies the time requirement
+    # mode=exact → satisfies time, mode=fuzzy/window → does NOT satisfy time
+    time_constraint = luma_response.get("time_constraint")
+    if effective_intent == "CREATE_APPOINTMENT" and time_constraint is not None:
+        # Check if time_constraint mode is exact (only exact satisfies time requirement)
+        time_constraint_mode = None
+        if isinstance(time_constraint, dict):
+            time_constraint_mode = time_constraint.get("mode")
+        
+        # Only remove "time" from missing_slots if mode is exact
+        if time_constraint_mode == "exact":
+            if "time" in missing_slots:
+                missing_slots = [s for s in missing_slots if s != "time"]
+                logger.info(
+                    f"[MISSING_SLOTS] time_constraint (mode=exact) satisfies time for CREATE_APPOINTMENT - removed 'time' from missing_slots"
+                )
+        else:
+            # Fuzzy/window time_constraint does NOT satisfy time requirement
+            logger.debug(
+                f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}) does NOT satisfy time for CREATE_APPOINTMENT - keeping 'time' in missing_slots"
+            )
+    
     # MISSING_SLOTS_DECISION: Log missing slots computation decision
     from core.orchestration.api.slot_contract import get_required_slots_for_intent
     required_slots = get_required_slots_for_intent(effective_intent)
@@ -1651,6 +1722,30 @@ def _compute_effective_collected_slots(luma_response: Dict[str, Any], planning_o
     plan = plan_intent(intent_name, promoted_slots, policy)
     missing_slots = plan["missing_slots"]
     
+    # APPOINTMENT INTENT RULE: time_constraint satisfies the time requirement
+    # APPOINTMENT INTENT RULE: Only exact time_constraint satisfies the time requirement
+    # mode=exact → satisfies time, mode=fuzzy/window → does NOT satisfy time
+    # This must happen BEFORE plan status is set and BEFORE session persistence
+    time_constraint = luma_response.get("time_constraint")
+    if intent_name == "CREATE_APPOINTMENT" and time_constraint is not None:
+        # Check if time_constraint mode is exact (only exact satisfies time requirement)
+        time_constraint_mode = None
+        if isinstance(time_constraint, dict):
+            time_constraint_mode = time_constraint.get("mode")
+        
+        # Only remove "time" from missing_slots if mode is exact
+        if time_constraint_mode == "exact":
+            if "time" in missing_slots:
+                missing_slots = [s for s in missing_slots if s != "time"]
+                logger.info(
+                    f"[MISSING_SLOTS] time_constraint (mode=exact) satisfies time for CREATE_APPOINTMENT - removed 'time' from missing_slots"
+                )
+        else:
+            # Fuzzy/window time_constraint does NOT satisfy time requirement
+            logger.debug(
+                f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}) does NOT satisfy time for CREATE_APPOINTMENT - keeping 'time' in missing_slots"
+            )
+    
     # Normalize MODIFY_BOOKING missing_slots (test contract)
     from core.orchestration.nlu.luma_response_processor import _normalize_modify_booking_missing_slots
     missing_slots = _normalize_modify_booking_missing_slots(
@@ -1707,14 +1802,39 @@ def build_session_state_from_outcome(
     Returns:
         Session state dictionary (WITH missing_slots if present) or None if status is READY
     """
-    # Don't save session for READY or EXECUTED status - session should be cleared
-    if outcome_status in ("READY", "EXECUTED"):
+    # SESSION LIFECYCLE RULE: Deterministic session persistence for CREATE_APPOINTMENT
+    # Never clear session on READY for CREATE_APPOINTMENT - session must persist for follow-up modifications
+    # READY is not terminal for CREATE_APPOINTMENT (allows time overrides like "make it 4pm")
+    
+    # EXECUTED status always clears session
+    if outcome_status == "EXECUTED":
+        return None
+    
+    # Extract intent name to determine session lifecycle rule
+    intent_name = ""
+    if merged_luma_response and isinstance(merged_luma_response, dict):
+        intent_obj = merged_luma_response.get("intent", {})
+        if isinstance(intent_obj, dict):
+            intent_name = intent_obj.get("name", "")
+    if not intent_name and outcome:
+        intent_name = outcome.get("intent_name", "") or outcome.get("intent", "")
+    
+    # RULE: Never clear session on READY for CREATE_APPOINTMENT
+    # For other intents, READY is terminal (don't save session)
+    if outcome_status == "READY" and intent_name != "CREATE_APPOINTMENT":
         return None
 
     # Guard: outcome must be a dict
     if not outcome or not isinstance(outcome, dict):
         print(
             f"[ERROR] build_session_state_from_outcome: outcome is None or not a dict: {outcome}")
+        return None
+
+    # Guard: outcome must have intent_name or intent (required for session state)
+    # Check early to prevent building invalid session state
+    if "intent_name" not in outcome and "intent" not in outcome:
+        print(
+            f"[ERROR] build_session_state_from_outcome: outcome has no intent_name or intent: {outcome}")
         return None
 
     # Extract facts (contains slots and missing_slots)
@@ -1730,6 +1850,7 @@ def build_session_state_from_outcome(
 
     # Get ALL merged slots from merged_luma_response (session slots + luma slots)
     # These are the durable facts that must be preserved
+    # FALLBACK: For empty/null Luma responses, use outcome.slots (session state reused as-is)
     slots = {}
     try:
         if merged_luma_response and isinstance(merged_luma_response, dict):
@@ -1742,6 +1863,15 @@ def build_session_state_from_outcome(
         print(f"  merged_luma_response type: {type(merged_luma_response)}")
         print(f"  merged_luma_response: {merged_luma_response}")
         slots = {}
+    
+    # FALLBACK: If merged_luma_response is None (empty/null Luma response), use outcome.slots
+    # This handles the case where empty response handler reuses session state as-is
+    if not slots and outcome and isinstance(outcome, dict):
+        outcome_slots = outcome.get("slots", {})
+        if isinstance(outcome_slots, dict) and outcome_slots:
+            slots = outcome_slots
+            print(
+                f"[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): {list(slots.keys())}")
 
 
     # Extract intent - prefer from merged Luma response, fallback to outcome
@@ -1778,10 +1908,34 @@ def build_session_state_from_outcome(
         plan = plan_intent(intent_name, slots, policy)
         recomputed_missing_slots = plan["missing_slots"]
         
+        # APPOINTMENT INTENT RULE: Only exact time_constraint satisfies the time requirement
+        # mode=exact → satisfies time, mode=fuzzy/window → does NOT satisfy time
+        # This must happen BEFORE plan status is set and BEFORE session persistence
+        merged_response = merged_luma_response or {}
+        time_constraint = merged_response.get("time_constraint")
+        if intent_name == "CREATE_APPOINTMENT" and time_constraint is not None:
+            # Check if time_constraint mode is exact (only exact satisfies time requirement)
+            time_constraint_mode = None
+            if isinstance(time_constraint, dict):
+                time_constraint_mode = time_constraint.get("mode")
+            
+            # Only remove "time" from missing_slots if mode is exact
+            if time_constraint_mode == "exact":
+                if "time" in recomputed_missing_slots:
+                    recomputed_missing_slots = [s for s in recomputed_missing_slots if s != "time"]
+                    logger.info(
+                        f"[MISSING_SLOTS] time_constraint (mode=exact) satisfies time for CREATE_APPOINTMENT - removed 'time' from recomputed_missing_slots"
+                    )
+            else:
+                # Fuzzy/window time_constraint does NOT satisfy time requirement
+                logger.debug(
+                    f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}) does NOT satisfy time for CREATE_APPOINTMENT - keeping 'time' in recomputed_missing_slots"
+                )
+        
         # Normalize MODIFY_BOOKING missing_slots (test contract)
         from core.orchestration.nlu.luma_response_processor import _normalize_modify_booking_missing_slots
         recomputed_missing_slots = _normalize_modify_booking_missing_slots(
-            recomputed_missing_slots, merged_luma_response or {}
+            recomputed_missing_slots, merged_response
         )
 
         # INVARIANT CHECK: missing_slots must be a list
@@ -1875,6 +2029,17 @@ def build_session_state_from_outcome(
         "status": status
     }
     
+    # Persist time_constraint to session state for multi-turn scenarios
+    # This ensures time_constraint from previous turns (e.g., "book at 2pm") is preserved
+    # when the next turn only provides date (e.g., "tomorrow")
+    if merged_luma_response and isinstance(merged_luma_response, dict):
+        time_constraint = merged_luma_response.get("time_constraint")
+        if time_constraint is not None and intent_name == "CREATE_APPOINTMENT":
+            session_state["time_constraint"] = time_constraint
+            logger.debug(
+                f"[TIME_CONSTRAINT] Persisting time_constraint to session_state: {time_constraint}"
+            )
+    
     # TRACE_MERGE 5: Before persisting session
     user_id = session_state.get("user_id", "unknown") if isinstance(session_state, dict) else "unknown"
     durable_slots_list = list(slots.keys()) if isinstance(slots, dict) else []
@@ -1920,10 +2085,34 @@ def build_session_state_from_outcome(
             plan = plan_intent(intent_name, slots, policy)
             missing_slots_to_persist = plan["missing_slots"]
             
+            # APPOINTMENT INTENT RULE: Only exact time_constraint satisfies the time requirement
+            # mode=exact → satisfies time, mode=fuzzy/window → does NOT satisfy time
+            # This must happen BEFORE plan status is set and BEFORE session persistence
+            merged_response = merged_luma_response or {}
+            time_constraint = merged_response.get("time_constraint")
+            if intent_name == "CREATE_APPOINTMENT" and time_constraint is not None:
+                # Check if time_constraint mode is exact (only exact satisfies time requirement)
+                time_constraint_mode = None
+                if isinstance(time_constraint, dict):
+                    time_constraint_mode = time_constraint.get("mode")
+                
+                # Only remove "time" from missing_slots if mode is exact
+                if time_constraint_mode == "exact":
+                    if "time" in missing_slots_to_persist:
+                        missing_slots_to_persist = [s for s in missing_slots_to_persist if s != "time"]
+                        logger.info(
+                            f"[MISSING_SLOTS] time_constraint (mode=exact) satisfies time for CREATE_APPOINTMENT - removed 'time' from missing_slots_to_persist"
+                        )
+                else:
+                    # Fuzzy/window time_constraint does NOT satisfy time requirement
+                    logger.debug(
+                        f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}) does NOT satisfy time for CREATE_APPOINTMENT - keeping 'time' in missing_slots_to_persist"
+                    )
+            
             # Normalize MODIFY_BOOKING missing_slots (test contract)
             from core.orchestration.nlu.luma_response_processor import _normalize_modify_booking_missing_slots
             missing_slots_to_persist = _normalize_modify_booking_missing_slots(
-                missing_slots_to_persist, merged_luma_response or {}
+                missing_slots_to_persist, merged_response
             )
         elif "facts" in outcome and isinstance(outcome["facts"], dict):
             # Last resort: try to get missing_slots from outcome facts

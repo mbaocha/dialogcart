@@ -125,6 +125,25 @@ def assert_turn_expectations(
     expected: Dict[str, Any],
     turn_index: int
 ) -> Optional[str]:
+    """Assert turn result matches expectations.
+
+    Validates:
+    - intent_name
+    - stage
+    - action
+    - missing_slots
+    - slots (partial match)
+    - executable_actions
+    - time_constraint (in _merged_luma_response)
+
+    Args:
+        result: Result from handle_message
+        expected: Expected outcome dict
+        turn_index: Turn index for error messages
+
+    Returns:
+        Error message if assertion fails, None if passes
+    """
     """
     Assert turn result matches expectations.
 
@@ -161,9 +180,11 @@ def assert_turn_expectations(
     expected_stage = expected.get("stage")
     if expected_stage:
         actual_stage = outcome.get("stage")
-        print(f"[ISOLATION_ASSERT] Checking stage: expected={expected_stage}, actual={actual_stage}, outcome.keys()={list(outcome.keys())}")
+        print(
+            f"[ISOLATION_ASSERT] Checking stage: expected={expected_stage}, actual={actual_stage}, outcome.keys()={list(outcome.keys())}")
         plan_dict = outcome.get('plan', {})
-        print(f"[ISOLATION_ASSERT] outcome.get('stage')={outcome.get('stage')}, outcome.get('plan', {{}}).get('stage')={plan_dict.get('stage')}")
+        print(
+            f"[ISOLATION_ASSERT] outcome.get('stage')={outcome.get('stage')}, outcome.get('plan', {{}}).get('stage')={plan_dict.get('stage')}")
         if actual_stage != expected_stage:
             return f"Turn {turn_index + 1} stage mismatch: expected {expected_stage}, got {actual_stage}"
 
@@ -172,9 +193,11 @@ def assert_turn_expectations(
     expected_action = expected.get("action")
     if expected_action:
         actual_action = outcome.get("action")
-        print(f"[ISOLATION_ASSERT] Checking action: expected={expected_action}, actual={actual_action}, outcome.keys()={list(outcome.keys())}")
+        print(
+            f"[ISOLATION_ASSERT] Checking action: expected={expected_action}, actual={actual_action}, outcome.keys()={list(outcome.keys())}")
         plan_dict = outcome.get('plan', {})
-        print(f"[ISOLATION_ASSERT] outcome.get('action')={outcome.get('action')}, outcome.get('plan', {{}}).get('action')={plan_dict.get('action')}")
+        print(
+            f"[ISOLATION_ASSERT] outcome.get('action')={outcome.get('action')}, outcome.get('plan', {{}}).get('action')={plan_dict.get('action')}")
         if actual_action != expected_action:
             return f"Turn {turn_index + 1} action mismatch: expected {expected_action}, got {actual_action}"
 
@@ -231,6 +254,46 @@ def assert_turn_expectations(
         # Compare as sets for order-insensitive match
         if set(actual_executable_actions) != set(expected_executable_actions):
             return f"Turn {turn_index + 1} executable_actions mismatch: expected {expected_executable_actions}, got {actual_executable_actions}"
+
+    # Assert time_constraint if provided
+    # time_constraint is in _merged_luma_response, not in outcome
+    expected_time_constraint = expected.get("time_constraint")
+    if expected_time_constraint is not None:
+        if result is None:
+            return f"Turn {turn_index + 1} cannot validate time_constraint: result not provided"
+
+        merged_luma_response = result.get("_merged_luma_response")
+        if not isinstance(merged_luma_response, dict):
+            return f"Turn {turn_index + 1} time_constraint validation failed: _merged_luma_response is not a dict"
+
+        actual_time_constraint = merged_luma_response.get("time_constraint")
+        if actual_time_constraint is None:
+            return f"Turn {turn_index + 1} missing time_constraint in _merged_luma_response"
+
+        # Validate time_constraint structure
+        expected_mode = expected_time_constraint.get("mode")
+        if expected_mode:
+            actual_mode = actual_time_constraint.get("mode")
+            if actual_mode != expected_mode:
+                return f"Turn {turn_index + 1} time_constraint.mode mismatch: expected {expected_mode}, got {actual_mode}"
+
+        expected_start = expected_time_constraint.get("start")
+        if expected_start:
+            actual_start = actual_time_constraint.get("start")
+            if actual_start != expected_start:
+                return f"Turn {turn_index + 1} time_constraint.start mismatch: expected {expected_start}, got {actual_start}"
+
+        expected_end = expected_time_constraint.get("end")
+        if expected_end:
+            actual_end = actual_time_constraint.get("end")
+            if actual_end != expected_end:
+                return f"Turn {turn_index + 1} time_constraint.end mismatch: expected {expected_end}, got {actual_end}"
+
+        expected_label = expected_time_constraint.get("label")
+        if expected_label is not None:  # Allow None explicitly
+            actual_label = actual_time_constraint.get("label")
+            if actual_label != expected_label:
+                return f"Turn {turn_index + 1} time_constraint.label mismatch: expected {expected_label}, got {actual_label}"
 
     return None
 
@@ -307,11 +370,18 @@ def test_scenario(
                     f"\n--- Turn {turn_index + 1}/{len(turns)}: {sentence} ---")
                 print(f"Expected: {json.dumps(expected, indent=2)}")
 
-            # Load session state before each turn (session is saved after NEEDS_CLARIFICATION responses)
+            # Load session state before each turn
+            # SESSION LIFECYCLE RULE: For CREATE_APPOINTMENT, sessions are preserved on READY
+            # Load sessions with status NEEDS_CLARIFICATION OR READY (for CREATE_APPOINTMENT)
             session_state = get_session(user_id)
-            # Only consider session if status == "NEEDS_CLARIFICATION" (same logic as API endpoint)
-            if session_state and session_state.get("status") != "NEEDS_CLARIFICATION":
-                session_state = None
+            if session_state:
+                session_status = session_state.get("status")
+                session_intent = session_state.get("intent")
+                session_intent_str = session_intent if isinstance(session_intent, str) else (
+                    session_intent.get("name", "") if isinstance(session_intent, dict) else "")
+                # Only consider session if status is NEEDS_CLARIFICATION, or READY for CREATE_APPOINTMENT
+                if session_status != "NEEDS_CLARIFICATION" and (session_status != "READY" or session_intent_str != "CREATE_APPOINTMENT"):
+                    session_state = None
 
             # Print session state before turn
             if verbose or turn_index > 0:  # Always print for turns after first
@@ -376,9 +446,12 @@ def test_scenario(
                 if verbose or turn_index >= 2:  # Always print for turn 3+
                     print(
                         f"\n[OUTCOME STATUS] Turn {turn_index + 1} outcome_status={outcome_status} outcome_keys={list(outcome.keys())}")
+                # Initialize new_session_state for all paths
+                new_session_state = None
+                merged_luma_response = result.get("_merged_luma_response")
+
                 if outcome_status == "NEEDS_CLARIFICATION":
                     # Save session state for follow-up
-                    merged_luma_response = result.get("_merged_luma_response")
                     new_session_state = build_session_state_from_outcome(
                         outcome, outcome_status, merged_luma_response
                     )
@@ -393,11 +466,23 @@ def test_scenario(
                         print(
                             f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - NOT SAVED (new_session_state is None)")
                 elif outcome_status in ("READY", "EXECUTED", "AWAITING_CONFIRMATION"):
-                    # For planning-only tests, READY is terminal - clear session
-                    # EXECUTED/AWAITING_CONFIRMATION also clear session
-                    clear_session(user_id)
-                    print(
-                        f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - CLEARED (status={outcome_status})")
+                    # For READY status, try to build session state (will be None for non-CREATE_APPOINTMENT)
+                    # EXECUTED/AWAITING_CONFIRMATION also try to build (but will return None)
+                    # Exception: CREATE_APPOINTMENT with READY status preserves session for follow-up modifications
+                    new_session_state = build_session_state_from_outcome(
+                        outcome, outcome_status, merged_luma_response
+                    )
+                    if new_session_state is None:
+                        clear_session(user_id)
+                        print(
+                            f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - CLEARED (status={outcome_status})")
+                    else:
+                        # Session was preserved (e.g., CREATE_APPOINTMENT on READY for follow-up modifications)
+                        save_session(user_id, new_session_state)
+                        print(
+                            f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - SAVED (status={outcome_status}, preserved for modifications)")
+                        print(
+                            f"  Session state: {json.dumps(new_session_state, indent=2, default=str)}")
                 else:
                     print(
                         f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - NOT SAVED (status={outcome_status})")
@@ -430,13 +515,16 @@ def test_scenario(
                 }
 
                 # TRACE_MERGE 8: Snapshot builder debug line
-                outcome_keys = list(outcome.keys()) if isinstance(outcome, dict) else []
+                outcome_keys = list(outcome.keys()) if isinstance(
+                    outcome, dict) else []
                 outcome_missing_slots_top = outcome.get("missing_slots")
-                outcome_missing_slots_facts = outcome.get("facts", {}).get("missing_slots") if isinstance(outcome.get("facts"), dict) else None
+                outcome_missing_slots_facts = outcome.get("facts", {}).get(
+                    "missing_slots") if isinstance(outcome.get("facts"), dict) else None
                 outcome_slots_top = outcome.get("slots")
-                outcome_slots_facts = outcome.get("facts", {}).get("slots") if isinstance(outcome.get("facts"), dict) else None
+                outcome_slots_facts = outcome.get("facts", {}).get(
+                    "slots") if isinstance(outcome.get("facts"), dict) else None
                 print(f"[TRACE_MERGE] user_id={user_id} point=SNAPSHOT_BUILDER outcome_keys={outcome_keys} outcome_missing_slots_top={outcome_missing_slots_top} outcome_missing_slots_facts={outcome_missing_slots_facts} outcome_slots_top={outcome_slots_top} outcome_slots_facts={outcome_slots_facts}")
-                
+
                 fail_snapshot = {
                     "expected": expected,
                     "got": actual_json,
@@ -456,15 +544,30 @@ def test_scenario(
 
                 return False, error_msg, user_id
 
-        # After all turns, check that session is cleared if final stage indicates completion
-        # (i.e., missing_slots is empty, indicating all required slots are present)
+        # SESSION LIFECYCLE RULE: Deterministic session clearing check
+        # READY is terminal (session cleared) for all intents EXCEPT CREATE_APPOINTMENT
+        # CREATE_APPOINTMENT never clears session on READY (allows follow-up modifications like "make it 4pm")
         final_expected = turns[-1].get("expected", {})
         final_missing_slots = final_expected.get("missing_slots", [])
+        final_intent = final_expected.get("intent", "")
 
-        # Session should be cleared when missing_slots is empty (planning complete)
+        # RULE: Session should be cleared when missing_slots is empty for non-CREATE_APPOINTMENT intents
+        # CREATE_APPOINTMENT preserves session on READY (single deterministic rule)
         if final_missing_slots == []:
             session_state = get_session(user_id)
-            if session_state is not None:
+            # Check session intent (not just expected intent, as final turn may not specify intent)
+            session_intent = None
+            if session_state:
+                session_intent_obj = session_state.get("intent")
+                if isinstance(session_intent_obj, str):
+                    session_intent = session_intent_obj
+                elif isinstance(session_intent_obj, dict):
+                    session_intent = session_intent_obj.get("name", "")
+            # Single rule: Never expect session clearing for CREATE_APPOINTMENT
+            # Check both final_intent (from expected) and session_intent (from actual session)
+            is_create_appointment = (
+                final_intent == "CREATE_APPOINTMENT" or session_intent == "CREATE_APPOINTMENT")
+            if session_state is not None and not is_create_appointment:
                 error_msg = f"Session not cleared after planning complete (missing_slots=[]). Session state: {session_state}"
                 # Print FAIL_SNAPSHOT on session not cleared
                 fail_snapshot = {
@@ -616,7 +719,8 @@ def run_all_scenarios(
             passed += 1
         else:
             failed += 1
-            failures.append((scenario_id, error_msg or "Unknown error", user_id))
+            failures.append(
+                (scenario_id, error_msg or "Unknown error", user_id))
             failing_scenario_names.append(scenario_name)
 
     return passed, failed, skipped, failures, failing_scenario_names
@@ -729,7 +833,8 @@ Examples:
                 print("="*70)
                 print("CORE SESSION FOLLOW-UP TEST SUITE")
                 print("="*70)
-                print(f"Total scenarios: {len(all_scenarios)} (followup: {len(followup_scenarios)}, planning_edges: {len(planning_edges_scenarios)})")
+                print(
+                    f"Total scenarios: {len(all_scenarios)} (followup: {len(followup_scenarios)}, planning_edges: {len(planning_edges_scenarios)})")
                 if len(scenarios_to_run) != len(all_scenarios):
                     print(
                         f"Running: {len(scenarios_to_run)} scenario{'s' if len(scenarios_to_run) != 1 else ''}")
@@ -761,7 +866,8 @@ Examples:
                         if i < len(failures) and len(failures[i]) >= 3:
                             scenario_id = failures[i][0]
                             user_id = failures[i][2]
-                            print(f"  - Scenario {scenario_id}: {scenario_name} (id: {user_id})")
+                            print(
+                                f"  - Scenario {scenario_id}: {scenario_name} (id: {user_id})")
                         else:
                             print(f"  - {scenario_name}")
 

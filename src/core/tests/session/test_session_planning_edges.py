@@ -27,8 +27,14 @@ planning_edges_scenarios = [
                     "action": "SEARCH_AVAILABILITY",
                     "missing_slots": ["time"],
                     # date normalized from "friday" to ISO date
-                    # "evening" may be normalized to time or remain ambiguous
-                    "slots": {"service_id": "haircut", "date": "2026-01-16"}
+                    # "evening" is normalized to fuzzy time_constraint (does NOT satisfy time requirement)
+                    "slots": {"service_id": "haircut", "date": "2026-01-16"},
+                    "time_constraint": {
+                        "mode": "fuzzy",
+                        "start": "17:00",
+                        "end": "21:59",
+                        "label": "evening"
+                    }
                 }
             }
         ]
@@ -97,7 +103,13 @@ planning_edges_scenarios = [
                     "stage": "CONFIRM",
                     "action": "CONFIRM_APPOINTMENT",
                     "missing_slots": [],
-                    "slots": {"service_id": "haircut", "date": "2026-01-16", "time": "3pm"}
+                    "slots": {"service_id": "haircut", "date": "2026-01-16"},
+                    "time_constraint": {
+                        "mode": "exact",
+                        "start": "15:00",
+                        "end": "15:00",
+                        "label": None
+                    }
                 }
             },
             {
@@ -106,8 +118,14 @@ planning_edges_scenarios = [
                     "stage": "CONFIRM",
                     "action": "CONFIRM_APPOINTMENT",
                     "missing_slots": [],
-                    # time overridden, no duplicate slots
-                    "slots": {"service_id": "haircut", "date": "2026-01-16", "time": "4pm"}
+                    # time_constraint overridden
+                    "slots": {"service_id": "haircut", "date": "2026-01-16"},
+                    "time_constraint": {
+                        "mode": "exact",
+                        "start": "16:00",
+                        "end": "16:00",
+                        "label": None
+                    }
                 }
             }
         ]

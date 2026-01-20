@@ -154,7 +154,13 @@ followup_scenarios = [
                     "missing_slots": ["date"],
                     # service_id present allows partial execution
                     "executable_actions": ["SEARCH_AVAILABILITY"],
-                    "slots": {"service_id": "massage", "time": "2pm"}
+                    "slots": {"service_id": "massage"},
+                    "time_constraint": {
+                        "mode": "exact",
+                        "start": "14:00",
+                        "end": "14:00",
+                        "label": None
+                    }
                 }
             },
             {
@@ -163,7 +169,13 @@ followup_scenarios = [
                     "stage": "CONFIRM",
                     "action": "CONFIRM_APPOINTMENT",
                     "missing_slots": [],
-                    "slots": {"service_id": "massage", "time": "2pm", "date": "tomorrow"}
+                    "slots": {"service_id": "massage", "date": "tomorrow"},
+                    "time_constraint": {
+                        "mode": "exact",
+                        "start": "14:00",
+                        "end": "14:00",
+                        "label": None
+                    }
                 }
             }
         ]
@@ -183,7 +195,13 @@ followup_scenarios = [
                     "missing_slots": ["date"],
                     # service_id present allows partial execution
                     "executable_actions": ["SEARCH_AVAILABILITY"],
-                    "slots": {"service_id": "haircut", "time": "10am"}
+                    "slots": {"service_id": "haircut"},
+                    "time_constraint": {
+                        "mode": "exact",
+                        "start": "10:00",
+                        "end": "10:00",
+                        "label": None
+                    }
                 }
             },
             {
@@ -192,7 +210,13 @@ followup_scenarios = [
                     "stage": "CONFIRM",
                     "action": "CONFIRM_APPOINTMENT",
                     "missing_slots": [],
-                    "slots": {"service_id": "haircut", "time": "10am", "date": "2026-01-16"}
+                    "slots": {"service_id": "haircut", "date": "2026-01-16"},
+                    "time_constraint": {
+                        "mode": "exact",
+                        "start": "10:00",
+                        "end": "10:00",
+                        "label": None
+                    }
                 }
             }
         ]
@@ -253,7 +277,13 @@ followup_scenarios = [
                     "stage": "CONFIRM",
                     "action": "CONFIRM_APPOINTMENT",
                     "missing_slots": [],
-                    "slots": {"service_id": "massage", "date": "tomorrow", "time": "3pm"}
+                    "slots": {"service_id": "massage", "date": "tomorrow"},
+                    "time_constraint": {
+                        "mode": "exact",
+                        "start": "15:00",
+                        "end": "15:00",
+                        "label": None
+                    }
                 }
             }
         ]
@@ -569,7 +599,13 @@ followup_scenarios = [
                     "stage": "AVAILABILITY",
                     "action": "SEARCH_AVAILABILITY",
                     "missing_slots": ["date"],
-                    "slots": {"service_id": "massage", "time": "3pm"}
+                    "slots": {"service_id": "massage"},
+                    "time_constraint": {
+                        "mode": "exact",
+                        "start": "15:00",
+                        "end": "15:00",
+                        "label": None
+                    }
                 }
             }
         ]

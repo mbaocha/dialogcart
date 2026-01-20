@@ -422,71 +422,168 @@ def handle_message(
 
     except UpstreamError as e:
         logger.error(f"Luma API error for user {user_id}: {str(e)}")
-        # FIX: Safe fallback when Luma call fails - preserve session and return planning response
-        if session_state and session_state.get("status") == "NEEDS_CLARIFICATION":
-            # Return planning response derived from session state
+        # SESSION LIFECYCLE RULE: For CREATE_APPOINTMENT, reuse session state as-is on empty/null Luma response
+        # Do not recompute slots or missing_slots - preserve session state exactly as-is
+        if session_state:
             session_intent = session_state.get("intent")
             session_intent_str = session_intent if isinstance(session_intent, str) else (session_intent.get("name", "") if isinstance(session_intent, dict) else "")
-            session_slots = session_state.get("slots", {})
-            if not isinstance(session_slots, dict):
-                session_slots = {}
             
-            # Compute missing_slots from session intent and slots
-            from core.orchestration.api.slot_contract import compute_missing_slots
-            missing_slots = compute_missing_slots(session_intent_str, session_slots, domain=derived_domain) if session_intent_str else []
-            
-            # Extract stage/action from session state if available, otherwise use defaults
-            session_stage = session_state.get("stage", "AVAILABILITY")
-            session_action = session_state.get("action")
-            
-            return {
-                "success": True,
-                "outcome": {
-                    "intent": session_intent_str,
+            # For CREATE_APPOINTMENT, reuse session state as-is without recomputation
+            if session_intent_str == "CREATE_APPOINTMENT":
+                session_slots = session_state.get("slots", {})
+                if not isinstance(session_slots, dict):
+                    session_slots = {}
+                session_missing_slots = session_state.get("missing_slots", [])
+                if not isinstance(session_missing_slots, list):
+                    session_missing_slots = []
+                session_stage = session_state.get("stage", "AVAILABILITY")
+                session_action = session_state.get("action")
+                # Derive action from stage if missing (for empty response recovery)
+                if not session_action and session_stage == "AVAILABILITY":
+                    session_action = "SEARCH_AVAILABILITY"
+                elif not session_action and session_stage == "CONFIRM":
+                    session_action = "CONFIRM_APPOINTMENT"
+                session_status = session_state.get("status", "NEEDS_CLARIFICATION")
+                
+                # Build outcome with plan and facts for consistency
+                outcome = {
+                    "intent_name": session_intent_str,
                     "stage": session_stage,
                     "action": session_action,
                     "slots": session_slots,
-                    "missing_slots": missing_slots,
-                    "status": "NEEDS_CLARIFICATION" if missing_slots else "READY"
+                    "missing_slots": session_missing_slots,
+                    "status": session_status,
+                    "plan": {
+                        "intent": session_intent_str,
+                        "stage": session_stage,
+                        "action": session_action,
+                        "missing_slots": session_missing_slots,
+                        "slots": session_slots,
+                        "status": session_status,
+                        "executable_actions": [session_action] if session_action else []
+                    },
+                    "facts": {
+                        "slots": session_slots,
+                        "missing_slots": session_missing_slots
+                    }
                 }
-            }
+                
+                return {
+                    "success": True,
+                    "outcome": outcome
+                }
+            
+            # For other intents, preserve session and return planning response (existing behavior)
+            if session_state.get("status") == "NEEDS_CLARIFICATION":
+                # Return planning response derived from session state
+                session_slots = session_state.get("slots", {})
+                if not isinstance(session_slots, dict):
+                    session_slots = {}
+                
+                # Compute missing_slots from session intent and slots
+                from core.orchestration.api.slot_contract import compute_missing_slots
+                missing_slots = compute_missing_slots(session_intent_str, session_slots) if session_intent_str else []
+                
+                # Extract stage/action from session state if available, otherwise use defaults
+                session_stage = session_state.get("stage", "AVAILABILITY")
+                session_action = session_state.get("action")
+                
+                return {
+                    "success": True,
+                    "outcome": {
+                        "intent_name": session_intent_str,
+                        "stage": session_stage,
+                        "action": session_action,
+                        "slots": session_slots,
+                        "missing_slots": missing_slots,
+                        "status": "NEEDS_CLARIFICATION" if missing_slots else "READY"
+                    }
+                }
         return {
             "success": False,
             "error": "upstream_error",
             "message": str(e)
         }
 
-    # FIX: Guard against None or empty Luma response
+    # SESSION LIFECYCLE RULE: For CREATE_APPOINTMENT, reuse session state as-is on empty/null Luma response
+    # Do not recompute slots or missing_slots - preserve session state exactly as-is
     if not luma_response or not isinstance(luma_response, dict):
         logger.error(f"Luma returned None or invalid response for user {user_id}")
-        # Safe fallback when Luma response is missing - preserve session and return planning response
-        if session_state and session_state.get("status") == "NEEDS_CLARIFICATION":
-            # Return planning response derived from session state
+        if session_state:
             session_intent = session_state.get("intent")
             session_intent_str = session_intent if isinstance(session_intent, str) else (session_intent.get("name", "") if isinstance(session_intent, dict) else "")
-            session_slots = session_state.get("slots", {})
-            if not isinstance(session_slots, dict):
-                session_slots = {}
             
-            # Compute missing_slots from session intent and slots
-            from core.orchestration.api.slot_contract import compute_missing_slots
-            missing_slots = compute_missing_slots(session_intent_str, session_slots, domain=derived_domain) if session_intent_str else []
-            
-            # Extract stage/action from session state if available, otherwise use defaults
-            session_stage = session_state.get("stage", "AVAILABILITY")
-            session_action = session_state.get("action")
-            
-            return {
-                "success": True,
-                "outcome": {
-                    "intent": session_intent_str,
+            # For CREATE_APPOINTMENT, reuse session state as-is without recomputation
+            if session_intent_str == "CREATE_APPOINTMENT":
+                session_slots = session_state.get("slots", {})
+                if not isinstance(session_slots, dict):
+                    session_slots = {}
+                session_missing_slots = session_state.get("missing_slots", [])
+                if not isinstance(session_missing_slots, list):
+                    session_missing_slots = []
+                session_stage = session_state.get("stage", "AVAILABILITY")
+                session_action = session_state.get("action")
+                # Derive action from stage if missing (for empty response recovery)
+                if not session_action and session_stage == "AVAILABILITY":
+                    session_action = "SEARCH_AVAILABILITY"
+                elif not session_action and session_stage == "CONFIRM":
+                    session_action = "CONFIRM_APPOINTMENT"
+                session_status = session_state.get("status", "NEEDS_CLARIFICATION")
+                
+                # Build outcome with plan and facts for consistency
+                outcome = {
+                    "intent_name": session_intent_str,
                     "stage": session_stage,
                     "action": session_action,
                     "slots": session_slots,
-                    "missing_slots": missing_slots,
-                    "status": "NEEDS_CLARIFICATION" if missing_slots else "READY"
+                    "missing_slots": session_missing_slots,
+                    "status": session_status,
+                    "plan": {
+                        "intent": session_intent_str,
+                        "stage": session_stage,
+                        "action": session_action,
+                        "missing_slots": session_missing_slots,
+                        "slots": session_slots,
+                        "status": session_status,
+                        "executable_actions": [session_action] if session_action else []
+                    },
+                    "facts": {
+                        "slots": session_slots,
+                        "missing_slots": session_missing_slots
+                    }
                 }
-            }
+                
+                return {
+                    "success": True,
+                    "outcome": outcome
+                }
+            
+            # For other intents, preserve session and return planning response (existing behavior)
+            if session_state.get("status") == "NEEDS_CLARIFICATION":
+                # Return planning response derived from session state
+                session_slots = session_state.get("slots", {})
+                if not isinstance(session_slots, dict):
+                    session_slots = {}
+                
+                # Compute missing_slots from session intent and slots
+                from core.orchestration.api.slot_contract import compute_missing_slots
+                missing_slots = compute_missing_slots(session_intent_str, session_slots) if session_intent_str else []
+                
+                # Extract stage/action from session state if available, otherwise use defaults
+                session_stage = session_state.get("stage", "AVAILABILITY")
+                session_action = session_state.get("action")
+                
+                return {
+                    "success": True,
+                    "outcome": {
+                        "intent_name": session_intent_str,
+                        "stage": session_stage,
+                        "action": session_action,
+                        "slots": session_slots,
+                        "missing_slots": missing_slots,
+                        "status": "NEEDS_CLARIFICATION" if missing_slots else "READY"
+                    }
+                }
         return {
             "success": False,
             "error": "upstream_error",
@@ -500,34 +597,83 @@ def handle_message(
         assert_luma_contract(luma_response)
     except ContractViolation as e:
         logger.error(f"Contract violation for user {user_id}: {str(e)}")
-        # FIX: Safe fallback on contract violation - preserve session and return planning response
-        if session_state and session_state.get("status") == "NEEDS_CLARIFICATION":
-            # Return planning response derived from session state
+        # SESSION LIFECYCLE RULE: For CREATE_APPOINTMENT, reuse session state as-is on contract violation
+        # Do not recompute slots or missing_slots - preserve session state exactly as-is
+        if session_state:
             session_intent = session_state.get("intent")
             session_intent_str = session_intent if isinstance(session_intent, str) else (session_intent.get("name", "") if isinstance(session_intent, dict) else "")
-            session_slots = session_state.get("slots", {})
-            if not isinstance(session_slots, dict):
-                session_slots = {}
             
-            # Compute missing_slots from session intent and slots
-            from core.orchestration.api.slot_contract import compute_missing_slots
-            missing_slots = compute_missing_slots(session_intent_str, session_slots, domain=derived_domain) if session_intent_str else []
-            
-            # Extract stage/action from session state if available, otherwise use defaults
-            session_stage = session_state.get("stage", "AVAILABILITY")
-            session_action = session_state.get("action")
-            
-            return {
-                "success": True,
-                "outcome": {
-                    "intent": session_intent_str,
+            # For CREATE_APPOINTMENT, reuse session state as-is without recomputation
+            if session_intent_str == "CREATE_APPOINTMENT":
+                session_slots = session_state.get("slots", {})
+                if not isinstance(session_slots, dict):
+                    session_slots = {}
+                session_missing_slots = session_state.get("missing_slots", [])
+                if not isinstance(session_missing_slots, list):
+                    session_missing_slots = []
+                session_stage = session_state.get("stage", "AVAILABILITY")
+                session_action = session_state.get("action")
+                # Derive action from stage if missing (for empty response recovery)
+                if not session_action and session_stage == "AVAILABILITY":
+                    session_action = "SEARCH_AVAILABILITY"
+                elif not session_action and session_stage == "CONFIRM":
+                    session_action = "CONFIRM_APPOINTMENT"
+                session_status = session_state.get("status", "NEEDS_CLARIFICATION")
+                
+                # Build outcome with plan and facts for consistency
+                outcome = {
+                    "intent_name": session_intent_str,
                     "stage": session_stage,
                     "action": session_action,
                     "slots": session_slots,
-                    "missing_slots": missing_slots,
-                    "status": "NEEDS_CLARIFICATION" if missing_slots else "READY"
+                    "missing_slots": session_missing_slots,
+                    "status": session_status,
+                    "plan": {
+                        "intent": session_intent_str,
+                        "stage": session_stage,
+                        "action": session_action,
+                        "missing_slots": session_missing_slots,
+                        "slots": session_slots,
+                        "status": session_status,
+                        "executable_actions": [session_action] if session_action else []
+                    },
+                    "facts": {
+                        "slots": session_slots,
+                        "missing_slots": session_missing_slots
+                    }
                 }
-            }
+                
+                return {
+                    "success": True,
+                    "outcome": outcome
+                }
+            
+            # For other intents, preserve session and return planning response (existing behavior)
+            if session_state.get("status") == "NEEDS_CLARIFICATION":
+                # Return planning response derived from session state
+                session_slots = session_state.get("slots", {})
+                if not isinstance(session_slots, dict):
+                    session_slots = {}
+                
+                # Compute missing_slots from session intent and slots
+                from core.orchestration.api.slot_contract import compute_missing_slots
+                missing_slots = compute_missing_slots(session_intent_str, session_slots) if session_intent_str else []
+                
+                # Extract stage/action from session state if available, otherwise use defaults
+                session_stage = session_state.get("stage", "AVAILABILITY")
+                session_action = session_state.get("action")
+                
+                return {
+                    "success": True,
+                    "outcome": {
+                        "intent_name": session_intent_str,
+                        "stage": session_stage,
+                        "action": session_action,
+                        "slots": session_slots,
+                        "missing_slots": missing_slots,
+                        "status": "NEEDS_CLARIFICATION" if missing_slots else "READY"
+                    }
+                }
         return {
             "success": False,
             "error": "contract_violation",
@@ -553,112 +699,136 @@ def handle_message(
     effective_intent = luma_intent_name
     session_reset_occurred = False
     
-    if session_state and session_state.get("status") == "NEEDS_CLARIFICATION":
+    # SESSION LIFECYCLE RULE: Handle session intent override for:
+    # 1. NEEDS_CLARIFICATION sessions (existing behavior)
+    # 2. READY sessions with CREATE_APPOINTMENT (allows time overrides like "make it 4pm")
+    session_status = session_state.get("status") if session_state else None
+    should_handle_session_intent = (
+        session_state and (
+            session_status == "NEEDS_CLARIFICATION" or
+            (session_status == "READY" and session_state.get("intent") is not None)
+        )
+    )
+    
+    if should_handle_session_intent:
         session_intent = session_state.get("intent")
         session_intent_str = session_intent if isinstance(session_intent, str) else (session_intent.get("name", "") if isinstance(session_intent, dict) else "")
         
-        # Check for domain switch based on canonical service evidence (even for UNKNOWN intents)
-        canonical_indicates_switch = False
-        context = luma_response.get("context", {})
-        services = context.get("services", []) if isinstance(context, dict) else []
-        
-        if services and isinstance(services, list) and len(services) > 0:
-            first_service = services[0]
-            if isinstance(first_service, dict):
-                canonical = first_service.get("canonical") or first_service.get("canonical_key")
-                if canonical:
-                    canonical_str = str(canonical).lower()
-                    # Check if canonical indicates reservation domain (hospitality.*)
-                    if canonical_str.startswith("hospitality.") or canonical_str.startswith("lodging."):
-                        # Canonical indicates reservation domain
-                        if session_intent_str == "CREATE_APPOINTMENT":
-                            canonical_indicates_switch = True
-                            logger.info(
-                                f"[session] domain_switch_detected user_id={user_id}{log_transaction_id} "
-                                f"canonical={canonical} indicates reservation domain, session was service"
-                            )
-                    elif canonical_str.startswith("beauty_and_wellness.") or canonical_str.startswith("service."):
-                        # Canonical indicates service domain
-                        if session_intent_str == "CREATE_RESERVATION":
-                            canonical_indicates_switch = True
-                            logger.info(
-                                f"[session] domain_switch_detected user_id={user_id}{log_transaction_id} "
-                                f"canonical={canonical} indicates service domain, session was reservation"
-                            )
-        
-        if canonical_indicates_switch:
-            # Domain switch detected - reset session and use new intent based on canonical
-            # Determine new intent from canonical evidence
-            new_intent = None
+        # For READY sessions, only process if intent is CREATE_APPOINTMENT (preserve for modifications)
+        if session_status == "READY" and session_intent_str != "CREATE_APPOINTMENT":
+            # For non-CREATE_APPOINTMENT READY sessions, don't override intent (session should be cleared)
+            pass
+        else:
+            # Check for domain switch based on canonical service evidence (even for UNKNOWN intents)
+            canonical_indicates_switch = False
+            context = luma_response.get("context", {})
+            services = context.get("services", []) if isinstance(context, dict) else []
+            
             if services and isinstance(services, list) and len(services) > 0:
                 first_service = services[0]
                 if isinstance(first_service, dict):
                     canonical = first_service.get("canonical") or first_service.get("canonical_key")
                     if canonical:
                         canonical_str = str(canonical).lower()
+                        # Check if canonical indicates reservation domain (hospitality.*)
                         if canonical_str.startswith("hospitality.") or canonical_str.startswith("lodging."):
-                            new_intent = "CREATE_RESERVATION"
+                            # Canonical indicates reservation domain
+                            if session_intent_str == "CREATE_APPOINTMENT":
+                                canonical_indicates_switch = True
+                                logger.info(
+                                    f"[session] domain_switch_detected user_id={user_id}{log_transaction_id} "
+                                    f"canonical={canonical} indicates reservation domain, session was service"
+                                )
                         elif canonical_str.startswith("beauty_and_wellness.") or canonical_str.startswith("service."):
-                            new_intent = "CREATE_APPOINTMENT"
-            
-            if new_intent:
-                effective_intent = new_intent
-            else:
-                # Fallback: use session intent if canonical parsing fails
-                effective_intent = session_intent_str
-                canonical_indicates_switch = False
+                            # Canonical indicates service domain
+                            if session_intent_str == "CREATE_RESERVATION":
+                                canonical_indicates_switch = True
+                                logger.info(
+                                    f"[session] domain_switch_detected user_id={user_id}{log_transaction_id} "
+                                    f"canonical={canonical} indicates service domain, session was reservation"
+                                )
             
             if canonical_indicates_switch:
-                from core.orchestration.session.session_manager import clear_session
-                clear_session(user_id)
-                session_state = None
-                session_reset_occurred = True
-                logger.info(
-                    f"[session] domain_switch_reset user_id={user_id}{log_transaction_id} "
-                    f"old={session_intent_str} new={effective_intent} (canonical-based switch)"
-                )
-        elif luma_intent_name == "UNKNOWN":
-            # Rule: If luma.intent == UNKNOWN, KEEP session.intent (NEVER allow UNKNOWN to overwrite)
-            effective_intent = session_intent_str
-            logger.info(
-                f"[session] intent_override user_id={user_id}{log_transaction_id} "
-                f"UNKNOWN -> session.intent={effective_intent}"
-            )
-        else:
-            # Check if new intent is non-core (DISCOVERY, CONFIRM_BOOKING, etc.)
-            from core.routing.intents.base_intents import is_core_intent
-            is_new_intent_core = is_core_intent(luma_intent_name)
-            is_session_intent_core = is_core_intent(session_intent_str) if session_intent_str else False
-            
-            # Rule: Non-core intents (DISCOVERY, CONFIRM_BOOKING) should NOT overwrite active booking session
-            if is_session_intent_core and not is_new_intent_core:
-                # Keep session intent - non-core intents are side-intents that don't interrupt booking flow
+                # Domain switch detected - reset session and use new intent based on canonical
+                # Determine new intent from canonical evidence
+                new_intent = None
+                if services and isinstance(services, list) and len(services) > 0:
+                    first_service = services[0]
+                    if isinstance(first_service, dict):
+                        canonical = first_service.get("canonical") or first_service.get("canonical_key")
+                        if canonical:
+                            canonical_str = str(canonical).lower()
+                            if canonical_str.startswith("hospitality.") or canonical_str.startswith("lodging."):
+                                new_intent = "CREATE_RESERVATION"
+                            elif canonical_str.startswith("beauty_and_wellness.") or canonical_str.startswith("service."):
+                                new_intent = "CREATE_APPOINTMENT"
+                
+                if new_intent:
+                    effective_intent = new_intent
+                else:
+                    # Fallback: use session intent if canonical parsing fails
+                    effective_intent = session_intent_str
+                    canonical_indicates_switch = False
+                
+                if canonical_indicates_switch:
+                    from core.orchestration.session.session_manager import clear_session
+                    clear_session(user_id)
+                    session_state = None
+                    session_reset_occurred = True
+                    logger.info(
+                        f"[session] domain_switch_reset user_id={user_id}{log_transaction_id} "
+                        f"old={session_intent_str} new={effective_intent} (canonical-based switch)"
+                    )
+            elif luma_intent_name == "UNKNOWN":
+                # Rule: If luma.intent == UNKNOWN, KEEP session.intent (NEVER allow UNKNOWN to overwrite)
                 effective_intent = session_intent_str
                 logger.info(
-                    f"[session] non_core_intent_ignored user_id={user_id}{log_transaction_id} "
-                    f"session.intent={session_intent_str} luma.intent={luma_intent_name} (non-core, preserving session)"
-                )
-            elif is_new_intent_core and luma_intent_name != session_intent_str:
-                # Core booking intent changed - clear old session
-                effective_intent = luma_intent_name
-                from core.orchestration.session.session_manager import clear_session
-                clear_session(user_id)
-                session_state = None
-                session_reset_occurred = True
-                logger.info(
-                    f"[session] intent_changed user_id={user_id}{log_transaction_id} "
-                    f"old={session_intent_str} new={luma_intent_name}"
+                    f"[session] intent_override user_id={user_id}{log_transaction_id} "
+                    f"UNKNOWN -> session.intent={effective_intent}"
                 )
             else:
-                # Same core intent or no switch - keep session
-                effective_intent = session_intent_str
+                # Check if new intent is non-core (DISCOVERY, CONFIRM_BOOKING, etc.)
+                from core.routing.intents.base_intents import is_core_intent
+                is_new_intent_core = is_core_intent(luma_intent_name)
+                is_session_intent_core = is_core_intent(session_intent_str) if session_intent_str else False
+                
+                # Rule: Non-core intents (DISCOVERY, CONFIRM_BOOKING) should NOT overwrite active booking session
+                if is_session_intent_core and not is_new_intent_core:
+                    # Keep session intent - non-core intents are side-intents that don't interrupt booking flow
+                    effective_intent = session_intent_str
+                    logger.info(
+                        f"[session] non_core_intent_ignored user_id={user_id}{log_transaction_id} "
+                        f"session.intent={session_intent_str} luma.intent={luma_intent_name} (non-core, preserving session)"
+                    )
+                elif is_new_intent_core and luma_intent_name != session_intent_str:
+                    # Core booking intent changed - clear old session
+                    effective_intent = luma_intent_name
+                    from core.orchestration.session.session_manager import clear_session
+                    clear_session(user_id)
+                    session_state = None
+                    session_reset_occurred = True
+                    logger.info(
+                        f"[session] intent_changed user_id={user_id}{log_transaction_id} "
+                        f"old={session_intent_str} new={luma_intent_name}"
+                    )
+                else:
+                    # Same core intent or no switch - keep session
+                    effective_intent = session_intent_str
     
     # Hard assertion: effective_intent must NOT be UNKNOWN when session exists (and not reset)
-    if session_state and session_state.get("status") == "NEEDS_CLARIFICATION" and not session_reset_occurred:
-        assert effective_intent != "UNKNOWN", (
-            f"Assertion failed: effective_intent is UNKNOWN but session.intent exists. "
-            f"session.intent={session_state.get('intent')}, luma.intent={luma_intent_name}"
-        )
+    # Applies to both NEEDS_CLARIFICATION and READY (CREATE_APPOINTMENT) sessions
+    if session_state and not session_reset_occurred:
+        session_status_check = session_state.get("status")
+        session_intent_for_assert = session_state.get("intent")
+        session_intent_str_for_assert = session_intent_for_assert if isinstance(session_intent_for_assert, str) else (session_intent_for_assert.get("name", "") if isinstance(session_intent_for_assert, dict) else "")
+        # Check for both NEEDS_CLARIFICATION and READY (CREATE_APPOINTMENT) sessions
+        if session_status_check == "NEEDS_CLARIFICATION" or (
+            session_status_check == "READY" and session_intent_str_for_assert == "CREATE_APPOINTMENT"
+        ):
+            assert effective_intent != "UNKNOWN", (
+                f"Assertion failed: effective_intent is UNKNOWN but session.intent exists. "
+                f"session.intent={session_intent_for_assert}, session.status={session_status_check}, luma.intent={luma_intent_name}"
+            )
     
     # Construct effective_response: Copy luma_response and replace intent.name with effective_intent
     # FACT-ONLY CONTRACT: facts may be empty or partial - this is valid
@@ -693,6 +863,11 @@ def handle_message(
 
     # Preserve the raw user text for follow-up slot promotion
     effective_response["_source_text"] = text
+    
+    # Extract time_constraint from luma_response for CREATE_APPOINTMENT missing slot computation
+    time_constraint = luma_response.get("time_constraint")
+    if time_constraint:
+        effective_response["time_constraint"] = time_constraint
     
     # Normalize service_id using tenant aliases (e.g., "suite" -> "room", "deluxe" -> "room")
     # CRITICAL: Preserve raw tenant value while storing canonical for planning
@@ -734,7 +909,23 @@ def handle_message(
     prior_missing = []
     
     # If session exists and not reset, merge slots from session
-    if session_state and session_state.get("status") == "NEEDS_CLARIFICATION" and not session_reset_occurred:
+    # SESSION LIFECYCLE RULE: Merge for NEEDS_CLARIFICATION sessions OR READY sessions with CREATE_APPOINTMENT
+    session_status_for_merge = session_state.get("status") if session_state else None
+    session_intent_for_merge = session_state.get("intent") if session_state else None
+    session_intent_str_for_merge = session_intent_for_merge if isinstance(session_intent_for_merge, str) else (session_intent_for_merge.get("name", "") if isinstance(session_intent_for_merge, dict) else "")
+    
+    should_merge_session = (
+        session_state and not session_reset_occurred and (
+            session_status_for_merge == "NEEDS_CLARIFICATION" or
+            (session_status_for_merge == "READY" and session_intent_str_for_merge == "CREATE_APPOINTMENT")
+        )
+    )
+    
+    if should_merge_session:
+        logger.info(
+            f"[SESSION_MERGE] Merging session slots: status={session_status_for_merge}, intent={session_intent_str_for_merge}, "
+            f"session_slots={list(session_state.get('slots', {}).keys())}"
+        )
         prior_intent = session_state.get("intent")
         prior_missing = session_state.get("missing_slots", [])
         prior_slots = list(session_state.get("slots", {}).keys())
@@ -751,6 +942,12 @@ def handle_message(
             "modification_context": effective_response.get("_modification_context")
         }
     else:
+        # No session merge (first turn or session reset or READY non-CREATE_APPOINTMENT)
+        if session_state:
+            logger.info(
+                f"[SESSION_MERGE] Skipping merge: status={session_status_for_merge}, intent={session_intent_str_for_merge}, "
+                f"session_reset_occurred={session_reset_occurred}"
+            )
         # No session (first turn) - still need to compute effective_collected_slots
         # This ensures slots are persisted correctly on the first turn
         if effective_response and isinstance(effective_response, dict):
@@ -776,8 +973,11 @@ def handle_message(
                 from core.orchestration.api.slot_contract import compute_missing_slots
                 intent_name = effective_response.get("intent", {}).get("name", "")
                 slots = effective_response.get("slots", {})
+                time_constraint = effective_response.get("time_constraint")
                 if intent_name:
-                    effective_response["missing_slots"] = compute_missing_slots(intent_name, slots)
+                    effective_response["missing_slots"] = compute_missing_slots(
+                        intent_name, slots, time_constraint=time_constraint
+                    )
                 else:
                     effective_response["missing_slots"] = []
         else:

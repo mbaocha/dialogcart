@@ -16,7 +16,7 @@ This module provides backward-compatible wrappers that delegate to the planner.
 """
 
 import os
-from typing import Dict, List, Set, Any
+from typing import Dict, List, Set, Any, Optional
 
 
 # GUARD: Hardcoded slot definitions are DEPRECATED
@@ -227,7 +227,8 @@ def compute_missing_slots(
     intent_name: str,
     collected_slots: Dict[str, Any],
     modification_context: Dict[str, Any] = None,
-    session_state: Dict[str, Any] = None
+    session_state: Dict[str, Any] = None,
+    time_constraint: Optional[Dict[str, Any]] = None
 ) -> List[str]:
     """
     DEPRECATED: Use core.planning.planner.plan_intent() instead.
@@ -243,6 +244,7 @@ def compute_missing_slots(
         collected_slots: Dictionary of effective collected slots
         modification_context: Optional modification context for MODIFY intents
         session_state: Optional session state (for logging)
+        time_constraint: Optional time_constraint from Luma (for CREATE_APPOINTMENT)
         
     Returns:
         Sorted list of missing slot names (empty list if all slots satisfied)
@@ -276,13 +278,35 @@ def compute_missing_slots(
     
     missing = required_slots - collected_slot_keys
     missing_slots = sorted(missing)
+
+    # APPOINTMENT INTENT RULE: Only exact time_constraint satisfies the time requirement
+    # mode=exact → satisfies time, mode=fuzzy/window → does NOT satisfy time
+    if intent_name == "CREATE_APPOINTMENT" and time_constraint is not None:
+        # Check if time_constraint mode is exact (only exact satisfies time requirement)
+        time_constraint_mode = None
+        if isinstance(time_constraint, dict):
+            time_constraint_mode = time_constraint.get("mode")
+        
+        # Only remove "time" from missing_slots if mode is exact
+        if time_constraint_mode == "exact":
+            if "time" in missing_slots:
+                missing_slots = [s for s in missing_slots if s != "time"]
+                logger.info(
+                    f"[MISSING_SLOTS] time_constraint (mode=exact) satisfies time for CREATE_APPOINTMENT - removed 'time' from missing_slots"
+                )
+        else:
+            # Fuzzy/window time_constraint does NOT satisfy time requirement
+            logger.debug(
+                f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}) does NOT satisfy time for CREATE_APPOINTMENT - keeping 'time' in missing_slots"
+            )
     
     logger.info(
         f"[MISSING_SLOTS] compute_missing_slots: "
         f"intent={intent_name}, "
         f"collected_slots={list(collected_slot_keys)}, "
         f"required_slots={list(required_slots)}, "
-        f"missing_slots={missing_slots}"
+        f"missing_slots={missing_slots}, "
+        f"time_constraint={time_constraint is not None}"
     )
     
     assert isinstance(missing_slots, list), (
