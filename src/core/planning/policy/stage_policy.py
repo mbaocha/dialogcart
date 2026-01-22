@@ -1,5 +1,5 @@
 """
-Dialog Policy
+Stage Policy
 
 Maps (intent, missing_slots) to advisory dialog prompts.
 Returns structured JSON instructions, not plain text.
@@ -7,7 +7,7 @@ Returns structured JSON instructions, not plain text.
 PLANNING BOUNDARY:
 - This module is PURELY REACTIVE - it accepts missing_slots as input
 - It MUST NOT compute, infer, or assume missing slots
-- missing_slots MUST come from the planner (core.planning.planner.plan_intent)
+- missing_slots MUST come from the planner (core.planning.policy.action_policy.plan_intent)
 - No ordering or staging logic allowed
 - Planning = intent_planning.yaml + planner code
 - Dialog = dialog_policy.yaml (consumes planner output)
@@ -35,7 +35,7 @@ def load_dialog_policy(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
     if config_path is None:
         # Default to config/dialog_policy.yaml relative to this file
-        config_dir = Path(__file__).resolve().parent.parent / "config"
+        config_dir = Path(__file__).resolve().parent.parent.parent / "config"
         config_path = str(config_dir / "dialog_policy.yaml")
 
     config_file = Path(config_path)
@@ -59,7 +59,7 @@ def get_dialog_instructions(
     GUARD: This function is PURELY REACTIVE.
     - It accepts missing_slots as input (from planner)
     - It MUST NOT compute, infer, or assume missing slots
-    - missing_slots MUST come from core.planning.planner.plan_intent()
+    - missing_slots MUST come from core.planning.policy.action_policy.plan_intent()
     
     Returns structured JSON instructions, not plain text.
     The prompt is advisory and does not enforce order - users can provide
@@ -134,7 +134,7 @@ def get_dialog_instructions(
     # Fallback to default intent prompt if no match found
     if not prompt:
         # Load full config to get default_intent_prompt
-        config_dir = Path(__file__).resolve().parent.parent / "config"
+        config_dir = Path(__file__).resolve().parent.parent.parent / "config"
         config_path = str(config_dir / "dialog_policy.yaml")
         config_file = Path(config_path)
         if config_file.exists():
@@ -151,3 +151,4 @@ def get_dialog_instructions(
         "prompt_type": "advisory",
         "slot_order": None  # No order enforced - users can provide slots in any order
     }
+

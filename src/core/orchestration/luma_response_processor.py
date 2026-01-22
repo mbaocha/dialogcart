@@ -267,7 +267,7 @@ def _build_decision_plan(
     # Planner computes executable_actions from intent_planning.yaml based on collected slots
     executable_actions = []
     if intent_name:
-        from core.planning.planner import plan_intent, load_planning_policy
+        from core.planning.policy.action_policy import plan_intent, load_planning_policy
         # Use effective_collected_slots if available (more accurate), otherwise use slots
         effective_slots = luma_response.get("_effective_collected_slots")
         if effective_slots is None:
@@ -812,7 +812,8 @@ def process_luma_response(
     print(f"  merged_session_slots.time={slots_for_filtering.get('time')}")
     
     # Build decision plan with FILTERED missing_slots
-    plan = _build_decision_plan(intent_name, luma_response_for_plan, domain)
+    from core.planning.orchestration.plan_builder import build_decision_plan
+    plan = build_decision_plan(intent_name, luma_response_for_plan, domain)
     
     # Check if Luma indicates clarification is needed
     if luma_response.get("needs_clarification", False):

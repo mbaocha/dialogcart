@@ -378,7 +378,7 @@ def _build_decision_plan(
     # Planner computes executable_actions from intent_planning.yaml based on collected slots
     executable_actions = []
     if intent_name:
-        from core.planning.planner import plan_intent, load_planning_policy
+        from core.planning.policy.action_policy import plan_intent, load_planning_policy
         # Use effective_collected_slots if available (more accurate), otherwise use slots
         effective_slots = luma_response.get("_effective_collected_slots")
         if effective_slots is None:
@@ -434,14 +434,14 @@ def _build_decision_plan(
     # Add dialog instructions when status is NEEDS_CLARIFICATION
     dialog_instructions = None
     if status == "NEEDS_CLARIFICATION" and len(missing_slots) > 0:
-        from core.dialog_policy import get_dialog_instructions
+        from core.planning.policy.stage_policy import get_dialog_instructions
         dialog_instructions = get_dialog_instructions(intent_name, missing_slots)
     
     # Get executable_actions from planner
     # Use effective_collected_slots if available (from turn_state), otherwise use slots from luma_response
     executable_actions = []
     if intent_name and missing_slots is not None:
-        from core.planning.planner import plan_intent, load_planning_policy
+        from core.planning.policy.action_policy import plan_intent, load_planning_policy
         # Prefer effective_collected_slots if available (more accurate), otherwise use slots
         effective_slots = luma_response.get("_effective_collected_slots")
         if effective_slots is None:
@@ -759,7 +759,7 @@ def _build_turn_state(
     This is the single source of truth for turn state, containing all slot states,
     status, and decision reasoning.
     """
-    from core.orchestration.api.slot_contract import get_required_slots_for_intent
+    from core.planning.orchestration.missing_slots import get_planning_required_slots_for_intent as get_required_slots_for_intent
     
     final_status = plan.get("status", "")
     
@@ -1049,7 +1049,8 @@ def process_luma_response(
     luma_response_for_plan["_effective_collected_slots"] = effective_collected_slots
     
     # Build decision plan with recomputed missing_slots (ONLY source of truth)
-    plan = _build_decision_plan(intent_name, luma_response_for_plan, domain)
+    from core.planning.orchestration.plan_builder import build_decision_plan
+    plan = build_decision_plan(intent_name, luma_response_for_plan, domain)
     
     # Check if Luma indicates clarification is needed
     # FACT-ONLY: needs_clarification is optional - only check if present
@@ -1101,7 +1102,7 @@ def process_luma_response(
         }
 
         # Build TurnState at end of turn (single source of truth)
-        from core.orchestration.api.slot_contract import get_required_slots_for_intent
+        from core.planning.orchestration.missing_slots import get_planning_required_slots_for_intent as get_required_slots_for_intent
         raw_luma_slots = luma_response.get("_raw_luma_slots", {})
         merged_session_slots = merged_session_slots_for_logging
         promoted_slots = promoted_slots_before_normalization
@@ -1259,7 +1260,7 @@ def process_luma_response(
     }
     
     # Build TurnState at end of turn (single source of truth)
-    from core.orchestration.api.slot_contract import get_required_slots_for_intent
+    from core.planning.orchestration.missing_slots import get_planning_required_slots_for_intent as get_required_slots_for_intent
     raw_luma_slots = luma_response.get("_raw_luma_slots", {})
     merged_session_slots = merged_session_slots_for_logging
     promoted_slots = promoted_slots_before_normalization
@@ -1337,7 +1338,7 @@ def build_clarify_outcome_from_reason(
     # Get dialog instructions if intent and missing slots are available
     dialog_instructions = None
     if intent_name and missing_slots:
-        from core.dialog_policy import get_dialog_instructions
+        from core.planning.policy.stage_policy import get_dialog_instructions
         dialog_instructions = get_dialog_instructions(intent_name, missing_slots)
 
     outcome = {

@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from typing import Dict, Any, Optional, List
 from enum import Enum
 
-from core.planning.planner import plan_intent, load_planning_policy
+from core.planning.policy.action_policy import plan_intent, load_planning_policy
 
 logger = logging.getLogger(__name__)
 

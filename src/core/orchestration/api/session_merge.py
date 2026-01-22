@@ -12,7 +12,7 @@ import logging
 import os
 from typing import Dict, Any, Optional
 
-from core.orchestration.api.slot_contract import compute_missing_slots
+from core.planning.orchestration.missing_slots import compute_missing_slots
 
 logger = logging.getLogger(__name__)
 
@@ -825,7 +825,7 @@ def merge_luma_with_session(
     )
 
     # Import planner for missing_slots computation
-    from core.planning.planner import plan_intent, load_planning_policy
+    from core.planning.policy.action_policy import plan_intent, load_planning_policy
 
     # STEP 3.6: Handle intent change (hard boundary)
     # ARCHITECTURAL INVARIANT: Intent change is a hard boundary
@@ -1190,7 +1190,7 @@ def merge_luma_with_session(
     #   - role inference
     # This prevents cross-domain slot leakage (e.g., service_id in reservation missing_slots)
     # PLANNING-ONLY: Skip domain filtering when planning_only=True
-    from core.orchestration.api.slot_contract import filter_slots_by_domain
+    from core.orchestration.api.slot_contract import filter_slots_by_domain  # Still in slot_contract
     domain_filtered_slots = filter_slots_by_domain(
         promoted_slots, effective_intent, planning_only=planning_only)
 
@@ -1319,7 +1319,7 @@ def merge_luma_with_session(
             )
     
     # MISSING_SLOTS_DECISION: Log missing slots computation decision
-    from core.orchestration.api.slot_contract import get_required_slots_for_intent
+    from core.planning.orchestration.missing_slots import get_planning_required_slots_for_intent as get_required_slots_for_intent
     required_slots = get_required_slots_for_intent(effective_intent)
     logger.info("[MISSING_SLOTS_DECISION] user_id=%s intent=%s required_slots=%s slots_used=%s missing_slots=%s",
                 user_id, effective_intent, required_slots, list(durable_slots_for_computation.keys()), missing_slots)
@@ -1665,7 +1665,7 @@ def _compute_effective_collected_slots(luma_response: Dict[str, Any], planning_o
     # missing_slots must be computed from durable slots (after promotion writes into slots)
     # A slot is satisfied ONLY if it exists in durable_slots under its exact slot name
     # Use planner for missing_slots computation
-    from core.planning.planner import plan_intent, load_planning_policy
+    from core.planning.policy.action_policy import plan_intent, load_planning_policy
 
     # BEFORE_REQUIRED_SLOTS: Log right before required-slot computation (first turn)
     before_required_slots_log = {
@@ -1903,7 +1903,7 @@ def build_session_state_from_outcome(
             modification_context = previous_session_state.get(
                 "_modification_context")
         # Use planner to recompute missing_slots
-        from core.planning.planner import plan_intent, load_planning_policy
+        from core.planning.policy.action_policy import plan_intent, load_planning_policy
         policy = load_planning_policy()
         plan = plan_intent(intent_name, slots, policy)
         recomputed_missing_slots = plan["missing_slots"]
@@ -2080,7 +2080,7 @@ def build_session_state_from_outcome(
             missing_slots_to_persist = recomputed_missing_slots
         elif intent_name:
             # Fallback: recompute missing_slots using planner if not already computed
-            from core.planning.planner import plan_intent, load_planning_policy
+            from core.planning.policy.action_policy import plan_intent, load_planning_policy
             policy = load_planning_policy()
             plan = plan_intent(intent_name, slots, policy)
             missing_slots_to_persist = plan["missing_slots"]
@@ -2170,7 +2170,7 @@ def build_session_state_from_outcome(
         # Compute effective_collected_slots from persisted slots
         effective_collected_slots = {}
         if final_intent:
-            from core.orchestration.api.slot_contract import get_required_slots_for_intent
+            from core.planning.orchestration.missing_slots import get_planning_required_slots_for_intent as get_required_slots_for_intent
             required_slots_set = set(
                 get_required_slots_for_intent(final_intent))
             effective_collected_slots = {
@@ -2185,7 +2185,7 @@ def build_session_state_from_outcome(
         # Get required_slots for intent
         required_slots_list = []
         if final_intent:
-            from core.orchestration.api.slot_contract import get_required_slots_for_intent
+            from core.planning.orchestration.missing_slots import get_planning_required_slots_for_intent as get_required_slots_for_intent
             required_slots_list = get_required_slots_for_intent(final_intent)
 
         # STRUCTURED SNAPSHOT LOG

@@ -1,5 +1,5 @@
 """
-Intent Planner
+Action Policy
 
 Pure, deterministic, stateless planning function for intent execution.
 No dialog logic, no execution - only planning.
@@ -26,7 +26,7 @@ def load_planning_policy(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
     if config_path is None:
         # Default to config/intent_planning.yaml relative to this file
-        config_dir = Path(__file__).resolve().parent.parent / "config"
+        config_dir = Path(__file__).resolve().parent.parent.parent / "config"
         config_path = str(config_dir / "intent_planning.yaml")
 
     config_file = Path(config_path)
