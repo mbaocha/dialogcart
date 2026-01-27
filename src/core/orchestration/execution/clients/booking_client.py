@@ -6,7 +6,7 @@ Thin HTTP client for calling booking internal API.
 
 from typing import Dict, Any, Optional, Literal, List
 
-from core.execution.clients.base_client import BaseClient
+from core.orchestration.execution.clients.base_client import BaseClient
 
 
 class BookingClient(BaseClient):
@@ -251,3 +251,5 @@ class BookingClient(BaseClient):
         if extra_payment_fields:
             payload["payment"].update(extra_payment_fields)
         return self._request("POST", "/api/internal/bookings/intent", json=payload)
+
+

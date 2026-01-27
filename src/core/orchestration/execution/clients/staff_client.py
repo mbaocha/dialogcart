@@ -6,7 +6,7 @@ Thin client for staff listing and details.
 
 from typing import Any, Dict, Optional
 
-from core.execution.clients.base_client import BaseClient
+from core.orchestration.execution.clients.base_client import BaseClient
 
 
 class StaffClient(BaseClient):
@@ -34,4 +34,5 @@ class StaffClient(BaseClient):
             params.update(extra_params)
         path = f"/api/internal/staff/{staff_id}"
         return self._request("GET", path, params=params)
+
 

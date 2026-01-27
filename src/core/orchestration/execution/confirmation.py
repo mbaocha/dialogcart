@@ -36,3 +36,4 @@ def confirm_booking(
         "confirmed": True
     }
 
+

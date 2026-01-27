@@ -6,7 +6,7 @@ Thin client for availability endpoints (reservation, services, staff, next avail
 
 from typing import Any, Dict, Optional
 
-from core.execution.clients.base_client import BaseClient
+from core.orchestration.execution.clients.base_client import BaseClient
 
 
 class AvailabilityClient(BaseClient):

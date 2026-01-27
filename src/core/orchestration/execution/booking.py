@@ -14,22 +14,22 @@ def execute_booking(
 ) -> Dict[str, Any]:
     """
     Execute booking creation action.
-    
+
     Args:
         user_id: User identifier
         slots: Collected slots (must include service_id, date, time for appointments)
         intent_name: Intent name (e.g., "CREATE_APPOINTMENT", "CREATE_RESERVATION")
-        
+
     Returns:
         Action result dictionary with booking information
     """
     # Placeholder: actual booking logic would go here
-    # This would integrate with booking_client from execution/clients/
-    
+    # This would integrate with booking_client from orchestration/execution/clients/
+
     service_id = slots.get("service_id")
     date = slots.get("date") or slots.get("start_date")
     time = slots.get("time")
-    
+
     return {
         "type": "booking",
         "status": "success",
@@ -42,4 +42,3 @@ def execute_booking(
             "booking_code": "PLACEHOLDER_CODE"
         }
     }
-

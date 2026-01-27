@@ -6,7 +6,7 @@ Thin HTTP client for calling payment internal API.
 
 from typing import Dict, Any, Optional
 
-from core.execution.clients.base_client import BaseClient
+from core.orchestration.execution.clients.base_client import BaseClient
 
 
 class PaymentClient(BaseClient):
@@ -56,3 +56,5 @@ class PaymentClient(BaseClient):
 
         path = "/api/internal/bookings/intent"
         return self._request("POST", path, json=payload)
+
+

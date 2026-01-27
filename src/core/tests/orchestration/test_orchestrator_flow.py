@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 from core.orchestration.orchestrator import handle_message
 from core.orchestration.errors import ContractViolation, UpstreamError
 from core.orchestration.nlu import LumaClient
-from core.execution.clients.booking_client import BookingClient
+from core.orchestration.execution.clients.booking_client import BookingClient
 from core.orchestration.clients.customer_client import CustomerClient
 from core.orchestration.clients.catalog_client import CatalogClient
 

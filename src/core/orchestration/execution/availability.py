@@ -24,7 +24,7 @@ def search_availability(
         Action result dictionary with availability information
     """
     # Placeholder: actual availability search logic would go here
-    # This would integrate with availability_client from execution/clients/
+    # This would integrate with availability_client from orchestration/execution/clients/
     
     service_id = slots.get("service_id")
     date = slots.get("date") or slots.get("start_date")
@@ -38,4 +38,5 @@ def search_availability(
         "date": date,
         "available_slots": []  # Placeholder
     }
+
 

@@ -18,8 +18,8 @@ from core.tests.integration.test_appointment_e2e import (
     _setup_test_org_domain,
     get_customer_details
 )
-from core.tests.session.followup import followup_scenarios
-from core.tests.session.test_session_planning_edges import planning_edges_scenarios
+from core.tests.planning.followup import followup_scenarios
+from core.tests.planning.test_planning_edges import planning_edges_scenarios
 from core.orchestration.session import get_session, clear_session, save_session
 from core.orchestration.orchestrator import handle_message
 from core.orchestration.api.session_merge import build_session_state_from_outcome

@@ -14,7 +14,7 @@ from unittest.mock import Mock, call
 from core.orchestration.orchestrator import handle_message
 from core.rendering.whatsapp_renderer import render_outcome_to_whatsapp
 from core.orchestration.nlu import LumaClient
-from core.execution.clients.booking_client import BookingClient
+from core.orchestration.execution.clients.booking_client import BookingClient
 from core.orchestration.clients.customer_client import CustomerClient
 from core.orchestration.clients.catalog_client import CatalogClient
 from core.orchestration.clients.organization_client import OrganizationClient

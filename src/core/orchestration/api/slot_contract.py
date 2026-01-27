@@ -9,7 +9,7 @@ Use core.planning.policy.action_policy.plan_intent() instead.
 
 PLANNING BOUNDARY:
 - Planning = intent_planning.yaml + planner code (core.planning.policy.action_policy)
-- Dialog = dialog_policy.yaml (consumes planner output, does NOT compute missing slots)
+- Dialog = dialog_policy.yaml (consumes planner output, does NOT compute missing slots) - available via core.planning
 - Execution = intent_execution.yaml (dumb routing only, does NOT reference slots)
 
 This module provides backward-compatible wrappers that delegate to the new modules.
