@@ -43,6 +43,17 @@ from core.orchestration.cache.catalog_cache import catalog_cache
 from core.orchestration.cache.org_domain_cache import org_domain_cache
 
 logger = logging.getLogger(__name__)
+# Dedicated turn-level logger (clean, minimal logs - ONE log per section)
+turn_logger = logging.getLogger("core.turn_log")
+turn_logger.setLevel(logging.INFO)
+
+# IMMEDIATELY disable noisy logs - set to ERROR ONLY
+logging.getLogger("core.orchestration").setLevel(logging.ERROR)
+logging.getLogger("core.planning").setLevel(logging.ERROR)
+logging.getLogger("core.slot").setLevel(logging.ERROR)
+logging.getLogger("core.execution").setLevel(logging.ERROR)
+logging.getLogger("core.nlu").setLevel(logging.ERROR)
+logging.getLogger("core.session_merge").setLevel(logging.ERROR)
 
 
 def _build_planning_outcome(
@@ -217,6 +228,15 @@ def handle_message(
     # Import execution dispatcher
     from core.orchestration.execution.dispatcher import execute
 
+    # LOG 1 — TURN INPUT (first line of handle_message)
+    turn_logger.info(
+        json.dumps({
+            "turn": "INPUT",
+            "user_id": user_id,
+            "text": text
+        }, ensure_ascii=True)
+    )
+
     # Get session state if session_store provided
     session_state = None
     if session_store is not None:
@@ -227,6 +247,14 @@ def handle_message(
                 session_state = session_store(user_id)
         except Exception as e:
             logger.warning(f"Failed to get session for user {user_id}: {e}")
+
+    # LOG 3 — SESSION READ (immediately after session_store.get_session)
+    turn_logger.info(
+        json.dumps({
+            "turn": "SESSION_READ",
+            "session": session_state
+        }, ensure_ascii=True, default=str)
+    )
 
     # Call plan_message to get planning result
     # plan_message internally calls Luma and handle_message_legacy
@@ -248,58 +276,117 @@ def handle_message(
             "plan": plan
         }
 
-    # Extract action from plan
-    action = plan.get("action")
+    # POLICY-DRIVEN EXECUTION SELECTION
+    # Use intent_policy.yaml to determine if and which execution step should run
+    intent_name = plan.get("intent_name") or plan.get("intent")
+    slots = plan.get("slots", {})
 
-    # Dispatch execution based on action
-    # Only SEARCH_AVAILABILITY is supported for now
-    if action == "SEARCH_AVAILABILITY":
-        if availability_client is None:
-            return {
-                "success": False,
-                "error": "missing_dependency",
-                "message": "availability_client is required for SEARCH_AVAILABILITY action",
-                "plan": plan
-            }
+    # Determine availability_resolved flag from session state
+    # (availability is resolved if it was executed in a previous turn)
+    availability_resolved = False
+    if session_state:
+        # Check if previous execution result indicates availability was resolved
+        prev_result = session_state.get("last_execution_result")
+        if prev_result and isinstance(prev_result, dict):
+            result_type = prev_result.get("type")
+            if result_type == "availability":
+                availability_resolved = True
 
-        # Ensure organization_id is in slots for availability search
-        slots = plan.get("slots", {})
-        if not slots.get("organization_id") and organization_id is not None:
-            slots["organization_id"] = organization_id
-        elif not slots.get("organization_id"):
-            # Try to get from env as fallback
-            slots["organization_id"] = _get_org_id_from_env()
+    # Select next execution step using policy
+    from core.policy.intent_policy import select_next_execution_step
 
-        # Update plan with organization_id
-        plan["slots"] = slots
+    flags = {
+        "availability_resolved": availability_resolved
+    }
 
-        try:
-            # Execute availability search
-            execution_result = execute(
-                plan=plan,
-                availability_client=availability_client
+    execution_step = select_next_execution_step(
+        intent_name=intent_name,
+        slots=slots,
+        flags=flags
+    )
+
+    # Only execute if policy selected a step
+    if execution_step:
+        action = execution_step.get("action")
+        client_name = execution_step.get("client", "")
+
+        # Map client name to actual client instance
+        execution_client = None
+        if client_name == "availability_client":
+            execution_client = availability_client
+        elif client_name == "booking_client":
+            # booking_client not yet supported in handle_message
+            logger.warning(
+                f"Execution step {action} requires {client_name}, but it's not yet supported")
+            execution_step = None
+        else:
+            logger.warning(
+                f"Unknown client name '{client_name}' for execution step {action}")
+            execution_step = None
+
+        # Only proceed if we have the required client
+        if execution_step and execution_client is None:
+            # Missing required client - return planning result (no error for clarification turns)
+            # This prevents "missing_dependency" errors when user is clarifying
+            logger.debug(
+                f"Execution step {action} requires {client_name}, but client not provided. "
+                "Returning planning result (likely clarification turn)."
             )
-
-            # Return execution result
             return {
                 "success": True,
-                "result": execution_result,
-                "plan": plan
+                "result": plan
             }
-        except Exception as e:
-            logger.error(f"Execution failed for action {action}: {e}")
-            return {
-                "success": False,
-                "error": "execution_failed",
-                "message": str(e),
-                "plan": plan
-            }
-    else:
-        # No execution required - return planning result
-        return {
-            "success": True,
-            "result": plan
-        }
+
+        if execution_step and execution_client:
+            # Ensure organization_id is in slots for execution
+            if not slots.get("organization_id") and organization_id is not None:
+                slots["organization_id"] = organization_id
+            elif not slots.get("organization_id"):
+                # Try to get from env as fallback
+                slots["organization_id"] = _get_org_id_from_env()
+
+            # Update plan with organization_id
+            plan["slots"] = slots
+
+            # Update plan action to match selected step
+            plan["action"] = action
+
+            try:
+                # Execute the selected step
+                if client_name == "availability_client":
+                    execution_result = execute(
+                        plan=plan,
+                        availability_client=execution_client
+                    )
+                else:
+                    # Other clients not yet supported
+                    logger.warning(
+                        f"Execution for {client_name} not yet implemented")
+                    return {
+                        "success": True,
+                        "result": plan
+                    }
+
+                # Return execution result
+                return {
+                    "success": True,
+                    "result": execution_result,
+                    "plan": plan
+                }
+            except Exception as e:
+                logger.error(f"Execution failed for action {action}: {e}")
+                return {
+                    "success": False,
+                    "error": "execution_failed",
+                    "message": str(e),
+                    "plan": plan
+                }
+
+    # No execution step selected by policy - return planning result
+    return {
+        "success": True,
+        "result": plan
+    }
 
 
 def handle_message_legacy(
@@ -484,6 +571,21 @@ def handle_message_legacy(
 
         # Store raw response for attachment to effective_response (must be accessible after try block)
         raw_luma_response_deep_copy = copy.deepcopy(luma_response)
+
+        # LOG 2 — LUMA OUTPUT (right after luma.resolve)
+        luma_intent_obj = luma_response.get("intent", {})
+        luma_intent = luma_intent_obj.get(
+            "name", "") if isinstance(luma_intent_obj, dict) else ""
+        luma_slots = luma_response.get("slots", {})
+        luma_missing_slots = luma_response.get("missing_slots", [])
+        turn_logger.info(
+            json.dumps({
+                "turn": "LUMA",
+                "intent": luma_intent,
+                "slots": luma_slots,
+                "missing_slots": luma_missing_slots
+            }, ensure_ascii=True, default=str)
+        )
 
         # ARCHITECTURAL INVARIANT: Create authoritative slot view BEFORE any processing
         # effective_turn_slots = merge(session_state.slots, raw_luma_response.slots)
@@ -1305,8 +1407,11 @@ def handle_message_legacy(
 
         # CRITICAL: Always populate plan object with all required fields
         # This ensures plan.stage and plan.action are always present (no silent failures)
+        # HARD RULE: Include both intent and intent_name for session persistence
         populated_plan = {
             "intent": intent_name,
+            # For session persistence - build_session_state_from_outcome reads plan.intent_name
+            "intent_name": intent_name,
             "stage": stage,
             "action": action,
             "missing_slots": missing_slots,
@@ -1386,6 +1491,36 @@ def handle_message_legacy(
             populated_plan["missing_slots"], populated_plan["slots"]
         )
 
+        # ASSERTION: plan.intent_name must never be empty after successful planning
+        if not populated_plan.get("intent_name") or populated_plan.get("intent_name") == "":
+            logger.error(
+                "[PLANNING_ASSERTION] CRITICAL: plan.intent_name is empty after planning! "
+                "intent_name=%r, plan=%s, outcome.intent_name=%s",
+                intent_name,
+                json.dumps(populated_plan, default=str, ensure_ascii=True),
+                result.get("outcome", {}).get("intent_name")
+            )
+            # Fail-safe: Use intent_name from variable if plan doesn't have it
+            if intent_name and intent_name not in ("", "UNKNOWN"):
+                populated_plan["intent_name"] = intent_name
+                result["outcome"]["intent_name"] = intent_name
+                result["outcome"]["plan"]["intent_name"] = intent_name
+                logger.error(
+                    "[PLANNING_ASSERTION] Recovered: Set plan.intent_name=%s from resolved intent_name",
+                    intent_name
+                )
+            else:
+                logger.error(
+                    "[PLANNING_ASSERTION] FAILED: Cannot recover - intent_name is empty/invalid: %r",
+                    intent_name
+                )
+        else:
+            # Log success to confirm intent_name is present
+            logger.debug(
+                "[PLANNING_ASSERTION] SUCCESS: plan.intent_name=%s is present after planning",
+                populated_plan.get("intent_name")
+            )
+
         # OUTCOME: Log final outcome structure
         outcome = result.get("outcome", {})
         outcome_slots = outcome.get("slots", {})
@@ -1447,6 +1582,38 @@ def handle_message_legacy(
                     result["outcome"]["missing_slots"] = facts_obj["missing_slots"]
                 if "slots" in facts_obj:
                     result["outcome"]["slots"] = facts_obj["slots"]
+
+                # CRITICAL: Ensure intent_name is set for NEEDS_CLARIFICATION
+                # NEEDS_CLARIFICATION must NEVER clear intent - preserve it for follow-up turns
+                if "intent_name" not in result["outcome"] or not result["outcome"].get("intent_name"):
+                    # Try to get intent_name from decision or effective_response
+                    resolved_intent = decision.get("intent_name", "")
+                    if not resolved_intent and effective_response:
+                        resolved_intent = effective_response.get(
+                            "_effective_intent")
+                    if not resolved_intent and effective_response:
+                        intent_obj = effective_response.get("intent", {})
+                        if isinstance(intent_obj, dict):
+                            resolved_intent = intent_obj.get("name", "")
+                            # Skip UNKNOWN - use effective_intent instead
+                            if resolved_intent == "UNKNOWN":
+                                resolved_intent = effective_response.get(
+                                    "_effective_intent", "")
+                    # If still empty, preserve session intent
+                    if not resolved_intent and session_state:
+                        resolved_intent = session_state.get(
+                            "intent_name") or session_state.get("intent")
+
+                    if resolved_intent:
+                        result["outcome"]["intent_name"] = resolved_intent
+                        logger.info(
+                            f"[NEEDS_CLARIFICATION] Set intent_name={resolved_intent} in outcome "
+                            f"(from decision/effective_response/session)"
+                        )
+                    else:
+                        logger.warning(
+                            f"[NEEDS_CLARIFICATION] No intent available to set in outcome"
+                        )
             result["_merged_luma_response"] = effective_response
             return result
         if "error" in decision:
@@ -1458,7 +1625,28 @@ def handle_message_legacy(
 
         # Synthesize clarification outcome when Luma didn't provide one (follow-up turns)
         # Core's responsibility: generate clarification from intent, missing_slots, and domain
+        # CRITICAL: Preserve effective_intent for NEEDS_CLARIFICATION (do NOT clear intent)
+        # Intent is only cleared on terminal flows (CANCEL, COMPLETE), never on NEEDS_CLARIFICATION
         intent_name = decision.get("intent_name", "")
+        # Fallback to effective_intent if decision.intent_name is empty (preserves session intent)
+        if not intent_name and effective_response:
+            effective_intent = effective_response.get("_effective_intent")
+            if effective_intent:
+                intent_name = effective_intent
+                logger.info(
+                    f"[NEEDS_CLARIFICATION] Preserved effective_intent={effective_intent} "
+                    f"(decision.intent_name was empty)"
+                )
+        # If still empty, try to get from effective_response.intent.name
+        if not intent_name and effective_response:
+            intent_obj = effective_response.get("intent", {})
+            if isinstance(intent_obj, dict):
+                intent_from_response = intent_obj.get("name", "")
+                if intent_from_response and intent_from_response != "UNKNOWN":
+                    intent_name = intent_from_response
+                    logger.info(
+                        f"[NEEDS_CLARIFICATION] Using intent from effective_response: {intent_name}"
+                    )
         facts = decision.get("facts", {})
 
         # Get missing_slots from facts (already merged/normalized from process_luma_response)
@@ -1560,9 +1748,33 @@ def handle_message_legacy(
             facts=facts
         )
 
-        # Set intent_name if available
-        if intent_name and "outcome" in result:
-            result["outcome"]["intent_name"] = intent_name
+        # CRITICAL: Always set intent_name in outcome for NEEDS_CLARIFICATION
+        # NEEDS_CLARIFICATION must NEVER clear intent - preserve it for follow-up turns
+        # If resolved_intent exists, use it; otherwise preserve existing session intent
+        if "outcome" in result:
+            if intent_name:
+                # Use resolved intent (from decision or effective_response)
+                result["outcome"]["intent_name"] = intent_name
+                logger.info(
+                    f"[NEEDS_CLARIFICATION] Set intent_name={intent_name} in outcome"
+                )
+            else:
+                # No resolved intent - preserve session intent if available
+                if session_state:
+                    session_intent = session_state.get(
+                        "intent_name") or session_state.get("intent")
+                    if session_intent:
+                        result["outcome"]["intent_name"] = session_intent
+                        logger.info(
+                            f"[NEEDS_CLARIFICATION] Preserved session intent_name={session_intent} "
+                            f"(no resolved intent available)"
+                        )
+                    else:
+                        # No session intent either - log warning but don't set empty string
+                        logger.warning(
+                            f"[NEEDS_CLARIFICATION] No intent available (decision or session) - "
+                            f"intent_name will not be set in outcome"
+                        )
 
         # Add plan to outcome for session building
         if "outcome" in result:

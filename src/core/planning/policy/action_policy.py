@@ -10,6 +10,28 @@ from pathlib import Path
 from typing import Dict, Any, List, Set, Optional
 
 
+def _get_required_slots_from_unified_policy(intent_name: str) -> List[str]:
+    """
+    Get required slots from unified intent_policy.yaml with fallback to legacy.
+    
+    This function provides a migration path from legacy planning configs
+    to the unified intent_policy.yaml.
+    
+    Args:
+        intent_name: Intent name (uppercase, e.g., "CREATE_APPOINTMENT")
+    
+    Returns:
+        List of required slot names, or empty list if not found in unified policy.
+    """
+    try:
+        from core.policy.intent_policy import get_planning_required_slots
+        return get_planning_required_slots(intent_name)
+    except (ImportError, Exception):
+        # If unified policy module doesn't exist or fails, return empty list
+        # This allows fallback to legacy policy
+        return []
+
+
 def load_planning_policy(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
     Load intent planning policy from YAML configuration.
@@ -87,7 +109,12 @@ def plan_intent(
         }
 
     # Extract policy fields
-    required_slots = intent_policy.get("required_slots", [])
+    # PREFER unified policy for required_slots, fallback to legacy policy
+    required_slots = _get_required_slots_from_unified_policy(intent_upper)
+    if not required_slots:
+        # Fallback to legacy policy
+        required_slots = intent_policy.get("required_slots", [])
+    
     optional_slots = intent_policy.get("optional_slots", [])
     executable_with = intent_policy.get("executable_with", [])
 

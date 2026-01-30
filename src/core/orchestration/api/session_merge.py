@@ -15,6 +15,9 @@ from typing import Dict, Any, Optional
 from core.planning.orchestration.missing_slots import compute_missing_slots
 
 logger = logging.getLogger(__name__)
+# Dedicated turn-level logger (clean, minimal logs - ONE log per section)
+turn_logger = logging.getLogger("core.turn_log")
+turn_logger.setLevel(logging.INFO)
 
 
 def merge_luma_with_session(
@@ -42,6 +45,36 @@ def merge_luma_with_session(
     Returns:
         Modified Luma response with merged slots and session intent (ready for process_luma_response)
     """
+    # SESSION_DEBUG_RAW: Log full session payload (for Turn-2 debugging)
+    logger.error(
+        "[SESSION_DEBUG_RAW] full session payload: %s",
+        session_state
+    )
+
+    # SESSION_DEBUG_KEYS: Log session keys (for Turn-2 debugging)
+    logger.error(
+        "[SESSION_DEBUG_KEYS] session keys: %s",
+        list(session_state.keys()) if isinstance(session_state, dict) else type(session_state)
+    )
+
+    # SESSION_DEBUG_INTENT_FIELDS: Log both intent fields (for Turn-2 debugging)
+    logger.error(
+        "[SESSION_DEBUG_INTENT_FIELDS] "
+        "session.intent=%s | session.intent_name=%s",
+        session_state.get("intent") if isinstance(session_state, dict) else None,
+        session_state.get("intent_name") if isinstance(session_state, dict) else None,
+    )
+
+    # SESSION_DEBUG: Log session state before any intent logic (for Turn-2 debugging)
+    logger.error(
+        "[SESSION_DEBUG] session read before merge",
+        extra={
+            "session": session_state,
+            "session_intent": session_state.get("intent_name") if session_state else None,
+            "session_slots": session_state.get("slots") if session_state else None,
+        },
+    )
+    
     # SESSION_BEFORE: Log session state before merge
     user_id = session_state.get("user_id", "unknown") if session_state else "unknown"
     session_slots = session_state.get("slots", {}) if session_state else {}
@@ -57,7 +90,19 @@ def merge_luma_with_session(
 
     # STEP 1: Handle intent - Session intent is immutable unless session is reset
     # If luma.intent == UNKNOWN: use session.intent (don't modify session intent)
-    session_intent = session_state.get("intent")
+    # CRITICAL: Read from "intent_name" first (canonical persisted field), fallback to "intent" (legacy/compat)
+    # This matches Core's persisted session schema where intent is stored as "intent_name"
+    session_intent = (
+        session_state.get("intent_name")
+        or session_state.get("intent")
+    )
+    
+    # SESSION_DEBUG_RESOLVED: Log resolved session_intent (for Turn-2 debugging)
+    logger.error(
+        "[SESSION_DEBUG_RESOLVED] resolved session_intent=%s",
+        session_intent
+    )
+    
     session_status = session_state.get("status", "")
 
     # Extract Luma intent
@@ -65,33 +110,111 @@ def merge_luma_with_session(
     luma_intent_name = luma_intent_obj.get(
         "name", "") if isinstance(luma_intent_obj, dict) else ""
 
+    # SESSION_DEBUG: Log Luma intent immediately after parsing (for Turn-2 debugging)
+    logger.error(
+        "[SESSION_DEBUG] luma intent before merge",
+        extra={
+            "luma_intent": luma_intent_name,
+        },
+    )
+
     logger.debug(
         f"merge_luma_with_session: luma_intent={luma_intent_name} "
         f"session_intent={session_intent} session_status={session_status}"
     )
 
-    # If session.intent exists and session is not RESOLVED (status != "READY")
-    if session_intent and session_status != "READY":
-        # If luma.intent == UNKNOWN, use session.intent (session intent is immutable)
-        if luma_intent_name == "UNKNOWN":
-            # Always use session intent (convert to dict format if string)
-            if isinstance(session_intent, str):
-                merged["intent"] = {"name": session_intent}
-            elif isinstance(session_intent, dict):
-                merged["intent"] = session_intent.copy()
-            logger.debug(
-                f"merge_luma_with_session: Overrode UNKNOWN with session_intent={session_intent}"
+    # STEP 1.5: Extract slots from Luma to check if continuation is valid
+    # Extract slots early to determine if UNKNOWN intent should be overridden
+    from core.orchestration.luma_facts_adapter import facts_to_slots
+    facts_obj_temp = merged.get("facts", {})
+    # Use session intent for slot extraction if Luma intent is UNKNOWN (for proper slot extraction)
+    effective_intent_for_slot_check = luma_intent_name
+    if luma_intent_name == "UNKNOWN" and session_intent:
+        if isinstance(session_intent, str):
+            effective_intent_for_slot_check = session_intent
+        elif isinstance(session_intent, dict):
+            effective_intent_for_slot_check = session_intent.get("name", luma_intent_name)
+    luma_slots_temp = facts_to_slots(
+        facts_obj_temp,
+        intent_name=effective_intent_for_slot_check,
+        source_text=merged.get("_source_text"),
+    ) if isinstance(facts_obj_temp, dict) else {}
+    # Also check for slots in nested facts.facts.slots
+    if isinstance(facts_obj_temp, dict) and isinstance(facts_obj_temp.get("facts"), dict):
+        nested_slots = facts_obj_temp.get("facts", {}).get("slots", {})
+        if isinstance(nested_slots, dict):
+            luma_slots_temp.update(nested_slots)
+    # Check for slots in top-level slots field
+    top_level_slots = merged.get("slots", {})
+    if isinstance(top_level_slots, dict):
+        luma_slots_temp.update(top_level_slots)
+    
+    # Determine if slots are present (non-empty dict)
+    has_extracted_slots = bool(luma_slots_temp)
+    
+    # Compute effective_intent EARLY (before any planning/slot computation)
+    # CRITICAL: This ensures effective_intent is available for all downstream operations
+    # Rule: if luma_intent is falsy OR "UNKNOWN", use session.intent (if present)
+    # Otherwise, use luma_intent
+    
+    # Extract session intent name for comparison
+    # CRITICAL: Handle both string and dict formats, and handle empty strings correctly
+    session_intent_name = None
+    if session_intent:
+        if isinstance(session_intent, str):
+            # String format: use directly if non-empty
+            session_intent_name = session_intent if session_intent else None
+        elif isinstance(session_intent, dict):
+            # Dict format: extract "name" field
+            session_intent_name = session_intent.get("name")
+            # Only use if it's a non-empty string
+            if not session_intent_name or not isinstance(session_intent_name, str):
+                session_intent_name = None
+    
+    # Compute effective_intent deterministically
+    # INTENT INHERITANCE RULE: If luma_intent is UNKNOWN or empty, inherit from session
+    # Treat luma_intent == "UNKNOWN" the same as empty
+    if not luma_intent_name or luma_intent_name == "UNKNOWN":
+        # Luma intent is empty or UNKNOWN - check if we can inherit from session
+        if session_intent_name and session_status != "COMPLETED":
+            # Session has active intent (not COMPLETED) - reuse it
+            effective_intent = session_intent_name
+            logger.info(
+                f"merge_luma_with_session: INHERITED session_intent={session_intent_name} "
+                f"(luma_intent='{luma_intent_name}', session_status={session_status})"
             )
-        # If luma.intent == session.intent, use session intent (ensures consistency)
-        elif luma_intent_name == session_intent or (isinstance(session_intent, dict) and luma_intent_name == session_intent.get("name", "")):
-            # Use session intent (convert to dict format if string)
-            if isinstance(session_intent, str):
-                merged["intent"] = {"name": session_intent}
-            elif isinstance(session_intent, dict):
-                merged["intent"] = session_intent.copy()
-            logger.debug(
-                f"merge_luma_with_session: Using session_intent={session_intent} (matches luma)"
-            )
+        else:
+            # No session intent or session is COMPLETED - use empty/UNKNOWN
+            effective_intent = luma_intent_name if luma_intent_name else ""
+            if session_status == "COMPLETED":
+                logger.debug(
+                    f"merge_luma_with_session: Session COMPLETED, not inheriting intent. "
+                    f"Using luma_intent='{luma_intent_name}'"
+                )
+            else:
+                logger.warning(
+                    f"merge_luma_with_session: No session intent available, using luma_intent='{luma_intent_name}' "
+                    f"(effective_intent will be empty)"
+                )
+    else:
+        # Luma intent is valid (not empty, not UNKNOWN) - use it
+        effective_intent = luma_intent_name
+        logger.debug(
+            f"merge_luma_with_session: Using luma_intent={luma_intent_name} (valid intent)"
+        )
+    
+    # CRITICAL: Write effective_intent to BOTH fields that downstream code reads
+    # 1. Store in _effective_intent for explicit access
+    merged["_effective_intent"] = effective_intent
+    # 2. Write to intent["name"] (the field that planning/required-slots reads)
+    if not isinstance(merged.get("intent"), dict):
+        merged["intent"] = {}
+    merged["intent"]["name"] = effective_intent
+    
+    logger.info(
+        f"merge_luma_with_session: effective_intent={effective_intent} "
+        f"(luma_intent={luma_intent_name}, session_intent={session_intent_name})"
+    )
 
     # STEP 2: Extract slots from Luma response
     # FACT-ONLY: Promote facts to slots BEFORE merging with session
@@ -99,18 +222,9 @@ def merge_luma_with_session(
     from core.orchestration.luma_facts_adapter import facts_to_slots
     facts_obj = merged.get("facts", {})
     # Get intent for date_range promotion (CREATE_RESERVATION with 2+ dates)
-    # CRITICAL: Use session intent if Luma intent is UNKNOWN (for date_range promotion on follow-up turns)
-    merged_intent_name = merged.get("intent", {}).get("name", "") if isinstance(merged.get("intent"), dict) else ""
-    # If intent is UNKNOWN and session has an intent, use session intent for date_range promotion
-    if merged_intent_name == "UNKNOWN" and session_intent:
-        if isinstance(session_intent, str):
-            effective_intent_for_promotion = session_intent
-        elif isinstance(session_intent, dict):
-            effective_intent_for_promotion = session_intent.get("name", "")
-        else:
-            effective_intent_for_promotion = merged_intent_name
-    else:
-        effective_intent_for_promotion = merged_intent_name
+    # CRITICAL: Use effective_intent (computed EARLY after UNKNOWN override) for all operations
+    # This ensures effective_intent is used consistently throughout
+    effective_intent_for_promotion = merged.get("_effective_intent", luma_intent_name)
     promoted_slots_from_facts = facts_to_slots(
         facts_obj,
         intent_name=effective_intent_for_promotion,
@@ -400,8 +514,9 @@ def merge_luma_with_session(
             logger.debug("Found semantic data at root level")
 
     # Extract intent name early for reservation contract enforcement
-    merged_intent_name = merged.get("intent", {}).get(
-        "name", "") if isinstance(merged.get("intent"), dict) else ""
+    # CRITICAL: Use effective_intent (computed EARLY after UNKNOWN override) for all operations
+    # This ensures effective_intent is used consistently throughout
+    merged_intent_name = merged.get("_effective_intent", merged.get("intent", {}).get("name", "") if isinstance(merged.get("intent"), dict) else "")
 
     # If we still have semantic_data, process it (this handles the case where we found it in a different location)
     # Process semantic data even if slots.date exists (may need to extract role-specific slots from date_roles)
@@ -761,8 +876,8 @@ def merge_luma_with_session(
 
     # Slots are merged additively - no special routing needed
     # Users can provide missing slots in any order
-    merged_intent_name = merged.get("intent", {}).get(
-        "name", "") if isinstance(merged.get("intent"), dict) else ""
+    # CRITICAL: Use effective_intent (computed EARLY after UNKNOWN override) for all operations
+    merged_intent_name = merged.get("_effective_intent", merged.get("intent", {}).get("name", "") if isinstance(merged.get("intent"), dict) else "")
 
     # Update merged response with merged slots
     # CRITICAL: Ensure all session slots are preserved (non-destructive merge)
@@ -1092,8 +1207,28 @@ def merge_luma_with_session(
 
         return merged
 
+    # Use effective_intent computed EARLY (after UNKNOWN override)
+    # This ensures effective_intent is resolved BEFORE planning/slot computation
+    effective_intent = merged.get("_effective_intent")
+    if not effective_intent:
+        # Fallback: read from intent["name"] (which should be set by early computation)
+        intent_obj = merged.get("intent", {})
+        if isinstance(intent_obj, dict):
+            effective_intent = intent_obj.get("name", "")
+        else:
+            effective_intent = merged_intent_name
+        if not effective_intent:
+            logger.error(
+                f"merge_luma_with_session: CRITICAL - effective_intent is empty! "
+                f"luma_intent={luma_intent_name}, session_intent={session_intent_name}, "
+                f"merged_intent_name={merged_intent_name}"
+            )
+        else:
+            logger.warning(
+                f"merge_luma_with_session: _effective_intent not set, using intent['name']={effective_intent}"
+            )
+    
     # For informational turns WITH new slots: use session intent but still process normally
-    effective_intent = merged_intent_name
     if is_informational_turn and current_turn_has_new_slots:
         # Informational turn but with new slots - use session intent for missing_slots computation
         # but still go through promotion and recomputation with new slots
@@ -1110,10 +1245,9 @@ def merge_luma_with_session(
             f"luma_intent={merged_intent_name}, session_intent={session_intent_name}, "
             f"new_slots={[k for k in merged_slots.keys() if k not in session_slots_dict]}"
         )
-
-    # Ensure effective_intent is set (fallback to merged_intent_name)
-    if not effective_intent:
-        effective_intent = merged_intent_name
+    
+    # Update merged with final effective_intent for downstream use
+    merged["_effective_intent"] = effective_intent
 
     # STEP 4.1: Promote slots (in-memory, non-persistent)
     # Promotion happens BEFORE computing missing_slots but is NEVER persisted
@@ -1874,16 +2008,40 @@ def build_session_state_from_outcome(
                 f"[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): {list(slots.keys())}")
 
 
-    # Extract intent - prefer from merged Luma response, fallback to outcome
+    # Extract intent - HARD RULE: Use planned intent from plan, NOT effective_intent or luma_intent
+    # CRITICAL: Preserve intent_name for NEEDS_CLARIFICATION - do NOT clear it
+    # Priority: 1) plan.intent_name, 2) plan.intent, 3) outcome.intent_name, 4) previous session intent (preserve)
     intent_name = ""
-    if merged_luma_response and isinstance(merged_luma_response, dict):
-        intent_obj = merged_luma_response.get("intent", {})
-        if isinstance(intent_obj, dict):
-            intent_name = intent_obj.get("name", "")
-        elif isinstance(intent_obj, str):
-            intent_name = intent_obj
-    if not intent_name and "intent_name" in outcome:
-        intent_name = outcome.get("intent_name", "")
+    
+    # Priority 1: Use plan.intent_name (planned intent - most authoritative)
+    if outcome:
+        plan_obj = outcome.get("plan", {})
+        if isinstance(plan_obj, dict):
+            plan_intent_name = plan_obj.get("intent_name") or plan_obj.get("intent")
+            if plan_intent_name and plan_intent_name not in ("", "UNKNOWN"):
+                intent_name = plan_intent_name
+                logger.debug(
+                    f"[build_session_state_from_outcome] Using plan.intent_name={intent_name}"
+                )
+    
+    # Priority 2: Use outcome.intent_name (set by orchestrator for NEEDS_CLARIFICATION)
+    if not intent_name and outcome:
+        outcome_intent = outcome.get("intent_name") or outcome.get("intent")
+        if outcome_intent and outcome_intent not in ("", "UNKNOWN"):
+            intent_name = outcome_intent
+            logger.debug(
+                f"[build_session_state_from_outcome] Using outcome intent_name={intent_name}"
+            )
+    
+    # Priority 3: Preserve previous session intent if no planned intent found
+    # Do NOT overwrite existing session intent with empty value
+    if not intent_name and previous_session_state:
+        previous_intent = previous_session_state.get("intent_name") or previous_session_state.get("intent")
+        if previous_intent and previous_intent not in ("", "UNKNOWN"):
+            intent_name = previous_intent
+            logger.debug(
+                f"[build_session_state_from_outcome] Preserving previous session intent={intent_name}"
+            )
 
     # CRITICAL: Recompute missing_slots from persisted slots AFTER persistence
     # ARCHITECTURAL INVARIANT: missing_slots = REQUIRED_SLOTS(intent) - session.slots.keys()
@@ -2017,8 +2175,110 @@ def build_session_state_from_outcome(
                 context_with_roles = {}
             context_with_roles["date_roles"] = prev_context["date_roles"]
 
+    # Determine missing_slots to persist (recomputed from effective_collected_slots)
+    missing_slots_to_persist = recomputed_missing_slots if recomputed_missing_slots is not None else []
+
+    # CRITICAL: Preserve intent_name for NEEDS_CLARIFICATION - do NOT clear it
+    # Rule: If resolved intent exists and is valid, use it. Otherwise, preserve previous session intent.
+    # NEEDS_CLARIFICATION must NEVER clear intent - preserve it for follow-up turns
+    # Intent is only cleared on terminal flows (CANCEL, RESET, COMPLETED), never on NEEDS_CLARIFICATION
+    final_intent_name = None
+    
+    # Step 1: Use resolved intent if it's valid (not empty, not UNKNOWN)
+    if intent_name and intent_name not in ("", "UNKNOWN"):
+        final_intent_name = intent_name
+        logger.info(
+            f"[build_session_state_from_outcome] Using resolved intent_name={final_intent_name}"
+        )
+    
+    # Step 2: If no valid resolved intent, preserve previous session intent
+    if not final_intent_name and previous_session_state:
+        session_intent = previous_session_state.get("intent_name") or previous_session_state.get("intent")
+        if session_intent and session_intent not in ("", "UNKNOWN"):
+            final_intent_name = session_intent
+            logger.info(
+                f"[build_session_state_from_outcome] Preserved session intent_name={final_intent_name} "
+                f"(resolved intent was empty/invalid, status={outcome_status})"
+            )
+    
+    # Step 3: If still empty and status is NEEDS_CLARIFICATION, this is an error
+    # For NEEDS_CLARIFICATION, we MUST have an intent (either resolved or preserved)
+    if not final_intent_name and outcome_status == "NEEDS_CLARIFICATION":
+        logger.error(
+            f"[build_session_state_from_outcome] CRITICAL: No intent available for NEEDS_CLARIFICATION! "
+            f"intent_name={intent_name}, previous_session_state={previous_session_state is not None}, "
+            f"outcome.intent_name={outcome.get('intent_name') if outcome else None}"
+        )
+        # Fail-safe: Try to get from outcome one more time
+        if outcome:
+            outcome_intent = outcome.get("intent_name") or outcome.get("intent")
+            if outcome_intent and outcome_intent not in ("", "UNKNOWN"):
+                final_intent_name = outcome_intent
+                logger.warning(
+                    f"[build_session_state_from_outcome] Recovered intent_name={final_intent_name} from outcome"
+                )
+
+    # CRITICAL: Final check - for NEEDS_CLARIFICATION, we MUST have an intent
+    # If still empty, this is a critical error but we'll preserve previous session intent as last resort
+    if not final_intent_name and outcome_status == "NEEDS_CLARIFICATION" and previous_session_state:
+        # Last resort: preserve previous session intent even if it was empty (better than clearing it)
+        session_intent = previous_session_state.get("intent_name") or previous_session_state.get("intent")
+        if session_intent:
+            final_intent_name = session_intent
+            logger.warning(
+                f"[build_session_state_from_outcome] Last resort: Preserved session intent_name={final_intent_name} "
+                f"for NEEDS_CLARIFICATION (all other sources were empty)"
+            )
+    
+    # HARD RULE: If plan exists and has intent_name, session.intent_name MUST equal plan.intent_name
+    # Guard: If intent_name is empty during persistence, log ERROR and preserve existing session intent
+    if not final_intent_name or final_intent_name == "":
+        # Guard: Log ERROR if intent_name is empty during persistence
+        logger.error(
+            "[SESSION_PERSISTENCE] ERROR: intent_name is empty during persistence! "
+            "outcome_status=%s, outcome_keys=%s, plan_keys=%s, previous_session_intent=%s",
+            outcome_status,
+            list(outcome.keys()) if outcome else None,
+            list(outcome.get("plan", {}).keys()) if outcome and isinstance(outcome.get("plan"), dict) else None,
+            previous_session_state.get("intent_name") if previous_session_state else None
+        )
+        # Do NOT overwrite existing session intent with empty value
+        if previous_session_state:
+            previous_intent = previous_session_state.get("intent_name") or previous_session_state.get("intent")
+            if previous_intent and previous_intent not in ("", "UNKNOWN"):
+                final_intent_name = previous_intent
+                logger.error(
+                    "[SESSION_PERSISTENCE] Preserving previous session intent=%s (intent_name was empty)",
+                    final_intent_name
+                )
+    
+    # ASSERTION: session.intent_name must never be empty after a successful planning pass
+    # This guarantees that planning intent survives follow-up turns
+    if not final_intent_name or final_intent_name == "":
+        logger.error(
+            "[SESSION_PERSISTENCE_ASSERTION] CRITICAL: session.intent_name is empty after planning! "
+            "This will break follow-up turns when Luma returns UNKNOWN. "
+            "outcome_status=%s, plan.intent_name=%s, outcome.intent_name=%s",
+            outcome_status,
+            outcome.get("plan", {}).get("intent_name") if outcome else None,
+            outcome.get("intent_name") if outcome else None
+        )
+        # This is a critical error - planning should always produce an intent_name
+        # But we'll still persist (with empty) to avoid breaking the flow, and log the error
+    else:
+        # Log success to confirm intent_name will be persisted
+        logger.debug(
+            "[SESSION_PERSISTENCE_ASSERTION] SUCCESS: session.intent_name=%s will be persisted after planning",
+            final_intent_name
+        )
+    
+    # CRITICAL: Use "intent_name" (canonical persisted field), not "intent" (legacy)
+    # This matches Core's persisted session schema
+    # NEVER set empty string for NEEDS_CLARIFICATION - preserve previous intent or use resolved intent
+    # Rule: resolved_intent > session_intent > "" (only empty if truly no intent available and not NEEDS_CLARIFICATION)
     session_state = {
-        "intent": intent_name,
+        "intent_name": final_intent_name if final_intent_name else "",  # Only empty if truly no intent available
+        "missing_slots": missing_slots_to_persist,
         # ARCHITECTURAL INVARIANT: Persist ALL collected slots (durable facts)
         # session.slots is the single source of truth for collected slots
         # Slots present in session MUST be preserved across turns unless intent changes
@@ -2029,12 +2289,29 @@ def build_session_state_from_outcome(
         "status": status
     }
     
+    # SESSION_SAVE_DEBUG: Guard logging before session save
+    logger.error(
+        "[SESSION_SAVE_DEBUG] intent_name=%r status=%r stage=%r action=%r",
+        session_state.get("intent_name"),
+        session_state.get("status"),
+        session_state.get("stage"),
+        session_state.get("action"),
+    )
+    
+    # LOG 4 — SESSION WRITE (immediately after persistence)
+    turn_logger.info(
+        json.dumps({
+            "turn": "SESSION_WRITE",
+            "session": session_state
+        }, ensure_ascii=True, default=str)
+    )
+    
     # Persist time_constraint to session state for multi-turn scenarios
     # This ensures time_constraint from previous turns (e.g., "book at 2pm") is preserved
     # when the next turn only provides date (e.g., "tomorrow")
     if merged_luma_response and isinstance(merged_luma_response, dict):
         time_constraint = merged_luma_response.get("time_constraint")
-        if time_constraint is not None and intent_name == "CREATE_APPOINTMENT":
+        if time_constraint is not None and final_intent_name == "CREATE_APPOINTMENT":
             session_state["time_constraint"] = time_constraint
             logger.debug(
                 f"[TIME_CONSTRAINT] Persisting time_constraint to session_state: {time_constraint}"

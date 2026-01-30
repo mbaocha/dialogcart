@@ -153,9 +153,10 @@ def test_core_e2e_followup_availability_time_provided_later():
     mock_availability_client.get_service_availability.assert_not_called()
 
     # Extract session state from turn 1 for turn 2
-    # The session state should contain intent, slots, and status
+    # The session state should match Core's persisted session schema
+    # Core persists intent as "intent_name" (canonical field)
     session_state = {
-        "intent": plan_turn1.get("intent_name", "CREATE_APPOINTMENT"),
+        "intent_name": plan_turn1.get("intent_name", "CREATE_APPOINTMENT"),
         "slots": plan_turn1.get("slots", {}),
         "status": plan_turn1.get("status"),
         "stage": plan_turn1.get("stage"),

@@ -124,7 +124,8 @@ def get_customer_details() -> Dict[str, Optional[Any]]:
     }
 
 
-class TestLumaClient(LumaClient):
+class TestLumaClient(LumaClient):  # noqa: N801
+    __test__ = False  # Not a pytest test class
     """Custom LumaClient that injects tenant_context from test aliases."""
 
     def __init__(self, test_aliases: Optional[Dict[str, str]] = None):
@@ -158,7 +159,8 @@ class TestLumaClient(LumaClient):
         return response
 
 
-class TestCatalogClient(CatalogClient):
+class TestCatalogClient(CatalogClient):  # noqa: N801
+    __test__ = False  # Not a pytest test class
     """Custom CatalogClient that returns test aliases as catalog data."""
 
     def __init__(self, test_aliases: Optional[Dict[str, str]] = None, domain: str = "service"):

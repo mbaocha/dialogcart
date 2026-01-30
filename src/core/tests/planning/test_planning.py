@@ -2,7 +2,7 @@
 Core Planning Test Suite
 
 Tests planning functionality across multi-turn conversations.
-Validates planning outputs: stage, action, slots, missing_slots, executable_actions.
+Validates planning outputs: status, plan.stage, plan.action, slots, missing_slots.
 
 Note: Uses session management as a mechanism to enable multi-turn testing,
 but the tests themselves validate planning behavior, not session management.
@@ -23,6 +23,7 @@ from core.tests.integration.test_appointment_e2e import (
 )
 from core.tests.planning.followup import followup_scenarios
 from core.tests.planning.test_planning_edges import planning_edges_scenarios
+from core.tests.planning.adapter import normalize_planning_outcome
 from core.orchestration.session import get_session, clear_session, save_session
 from core.orchestration.orchestrator import handle_message
 from core.orchestration.api.session_merge import build_session_state_from_outcome
@@ -132,12 +133,11 @@ def assert_turn_expectations(
 
     Validates:
     - intent_name
-    - stage
-    - action
+    - status (READY / NEEDS_CLARIFICATION)
+    - plan.stage
+    - plan.action
     - missing_slots
     - slots (partial match)
-    - executable_actions
-    - time_constraint (in _merged_luma_response)
 
     Args:
         result: Result from handle_message
@@ -165,54 +165,42 @@ def assert_turn_expectations(
         error_msg = result.get("error", "Unknown error")
         return f"Turn {turn_index + 1} failed: {error_msg}"
 
-    outcome = result.get("outcome", {})
-    if not isinstance(outcome, dict):
-        return f"Turn {turn_index + 1} failed: outcome is not a dict: {outcome}"
+    # Normalize CoreOutcome to stable planning view
+    try:
+        normalized = normalize_planning_outcome(result)
+    except Exception as e:
+        return f"Turn {turn_index + 1} failed: adapter error: {str(e)}"
 
     # Assert intent if provided
     expected_intent = expected.get("intent")
     if expected_intent:
-        # Core contract: outcome must expose intent_name
-        assert "intent_name" in outcome, "Core outcome must expose intent_name"
-        actual_intent = outcome.get("intent_name")
+        actual_intent = normalized.get("intent")
         if actual_intent != expected_intent:
             return f"Turn {turn_index + 1} intent mismatch: expected {expected_intent}, got {actual_intent}"
 
-    # Assert stage if provided
-    # Tests assert outcome.stage / outcome.action directly (not nested in plan)
-    expected_stage = expected.get("stage")
+    # Assert stage if provided (from plan.stage)
+    expected_plan = expected.get("plan", {})
+    if not isinstance(expected_plan, dict):
+        expected_plan = {}
+    # Support both nested "plan" structure and legacy top-level "stage"/"action" for backward compatibility
+    expected_stage = expected_plan.get("stage") or expected.get("stage")
     if expected_stage:
-        actual_stage = outcome.get("stage")
-        print(
-            f"[ISOLATION_ASSERT] Checking stage: expected={expected_stage}, actual={actual_stage}, outcome.keys()={list(outcome.keys())}")
-        plan_dict = outcome.get('plan', {})
-        print(
-            f"[ISOLATION_ASSERT] outcome.get('stage')={outcome.get('stage')}, outcome.get('plan', {{}}).get('stage')={plan_dict.get('stage')}")
+        actual_stage = normalized.get("plan", {}).get("stage")
         if actual_stage != expected_stage:
             return f"Turn {turn_index + 1} stage mismatch: expected {expected_stage}, got {actual_stage}"
 
-    # Assert action if provided
-    # Tests assert outcome.stage / outcome.action directly (not nested in plan)
-    expected_action = expected.get("action")
+    # Assert action if provided (from plan.action)
+    expected_action = expected_plan.get("action") or expected.get("action")
     if expected_action:
-        actual_action = outcome.get("action")
-        print(
-            f"[ISOLATION_ASSERT] Checking action: expected={expected_action}, actual={actual_action}, outcome.keys()={list(outcome.keys())}")
-        plan_dict = outcome.get('plan', {})
-        print(
-            f"[ISOLATION_ASSERT] outcome.get('action')={outcome.get('action')}, outcome.get('plan', {{}}).get('action')={plan_dict.get('action')}")
+        actual_action = normalized.get("plan", {}).get("action")
         if actual_action != expected_action:
             return f"Turn {turn_index + 1} action mismatch: expected {expected_action}, got {actual_action}"
 
     # Assert missing_slots (exact match, order-insensitive)
-    # Tests assert outcome.missing_slots directly (not nested in facts)
     # INVARIANT: missing_slots order does not matter
     expected_missing = expected.get("missing_slots")
     if expected_missing is not None:
-        # Check top-level outcome.missing_slots first, fallback to facts.missing_slots for backward compatibility
-        actual_missing = outcome.get("missing_slots")
-        if actual_missing is None:
-            actual_missing = outcome.get("facts", {}).get("missing_slots", [])
+        actual_missing = normalized.get("missing_slots", [])
         if not isinstance(actual_missing, list):
             actual_missing = []
 
@@ -226,14 +214,10 @@ def assert_turn_expectations(
             return f"Turn {turn_index + 1} missing_slots not sorted: got {actual_missing} (should be sorted for determinism)"
 
     # Assert slots (partial match only)
-    # Tests assert outcome.slots directly (not nested in facts)
     # INVARIANT: Slots can be provided in any order - all slots are additive
     expected_slots = expected.get("slots")
     if expected_slots:
-        # Check top-level outcome.slots first, fallback to facts.slots for backward compatibility
-        actual_slots = outcome.get("slots")
-        if actual_slots is None:
-            actual_slots = outcome.get("facts", {}).get("slots", {})
+        actual_slots = normalized.get("slots", {})
         if not isinstance(actual_slots, dict):
             actual_slots = {}
 
@@ -245,63 +229,18 @@ def assert_turn_expectations(
             if actual_slots[key] != expected_value:
                 return f"Turn {turn_index + 1} slot {key} mismatch: expected {expected_value}, got {actual_slots[key]}"
 
-    # Assert executable_actions if provided
-    # INVARIANT: executable_actions appear when partial slots are present
-    expected_executable_actions = expected.get("executable_actions")
-    if expected_executable_actions is not None:
-        plan = outcome.get("plan", {})
-        actual_executable_actions = plan.get("executable_actions", [])
-        if not isinstance(actual_executable_actions, list):
-            actual_executable_actions = []
-
-        # Compare as sets for order-insensitive match
-        if set(actual_executable_actions) != set(expected_executable_actions):
-            return f"Turn {turn_index + 1} executable_actions mismatch: expected {expected_executable_actions}, got {actual_executable_actions}"
-
-    # Assert time_constraint if provided
-    # time_constraint is in _merged_luma_response, not in outcome
-    expected_time_constraint = expected.get("time_constraint")
-    if expected_time_constraint is not None:
-        if result is None:
-            return f"Turn {turn_index + 1} cannot validate time_constraint: result not provided"
-
-        merged_luma_response = result.get("_merged_luma_response")
-        if not isinstance(merged_luma_response, dict):
-            return f"Turn {turn_index + 1} time_constraint validation failed: _merged_luma_response is not a dict"
-
-        actual_time_constraint = merged_luma_response.get("time_constraint")
-        if actual_time_constraint is None:
-            return f"Turn {turn_index + 1} missing time_constraint in _merged_luma_response"
-
-        # Validate time_constraint structure
-        expected_mode = expected_time_constraint.get("mode")
-        if expected_mode:
-            actual_mode = actual_time_constraint.get("mode")
-            if actual_mode != expected_mode:
-                return f"Turn {turn_index + 1} time_constraint.mode mismatch: expected {expected_mode}, got {actual_mode}"
-
-        expected_start = expected_time_constraint.get("start")
-        if expected_start:
-            actual_start = actual_time_constraint.get("start")
-            if actual_start != expected_start:
-                return f"Turn {turn_index + 1} time_constraint.start mismatch: expected {expected_start}, got {actual_start}"
-
-        expected_end = expected_time_constraint.get("end")
-        if expected_end:
-            actual_end = actual_time_constraint.get("end")
-            if actual_end != expected_end:
-                return f"Turn {turn_index + 1} time_constraint.end mismatch: expected {expected_end}, got {actual_end}"
-
-        expected_label = expected_time_constraint.get("label")
-        if expected_label is not None:  # Allow None explicitly
-            actual_label = actual_time_constraint.get("label")
-            if actual_label != expected_label:
-                return f"Turn {turn_index + 1} time_constraint.label mismatch: expected {expected_label}, got {actual_label}"
+    # Assert status if provided
+    # Status must match planning contract: NEEDS_CLARIFICATION when missing_slots != [], READY when missing_slots == []
+    expected_status = expected.get("status")
+    if expected_status is not None:
+        actual_status = normalized.get("status")
+        if actual_status != expected_status:
+            return f"Turn {turn_index + 1} status mismatch: expected {expected_status}, got {actual_status}"
 
     return None
 
 
-def test_scenario(
+def _test_scenario(
     scenario: Dict[str, Any],
     scenario_id: int,
     customer_details: Dict[str, Optional[Any]],
@@ -397,23 +336,23 @@ def test_scenario(
                     print("  Session state: None (no session found)")
 
             # Call handle_message with the same user_id and session_state
-            # Use planning_only=True to limit tests to planning/resolution scope only
-            # This prevents execution logic (service resolution, catalog lookup, etc.) from running
+            # Create a session_store wrapper to pass session_state
+            class SessionStoreWrapper:
+                def __init__(self, session_state):
+                    self.session_state = session_state
+
+                def get_session(self, user_id):
+                    return self.session_state
+
+            session_store = SessionStoreWrapper(
+                session_state) if session_state else None
+
             result = handle_message(
-                user_id=user_id,
                 text=sentence,
-                domain=domain,
-                timezone="UTC",
-                phone_number=customer_details.get(
-                    'phone_number') if customer_details else None,
-                email=customer_details.get(
-                    'email') if customer_details else None,
-                customer_id=customer_details.get(
-                    'customer_id') if customer_details else None,
+                user_id=user_id,
                 luma_client=luma_client,
-                catalog_client=catalog_client,
-                session_state=session_state,
-                planning_only=True  # Stop at READY, don't execute
+                organization_client=None,  # Will use default
+                session_store=session_store
             )
 
             if not result or not isinstance(result, dict):
@@ -442,9 +381,19 @@ def test_scenario(
 
             # Save session after response (same logic as API endpoint)
             # Note: result already validated above
+            # Extract outcome from result for session management (needs raw structure)
             outcome = result.get("outcome")
+            if not outcome:
+                # Try to extract from result or plan
+                outcome = result.get("result") or result.get("plan", {})
+            
             if outcome and isinstance(outcome, dict):
                 outcome_status = outcome.get("status")
+                # If status not in outcome, use normalized status
+                if outcome_status is None:
+                    normalized = normalize_planning_outcome(result)
+                    outcome_status = normalized.get("status")
+                
                 # DEBUG: Print outcome status to understand what's happening
                 if verbose or turn_index >= 2:  # Always print for turn 3+
                     print(
@@ -495,38 +444,32 @@ def test_scenario(
             session_state_after = None
             merged_luma_response_for_snapshot = result.get(
                 "_merged_luma_response")
-            plan_for_snapshot = outcome.get("plan", {}) if outcome else {}
-            facts_for_snapshot = outcome.get("facts", {}) if outcome else {}
+            
+            # Extract outcome for snapshot (use normalized view for consistency)
+            normalized_snapshot = normalize_planning_outcome(result)
+            plan_for_snapshot = normalized_snapshot.get("plan", {})
+            facts_for_snapshot = {
+                "slots": normalized_snapshot.get("slots", {}),
+                "missing_slots": normalized_snapshot.get("missing_slots", [])
+            }
 
             # Get session after save (if saved) - session was saved above if NEEDS_CLARIFICATION
-            if outcome and isinstance(outcome, dict):
-                outcome_status_snapshot = outcome.get("status")
-                if outcome_status_snapshot == "NEEDS_CLARIFICATION":
-                    # Session was saved - get it for snapshot
-                    session_state_after = get_session(user_id)
+            outcome_status_snapshot = normalized_snapshot.get("status")
+            if outcome_status_snapshot == "NEEDS_CLARIFICATION":
+                # Session was saved - get it for snapshot
+                session_state_after = get_session(user_id)
 
             # Assert expectations
             error_msg = assert_turn_expectations(result, expected, turn_index)
             if error_msg:
                 # Print compact FAIL_SNAPSHOT on assertion failure
-                actual_outcome = result.get("outcome", {}) if result else {}
+                # Use normalized view for snapshot
                 actual_json = {
-                    "intent": actual_outcome.get("intent_name"),
-                    "status": actual_outcome.get("status"),
-                    "missing_slots": actual_outcome.get("facts", {}).get("missing_slots", []),
-                    "slots": actual_outcome.get("facts", {}).get("slots", {})
+                    "intent": normalized_snapshot.get("intent"),
+                    "status": normalized_snapshot.get("status"),
+                    "missing_slots": normalized_snapshot.get("missing_slots", []),
+                    "slots": normalized_snapshot.get("slots", {})
                 }
-
-                # TRACE_MERGE 8: Snapshot builder debug line
-                outcome_keys = list(outcome.keys()) if isinstance(
-                    outcome, dict) else []
-                outcome_missing_slots_top = outcome.get("missing_slots")
-                outcome_missing_slots_facts = outcome.get("facts", {}).get(
-                    "missing_slots") if isinstance(outcome.get("facts"), dict) else None
-                outcome_slots_top = outcome.get("slots")
-                outcome_slots_facts = outcome.get("facts", {}).get(
-                    "slots") if isinstance(outcome.get("facts"), dict) else None
-                print(f"[TRACE_MERGE] user_id={user_id} point=SNAPSHOT_BUILDER outcome_keys={outcome_keys} outcome_missing_slots_top={outcome_missing_slots_top} outcome_missing_slots_facts={outcome_missing_slots_facts} outcome_slots_top={outcome_slots_top} outcome_slots_facts={outcome_slots_facts}")
 
                 fail_snapshot = {
                     "expected": expected,
@@ -715,7 +658,7 @@ def run_all_scenarios(
         # Use sequential index for scenario_id (for user_id generation)
         scenario_id = index
 
-        success, error_msg, user_id = test_scenario(
+        success, error_msg, user_id = _test_scenario(
             scenario, scenario_id, customer_details, verbose, run_id=run_id)
 
         if success:

@@ -891,11 +891,41 @@ def process_luma_response(
         - message: Error message (if error occurred)
     """
     # Extract intent and validate
+    # CRITICAL: Use effective_intent if available (set by merge_luma_with_session)
+    # UNKNOWN intent should be treated as no-op - preserve effective/session intent
+    effective_intent = luma_response.get("_effective_intent")
     intent = luma_response.get("intent", {})
-    intent_name = intent.get("name", "").strip() if intent.get("name") else ""
+    luma_intent_name = intent.get("name", "").strip() if intent.get("name") else ""
+    
+    # Intent resolution: UNKNOWN means "slot-only follow-up" - preserve effective intent
+    if luma_intent_name == "UNKNOWN":
+        # UNKNOWN is a no-op - use effective_intent if available
+        if effective_intent:
+            intent_name = effective_intent
+            logger.info(
+                f"process_luma_response: UNKNOWN intent detected, preserving effective_intent={effective_intent}"
+            )
+        else:
+            # No effective_intent available - this shouldn't happen if merge worked correctly
+            intent_name = ""
+            logger.warning(
+                f"process_luma_response: UNKNOWN intent but no effective_intent available"
+            )
+    elif luma_intent_name:
+        # Valid Luma intent - use it
+        intent_name = luma_intent_name
+    elif effective_intent:
+        # Empty Luma intent but effective_intent available - use it
+        intent_name = effective_intent
+        logger.info(
+            f"process_luma_response: Empty Luma intent, using effective_intent={effective_intent}"
+        )
+    else:
+        # No intent available at all
+        intent_name = ""
     
     if not intent_name:
-        logger.error(f"Missing intent name in Luma response for user {user_id}")
+        logger.error(f"Missing intent name in Luma response for user {user_id} (luma_intent='{luma_intent_name}', effective_intent={effective_intent})")
         # Extract facts container even for error cases
         facts = {
             "slots": luma_response.get("slots", {}),
@@ -923,12 +953,12 @@ def process_luma_response(
     # This ensures facts.service_id, facts.times, etc. are available for planning
     from core.orchestration.luma_facts_adapter import facts_to_slots
     facts_obj = luma_response.get("facts", {})
-    # Get intent for date_range promotion (CREATE_RESERVATION with 2+ dates)
-    intent_obj = luma_response.get("intent", {})
-    intent_name = intent_obj.get("name", "") if isinstance(intent_obj, dict) else ""
+    # CRITICAL: Use resolved intent_name (not raw Luma intent) for slot promotion
+    # intent_name was already resolved above (handles UNKNOWN -> effective_intent)
+    # Do NOT re-extract from raw Luma response - that would overwrite the resolved intent
     promoted_slots_from_facts = facts_to_slots(
         facts_obj,
-        intent_name=intent_name,
+        intent_name=intent_name,  # Use resolved intent_name (preserves effective_intent for UNKNOWN)
         source_text=luma_response.get("_source_text"),
     ) if isinstance(facts_obj, dict) else {}
     
@@ -1123,6 +1153,7 @@ def process_luma_response(
         print(f"TURN_STATE: {json.dumps(turn_state_obj.to_dict(), indent=2, default=str)}")
 
         return {
+            "intent_name": intent_name,  # CRITICAL: Always include intent_name in decision
             "outcome": _build_clarify_outcome(
                 clarification_reason=reason,
                 issues=issues,

@@ -42,11 +42,21 @@ def get_planning_required_slots_for_intent(
     Returns:
         List of planning-required slot names for the intent
     """
-    # DELEGATE TO PLANNER: Get base requirements from intent_planning.yaml
-    from core.planning.policy.action_policy import load_planning_policy
-    policy = load_planning_policy()
-    intent_policy = policy.get(intent_name, {})
-    base_planning_slots = intent_policy.get("required_slots", [])
+    # PREFER unified policy for required_slots, fallback to legacy planning config
+    base_planning_slots = []
+    try:
+        from core.policy.intent_policy import get_planning_required_slots
+        base_planning_slots = get_planning_required_slots(intent_name)
+    except (ImportError, Exception):
+        # Fallback to legacy planning config
+        pass
+    
+    if not base_planning_slots:
+        # Fallback to legacy planning config
+        from core.planning.policy.action_policy import load_planning_policy
+        policy = load_planning_policy()
+        intent_policy = policy.get(intent_name, {})
+        base_planning_slots = intent_policy.get("required_slots", [])
     if not isinstance(base_planning_slots, list):
         base_planning_slots = []
     
@@ -205,14 +215,25 @@ def compute_missing_slots(
     if not intent_name:
         return []
     
-    # DELEGATE TO PLANNER: Use planner for base requirements
+    # PREFER unified policy for base requirements, fallback to legacy planning config
     # For MODIFY intents, apply context-aware logic after getting base requirements
     from core.planning.policy.action_policy import plan_intent, load_planning_policy
     
-    # Get base required slots from planner (intent_planning.yaml)
-    policy = load_planning_policy()
-    intent_policy = policy.get(intent_name, {})
-    base_required_slots = intent_policy.get("required_slots", [])
+    # Get base required slots from unified policy (intent_policy.yaml) with fallback to legacy (intent_planning.yaml)
+    base_required_slots = []
+    try:
+        from core.policy.intent_policy import get_planning_required_slots
+        base_required_slots = get_planning_required_slots(intent_name)
+    except (ImportError, Exception):
+        # Fallback to legacy planning config
+        pass
+    
+    if not base_required_slots:
+        # Fallback to legacy planning config
+        policy = load_planning_policy()
+        intent_policy = policy.get(intent_name, {})
+        base_required_slots = intent_policy.get("required_slots", [])
+    
     if not isinstance(base_required_slots, list):
         base_required_slots = []
     
