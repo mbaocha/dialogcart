@@ -41,6 +41,7 @@ from core.orchestration.clients.catalog_client import CatalogClient
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.cache.catalog_cache import catalog_cache
 from core.orchestration.cache.org_domain_cache import org_domain_cache
+from core.orchestration.persistence.durable_intents import is_durable_intent
 
 logger = logging.getLogger(__name__)
 # Dedicated turn-level logger (clean, minimal logs - ONE log per section)
@@ -276,8 +277,22 @@ def handle_message(
             "plan": plan
         }
 
+    # HARD GUARD: Skip execution if planning requires clarification
+    # Execution should ONLY run when plan status indicates readiness (READY, AWAITING_CONFIRMATION, etc.)
+    plan_status = plan.get("status")
+    if plan_status == "NEEDS_CLARIFICATION":
+        logger.debug(
+            f"Skipping execution: plan status is NEEDS_CLARIFICATION. "
+            f"Missing slots: {plan.get('missing_slots', [])}"
+        )
+        return {
+            "success": True,
+            "result": plan
+        }
+
     # POLICY-DRIVEN EXECUTION SELECTION
     # Use intent_policy.yaml to determine if and which execution step should run
+    # Only reached if plan status indicates readiness (not NEEDS_CLARIFICATION)
     intent_name = plan.get("intent_name") or plan.get("intent")
     slots = plan.get("slots", {})
 
@@ -968,6 +983,9 @@ def handle_message_legacy(
     # Missing slots are NOT errors - planner will compute missing_slots from intent_planning.yaml
     effective_response = luma_response.copy()
     effective_response["intent"] = {"name": effective_intent}
+    # CRITICAL: Set _effective_intent for process_luma_response to recover durable intents
+    # This ensures UNKNOWN intents can be recovered from session when durable
+    effective_response["_effective_intent"] = effective_intent or ""
 
     # FACT-ONLY: Promote facts to slots BEFORE any other processing
     # This ensures facts.service_id, facts.times, etc. are available for planning
@@ -1520,6 +1538,16 @@ def handle_message_legacy(
                 "[PLANNING_ASSERTION] SUCCESS: plan.intent_name=%s is present after planning",
                 populated_plan.get("intent_name")
             )
+
+        # PLANNING INVARIANT: Ephemeral intents must NOT leak into planning
+        plan_intent_name = populated_plan.get("intent_name")
+        if plan_intent_name and plan_intent_name not in ("", "UNKNOWN"):
+            if not is_durable_intent(plan_intent_name):
+                raise AssertionError(
+                    f"Ephemeral intent '{plan_intent_name}' leaked into planning. "
+                    f"Only durable intents may be persisted. "
+                    f"Add '{plan_intent_name}' to DURABLE_INTENTS if it should be persistent."
+                )
 
         # OUTCOME: Log final outcome structure
         outcome = result.get("outcome", {})

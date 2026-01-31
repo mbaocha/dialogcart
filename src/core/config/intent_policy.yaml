@@ -1,0 +1,153 @@
+# Unified Intent Execution Policy
+#
+# SOURCE OF TRUTH: This file defines BOTH planning completeness and execution sequencing
+# for intents. It serves as the future authoritative policy for intent behavior.
+#
+# STATUS: Documentation/Preparation - Not yet loaded or used in runtime.
+# This file exists as a clearly defined, future-proof policy specification.
+#
+# Structure:
+# - metadata: Intent metadata (durable: true/false)
+# - planning: Defines slot requirements for planning completeness
+#   - required_slots: Slots that must be filled for full execution
+#   - optional_slots: Slots that can be provided but are not mandatory
+#   - executable_with: Subsets of slots that allow partial execution
+# - execution: Defines execution actions with their requirements and sequencing
+#   - Each step has: mode (exploratory | committing), required_slots, optional_slots,
+#     resolves, requires, client
+
+intents:
+  CREATE_APPOINTMENT:
+    metadata:
+      durable: true
+    planning:
+      required_slots:
+        - service_id
+        - date
+        - time
+      optional_slots:
+        - date
+        - time
+      executable_with:
+        # Can search availability with just service_id
+        - service_id
+    execution:
+      SEARCH_AVAILABILITY:
+        mode: exploratory
+        required_slots:
+          - service_id
+        optional_slots:
+          - date
+          - time
+        resolves:
+          - availability
+        client: availability_client
+
+      CONFIRM_APPOINTMENT:
+        mode: committing
+        required_slots:
+          - service_id
+          - date
+          - time
+        requires:
+          - availability_resolved
+        client: booking_client
+
+  CREATE_RESERVATION:
+    metadata:
+      durable: true
+    planning:
+      required_slots:
+        - service_id
+        - date_range
+      optional_slots:
+        - date_range
+      executable_with:
+        # Can search availability with just service_id
+        - service_id
+    execution:
+      SEARCH_AVAILABILITY:
+        mode: exploratory
+        required_slots:
+          - service_id
+        optional_slots:
+          - date_range
+        resolves:
+          - availability
+        client: availability_client
+
+      CONFIRM_RESERVATION:
+        mode: committing
+        required_slots:
+          - service_id
+          - date_range
+        requires:
+          - availability_resolved
+        client: booking_client
+
+  MODIFY_BOOKING:
+    metadata:
+      durable: true
+    planning:
+      required_slots:
+        - booking_id
+      optional_slots:
+        - date
+        - time
+        - date_range
+      executable_with:
+        # Can preview modifications with just booking_id
+        - booking_id
+    execution:
+      APPLY_MODIFICATION:
+        mode: committing
+        required_slots:
+          - booking_id
+        optional_slots:
+          - date
+          - time
+          - date_range
+        client: booking_client
+
+  MODIFY_RESERVATION:
+    metadata:
+      durable: true
+    planning:
+      required_slots:
+        - booking_id
+      optional_slots:
+        - start_date
+        - end_date
+        - date_range
+      executable_with:
+        # Can preview modifications with just booking_id
+        - booking_id
+    execution:
+      APPLY_MODIFICATION:
+        mode: committing
+        required_slots:
+          - booking_id
+        optional_slots:
+          - start_date
+          - end_date
+          - date_range
+        client: booking_client
+
+  CANCEL_BOOKING:
+    metadata:
+      durable: true
+    planning:
+      required_slots:
+        - booking_id
+      optional_slots: []
+      executable_with:
+        # Can identify/fetch booking with just booking_id
+        - booking_id
+    execution:
+      CONFIRM_CANCELLATION:
+        mode: committing
+        required_slots:
+          - booking_id
+        optional_slots: []
+        client: booking_client
+

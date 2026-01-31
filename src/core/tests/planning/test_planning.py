@@ -336,16 +336,22 @@ def _test_scenario(
                     print("  Session state: None (no session found)")
 
             # Call handle_message with the same user_id and session_state
-            # Create a session_store wrapper to pass session_state
+            # Create a session_store wrapper that retrieves sessions dynamically
+            # This ensures session continuity across turns - the wrapper will retrieve
+            # the latest session state that was saved in previous turns
             class SessionStoreWrapper:
-                def __init__(self, session_state):
-                    self.session_state = session_state
+                def __init__(self, user_id):
+                    self.user_id = user_id
 
                 def get_session(self, user_id):
-                    return self.session_state
+                    # Retrieve session dynamically to get the latest saved state
+                    # This ensures durable intents can be recovered from session
+                    # even when Luma returns UNKNOWN/empty/error on follow-up turns
+                    return get_session(user_id)
 
-            session_store = SessionStoreWrapper(
-                session_state) if session_state else None
+            # Always create session_store wrapper (even if current session_state is None)
+            # The wrapper will dynamically retrieve sessions, allowing durable intent recovery
+            session_store = SessionStoreWrapper(user_id)
 
             result = handle_message(
                 text=sentence,
@@ -386,14 +392,14 @@ def _test_scenario(
             if not outcome:
                 # Try to extract from result or plan
                 outcome = result.get("result") or result.get("plan", {})
-            
+
             if outcome and isinstance(outcome, dict):
                 outcome_status = outcome.get("status")
                 # If status not in outcome, use normalized status
                 if outcome_status is None:
                     normalized = normalize_planning_outcome(result)
                     outcome_status = normalized.get("status")
-                
+
                 # DEBUG: Print outcome status to understand what's happening
                 if verbose or turn_index >= 2:  # Always print for turn 3+
                     print(
@@ -444,7 +450,7 @@ def _test_scenario(
             session_state_after = None
             merged_luma_response_for_snapshot = result.get(
                 "_merged_luma_response")
-            
+
             # Extract outcome for snapshot (use normalized view for consistency)
             normalized_snapshot = normalize_planning_outcome(result)
             plan_for_snapshot = normalized_snapshot.get("plan", {})

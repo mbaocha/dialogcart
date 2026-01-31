@@ -1,0 +1,232 @@
+scenarios:
+  - name: followup_time_after_unknown
+    description: User provides time in follow-up after initial booking request
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book haircut tomorrow"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["time"]
+
+      - sentence: "3pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+
+  - name: followup_date_after_service
+    description: User provides date in follow-up after service request
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "I want a haircut"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["date", "time"]
+
+      - sentence: "tomorrow"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["time"]
+          intent_preserved: true
+
+      - sentence: "3pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+
+  - name: followup_time_with_unknown_intent
+    description: Follow-up with UNKNOWN intent should preserve session intent
+    domain: service
+    aliases:
+      massage: massage
+    turns:
+      - sentence: "book a massage for tomorrow"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["time"]
+
+      - sentence: "3pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+          # Intent should be preserved even if Luma returns UNKNOWN
+
+  # A. Slot-completion flows
+  - name: service_to_time_to_date
+    description: User provides time before date (order swapped)
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book haircut at 3pm"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["date"]
+
+      - sentence: "tomorrow"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+
+  - name: date_to_service_to_time
+    description: User provides date first, then service, then time
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "tomorrow"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: []
+          allow_empty_intent: true
+          # Turn 1: Pre-intent slot collection - standalone date is valid pre-intent input
+          # Core must not infer CREATE_APPOINTMENT without service
+          # Missing slots are undefined until intent is known
+
+      - sentence: "book a haircut"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["time"]
+          intent_preserved: true
+
+      - sentence: "3pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+
+  - name: service_only_abandoned
+    description: User provides only service, no follow-up (remains in clarification)
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "I want a haircut"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["date", "time"]
+
+  # B. Intent preservation
+  - name: vague_followup_phrase
+    description: User provides vague follow-up phrase that should preserve intent
+    domain: service
+    aliases:
+      massage: massage
+    turns:
+      - sentence: "book a massage for tomorrow"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["time"]
+
+      - sentence: "that works"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["time"]
+          intent_preserved: true
+          # Vague phrase should preserve intent but may not provide time
+
+  - name: unknown_intent_with_valid_slot
+    description: UNKNOWN intent with valid slot should preserve booking intent
+    domain: service
+    aliases:
+      facial: facial
+    turns:
+      - sentence: "book a facial for tomorrow"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["time"]
+
+      - sentence: "afternoon"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+          # "afternoon" provides valid time slot, intent should be preserved even if Luma returns UNKNOWN
+
+  # C. Intent switch (critical)
+  - name: intent_switch_to_cancel
+    description: User switches from booking to cancel mid-flow
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book haircut tomorrow"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["time"]
+
+      - sentence: "actually cancel that"
+        expect:
+          intent_switched: true
+          # Intent should switch to CANCEL_APPOINTMENT or similar
+          # Previous booking intent should NOT be preserved
+
+  - name: intent_switch_to_question
+    description: User asks unrelated question mid-booking flow
+    domain: service
+    aliases:
+      massage: massage
+    turns:
+      - sentence: "book a massage"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["date", "time"]
+
+      - sentence: "what are your opening hours?"
+        expect:
+          intent_preserved: true
+          status: NEEDS_CLARIFICATION
+          # DETAILS is an ephemeral intent - must NOT override durable session intent
+          # Booking flow must continue uninterrupted
+          # Ephemeral intents do not persist or switch durable intents
+
+  # D. Recovery after partial clarification
+  - name: invalid_time_provided
+    description: User provides invalid/ambiguous time, system remains in clarification
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book haircut tomorrow"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["time"]
+
+      - sentence: "late evening"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["time"]
+          intent_preserved: true
+          # "late evening" may be too vague, system should remain in clarification
+
+  - name: partial_slot_recovery
+    description: User provides partial information, system requests remaining slots
+    domain: service
+    aliases:
+      massage: massage
+    turns:
+      - sentence: "book a massage"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["date", "time"]
+
+      - sentence: "next week"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["time"]
+          intent_preserved: true
+          # "next week" provides date range but not specific date/time
+
+      - sentence: "Friday at 2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+

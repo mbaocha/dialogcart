@@ -13,13 +13,13 @@ from typing import Dict, Any, List, Set, Optional
 def _get_required_slots_from_unified_policy(intent_name: str) -> List[str]:
     """
     Get required slots from unified intent_policy.yaml with fallback to legacy.
-    
+
     This function provides a migration path from legacy planning configs
     to the unified intent_policy.yaml.
-    
+
     Args:
         intent_name: Intent name (uppercase, e.g., "CREATE_APPOINTMENT")
-    
+
     Returns:
         List of required slot names, or empty list if not found in unified policy.
     """
@@ -34,31 +34,39 @@ def _get_required_slots_from_unified_policy(intent_name: str) -> List[str]:
 
 def load_planning_policy(config_path: Optional[str] = None) -> Dict[str, Any]:
     """
-    Load intent planning policy from YAML configuration.
+    Load intent planning policy from intent_policy.yaml.
+
+    DEPRECATED: This function is kept for backward compatibility but now loads
+    from intent_policy.yaml. The policy structure is flattened to match the
+    legacy format expected by plan_intent().
 
     Args:
-        config_path: Optional path to config file. If None, uses default location.
+        config_path: Ignored - always loads from intent_policy.yaml
 
     Returns:
-        Dictionary containing intent planning policies.
+        Dictionary containing intent planning policies (legacy format).
 
     Raises:
-        FileNotFoundError: If config file does not exist.
-        yaml.YAMLError: If config file is invalid YAML.
+        RuntimeError: If intent_policy.yaml cannot be loaded.
     """
-    if config_path is None:
-        # Default to config/intent_planning.yaml relative to this file
-        config_dir = Path(__file__).resolve().parent.parent.parent / "config"
-        config_path = str(config_dir / "intent_planning.yaml")
+    # Load from unified policy and convert to legacy format
+    from core.policy.intent_policy import _load_unified_policy
 
-    config_file = Path(config_path)
-    if not config_file.exists():
-        raise FileNotFoundError(f"Planning policy config not found: {config_path}")
+    unified_policy = _load_unified_policy()
 
-    with config_file.open(encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
+    # Convert to legacy format: {INTENT_NAME: {required_slots, optional_slots, executable_with}}
+    legacy_format = {}
+    for intent_name, intent_config in unified_policy.items():
+        if isinstance(intent_config, dict):
+            planning_config = intent_config.get("planning", {})
+            if isinstance(planning_config, dict):
+                legacy_format[intent_name] = {
+                    "required_slots": planning_config.get("required_slots", []),
+                    "optional_slots": planning_config.get("optional_slots", []),
+                    "executable_with": planning_config.get("executable_with", [])
+                }
 
-    return raw.get("intents", raw) if isinstance(raw, dict) else {}
+    return legacy_format
 
 
 def plan_intent(
@@ -108,15 +116,26 @@ def plan_intent(
             "executable_actions": []
         }
 
-    # Extract policy fields
-    # PREFER unified policy for required_slots, fallback to legacy policy
+    # Extract policy fields from unified policy (intent_policy.yaml)
+    # All planning data MUST come from intent_policy.yaml - no fallback
     required_slots = _get_required_slots_from_unified_policy(intent_upper)
     if not required_slots:
-        # Fallback to legacy policy
-        required_slots = intent_policy.get("required_slots", [])
-    
-    optional_slots = intent_policy.get("optional_slots", [])
-    executable_with = intent_policy.get("executable_with", [])
+        # If unified policy doesn't have required_slots, this is an error
+        # Return empty plan (intent not supported)
+        return {
+            "intent": intent,
+            "collected_slots": [],
+            "missing_slots": [],
+            "executable_actions": []
+        }
+
+    # Get optional_slots from unified policy
+    from core.policy.intent_policy import get_planning_optional_slots
+    optional_slots = get_planning_optional_slots(intent_upper)
+
+    # Get executable_with from unified policy
+    from core.policy.intent_policy import get_planning_executable_with
+    executable_with = get_planning_executable_with(intent_upper)
 
     # Normalize to sets for efficient operations
     required_set = set(required_slots)
@@ -146,7 +165,8 @@ def plan_intent(
         # Check if all slots in this subset are collected
         if subset_slots.issubset(collected_set):
             # Map executable subset to action name based on intent
-            action = _map_executable_subset_to_action(intent_upper, subset_slots)
+            action = _map_executable_subset_to_action(
+                intent_upper, subset_slots)
             if action:
                 executable_actions.append(action)
 
@@ -198,4 +218,3 @@ def _map_executable_subset_to_action(
             return "FETCH_BOOKING"
 
     return None
-

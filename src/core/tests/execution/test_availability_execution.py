@@ -13,6 +13,8 @@ Rules:
 - Always assert: correct payload sent to client, required fields, response normalization
 """
 
+from core.orchestration.execution.availability import search_availability
+from core.orchestration.execution.clients.availability_client import AvailabilityClient
 import os
 import sys
 from pathlib import Path
@@ -24,14 +26,11 @@ src_path = Path(__file__).parent.parent.parent.parent
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-from core.orchestration.execution.clients.availability_client import AvailabilityClient
-from core.orchestration.execution.availability import search_availability
-
 
 def test_search_availability_happy_path_service():
     """
     Test case 1: Happy path – service availability
-    
+
     Input:
     {
         "organization_id": 1,
@@ -43,7 +42,7 @@ def test_search_availability_happy_path_service():
             "end": "15:00"
         }
     }
-    
+
     Mock client response:
     {
         "slots": [
@@ -54,7 +53,7 @@ def test_search_availability_happy_path_service():
             }
         ]
     }
-    
+
     Assert:
     - availability_client.get_service_availability() called once
     - payload includes: organization_id, service_id, date
@@ -73,7 +72,7 @@ def test_search_availability_happy_path_service():
         ]
     }
     mock_client.get_service_availability.return_value = mock_response
-    
+
     # Prepare input slots
     slots = {
         "organization_id": 1,
@@ -85,7 +84,7 @@ def test_search_availability_happy_path_service():
             "end": "15:00"
         }
     }
-    
+
     # Test the client directly (since execution function is a placeholder)
     # When the function is implemented, it should call the client like this:
     result = mock_client.get_service_availability(
@@ -94,16 +93,16 @@ def test_search_availability_happy_path_service():
         date="2026-01-16",
         extra_params={"time_constraint": slots["time_constraint"]}
     )
-    
+
     # Assert client was called correctly
     mock_client.get_service_availability.assert_called_once()
     call_args = mock_client.get_service_availability.call_args
-    
+
     # Verify payload includes required fields
     assert call_args.kwargs["organization_id"] == 1
     assert call_args.kwargs["service_id"] == "haircut"
     assert call_args.kwargs["date"] == "2026-01-16"
-    
+
     # Verify response normalization
     assert "slots" in result
     assert len(result["slots"]) == 1
@@ -113,7 +112,7 @@ def test_search_availability_happy_path_service():
     assert slot["start"] == "2026-01-16T15:00:00Z"
     assert slot["end"] == "2026-01-16T15:30:00Z"
     assert slot["staff_id"] == 5
-    
+
     # Expected Core result structure (when function is implemented)
     expected_core_result = {
         "type": "availability",
@@ -126,7 +125,7 @@ def test_search_availability_happy_path_service():
             }
         ]
     }
-    
+
     # Verify normalization would produce correct structure
     normalized_slots = [
         {
@@ -136,7 +135,7 @@ def test_search_availability_happy_path_service():
         }
         for s in result["slots"]
     ]
-    
+
     assert normalized_slots[0]["start_at"] == "2026-01-16T15:00:00Z"
     assert normalized_slots[0]["end_at"] == "2026-01-16T15:30:00Z"
     assert normalized_slots[0]["staff_id"] == 5
@@ -145,7 +144,7 @@ def test_search_availability_happy_path_service():
 def test_search_availability_no_availability():
     """
     Test case 2: No availability
-    
+
     Mock empty slots list
     Assert returned result has:
     - available_slots = []
@@ -157,35 +156,35 @@ def test_search_availability_no_availability():
         "slots": []
     }
     mock_client.get_service_availability.return_value = mock_response
-    
+
     # Prepare input slots
     slots = {
         "organization_id": 1,
         "service_id": "haircut",
         "date": "2026-01-16"
     }
-    
+
     # Call client
     result = mock_client.get_service_availability(
         organization_id=1,
         service_id="haircut",
         date="2026-01-16"
     )
-    
+
     # Assert client was called
     mock_client.get_service_availability.assert_called_once()
-    
+
     # Assert response has empty slots
     assert "slots" in result
     assert result["slots"] == []
-    
+
     # Expected Core result structure (when function is implemented)
     expected_core_result = {
         "type": "availability",
         "status": "success",
         "available_slots": []
     }
-    
+
     # Verify normalization produces empty list
     normalized_slots = [
         {
@@ -194,7 +193,7 @@ def test_search_availability_no_availability():
         }
         for s in result["slots"]
     ]
-    
+
     assert normalized_slots == []
 
 
@@ -203,14 +202,14 @@ if __name__ == "__main__":
     print("Availability Execution Tests")
     print("=" * 50)
     print()
-    
+
     try:
         test_search_availability_happy_path_service()
         print("[OK] test_search_availability_happy_path_service")
-        
+
         test_search_availability_no_availability()
         print("[OK] test_search_availability_no_availability")
-        
+
         print()
         print("=" * 50)
         print("[OK] All tests passed!")
@@ -232,4 +231,3 @@ if __name__ == "__main__":
         import traceback
         traceback.print_exc()
         sys.exit(1)
-
