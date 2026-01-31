@@ -27,6 +27,7 @@ from core.tests.planning.adapter import normalize_planning_outcome
 from core.orchestration.session import get_session, clear_session, save_session
 from core.orchestration.orchestrator import handle_message
 from core.orchestration.api.session_merge import build_session_state_from_outcome
+from core.orchestration.persistence.durable_intents import is_durable_intent
 import os
 import sys
 from pathlib import Path
@@ -313,17 +314,21 @@ def _test_scenario(
                 print(f"Expected: {json.dumps(expected, indent=2)}")
 
             # Load session state before each turn
-            # SESSION LIFECYCLE RULE: For CREATE_APPOINTMENT, sessions are preserved on READY
-            # Load sessions with status NEEDS_CLARIFICATION OR READY (for CREATE_APPOINTMENT)
+            # SESSION LIFECYCLE RULE: Durable intents preserve sessions on READY
+            # Load sessions with status NEEDS_CLARIFICATION OR READY (for durable intents)
             session_state = get_session(user_id)
             if session_state:
                 session_status = session_state.get("status")
-                session_intent = session_state.get("intent")
-                session_intent_str = session_intent if isinstance(session_intent, str) else (
-                    session_intent.get("name", "") if isinstance(session_intent, dict) else "")
-                # Only consider session if status is NEEDS_CLARIFICATION, or READY for CREATE_APPOINTMENT
-                if session_status != "NEEDS_CLARIFICATION" and (session_status != "READY" or session_intent_str != "CREATE_APPOINTMENT"):
-                    session_state = None
+                session_intent_name = session_state.get("intent_name")
+                # Only consider session if status is NEEDS_CLARIFICATION, or READY for durable intents
+                if session_status != "NEEDS_CLARIFICATION":
+                    if session_status == "READY" and session_intent_name:
+                        # Check if intent is durable - only preserve READY sessions for durable intents
+                        if not is_durable_intent(session_intent_name):
+                            session_state = None
+                    else:
+                        # Not NEEDS_CLARIFICATION and not READY (or no intent_name) - clear it
+                        session_state = None
 
             # Print session state before turn
             if verbose or turn_index > 0:  # Always print for turns after first
@@ -424,9 +429,10 @@ def _test_scenario(
                         print(
                             f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - NOT SAVED (new_session_state is None)")
                 elif outcome_status in ("READY", "EXECUTED", "AWAITING_CONFIRMATION"):
-                    # For READY status, try to build session state (will be None for non-CREATE_APPOINTMENT)
+                    # For READY status, try to build session state (will be None for non-durable intents)
                     # EXECUTED/AWAITING_CONFIRMATION also try to build (but will return None)
-                    # Exception: CREATE_APPOINTMENT with READY status preserves session for follow-up modifications
+                    # DURABLE INTENT CONTRACT: Durable intents (as defined in intent_policy.yaml) preserve sessions on READY
+                    # This allows follow-up modifications (e.g., "make it 4pm" after booking is ready)
                     new_session_state = build_session_state_from_outcome(
                         outcome, outcome_status, merged_luma_response
                     )
@@ -435,7 +441,7 @@ def _test_scenario(
                         print(
                             f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - CLEARED (status={outcome_status})")
                     else:
-                        # Session was preserved (e.g., CREATE_APPOINTMENT on READY for follow-up modifications)
+                        # Session was preserved (e.g., durable intents on READY for follow-up modifications)
                         save_session(user_id, new_session_state)
                         print(
                             f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - SAVED (status={outcome_status}, preserved for modifications)")
@@ -497,47 +503,134 @@ def _test_scenario(
                 return False, error_msg, user_id
 
         # SESSION LIFECYCLE RULE: Deterministic session clearing check
-        # READY is terminal (session cleared) for all intents EXCEPT CREATE_APPOINTMENT
-        # CREATE_APPOINTMENT never clears session on READY (allows follow-up modifications like "make it 4pm")
+        # DURABLE INTENT CONTRACT: Durable intents (as defined in intent_policy.yaml) preserve sessions on READY
+        # This allows follow-up modifications (e.g., "make it 4pm" after booking is ready)
+        # Ephemeral intents clear sessions on READY (terminal state)
         final_expected = turns[-1].get("expected", {})
         final_missing_slots = final_expected.get("missing_slots", [])
         final_intent = final_expected.get("intent", "")
 
-        # RULE: Session should be cleared when missing_slots is empty for non-CREATE_APPOINTMENT intents
-        # CREATE_APPOINTMENT preserves session on READY (single deterministic rule)
+        # RULE: Session should be cleared when missing_slots is empty for non-durable intents
+        # Durable intents preserve session on READY (allows follow-up modifications)
         if final_missing_slots == []:
             session_state = get_session(user_id)
-            # Check session intent (not just expected intent, as final turn may not specify intent)
-            session_intent = None
+            # Check session intent_name (session stores intent_name, not intent)
+            # Also check expected intent from test scenario
+            session_intent_name = None
             if session_state:
-                session_intent_obj = session_state.get("intent")
-                if isinstance(session_intent_obj, str):
-                    session_intent = session_intent_obj
-                elif isinstance(session_intent_obj, dict):
-                    session_intent = session_intent_obj.get("name", "")
-            # Single rule: Never expect session clearing for CREATE_APPOINTMENT
-            # Check both final_intent (from expected) and session_intent (from actual session)
-            is_create_appointment = (
-                final_intent == "CREATE_APPOINTMENT" or session_intent == "CREATE_APPOINTMENT")
-            if session_state is not None and not is_create_appointment:
-                error_msg = f"Session not cleared after planning complete (missing_slots=[]). Session state: {session_state}"
-                # Print FAIL_SNAPSHOT on session not cleared
-                fail_snapshot = {
-                    "expected": {"missing_slots": [], "session_cleared": True},
-                    "got": {"missing_slots": [], "session_cleared": False, "session_state": session_state},
-                    "session_before": None,
-                    "session_after": session_state,
-                    "merged_luma_response": None,
-                    "final_plan": {},
-                    "facts": {}
-                }
-                print(f"\n{'='*70}")
-                print(
-                    f"FAIL_SNAPSHOT: scenario={scenario_name} turn=FINAL user_id={user_id}")
-                print(f"{'='*70}")
-                print(json.dumps(fail_snapshot, indent=2, default=str))
-                print(f"{'='*70}\n")
-                return False, error_msg, user_id
+                # Session stores intent_name as a string
+                session_intent_name = session_state.get("intent_name")
+            
+            # Determine if the intent is durable (from intent_policy.yaml)
+            # Check both final_intent (from expected) and session_intent_name (from actual session)
+            intent_to_check = session_intent_name or final_intent
+            is_durable = False
+            if intent_to_check:
+                is_durable = is_durable_intent(intent_to_check)
+            
+            # DURABLE INTENT RULE: Durable intents preserve session on READY
+            # Verify session is preserved with correct state
+            if is_durable:
+                if session_state is None:
+                    error_msg = f"Durable intent '{intent_to_check}' session was cleared but should be preserved on READY"
+                    fail_snapshot = {
+                        "expected": {
+                            "missing_slots": [],
+                            "session_cleared": False,
+                            "intent_name": intent_to_check,
+                            "status": "READY"
+                        },
+                        "got": {
+                            "missing_slots": [],
+                            "session_cleared": True,
+                            "session_state": None
+                        },
+                        "session_before": None,
+                        "session_after": None,
+                        "merged_luma_response": None,
+                        "final_plan": {},
+                        "facts": {}
+                    }
+                    print(f"\n{'='*70}")
+                    print(
+                        f"FAIL_SNAPSHOT: scenario={scenario_name} turn=FINAL user_id={user_id}")
+                    print(f"{'='*70}")
+                    print(json.dumps(fail_snapshot, indent=2, default=str))
+                    print(f"{'='*70}\n")
+                    return False, error_msg, user_id
+                
+                # Verify session state is correct for durable intent
+                if session_state.get("intent_name") != intent_to_check:
+                    error_msg = f"Durable intent session has wrong intent_name: expected '{intent_to_check}', got '{session_state.get('intent_name')}'"
+                    fail_snapshot = {
+                        "expected": {
+                            "missing_slots": [],
+                            "intent_name": intent_to_check,
+                            "status": "READY"
+                        },
+                        "got": {
+                            "missing_slots": [],
+                            "session_state": session_state
+                        },
+                        "session_before": None,
+                        "session_after": session_state,
+                        "merged_luma_response": None,
+                        "final_plan": {},
+                        "facts": {}
+                    }
+                    print(f"\n{'='*70}")
+                    print(
+                        f"FAIL_SNAPSHOT: scenario={scenario_name} turn=FINAL user_id={user_id}")
+                    print(f"{'='*70}")
+                    print(json.dumps(fail_snapshot, indent=2, default=str))
+                    print(f"{'='*70}\n")
+                    return False, error_msg, user_id
+                
+                if session_state.get("status") != "READY":
+                    error_msg = f"Durable intent session has wrong status: expected 'READY', got '{session_state.get('status')}'"
+                    fail_snapshot = {
+                        "expected": {
+                            "missing_slots": [],
+                            "status": "READY"
+                        },
+                        "got": {
+                            "missing_slots": [],
+                            "session_state": session_state
+                        },
+                        "session_before": None,
+                        "session_after": session_state,
+                        "merged_luma_response": None,
+                        "final_plan": {},
+                        "facts": {}
+                    }
+                    print(f"\n{'='*70}")
+                    print(
+                        f"FAIL_SNAPSHOT: scenario={scenario_name} turn=FINAL user_id={user_id}")
+                    print(f"{'='*70}")
+                    print(json.dumps(fail_snapshot, indent=2, default=str))
+                    print(f"{'='*70}\n")
+                    return False, error_msg, user_id
+            else:
+                # EPHEMERAL INTENT RULE: Ephemeral intents clear session on READY
+                if session_state is not None:
+                    error_msg = f"Session not cleared after planning complete (missing_slots=[]). Session state: {session_state}"
+                    # Print FAIL_SNAPSHOT on session not cleared
+                    fail_snapshot = {
+                        "expected": {"missing_slots": [], "session_cleared": True},
+                        "got": {"missing_slots": [], "session_cleared": False, "session_state": session_state},
+                        "session_before": None,
+                        "session_after": session_state,
+                        "merged_luma_response": None,
+                        "final_plan": {},
+                        "facts": {}
+                    }
+                    print(f"\n{'='*70}")
+                    print(
+                        f"FAIL_SNAPSHOT: scenario={scenario_name} turn=FINAL user_id={user_id}")
+                    print(f"{'='*70}")
+                    print(json.dumps(fail_snapshot, indent=2, default=str))
+                    print(f"{'='*70}\n")
+                    return False, error_msg, user_id
 
         if verbose:
             print(f"\n[OK] Scenario {scenario_id} passed")

@@ -1051,6 +1051,28 @@ def process_luma_response(
     # Also include effective_collected_slots for executable_actions computation
     luma_response_for_plan["_effective_collected_slots"] = effective_collected_slots
 
+    # PHASE 1 INSTRUMENTATION: Log intent state BEFORE build_decision_plan
+    decision_intent = intent_name
+    facts_intent = luma_response.get("facts", {}).get("intent_name", "") if isinstance(luma_response.get("facts"), dict) else ""
+    logger.error(
+        "[INTENT_TRACE_PLANNING_ENTRY] BEFORE build_decision_plan: "
+        f"decision.intent_name={decision_intent}, "
+        f"facts.intent_name={facts_intent}, "
+        f"luma_response['intent']['name']={luma_response.get('intent', {}).get('name', '')}, "
+        f"luma_response['_effective_intent']={luma_response.get('_effective_intent', '')}, "
+        f"user_id={user_id}"
+    )
+
+    # SAFETY ASSERTION: Planning must NEVER run with invalid intent
+    # This ensures future regressions fail fast
+    # The orchestrator should have already recovered durable session intent before calling this function
+    assert intent_name and intent_name != "UNKNOWN", (
+        f"Planning called with invalid intent while durable session intent exists. "
+        f"intent_name={intent_name!r}, user_id={user_id}, "
+        f"luma_intent={luma_response.get('intent', {}).get('name', '')}, "
+        f"effective_intent={luma_response.get('_effective_intent', '')}"
+    )
+
     # Build decision plan with recomputed missing_slots (ONLY source of truth)
     from core.planning.orchestration.plan_builder import build_decision_plan
     plan = build_decision_plan(intent_name, luma_response_for_plan, domain)

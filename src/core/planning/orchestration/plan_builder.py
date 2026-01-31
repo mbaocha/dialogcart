@@ -87,6 +87,14 @@ def build_decision_plan(
         - blocked_actions: List of blocked action names
         - awaiting: USER_CONFIRMATION or null
     """
+    # SAFETY ASSERTION: Planning must NEVER run with invalid intent
+    # This ensures future regressions fail fast
+    # The orchestrator should have already recovered durable session intent before calling this function
+    assert intent_name and intent_name != "UNKNOWN", (
+        f"build_decision_plan called with empty intent. "
+        f"intent_name={intent_name!r}, domain={domain}"
+    )
+    
     # Get commit action from unified policy (intent_policy.yaml)
     from core.policy.intent_policy import get_commit_action
     commit_action = get_commit_action(intent_name)

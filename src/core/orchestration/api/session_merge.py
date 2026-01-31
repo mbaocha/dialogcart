@@ -176,61 +176,94 @@ def merge_luma_with_session(
     # Determine if slots are present (non-empty dict)
     has_extracted_slots = bool(luma_slots_temp)
 
-    # Compute effective_intent EARLY (before any planning/slot computation)
-    # CRITICAL: This ensures effective_intent is available for all downstream operations
-    # Rule: if luma_intent is falsy OR "UNKNOWN", use session.intent (if present)
-    # Otherwise, use luma_intent
+    # ARCHITECTURAL FIX: Intent is resolved ONCE in orchestrator.py before calling merge_luma_with_session
+    # The orchestrator sets effective_response["intent"]["name"] as the SINGLE SOURCE OF TRUTH
+    # This function MUST NOT recompute intent - it must preserve the authoritative intent
+    # 
+    # HARD RULE: NEVER overwrite merged["intent"]["name"] if it already exists and is non-empty
+    # NEVER write "" or None into merged["intent"]["name"]
+    # If orchestrator set an intent, it is authoritative and must be preserved
 
-    # Compute effective_intent using durable intents policy
-    # DURABLE INTENTS RULE: Only durable intents may be persisted and inherited
-    def resolve_effective_intent(luma_intent: str, session_intent: Optional[str]) -> Optional[str]:
-        """
-        Resolve effective intent based on durable intents policy.
+    # PHASE 1 INSTRUMENTATION: Log entry state
+    logger.error(
+        "[INTENT_TRACE_SESSION_MERGE] ENTRY: "
+        f"merged['intent']['name']={merged.get('intent', {}).get('name', '') if isinstance(merged.get('intent'), dict) else 'N/A'}, "
+        f"session_intent_name={session_intent_name}, "
+        f"session_status={session_status}, "
+        f"luma_intent_name={luma_intent_name}"
+    )
 
-        Rules:
-        - If luma_intent is durable: use it
-        - If luma_intent is UNKNOWN/empty and session_intent is durable: inherit session
-        - All other cases: return None (ephemeral, do not persist)
-        """
-        # If Luma provides a durable intent, use it
-        if luma_intent and is_durable_intent(luma_intent):
-            return luma_intent
-
-        # If Luma intent is UNKNOWN/empty and session has durable intent, inherit it
-        if (not luma_intent or luma_intent == "UNKNOWN") and session_intent:
-            if session_status != "COMPLETED" and is_durable_intent(session_intent):
-                return session_intent
-
-        # All other cases: ephemeral (do not persist)
-        return None
-
-    effective_intent = resolve_effective_intent(
-        luma_intent_name, session_intent_name)
-
-    if effective_intent:
-        logger.info(
-            f"merge_luma_with_session: effective_intent={effective_intent} "
-            f"(luma_intent={luma_intent_name}, session_intent={session_intent_name}, durable=True)"
-        )
-    else:
-        logger.debug(
-            f"merge_luma_with_session: effective_intent=None (ephemeral) "
-            f"(luma_intent={luma_intent_name}, session_intent={session_intent_name})"
-        )
-
-    # CRITICAL: Write effective_intent to BOTH fields that downstream code reads
-    # Only write if effective_intent is not None (durable intent resolved)
-    # 1. Store in _effective_intent for explicit access
-    merged["_effective_intent"] = effective_intent or ""
-    # 2. Write to intent["name"] (the field that planning/required-slots reads)
+    # Ensure intent dict exists
     if not isinstance(merged.get("intent"), dict):
         merged["intent"] = {}
-    merged["intent"]["name"] = effective_intent or ""
-
-    logger.info(
-        f"merge_luma_with_session: effective_intent={effective_intent} "
-        f"(luma_intent={luma_intent_name}, session_intent={session_intent_name})"
+    
+    existing_intent_name = merged.get("intent", {}).get("name", "")
+    
+    # PHASE 1 INSTRUMENTATION: Log BEFORE intent assignment
+    logger.error(
+        "[INTENT_TRACE_SESSION_MERGE] BEFORE intent assignment: "
+        f"existing_intent_name={existing_intent_name}, "
+        f"session_intent_name={session_intent_name}, "
+        f"luma_intent_name={luma_intent_name}, "
+        f"session_intent_is_durable={is_durable_intent(session_intent_name) if session_intent_name else False}"
     )
+    
+    # INVARIANT ENFORCEMENT: If session has a durable intent, UNKNOWN/empty/None intents from Luma must be ignored
+    if (not existing_intent_name or existing_intent_name == "UNKNOWN") and session_intent_name:
+        # Check if session intent is durable
+        if is_durable_intent(session_intent_name):
+            # Assert if code attempts to overwrite a durable intent with UNKNOWN/empty
+            if luma_intent_name == "UNKNOWN" or not luma_intent_name:
+                # This is expected - orchestrator should have already set the durable intent
+                # But if it didn't, we preserve it here as a safety measure
+                merged["intent"]["name"] = session_intent_name
+                merged["_effective_intent"] = session_intent_name
+                logger.info(
+                    f"merge_luma_with_session: Preserved durable session intent={session_intent_name} "
+                    f"(Luma returned UNKNOWN/empty, orchestrator should have set this)"
+                )
+            else:
+                # Luma has a non-UNKNOWN intent - this should have been set by orchestrator
+                # If it wasn't, this is a bug
+                raise AssertionError(
+                    f"merge_luma_with_session: Orchestrator should have set authoritative intent, but intent['name'] is empty/UNKNOWN. "
+                    f"luma_intent={luma_intent_name}, session_intent={session_intent_name}, "
+                    f"existing_intent_name={existing_intent_name}"
+                )
+        else:
+            # Session intent is not durable - if orchestrator didn't set an intent, this is expected
+            if not existing_intent_name or existing_intent_name == "UNKNOWN":
+                # No authoritative intent from orchestrator - this is valid for ephemeral intents
+                merged["intent"]["name"] = luma_intent_name or ""
+                merged["_effective_intent"] = luma_intent_name or ""
+                logger.debug(
+                    f"merge_luma_with_session: No durable intent to preserve (ephemeral). "
+                    f"luma_intent={luma_intent_name}, session_intent={session_intent_name}"
+                )
+    elif existing_intent_name and existing_intent_name != "UNKNOWN":
+        # Intent already set by orchestrator - preserve it as authoritative
+        # Update _effective_intent to match (for consistency)
+        merged["_effective_intent"] = existing_intent_name
+        logger.debug(
+            f"merge_luma_with_session: Preserved authoritative intent from orchestrator: {existing_intent_name}"
+        )
+        
+        # INVARIANT CHECK: Assert if attempting to overwrite a durable intent
+        if session_intent_name and is_durable_intent(session_intent_name):
+            if existing_intent_name != session_intent_name and (not luma_intent_name or luma_intent_name == "UNKNOWN"):
+                # This should not happen - orchestrator should have preserved durable session intent
+                logger.warning(
+                    f"merge_luma_with_session: Orchestrator set intent={existing_intent_name} but durable session intent={session_intent_name} exists. "
+                    f"This may indicate orchestrator did not properly preserve durable intent."
+                )
+    else:
+        # No intent from orchestrator and no durable session intent - this is valid for first turns
+        merged["intent"]["name"] = luma_intent_name or ""
+        merged["_effective_intent"] = luma_intent_name or ""
+        logger.debug(
+            f"merge_luma_with_session: No authoritative intent to preserve (first turn or ephemeral). "
+            f"luma_intent={luma_intent_name}"
+        )
 
     # STEP 2: Extract slots from Luma response
     # FACT-ONLY: Promote facts to slots BEFORE merging with session
@@ -2031,13 +2064,34 @@ def build_session_state_from_outcome(
             print(
                 f"[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): {list(slots.keys())}")
 
-    # Extract intent - HARD RULE: Use planned intent from plan, NOT effective_intent or luma_intent
+    # Extract intent - HARD RULE: Explicit precedence order for intent during persistence
     # DURABLE INTENTS RULE: Only durable intents may be persisted
-    # Priority: 1) plan.intent_name, 2) plan.intent, 3) outcome.intent_name, 4) previous session intent (if durable)
+    # INVARIANT: A durable intent MUST NEVER be wiped once established
+    # 
+    # Explicit precedence order:
+    # 1. outcome.intent_name (if truthy and durable)
+    # 2. plan.intent_name (if available and durable)
+    # 3. previous_session_state.intent_name (if durable)
+    # 4. Otherwise: raise/assert (invalid state)
     intent_name = ""
 
-    # Priority 1: Use plan.intent_name (planned intent - most authoritative)
+    # Priority 1: Use outcome.intent_name (if truthy and durable)
     if outcome:
+        outcome_intent = outcome.get("intent_name") or outcome.get("intent")
+        if outcome_intent and outcome_intent not in ("", "UNKNOWN"):
+            # Only use if durable
+            if is_durable_intent(outcome_intent):
+                intent_name = outcome_intent
+                logger.debug(
+                    f"[build_session_state_from_outcome] Using outcome.intent_name={intent_name} (durable)"
+                )
+            else:
+                logger.debug(
+                    f"[build_session_state_from_outcome] Skipping ephemeral outcome.intent_name={outcome_intent}"
+                )
+
+    # Priority 2: Use plan.intent_name (if available and durable)
+    if not intent_name and outcome:
         plan_obj = outcome.get("plan", {})
         if isinstance(plan_obj, dict):
             plan_intent_name = plan_obj.get(
@@ -2054,23 +2108,9 @@ def build_session_state_from_outcome(
                         f"[build_session_state_from_outcome] Skipping ephemeral plan.intent_name={plan_intent_name}"
                     )
 
-    # Priority 2: Use outcome.intent_name (set by orchestrator for NEEDS_CLARIFICATION)
-    if not intent_name and outcome:
-        outcome_intent = outcome.get("intent_name") or outcome.get("intent")
-        if outcome_intent and outcome_intent not in ("", "UNKNOWN"):
-            # Only use if durable
-            if is_durable_intent(outcome_intent):
-                intent_name = outcome_intent
-                logger.debug(
-                    f"[build_session_state_from_outcome] Using outcome intent_name={intent_name} (durable)"
-                )
-            else:
-                logger.debug(
-                    f"[build_session_state_from_outcome] Skipping ephemeral outcome.intent_name={outcome_intent}"
-                )
-
-    # Priority 3: Preserve previous session intent if no planned intent found (only if durable)
-    # Do NOT overwrite existing session intent with empty value
+    # Priority 3: Preserve previous session intent if no outcome/plan intent found (only if durable)
+    # CRITICAL: If outcome.intent_name is falsy AND previous_session_state.intent_name exists AND is durable
+    # → Preserve the previous session intent instead of writing None
     if not intent_name and previous_session_state:
         previous_intent = previous_session_state.get(
             "intent_name") or previous_session_state.get("intent")
@@ -2078,17 +2118,54 @@ def build_session_state_from_outcome(
             # Only preserve if durable
             if is_durable_intent(previous_intent):
                 intent_name = previous_intent
-                logger.debug(
-                    f"[build_session_state_from_outcome] Preserving previous session intent={intent_name} (durable)"
+                logger.info(
+                    f"[build_session_state_from_outcome] Preserving durable previous session intent={intent_name} "
+                    f"(outcome.intent_name was falsy/empty)"
                 )
             else:
                 logger.debug(
                     f"[build_session_state_from_outcome] Not preserving ephemeral previous session intent={previous_intent}"
                 )
 
-    # READY status clears session for non-CREATE_APPOINTMENT intents (as expected by tests)
-    # CREATE_APPOINTMENT sessions are preserved on READY to allow follow-up modifications
-    if outcome_status == "READY" and intent_name and intent_name != "CREATE_APPOINTMENT":
+    # DURABLE INTENT CONTRACT: Durable intents (as defined in intent_policy.yaml) preserve sessions on READY
+    # This allows follow-up modifications (e.g., "make it 4pm" after booking is ready)
+    # Ephemeral intents clear sessions on READY (terminal state)
+    # TEMPORARY DEBUG LOG: Show intent_name, outcome_status, and whether session is cleared or preserved
+    session_cleared = False
+    if outcome_status == "READY" and intent_name:
+        is_durable = is_durable_intent(intent_name)
+        if not is_durable:
+            # Ephemeral intent: clear session on READY
+            logger.error(
+                f"[SESSION_CLEAR_DEBUG] intent_name={intent_name}, outcome_status={outcome_status}, "
+                f"is_durable={is_durable}, action=CLEARED"
+            )
+            print(
+                f"[SESSION_CLEAR_DEBUG] intent_name={intent_name}, outcome_status={outcome_status}, "
+                f"is_durable={is_durable}, action=CLEARED"
+            )
+            return None
+        else:
+            # Durable intent: preserve session on READY
+            session_cleared = False
+            logger.error(
+                f"[SESSION_CLEAR_DEBUG] intent_name={intent_name}, outcome_status={outcome_status}, "
+                f"is_durable={is_durable}, action=PRESERVED"
+            )
+            print(
+                f"[SESSION_CLEAR_DEBUG] intent_name={intent_name}, outcome_status={outcome_status}, "
+                f"is_durable={is_durable}, action=PRESERVED"
+            )
+    elif outcome_status == "READY" and not intent_name:
+        # No intent: clear session
+        logger.error(
+            f"[SESSION_CLEAR_DEBUG] intent_name=None, outcome_status={outcome_status}, "
+            f"is_durable=False, action=CLEARED (no intent)"
+        )
+        print(
+            f"[SESSION_CLEAR_DEBUG] intent_name=None, outcome_status={outcome_status}, "
+            f"is_durable=False, action=CLEARED (no intent)"
+        )
         return None
 
     # CRITICAL: Recompute missing_slots from persisted slots AFTER persistence
@@ -2227,105 +2304,67 @@ def build_session_state_from_outcome(
     # Determine missing_slots to persist (recomputed from effective_collected_slots)
     missing_slots_to_persist = recomputed_missing_slots if recomputed_missing_slots is not None else []
 
-    # CRITICAL: Preserve intent_name for NEEDS_CLARIFICATION - do NOT clear it
-    # Rule: If resolved intent exists and is valid, use it. Otherwise, preserve previous session intent.
-    # NEEDS_CLARIFICATION must NEVER clear intent - preserve it for follow-up turns
-    # Intent is only cleared on terminal flows (CANCEL, RESET, COMPLETED), never on NEEDS_CLARIFICATION
-    final_intent_name = None
+    # CRITICAL: Final intent determination with hard assertion
+    # Use the resolved intent_name from the precedence order above
+    final_intent_name = intent_name if intent_name and intent_name not in ("", "UNKNOWN") else None
 
-    # Step 1: Use resolved intent if it's valid (not empty, not UNKNOWN)
-    if intent_name and intent_name not in ("", "UNKNOWN"):
-        final_intent_name = intent_name
-        logger.info(
-            f"[build_session_state_from_outcome] Using resolved intent_name={final_intent_name}"
-        )
-
-    # Step 2: If no valid resolved intent, preserve previous session intent
+    # HARD ASSERTION: If a durable intent exists in the session, persistence must never write intent_name=None
+    # Check if previous session has a durable intent that should be preserved
     if not final_intent_name and previous_session_state:
-        session_intent = previous_session_state.get(
+        previous_intent = previous_session_state.get(
             "intent_name") or previous_session_state.get("intent")
-        if session_intent and session_intent not in ("", "UNKNOWN"):
-            final_intent_name = session_intent
-            logger.info(
-                f"[build_session_state_from_outcome] Preserved session intent_name={final_intent_name} "
-                f"(resolved intent was empty/invalid, status={outcome_status})"
-            )
-
-    # Step 3: If still empty and status is NEEDS_CLARIFICATION, this is an error
-    # For NEEDS_CLARIFICATION, we MUST have an intent (either resolved or preserved)
-    if not final_intent_name and outcome_status == "NEEDS_CLARIFICATION":
-        logger.error(
-            f"[build_session_state_from_outcome] CRITICAL: No intent available for NEEDS_CLARIFICATION! "
-            f"intent_name={intent_name}, previous_session_state={previous_session_state is not None}, "
-            f"outcome.intent_name={outcome.get('intent_name') if outcome else None}"
-        )
-        # Fail-safe: Try to get from outcome one more time
-        if outcome:
-            outcome_intent = outcome.get(
-                "intent_name") or outcome.get("intent")
-            if outcome_intent and outcome_intent not in ("", "UNKNOWN"):
-                final_intent_name = outcome_intent
-                logger.warning(
-                    f"[build_session_state_from_outcome] Recovered intent_name={final_intent_name} from outcome"
+        if previous_intent and previous_intent not in ("", "UNKNOWN"):
+            if is_durable_intent(previous_intent):
+                # CRITICAL: Preserve durable session intent - never wipe it
+                final_intent_name = previous_intent
+                logger.info(
+                    f"[build_session_state_from_outcome] Preserving durable session intent={final_intent_name} "
+                    f"(outcome.intent_name was falsy/empty, status={outcome_status})"
                 )
 
-    # CRITICAL: Final check - for NEEDS_CLARIFICATION, we MUST have an intent
-    # If still empty, this is a critical error but we'll preserve previous session intent as last resort
-    if not final_intent_name and outcome_status == "NEEDS_CLARIFICATION" and previous_session_state:
-        # Last resort: preserve previous session intent even if it was empty (better than clearing it)
-        session_intent = previous_session_state.get(
+    # HARD ASSERTION: If a durable intent exists, it must never be wiped
+    if previous_session_state:
+        previous_intent = previous_session_state.get(
             "intent_name") or previous_session_state.get("intent")
-        if session_intent:
-            final_intent_name = session_intent
-            logger.warning(
-                f"[build_session_state_from_outcome] Last resort: Preserved session intent_name={final_intent_name} "
-                f"for NEEDS_CLARIFICATION (all other sources were empty)"
-            )
+        if previous_intent and previous_intent not in ("", "UNKNOWN"):
+            if is_durable_intent(previous_intent):
+                # Assert that we're not wiping a durable intent
+                assert final_intent_name == previous_intent or final_intent_name, (
+                    f"Invariant violation: durable intent '{previous_intent}' lost during session persistence. "
+                    f"final_intent_name={final_intent_name}, outcome.intent_name={outcome.get('intent_name') if outcome else None}, "
+                    f"plan.intent_name={outcome.get('plan', {}).get('intent_name') if outcome and isinstance(outcome.get('plan'), dict) else None}, "
+                    f"outcome_status={outcome_status}"
+                )
+                # If final_intent_name is empty but we have a durable previous intent, use it
+                if not final_intent_name:
+                    final_intent_name = previous_intent
+                    logger.error(
+                        "[SESSION_PERSISTENCE] CRITICAL: Recovered durable intent=%s (was about to be wiped)",
+                        final_intent_name
+                    )
 
-    # HARD RULE: If plan exists and has intent_name, session.intent_name MUST equal plan.intent_name
-    # Guard: If intent_name is empty during persistence, log ERROR and preserve existing session intent
-    if not final_intent_name or final_intent_name == "":
-        # Guard: Log ERROR if intent_name is empty during persistence
+    # Final assertion: If we still don't have an intent, this is an invalid state
+    # (unless this is a first turn with no session, which is valid)
+    if not final_intent_name and previous_session_state:
+        # This should never happen if the above logic worked correctly
         logger.error(
-            "[SESSION_PERSISTENCE] ERROR: intent_name is empty during persistence! "
+            "[SESSION_PERSISTENCE] ERROR: intent_name is empty during persistence with existing session! "
             "outcome_status=%s, outcome_keys=%s, plan_keys=%s, previous_session_intent=%s",
             outcome_status,
             list(outcome.keys()) if outcome else None,
             list(outcome.get("plan", {}).keys()) if outcome and isinstance(
                 outcome.get("plan"), dict) else None,
-            previous_session_state.get(
-                "intent_name") if previous_session_state else None
+            previous_session_state.get("intent_name") if previous_session_state else None
         )
-        # Do NOT overwrite existing session intent with empty value
-        if previous_session_state:
-            previous_intent = previous_session_state.get(
-                "intent_name") or previous_session_state.get("intent")
-            if previous_intent and previous_intent not in ("", "UNKNOWN"):
-                final_intent_name = previous_intent
-                logger.error(
-                    "[SESSION_PERSISTENCE] Preserving previous session intent=%s (intent_name was empty)",
-                    final_intent_name
-                )
-
-    # ASSERTION: session.intent_name must never be empty after a successful planning pass
-    # This guarantees that planning intent survives follow-up turns
-    if not final_intent_name or final_intent_name == "":
-        logger.error(
-            "[SESSION_PERSISTENCE_ASSERTION] CRITICAL: session.intent_name is empty after planning! "
-            "This will break follow-up turns when Luma returns UNKNOWN. "
-            "outcome_status=%s, plan.intent_name=%s, outcome.intent_name=%s",
-            outcome_status,
-            outcome.get("plan", {}).get("intent_name") if outcome else None,
-            outcome.get("intent_name") if outcome else None
-        )
-        # This is a critical error - planning should always produce an intent_name
-        # But we'll still persist (with empty) to avoid breaking the flow, and log the error
-    else:
-        # Log success to confirm intent_name will be persisted
-        logger.debug(
-            "[SESSION_PERSISTENCE_ASSERTION] SUCCESS: session.intent_name=%s will be persisted after planning",
-            final_intent_name
-        )
+        # Last resort: try to preserve any previous intent (even if not explicitly durable-checked)
+        previous_intent = previous_session_state.get(
+            "intent_name") or previous_session_state.get("intent")
+        if previous_intent and previous_intent not in ("", "UNKNOWN"):
+            final_intent_name = previous_intent
+            logger.warning(
+                "[SESSION_PERSISTENCE] Last resort: Preserving previous session intent=%s",
+                final_intent_name
+            )
 
     # DURABLE INTENTS RULE: Gate slot persistence by durable intent
     # Only durable intents may be persisted in session

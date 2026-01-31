@@ -978,9 +978,40 @@ def handle_message_legacy(
     if session_reset_occurred:
         session_state = None
 
+    # SINGLE SOURCE OF TRUTH: Ensure effective_intent is never None/empty when durable session intent exists
+    # This is the authoritative intent that will be used throughout planning
+    if not effective_intent or effective_intent == "UNKNOWN":
+        # Fallback to durable session intent if available
+        if session_state and not session_reset_occurred:
+            session_intent = session_state.get(
+                "intent_name") or session_state.get("intent")
+            session_intent_str = session_intent if isinstance(session_intent, str) else (
+                session_intent.get("name", "") if isinstance(session_intent, dict) else "")
+            if session_intent_str:
+                # Check if session intent is durable
+                try:
+                    from core.policy.intent_policy import get_intent_durable
+                    if get_intent_durable(session_intent_str):
+                        effective_intent = session_intent_str
+                        logger.info(
+                            f"[INTENT_PRESERVATION] Using durable session intent as effective_intent: {effective_intent} "
+                            f"(luma returned UNKNOWN/empty, user_id={user_id}{log_transaction_id})"
+                        )
+                except (ImportError, Exception) as e:
+                    logger.warning(
+                        f"Failed to check durable status for '{session_intent_str}': {e}. "
+                        f"Using session intent as fallback."
+                    )
+                    effective_intent = session_intent_str
+                    logger.info(
+                        f"[INTENT_PRESERVATION] Using session intent as effective_intent (durability check failed): {effective_intent} "
+                        f"(user_id={user_id}{log_transaction_id})"
+                    )
+
     # Construct effective_response: Copy luma_response and replace intent.name with effective_intent
     # FACT-ONLY CONTRACT: facts may be empty or partial - this is valid
     # Missing slots are NOT errors - planner will compute missing_slots from intent_planning.yaml
+    # CRITICAL: This is the SINGLE SOURCE OF TRUTH for intent - no downstream component may recompute it
     effective_response = luma_response.copy()
     effective_response["intent"] = {"name": effective_intent}
     # CRITICAL: Set _effective_intent for process_luma_response to recover durable intents
@@ -1047,6 +1078,22 @@ def handle_message_legacy(
     logger.info(
         f"effective_intent_resolved user_id={user_id}{log_transaction_id} "
         f"luma_intent={luma_intent_name} effective_intent={effective_intent}"
+    )
+
+    # PHASE 1 INSTRUMENTATION: Log intent state BEFORE merge_luma_with_session and process_luma_response
+    session_intent_for_trace = None
+    session_status_for_trace = None
+    if session_state:
+        session_intent_for_trace = session_state.get(
+            "intent_name") or session_state.get("intent")
+        session_status_for_trace = session_state.get("status")
+    logger.error(
+        "[INTENT_TRACE_ORCHESTRATOR] BEFORE merge_luma_with_session: "
+        f"effective_intent={effective_intent}, "
+        f"effective_response['intent']['name']={effective_response.get('intent', {}).get('name', '')}, "
+        f"session.intent_name={session_intent_for_trace}, "
+        f"session.status={session_status_for_trace}, "
+        f"user_id={user_id}{log_transaction_id}"
     )
 
     # Step 4: Process Luma response (interpret and decide CLARIFY vs EXECUTE)
@@ -1192,6 +1239,88 @@ def handle_message_legacy(
     logger.info(
         f"calling_process_luma_response user_id={user_id}{log_transaction_id} "
         f"intent={final_intent_check}"
+    )
+
+    # HARD INVARIANT: Planning must NEVER run with intent=UNKNOWN or empty when durable session intent exists
+    # This ensures durable intents are preserved even if intent resolution failed or was overwritten
+    planning_intent = effective_response.get("intent", {}).get("name", "")
+    effective_intent_for_planning = effective_response.get(
+        "_effective_intent", "")
+
+    # If planning intent is UNKNOWN/empty but effective_intent exists, use effective_intent
+    if (not planning_intent or planning_intent == "UNKNOWN") and effective_intent_for_planning:
+        planning_intent = effective_intent_for_planning
+        effective_response["intent"] = {"name": planning_intent}
+        logger.info(
+            f"[INTENT_PRESERVATION] Recovered intent for planning: {planning_intent} "
+            f"(was UNKNOWN/empty, user_id={user_id}{log_transaction_id})"
+        )
+
+    # If still UNKNOWN/empty and session has durable intent, recover from session
+    if (not planning_intent or planning_intent == "UNKNOWN") and session_state and not session_reset_occurred:
+        session_intent = session_state.get("intent")
+        session_intent_str = session_intent if isinstance(session_intent, str) else (
+            session_intent.get("name", "") if isinstance(session_intent, dict) else "")
+        if session_intent_str:
+            # Check if session intent is durable
+            try:
+                from core.policy.intent_policy import get_intent_durable
+                if get_intent_durable(session_intent_str):
+                    planning_intent = session_intent_str
+                    effective_response["intent"] = {"name": planning_intent}
+                    effective_response["_effective_intent"] = planning_intent
+                    logger.info(
+                        f"[INTENT_PRESERVATION] Recovered durable intent from session for planning: {planning_intent} "
+                        f"(was UNKNOWN/empty, user_id={user_id}{log_transaction_id})"
+                    )
+            except (ImportError, Exception) as e:
+                logger.warning(
+                    f"Failed to check durable status for '{session_intent_str}': {e}. "
+                    f"Using session intent as fallback."
+                )
+                planning_intent = session_intent_str
+                effective_response["intent"] = {"name": planning_intent}
+                effective_response["_effective_intent"] = planning_intent
+                logger.info(
+                    f"[INTENT_PRESERVATION] Recovered intent from session (durability check failed): {planning_intent} "
+                    f"(user_id={user_id}{log_transaction_id})"
+                )
+
+    # SAFETY ASSERTION: Planning must NEVER run with invalid intent when durable session intent exists
+    if (not planning_intent or planning_intent == "UNKNOWN") and session_state and not session_reset_occurred:
+        session_intent = session_state.get("intent")
+        session_intent_str = session_intent if isinstance(session_intent, str) else (
+            session_intent.get("name", "") if isinstance(session_intent, dict) else "")
+        if session_intent_str:
+            try:
+                from core.policy.intent_policy import get_intent_durable
+                if get_intent_durable(session_intent_str):
+                    raise AssertionError(
+                        f"Planning invoked without a valid intent when durable session intent exists. "
+                        f"planning_intent={planning_intent}, session_intent={session_intent_str}, "
+                        f"user_id={user_id}{log_transaction_id}"
+                    )
+            except (ImportError, Exception):
+                # If durability check fails, skip assertion (don't fail on import errors)
+                pass
+
+    # Update final_intent_check for logging
+    final_intent_check = effective_response.get("intent", {}).get("name", "")
+
+    # PHASE 1 INSTRUMENTATION: Log intent state BEFORE process_luma_response
+    session_intent_for_trace = None
+    session_status_for_trace = None
+    if session_state:
+        session_intent_for_trace = session_state.get(
+            "intent_name") or session_state.get("intent")
+        session_status_for_trace = session_state.get("status")
+    logger.error(
+        "[INTENT_TRACE_ORCHESTRATOR] BEFORE process_luma_response: "
+        f"effective_response['intent']['name']={final_intent_check}, "
+        f"effective_response['_effective_intent']={effective_response.get('_effective_intent', '')}, "
+        f"session.intent_name={session_intent_for_trace}, "
+        f"session.status={session_status_for_trace}, "
+        f"user_id={user_id}{log_transaction_id}"
     )
 
     # INVARIANT CHECK: missing_slots MUST be computed before planning
