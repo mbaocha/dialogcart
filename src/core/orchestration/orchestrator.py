@@ -673,16 +673,34 @@ def handle_message_legacy(
                 print("=== END DEBUG_LUMA_WEEKDAY ===\n")
 
     except UpstreamError as e:
-        logger.error(f"Luma API error for user {user_id}: {str(e)}")
-        # SESSION LIFECYCLE RULE: For CREATE_APPOINTMENT, reuse session state as-is on empty/null Luma response
+        logger.error(
+            f"[LUMA_ERROR_FALLBACK] Luma API error for user {user_id}: {str(e)}")
+        # SESSION LIFECYCLE RULE: For durable intents, reuse session state as-is on Luma error
         # Do not recompute slots or missing_slots - preserve session state exactly as-is
         if session_state:
-            session_intent = session_state.get("intent")
-            session_intent_str = session_intent if isinstance(session_intent, str) else (
-                session_intent.get("name", "") if isinstance(session_intent, dict) else "")
+            # CRITICAL: Check intent_name first, then fall back to intent
+            session_intent_str = session_state.get("intent_name") or (
+                session_state.get("intent") if isinstance(session_state.get("intent"), str) else
+                (session_state.get("intent", {}).get("name", "")
+                 if isinstance(session_state.get("intent"), dict) else "")
+            )
 
-            # For CREATE_APPOINTMENT, reuse session state as-is without recomputation
-            if session_intent_str == "CREATE_APPOINTMENT":
+            # Check if session intent is durable
+            is_durable = False
+            if session_intent_str:
+                try:
+                    is_durable = is_durable_intent(session_intent_str)
+                except (ImportError, Exception) as e:
+                    logger.warning(
+                        f"[LUMA_ERROR_FALLBACK] Failed to check durable status: {e}")
+
+            logger.error(
+                f"[LUMA_ERROR_FALLBACK] session_intent={session_intent_str}, is_durable={is_durable}, "
+                f"session_status={session_state.get('status')}, session_missing_slots={session_state.get('missing_slots', [])}"
+            )
+
+            # For durable intents, reuse session state as-is without recomputation
+            if is_durable:
                 session_slots = session_state.get("slots", {})
                 if not isinstance(session_slots, dict):
                     session_slots = {}
@@ -698,6 +716,14 @@ def handle_message_legacy(
                     session_action = "CONFIRM_APPOINTMENT"
                 session_status = session_state.get(
                     "status", "NEEDS_CLARIFICATION")
+                # CRITICAL: Status must be NEEDS_CLARIFICATION if there are missing slots
+                # Do NOT use session_status if it's READY but there are missing slots
+                final_status = "NEEDS_CLARIFICATION" if session_missing_slots else session_status
+
+                logger.error(
+                    f"[LUMA_ERROR_FALLBACK] Final status={final_status} (session_status={session_status}, "
+                    f"missing_slots={session_missing_slots})"
+                )
 
                 # Build outcome with plan and facts for consistency
                 outcome = {
@@ -706,14 +732,14 @@ def handle_message_legacy(
                     "action": session_action,
                     "slots": session_slots,
                     "missing_slots": session_missing_slots,
-                    "status": session_status,
+                    "status": final_status,
                     "plan": {
                         "intent": session_intent_str,
                         "stage": session_stage,
                         "action": session_action,
                         "missing_slots": session_missing_slots,
                         "slots": session_slots,
-                        "status": session_status,
+                        "status": final_status,
                         "executable_actions": [session_action] if session_action else []
                     },
                     "facts": {
@@ -760,18 +786,35 @@ def handle_message_legacy(
             "message": str(e)
         }
 
-    # SESSION LIFECYCLE RULE: For CREATE_APPOINTMENT, reuse session state as-is on empty/null Luma response
+    # SESSION LIFECYCLE RULE: For durable intents, reuse session state as-is on empty/null Luma response
     # Do not recompute slots or missing_slots - preserve session state exactly as-is
     if not luma_response or not isinstance(luma_response, dict):
         logger.error(
-            f"Luma returned None or invalid response for user {user_id}")
+            f"[LUMA_ERROR_FALLBACK] Luma returned None or invalid response for user {user_id}")
         if session_state:
-            session_intent = session_state.get("intent")
-            session_intent_str = session_intent if isinstance(session_intent, str) else (
-                session_intent.get("name", "") if isinstance(session_intent, dict) else "")
+            # CRITICAL: Check intent_name first, then fall back to intent
+            session_intent_str = session_state.get("intent_name") or (
+                session_state.get("intent") if isinstance(session_state.get("intent"), str) else
+                (session_state.get("intent", {}).get("name", "")
+                 if isinstance(session_state.get("intent"), dict) else "")
+            )
 
-            # For CREATE_APPOINTMENT, reuse session state as-is without recomputation
-            if session_intent_str == "CREATE_APPOINTMENT":
+            # Check if session intent is durable
+            is_durable = False
+            if session_intent_str:
+                try:
+                    is_durable = is_durable_intent(session_intent_str)
+                except (ImportError, Exception) as e:
+                    logger.warning(
+                        f"[LUMA_ERROR_FALLBACK] Failed to check durable status: {e}")
+
+            logger.error(
+                f"[LUMA_ERROR_FALLBACK] session_intent={session_intent_str}, is_durable={is_durable}, "
+                f"session_status={session_state.get('status')}, session_missing_slots={session_state.get('missing_slots', [])}"
+            )
+
+            # For durable intents, reuse session state as-is without recomputation
+            if is_durable:
                 session_slots = session_state.get("slots", {})
                 if not isinstance(session_slots, dict):
                     session_slots = {}
@@ -787,6 +830,14 @@ def handle_message_legacy(
                     session_action = "CONFIRM_APPOINTMENT"
                 session_status = session_state.get(
                     "status", "NEEDS_CLARIFICATION")
+                # CRITICAL: Status must be NEEDS_CLARIFICATION if there are missing slots
+                # Do NOT use session_status if it's READY but there are missing slots
+                final_status = "NEEDS_CLARIFICATION" if session_missing_slots else session_status
+
+                logger.error(
+                    f"[LUMA_ERROR_FALLBACK] Final status={final_status} (session_status={session_status}, "
+                    f"missing_slots={session_missing_slots})"
+                )
 
                 # Build outcome with plan and facts for consistency
                 outcome = {
@@ -795,14 +846,14 @@ def handle_message_legacy(
                     "action": session_action,
                     "slots": session_slots,
                     "missing_slots": session_missing_slots,
-                    "status": session_status,
+                    "status": final_status,
                     "plan": {
                         "intent": session_intent_str,
                         "stage": session_stage,
                         "action": session_action,
                         "missing_slots": session_missing_slots,
                         "slots": session_slots,
-                        "status": session_status,
+                        "status": final_status,
                         "executable_actions": [session_action] if session_action else []
                     },
                     "facts": {
@@ -855,16 +906,34 @@ def handle_message_legacy(
     try:
         assert_luma_contract(luma_response)
     except ContractViolation as e:
-        logger.error(f"Contract violation for user {user_id}: {str(e)}")
-        # SESSION LIFECYCLE RULE: For CREATE_APPOINTMENT, reuse session state as-is on contract violation
+        logger.error(
+            f"[LUMA_ERROR_FALLBACK] Contract violation for user {user_id}: {str(e)}")
+        # SESSION LIFECYCLE RULE: For durable intents, reuse session state as-is on contract violation
         # Do not recompute slots or missing_slots - preserve session state exactly as-is
         if session_state:
-            session_intent = session_state.get("intent")
-            session_intent_str = session_intent if isinstance(session_intent, str) else (
-                session_intent.get("name", "") if isinstance(session_intent, dict) else "")
+            # CRITICAL: Check intent_name first, then fall back to intent
+            session_intent_str = session_state.get("intent_name") or (
+                session_state.get("intent") if isinstance(session_state.get("intent"), str) else
+                (session_state.get("intent", {}).get("name", "")
+                 if isinstance(session_state.get("intent"), dict) else "")
+            )
 
-            # For CREATE_APPOINTMENT, reuse session state as-is without recomputation
-            if session_intent_str == "CREATE_APPOINTMENT":
+            # Check if session intent is durable
+            is_durable = False
+            if session_intent_str:
+                try:
+                    is_durable = is_durable_intent(session_intent_str)
+                except (ImportError, Exception) as e:
+                    logger.warning(
+                        f"[LUMA_ERROR_FALLBACK] Failed to check durable status: {e}")
+
+            logger.error(
+                f"[LUMA_ERROR_FALLBACK] session_intent={session_intent_str}, is_durable={is_durable}, "
+                f"session_status={session_state.get('status')}, session_missing_slots={session_state.get('missing_slots', [])}"
+            )
+
+            # For durable intents, reuse session state as-is without recomputation
+            if is_durable:
                 session_slots = session_state.get("slots", {})
                 if not isinstance(session_slots, dict):
                     session_slots = {}
@@ -880,6 +949,14 @@ def handle_message_legacy(
                     session_action = "CONFIRM_APPOINTMENT"
                 session_status = session_state.get(
                     "status", "NEEDS_CLARIFICATION")
+                # CRITICAL: Status must be NEEDS_CLARIFICATION if there are missing slots
+                # Do NOT use session_status if it's READY but there are missing slots
+                final_status = "NEEDS_CLARIFICATION" if session_missing_slots else session_status
+
+                logger.error(
+                    f"[LUMA_ERROR_FALLBACK] Final status={final_status} (session_status={session_status}, "
+                    f"missing_slots={session_missing_slots})"
+                )
 
                 # Build outcome with plan and facts for consistency
                 outcome = {
@@ -888,14 +965,14 @@ def handle_message_legacy(
                     "action": session_action,
                     "slots": session_slots,
                     "missing_slots": session_missing_slots,
-                    "status": session_status,
+                    "status": final_status,
                     "plan": {
                         "intent": session_intent_str,
                         "stage": session_stage,
                         "action": session_action,
                         "missing_slots": session_missing_slots,
                         "slots": session_slots,
-                        "status": session_status,
+                        "status": final_status,
                         "executable_actions": [session_action] if session_action else []
                     },
                     "facts": {
@@ -1108,19 +1185,34 @@ def handle_message_legacy(
     prior_missing = []
 
     # If session exists and not reset, merge slots from session
-    # SESSION LIFECYCLE RULE: Merge for NEEDS_CLARIFICATION sessions OR READY sessions with CREATE_APPOINTMENT
+    # SESSION LIFECYCLE RULE: Merge for NEEDS_CLARIFICATION sessions OR READY sessions with durable intents
     session_status_for_merge = session_state.get(
         "status") if session_state else None
+    # CRITICAL: Session stores intent_name, not intent. Check intent_name first, then fall back to intent.
     session_intent_for_merge = session_state.get(
-        "intent") if session_state else None
+        "intent_name") if session_state else None
+    if not session_intent_for_merge and session_state:
+        # Fallback to intent (for backward compatibility)
+        session_intent_for_merge = session_state.get("intent")
     session_intent_str_for_merge = session_intent_for_merge if isinstance(session_intent_for_merge, str) else (
         session_intent_for_merge.get("name", "") if isinstance(session_intent_for_merge, dict) else "")
+
+    # Check if session intent is durable
+    is_session_intent_durable = False
+    if session_intent_str_for_merge:
+        try:
+            is_session_intent_durable = is_durable_intent(
+                session_intent_str_for_merge)
+        except (ImportError, Exception) as e:
+            logger.warning(
+                f"Failed to check durable status for '{session_intent_str_for_merge}': {e}. "
+                f"Assuming not durable for merge decision."
+            )
 
     should_merge_session = (
         session_state and not session_reset_occurred and (
             session_status_for_merge == "NEEDS_CLARIFICATION" or
-            (session_status_for_merge ==
-             "READY" and session_intent_str_for_merge == "CREATE_APPOINTMENT")
+            (session_status_for_merge == "READY" and is_session_intent_durable)
         )
     )
 

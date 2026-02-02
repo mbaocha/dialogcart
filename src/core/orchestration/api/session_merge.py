@@ -1967,7 +1967,8 @@ def build_session_state_from_outcome(
     outcome: Dict[str, Any],
     outcome_status: str,
     merged_luma_response: Optional[Dict[str, Any]] = None,
-    previous_session_state: Optional[Dict[str, Any]] = None
+    previous_session_state: Optional[Dict[str, Any]] = None,
+    user_id: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """
     Build session state from outcome and merged Luma response.
@@ -2111,6 +2112,7 @@ def build_session_state_from_outcome(
     # Priority 3: Preserve previous session intent if no outcome/plan intent found (only if durable)
     # CRITICAL: If outcome.intent_name is falsy AND previous_session_state.intent_name exists AND is durable
     # → Preserve the previous session intent instead of writing None
+    # This check happens BEFORE session clearing to ensure durable intents are preserved
     if not intent_name and previous_session_state:
         previous_intent = previous_session_state.get(
             "intent_name") or previous_session_state.get("intent")
@@ -2120,7 +2122,7 @@ def build_session_state_from_outcome(
                 intent_name = previous_intent
                 logger.info(
                     f"[build_session_state_from_outcome] Preserving durable previous session intent={intent_name} "
-                    f"(outcome.intent_name was falsy/empty)"
+                    f"(outcome.intent_name was falsy/empty, status={outcome_status})"
                 )
             else:
                 logger.debug(
@@ -2423,8 +2425,8 @@ def build_session_state_from_outcome(
             )
 
     # TRACE_MERGE 5: Before persisting session
-    user_id = session_state.get("user_id", "unknown") if isinstance(
-        session_state, dict) else "unknown"
+    # CRITICAL: Use user_id parameter, not from session_state (session_state is being built, not previous session)
+    effective_user_id = user_id if user_id else (session_state.get("user_id") if isinstance(session_state, dict) else None) or "unknown"
     durable_slots_list = list(slots.keys()) if isinstance(slots, dict) else []
     raw_service_id = slots.get(
         "service_id") if isinstance(slots, dict) else None
@@ -2433,9 +2435,9 @@ def build_session_state_from_outcome(
     # DEBUG: Log service_id preservation (guarded by DEBUG flag)
     if os.getenv("DEBUG_SERVICE_ID", "0") == "1":
         logger.error("[DEBUG_SERVICE_ID] user_id=%s point=BEFORE_PERSIST raw_service_id=%s canonical_service_id=%s",
-                     user_id, raw_service_id, canonical_service_id)
+                     effective_user_id, raw_service_id, canonical_service_id)
     logger.error("[TRACE_MERGE] user_id=%s point=BEFORE_PERSIST session_after_candidate=%s durable_slots=%s slots_to_write=%s raw_service_id=%s canonical_service_id=%s",
-                 user_id, json.dumps(session_state, default=str, ensure_ascii=True), durable_slots_list, durable_slots_list, raw_service_id, canonical_service_id)
+                 effective_user_id, json.dumps(session_state, default=str, ensure_ascii=True), durable_slots_list, durable_slots_list, raw_service_id, canonical_service_id)
 
     # Persist modification context for MODIFY_* intents (allows context-aware required slot derivation)
     # This is persisted separately from slots to enable required slot inference even when slots are empty

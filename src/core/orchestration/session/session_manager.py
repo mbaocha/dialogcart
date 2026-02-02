@@ -167,16 +167,28 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Session state dictionary or None if not found/expired
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    key = _get_session_key(user_id)
+    logger.error("[SESSION_LOAD] Attempting to load: user_id=%s key=%s", user_id, key)
+    
     redis_client = _get_redis_client()
     if redis_client:
         # Try Redis first
         try:
-            key = _get_session_key(user_id)
             raw = redis_client.get(key)
             if not raw:
+                logger.error("[SESSION_LOAD] Not found in Redis: user_id=%s key=%s", user_id, key)
                 return None
-            return json.loads(raw)
-        except Exception:
+            session_state = json.loads(raw)
+            logger.error(
+                "[SESSION_LOAD] Found in Redis: user_id=%s key=%s intent_name=%r status=%r",
+                user_id, key, session_state.get("intent_name"), session_state.get("status")
+            )
+            return session_state
+        except Exception as e:
+            logger.warning("[SESSION_LOAD] Redis load failed, falling back to in-memory: user_id=%s error=%s", user_id, e)
             # Fall through to in-memory fallback
             pass
 
@@ -187,12 +199,18 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
         if time.time() - stored_at > SESSION_TTL_SECONDS_FALLBACK:
             # Expired, remove it
             del _in_memory_sessions[user_id]
+            logger.error("[SESSION_LOAD] Expired in in-memory: user_id=%s", user_id)
             return None
         # Return session state (without internal _stored_at field)
         session_state = {k: v for k, v in session_data.items()
                          if not k.startswith("_")}
+        logger.error(
+            "[SESSION_LOAD] Found in in-memory: user_id=%s intent_name=%r status=%r",
+            user_id, session_state.get("intent_name"), session_state.get("status")
+        )
         return session_state
 
+    logger.error("[SESSION_LOAD] Not found anywhere: user_id=%s key=%s", user_id, key)
     return None
 
 
@@ -211,6 +229,22 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
 
     Note: missing_slots are NOT stored in session - they are computed fresh.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    # Log session save with key verification
+    intent_name = session_state.get("intent_name")
+    status = session_state.get("status")
+    slots_keys = list(session_state.get("slots", {}).keys())
+    logger.error(
+        "[SESSION_SAVE] user_id=%s key=%s intent_name=%r status=%r slots_keys=%s",
+        user_id,
+        _get_session_key(user_id),
+        intent_name,
+        status,
+        slots_keys
+    )
+    
     redis_client = _get_redis_client()
     if redis_client:
         # Try Redis first
@@ -218,8 +252,10 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
             key = _get_session_key(user_id)
             serialized = json.dumps(session_state)
             redis_client.setex(key, SESSION_TTL_SECONDS, serialized)
+            logger.error("[SESSION_SAVE] Saved to Redis: user_id=%s key=%s", user_id, key)
             return
-        except Exception:
+        except Exception as e:
+            logger.warning("[SESSION_SAVE] Redis save failed, falling back to in-memory: user_id=%s error=%s", user_id, e)
             # Fall through to in-memory fallback
             pass
 
@@ -227,6 +263,7 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
     session_data = session_state.copy()
     session_data["_stored_at"] = time.time()
     _in_memory_sessions[user_id] = session_data
+    logger.error("[SESSION_SAVE] Saved to in-memory: user_id=%s", user_id)
 
 
 def clear_session(user_id: str) -> None:

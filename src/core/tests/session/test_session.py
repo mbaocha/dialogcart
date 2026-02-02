@@ -453,7 +453,7 @@ def test_scenario(
                 if outcome_status == "NEEDS_CLARIFICATION":
                     # Save session state for follow-up
                     new_session_state = build_session_state_from_outcome(
-                        outcome, outcome_status, merged_luma_response
+                        outcome, outcome_status, merged_luma_response, session_state, user_id
                     )
                     if new_session_state:
                         save_session(user_id, new_session_state)
@@ -470,7 +470,7 @@ def test_scenario(
                     # EXECUTED/AWAITING_CONFIRMATION also try to build (but will return None)
                     # Exception: CREATE_APPOINTMENT with READY status preserves session for follow-up modifications
                     new_session_state = build_session_state_from_outcome(
-                        outcome, outcome_status, merged_luma_response
+                        outcome, outcome_status, merged_luma_response, session_state, user_id
                     )
                     if new_session_state is None:
                         clear_session(user_id)

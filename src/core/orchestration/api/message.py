@@ -108,7 +108,7 @@ async def post_message(request: MessageRequest):
                 merged_luma_response = result.get("_merged_luma_response")
                 # Pass previous session state for context (intent change detection, etc.)
                 new_session_state = build_session_state_from_outcome(
-                    outcome, outcome_status, merged_luma_response, session_state
+                    outcome, outcome_status, merged_luma_response, session_state, request.user_id
                 )
                 if new_session_state:
                     save_session(request.user_id, new_session_state)
