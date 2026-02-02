@@ -87,13 +87,27 @@ def build_decision_plan(
         - blocked_actions: List of blocked action names
         - awaiting: USER_CONFIRMATION or null
     """
-    # SAFETY ASSERTION: Planning must NEVER run with invalid intent
+    # SAFETY ASSERTION: Planning must NEVER run with invalid intent when a durable session intent exists
     # This ensures future regressions fail fast
     # The orchestrator should have already recovered durable session intent before calling this function
-    assert intent_name and intent_name != "UNKNOWN", (
-        f"build_decision_plan called with empty intent. "
-        f"intent_name={intent_name!r}, domain={domain}"
-    )
+    # However, UNKNOWN is valid on first turns when there's no session - only assert if _effective_intent
+    # is set (indicating a session exists) and is durable, but intent_name is still UNKNOWN
+    # FIRST-TURN PERMISSIVENESS: On first-turn messages with no session, Luma may return UNKNOWN intent
+    # (e.g., user says just "tomorrow" without specifying service). This is valid and should not trigger
+    # an assertion. The assertion only fires when a durable session intent exists but wasn't recovered.
+    effective_intent_from_response = luma_response.get("_effective_intent", "")
+    # Only assert if _effective_intent is set (non-empty, non-UNKNOWN) and is durable, but intent_name is UNKNOWN
+    # This indicates a durable session intent should have been recovered but wasn't
+    if effective_intent_from_response and effective_intent_from_response != "UNKNOWN":
+        # Check if the effective intent is durable (only durable intents should trigger the assertion)
+        from core.orchestration.persistence.durable_intents import is_durable_intent
+        if is_durable_intent(effective_intent_from_response):
+            # There's a durable session intent that should have been used
+            assert intent_name and intent_name != "UNKNOWN", (
+                f"build_decision_plan called with invalid intent while durable session intent exists. "
+                f"intent_name={intent_name!r}, effective_intent={effective_intent_from_response}, domain={domain}"
+            )
+    # Otherwise, UNKNOWN is valid (first turn with no session, or non-durable intent)
     
     # Get commit action from unified policy (intent_policy.yaml)
     from core.policy.intent_policy import get_commit_action
@@ -112,9 +126,15 @@ def build_decision_plan(
     print(
         f"[BUILD_PLAN] intent={intent_name} missing_slots={missing_slots} needs_clarification={needs_clarification} confirmation_state={confirmation_state}")
 
+    # UNKNOWN INTENT RULE: Always return NEEDS_CLARIFICATION when intent is UNKNOWN
+    # UNKNOWN means we don't know what the user wants, so we must clarify
+    if intent_name == "UNKNOWN":
+        status = "NEEDS_CLARIFICATION"
+        print(
+            f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because intent=UNKNOWN (must clarify user intent)")
     # CRITICAL: If missing_slots is non-empty, status MUST be NEEDS_CLARIFICATION
     # This is the authoritative rule - missing slots drive clarification, not Luma flags
-    if missing_slots:
+    elif missing_slots:
         status = "NEEDS_CLARIFICATION"
         print(
             f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots={missing_slots}")

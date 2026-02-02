@@ -180,14 +180,31 @@ def facts_to_slots(
             # Single date for reservation - do NOT promote to date
             logger.debug("Reservation with single date: skipping slots.date promotion")
     else:
-        # For appointments or other intents: take first date only if a single date is present
+        # For appointments or other intents: handle single dates and date ranges
         if "dates" in facts and isinstance(facts["dates"], list):
             if len(facts["dates"]) == 1:
                 slots["date"] = raw_date or facts["dates"][0]
                 logger.debug(f"Promoted facts.dates[0]={facts['dates'][0]} to slots.date")
             elif len(facts["dates"]) >= 2:
-                # Range-like dates should not be promoted to a single date for service intents
-                logger.debug("Multiple dates for non-reservation intent: skipping slots.date promotion")
+                # DATE RANGE RECOVERY: For appointments, date ranges (e.g., "next week") satisfy the date slot
+                # requirement. Promote to date_range to preserve the range information without forcing
+                # a single date selection. The date_range structure is authoritative and preserves the full range.
+                # We also set date to the first date for planning layer compatibility (it checks for "date" in
+                # collected_slots), but date_range is the source of truth for the actual range.
+                # This enables slot recovery for relative date ranges like "next week", "this month", etc.
+                slots["date_range"] = (
+                    raw_date_range
+                    if raw_date_range
+                    else {"start": facts["dates"][0], "end": facts["dates"][-1]}
+                )
+                # Set date to first date for planning layer compatibility (satisfies "date" requirement)
+                # but date_range is authoritative and preserves the full range without collapsing
+                slots["date"] = raw_date or facts["dates"][0]
+                logger.info(
+                    f"Promoted facts.dates (length={len(facts['dates'])}) to slots.date_range and slots.date "
+                    f"for appointment date range recovery. date_range={slots['date_range']} (authoritative), "
+                    f"date={slots['date']} (for planning compatibility)"
+                )
     
     # List mappings (take first element)
     if "times" in facts and isinstance(facts["times"], list) and len(facts["times"]) > 0:

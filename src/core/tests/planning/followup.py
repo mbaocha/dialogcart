@@ -261,9 +261,15 @@ followup_scenarios = [
                         "stage": "AVAILABILITY",
                         "action": "SEARCH_AVAILABILITY"
                     },
-                    "missing_slots": ["date", "time"],
-                    # Multiple dates from "next week" are not promoted to single date for service appointments
-                    "slots": {"service_id": "facial"}
+                    "missing_slots": ["time"],
+                    # Date ranges (e.g., "next week") now satisfy the date slot for CREATE_APPOINTMENT.
+                    # Core promotes date ranges to both date_range (authoritative) and date (for planning compatibility).
+                    # The date slot is considered satisfied when a date_range is present.
+                    "slots": {
+                        "service_id": "facial",
+                        "date_range": {"start": "2026-01-19", "end": "2026-01-25"},
+                        "date": "next week"
+                    }
                 }
             },
             {
@@ -659,8 +665,15 @@ followup_scenarios = [
                         "stage": "AVAILABILITY",
                         "action": "SEARCH_AVAILABILITY"
                     },
-                    "missing_slots": ["date", "time"],
-                    "slots": {"service_id": "haircut"}
+                    "missing_slots": ["time"],
+                    # Date ranges (e.g., "from nov 1st to nov 5th") now satisfy the date slot for CREATE_APPOINTMENT.
+                    # Core promotes date ranges to both date_range (authoritative) and date (for planning compatibility).
+                    # The date slot is considered satisfied when a date_range is present.
+                    "slots": {
+                        "service_id": "haircut",
+                        "date_range": {"start": "2026-11-01", "end": "2026-11-05"},
+                        "date": "nov 1st"
+                    }
                 }
             }
         ]

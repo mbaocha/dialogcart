@@ -119,6 +119,26 @@ def finalize_turn_state(
             "status": "NEEDS_CLARIFICATION"
         }
     
+    # UNKNOWN INTENT RULE: Always return NEEDS_CLARIFICATION when intent is UNKNOWN
+    # UNKNOWN means we don't know what the user wants, so we must clarify
+    # This applies even if missing_slots is empty (planner may return [] for UNKNOWN)
+    if intent_name == "UNKNOWN":
+        # Build effective_collected_slots from merged_session_slots
+        effective_collected_slots = {
+            slot_name: slot_value
+            for slot_name, slot_value in merged_session_slots.items()
+            if slot_value is not None
+        }
+        logger.info(
+            f"[FINALIZE_TURN_STATE] intent=UNKNOWN, forcing NEEDS_CLARIFICATION. "
+            f"effective_slots={sorted(effective_collected_slots.keys())}"
+        )
+        return {
+            "effective_slots": effective_collected_slots,
+            "missing_slots": [],  # UNKNOWN has no required slots, but still needs clarification
+            "status": "NEEDS_CLARIFICATION"
+        }
+    
     # Use planner to compute missing_slots
     # Slots are treated as an unordered, additive map
     policy = _get_planning_policy()

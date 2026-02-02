@@ -989,30 +989,60 @@ def process_luma_response(
     effective_collected_slots = turn_state["effective_slots"]
     missing_slots = turn_state["missing_slots"]
 
-    # APPOINTMENT INTENT RULE: Only exact time_constraint satisfies the time requirement
-    # mode=exact → satisfies time, mode=fuzzy/window → does NOT satisfy time
+    # APPOINTMENT INTENT RULE: Bounded time_constraint (with both start and end) satisfies the time requirement
+    # - mode=exact → satisfies time (always has start, may have end)
+    # - mode=fuzzy/window with BOTH start and end → satisfies time (bounded fuzzy/window)
+    # - mode=fuzzy/window with only start OR no bounds → does NOT satisfy time (unbounded)
     # This must happen BEFORE plan is built (plan status depends on missing_slots)
     time_constraint = luma_response.get("time_constraint")
     if intent_name == "CREATE_APPOINTMENT" and time_constraint is not None:
-        # Check if time_constraint mode is exact (only exact satisfies time requirement)
         time_constraint_mode = None
+        time_constraint_start = None
+        time_constraint_end = None
         if isinstance(time_constraint, dict):
             time_constraint_mode = time_constraint.get("mode")
+            time_constraint_start = time_constraint.get("start")
+            time_constraint_end = time_constraint.get("end")
 
-        # Only remove "time" from missing_slots if mode is exact
-        if time_constraint_mode == "exact":
+        # Check if time_constraint is bounded (has both start and end)
+        has_start = time_constraint_start is not None and str(time_constraint_start).strip() != ""
+        has_end = time_constraint_end is not None and str(time_constraint_end).strip() != ""
+        is_bounded = has_start and has_end
+
+        # Bounded time_constraint (with both start and end) satisfies time requirement regardless of mode
+        # This includes: exact mode, bounded fuzzy (e.g., "afternoon" with start+end), bounded window
+        if is_bounded:
             if "time" in missing_slots:
                 missing_slots = [s for s in missing_slots if s != "time"]
                 logger.info(
-                    f"[MISSING_SLOTS] time_constraint (mode=exact) satisfies time for CREATE_APPOINTMENT - removed 'time' from missing_slots before plan build"
+                    f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}, bounded=True) satisfies time for CREATE_APPOINTMENT - removed 'time' from missing_slots before plan build"
+                )
+                # Update turn_state with corrected missing_slots
+                turn_state["missing_slots"] = missing_slots
+        elif time_constraint_mode == "exact" and has_start:
+            # Exact mode with start (even without end) satisfies time
+            if "time" in missing_slots:
+                missing_slots = [s for s in missing_slots if s != "time"]
+                logger.info(
+                    f"[MISSING_SLOTS] time_constraint (mode=exact, start={time_constraint_start}) satisfies time for CREATE_APPOINTMENT - removed 'time' from missing_slots before plan build"
                 )
                 # Update turn_state with corrected missing_slots
                 turn_state["missing_slots"] = missing_slots
         else:
-            # Fuzzy/window time_constraint does NOT satisfy time requirement
-            logger.debug(
-                f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}) does NOT satisfy time for CREATE_APPOINTMENT - keeping 'time' in missing_slots"
-            )
+            # Unbounded fuzzy/window time_constraint does NOT satisfy time requirement
+            # CRITICAL: Ensure "time" is in missing_slots for unbounded fuzzy/window modes
+            # The planner might have removed it if it saw a time slot, but unbounded times need clarification
+            if time_constraint_mode in ("fuzzy", "window") and "time" not in missing_slots:
+                missing_slots.append("time")
+                logger.info(
+                    f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}, bounded={is_bounded}) does NOT satisfy time for CREATE_APPOINTMENT - added 'time' to missing_slots"
+                )
+                # Update turn_state with corrected missing_slots
+                turn_state["missing_slots"] = missing_slots
+            else:
+                logger.debug(
+                    f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}, bounded={is_bounded}) does NOT satisfy time for CREATE_APPOINTMENT - keeping 'time' in missing_slots"
+                )
 
     # Note: turn_state["status"] is the base status, but build_plan may override based on
     # needs_clarification or confirmation_state
@@ -1063,15 +1093,23 @@ def process_luma_response(
         f"user_id={user_id}"
     )
 
-    # SAFETY ASSERTION: Planning must NEVER run with invalid intent
+    # SAFETY ASSERTION: Planning must NEVER run with invalid intent when a durable session intent exists
     # This ensures future regressions fail fast
     # The orchestrator should have already recovered durable session intent before calling this function
-    assert intent_name and intent_name != "UNKNOWN", (
-        f"Planning called with invalid intent while durable session intent exists. "
-        f"intent_name={intent_name!r}, user_id={user_id}, "
-        f"luma_intent={luma_response.get('intent', {}).get('name', '')}, "
-        f"effective_intent={luma_response.get('_effective_intent', '')}"
-    )
+    # However, UNKNOWN is valid on first turns when there's no session - only assert if _effective_intent
+    # is set (indicating a session exists) but intent_name is still UNKNOWN
+    effective_intent_from_response = luma_response.get("_effective_intent", "")
+    # Only assert if _effective_intent is set (non-empty, non-UNKNOWN) but intent_name is UNKNOWN
+    # This indicates a durable session intent should have been recovered but wasn't
+    if effective_intent_from_response and effective_intent_from_response != "UNKNOWN":
+        # There's a durable session intent that should have been used
+        assert intent_name and intent_name != "UNKNOWN", (
+            f"Planning called with invalid intent while durable session intent exists. "
+            f"intent_name={intent_name!r}, user_id={user_id}, "
+            f"luma_intent={luma_response.get('intent', {}).get('name', '')}, "
+            f"effective_intent={effective_intent_from_response}"
+        )
+    # Otherwise, UNKNOWN is valid (first turn with no session)
 
     # Build decision plan with recomputed missing_slots (ONLY source of truth)
     from core.planning.orchestration.plan_builder import build_decision_plan

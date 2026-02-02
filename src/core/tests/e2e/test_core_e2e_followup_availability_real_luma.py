@@ -14,9 +14,20 @@ This test validates:
 To run this test:
   RUN_REAL_LUMA_E2E=true pytest core/tests/e2e/test_core_e2e_followup_availability_real_luma.py
 
+To run a specific test by index (0-based):
+  E2E_TEST_INDEX=2 RUN_REAL_LUMA_E2E=true pytest core/tests/e2e/test_core_e2e_followup_availability_real_luma.py
+
+To run multiple tests by index (comma-separated):
+  E2E_TEST_INDEX=4,9,10 RUN_REAL_LUMA_E2E=true pytest core/tests/e2e/test_core_e2e_followup_availability_real_luma.py
+
 Requirements:
   - RUN_REAL_LUMA_E2E=true environment variable must be set
   - Luma service must be running (defaults to http://localhost:9001, or set LUMA_BASE_URL)
+
+Features:
+  - Run specific tests by index using E2E_TEST_INDEX environment variable (single or comma-separated)
+  - Automatic failure summary at end of run showing failing test indices and names
+  - Copy-paste commands to rerun failing tests (single or multiple)
 """
 
 import os
@@ -57,7 +68,38 @@ def load_scenarios() -> List[Dict[str, Any]]:
     with open(scenarios_file, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
 
-    return data.get("scenarios", [])
+    scenarios = data.get("scenarios", [])
+    
+    # Support selecting specific tests by index via environment variable
+    # Usage: 
+    #   E2E_TEST_INDEX=2 pytest ... to run only test at index 2 (0-based)
+    #   E2E_TEST_INDEX=2,4,9 pytest ... to run tests at indices 2, 4, and 9
+    test_index_env = os.getenv("E2E_TEST_INDEX")
+    if test_index_env is not None:
+        try:
+            # Parse comma-separated indices
+            index_strings = [s.strip() for s in test_index_env.split(",")]
+            selected_indices = []
+            for index_str in index_strings:
+                if index_str:
+                    index = int(index_str)
+                    if 0 <= index < len(scenarios):
+                        selected_indices.append(index)
+                    else:
+                        print(f"\n[E2E_TEST] WARNING: Test index {index} is out of range (0-{len(scenarios)-1}). Skipping.\n")
+            
+            if selected_indices:
+                # Return only the selected scenarios (preserve order)
+                selected = [scenarios[i] for i in sorted(set(selected_indices))]  # Remove duplicates and sort
+                names = [s.get('name', 'unnamed') for s in selected]
+                print(f"\n[E2E_TEST] Running {len(selected)} test(s) at indices {sorted(set(selected_indices))}: {', '.join(names)}\n")
+                return selected
+            else:
+                print(f"\n[E2E_TEST] WARNING: No valid test indices found. Running all tests.\n")
+        except ValueError as e:
+            print(f"\n[E2E_TEST] WARNING: Invalid E2E_TEST_INDEX value '{test_index_env}'. Must be comma-separated numbers. Running all tests.\n")
+    
+    return scenarios
 
 
 def create_mock_availability_client() -> Mock:
@@ -200,7 +242,27 @@ def assert_turn_expectations(
         pass
 
 
-@pytest.mark.parametrize("scenario", load_scenarios())
+# Load scenarios once for parametrization
+_scenarios_for_parametrize = load_scenarios()
+
+def _scenario_id(scenario: Dict[str, Any]) -> str:
+    """Generate test ID with index and name."""
+    # Load all scenarios to get index
+    scenarios_file = Path(__file__).parent / "scenarios" / \
+        "followup_availability_real_luma.yaml"
+    if scenarios_file.exists():
+        with open(scenarios_file, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+        all_scenarios = data.get("scenarios", [])
+        try:
+            idx = all_scenarios.index(scenario)
+            return f"{idx}-{scenario.get('name', 'unnamed')}"
+        except ValueError:
+            return scenario.get('name', 'unnamed')
+    return scenario.get('name', 'unnamed')
+
+
+@pytest.mark.parametrize("scenario", _scenarios_for_parametrize, ids=_scenario_id)
 def test_real_luma_followup_scenario(scenario: Dict[str, Any]):
     """
     Test a single scenario from the YAML file using real Luma client.
@@ -297,7 +359,3 @@ def test_real_luma_followup_scenario(scenario: Dict[str, Any]):
                 session_state["action"] = plan_obj.get("action")
 
             session_store.save_session(user_id, session_state)
-
-
-if __name__ == "__main__":
-    pytest.main([__file__, "-v"])

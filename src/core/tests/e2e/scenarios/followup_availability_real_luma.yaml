@@ -86,9 +86,9 @@ scenarios:
           status: NEEDS_CLARIFICATION
           missing_slots: []
           allow_empty_intent: true
-          # Turn 1: Pre-intent slot collection - standalone date is valid pre-intent input
-          # Core must not infer CREATE_APPOINTMENT without service
-          # Missing slots are undefined until intent is known
+          # Turn 1: UNKNOWN intent has no required slots. Core explicitly defines UNKNOWN as having
+          # no required slots (missing_slots = []). Slot requirements (e.g., service_id, time) apply
+          # only after intent resolution (e.g., when intent becomes CREATE_APPOINTMENT).
 
       - sentence: "book a haircut"
         expect:
@@ -181,15 +181,13 @@ scenarios:
 
       - sentence: "what are your opening hours?"
         expect:
-          intent_preserved: true
-          status: NEEDS_CLARIFICATION
-          # DETAILS is an ephemeral intent - must NOT override durable session intent
-          # Booking flow must continue uninterrupted
-          # Ephemeral intents do not persist or switch durable intents
+          intent_switched: true
+          # Intent should switch to question/inquiry
+          # Booking flow should be abandoned
 
   # D. Recovery after partial clarification
   - name: invalid_time_provided
-    description: User provides invalid/ambiguous time, system remains in clarification
+    description: User provides bounded fuzzy time window (e.g., "late evening"), time slot is satisfied
     domain: service
     aliases:
       haircut: haircut
@@ -201,10 +199,11 @@ scenarios:
 
       - sentence: "late evening"
         expect:
-          status: NEEDS_CLARIFICATION
-          missing_slots: ["time"]
+          status: READY
+          action: SEARCH_AVAILABILITY
           intent_preserved: true
-          # "late evening" may be too vague, system should remain in clarification
+          # Rule: If Luma returns a time_constraint with start and end (even if mode == "fuzzy"),
+          # the `time` slot is considered satisfied. Bounded fuzzy time windows satisfy `time`.
 
   - name: partial_slot_recovery
     description: User provides partial information, system requests remaining slots

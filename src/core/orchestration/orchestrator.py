@@ -1044,6 +1044,9 @@ def handle_message_legacy(
 
     # Resolve effective intent using new intent_resolution module
     from core.planning.orchestration.intent_resolution import resolve_effective_intent
+    # CRITICAL: Preserve original session_state before intent resolution
+    # This ensures session (with intent_name + slots) is available for merge_luma_with_session
+    original_session_state = session_state
     effective_intent, session_reset_occurred = resolve_effective_intent(
         luma_response,
         session_state,
@@ -1051,8 +1054,39 @@ def handle_message_legacy(
         transaction_id
     )
 
-    # Update session_state if it was reset
+    # Track the source of session_reset_occurred
+    session_reset_occurred_source = "resolve_effective_intent"
+    logger.error(
+        f"[SESSION_RESET_WRITER] RECEIVED_FROM_RESOLVER value={session_reset_occurred} "
+        f"source={session_reset_occurred_source} "
+        f"effective_intent={effective_intent} "
+        f"user_id={user_id}{log_transaction_id}"
+    )
+
+    # DEBUG: Log result immediately after resolve_effective_intent returns
+    logger.error(
+        f"[ORCHESTRATOR] AFTER resolve_effective_intent: effective_intent={effective_intent} "
+        f"session_reset_occurred={session_reset_occurred} "
+        f"will_null_session_state={session_reset_occurred} "
+        f"user_id={user_id}{log_transaction_id}"
+    )
+
+    # Update session_state if it was reset (for downstream logic)
+    # BUT preserve original_session_state for merge decision - merge needs access to original session
+    # CRITICAL: UNKNOWN → concrete intent transitions do NOT reset (intent materialization, not destructive switch)
+    # Only true intent switches (e.g., CREATE_APPOINTMENT → DETAILS) reset the session
     if session_reset_occurred:
+        # DEBUG: Log why session_state is being nulled
+        import traceback
+        # Last 2 frames before this one
+        call_stack = ''.join(traceback.format_stack()[-3:-1])
+        logger.error(
+            f"[ORCHESTRATOR] NULLING session_state: reason=session_reset_occurred=True "
+            f"effective_intent={effective_intent} "
+            f"original_session_intent={original_session_state.get('intent_name') if original_session_state else None} "
+            f"call_stack={call_stack} "
+            f"user_id={user_id}{log_transaction_id}"
+        )
         session_state = None
 
     # SINGLE SOURCE OF TRUTH: Ensure effective_intent is never None/empty when durable session intent exists
@@ -1084,6 +1118,70 @@ def handle_message_legacy(
                         f"[INTENT_PRESERVATION] Using session intent as effective_intent (durability check failed): {effective_intent} "
                         f"(user_id={user_id}{log_transaction_id})"
                     )
+
+    # SHORT-CIRCUIT: Non-durable intents must NOT reach planning or persistence
+    # Rule: Any intent with durable=false may be recognized, but must:
+    # - STOP before planning (do not call build_decision_plan)
+    # - NOT be persisted to session (do not update session.intent_name or slots)
+    # - Preserve any existing durable session state
+    # Only durable intents may reach build_decision_plan
+    # CRITICAL: Check AFTER UNKNOWN recovery to ensure we catch non-durable intents even after recovery
+    if effective_intent and effective_intent != "UNKNOWN":
+        try:
+            from core.policy.intent_policy import get_intent_durable
+            is_durable = get_intent_durable(effective_intent)
+
+            if not is_durable:
+                # Non-durable intent detected - return informational response immediately
+                # Do NOT proceed to planning, merge, or persistence
+                # Do NOT treat this as a session reset - preserve existing durable session state
+                logger.info(
+                    f"[NON_DURABLE_INTENT] Short-circuiting planning for non-durable intent: {effective_intent} "
+                    f"(user_id={user_id}{log_transaction_id})"
+                )
+
+                # Extract facts from Luma response for informational response
+                facts_obj = luma_response.get("facts", {})
+                from core.orchestration.luma_facts_adapter import facts_to_slots
+                slots = facts_to_slots(
+                    facts_obj,
+                    intent_name=effective_intent,
+                    source_text=text,
+                ) if isinstance(facts_obj, dict) else {}
+
+                # Also check for slots in nested facts.facts.slots or top-level slots
+                if isinstance(facts_obj, dict) and "slots" in facts_obj:
+                    nested_slots = facts_obj.get("slots", {})
+                    if isinstance(nested_slots, dict):
+                        slots.update(nested_slots)
+                elif "slots" in luma_response:
+                    top_level_slots = luma_response.get("slots", {})
+                    if isinstance(top_level_slots, dict):
+                        slots.update(top_level_slots)
+
+                # Return informational response (similar to non-core intent handling)
+                # Do NOT persist to session, do NOT plan, do NOT merge
+                # Preserve existing durable session state (do not clear session)
+                return {
+                    "success": True,
+                    "outcome": {
+                        "status": "NON_DURABLE_INTENT",
+                        "intent_name": effective_intent,
+                        "slots": slots,
+                        "missing_slots": [],  # Non-durable intents don't have required slots
+                        "facts": {
+                            "slots": slots,
+                            "missing_slots": [],
+                            "context": luma_response.get("context", {}),
+                        }
+                    }
+                }
+        except (ImportError, Exception) as e:
+            # If durability check fails, log warning but continue (defensive)
+            logger.warning(
+                f"Failed to check durable status for '{effective_intent}': {e}. "
+                f"Continuing with planning (assuming durable)."
+            )
 
     # Construct effective_response: Copy luma_response and replace intent.name with effective_intent
     # FACT-ONLY CONTRACT: facts may be empty or partial - this is valid
@@ -1158,18 +1256,20 @@ def handle_message_legacy(
     )
 
     # PHASE 1 INSTRUMENTATION: Log intent state BEFORE merge_luma_with_session and process_luma_response
+    # CRITICAL: Use original_session_state for logging to show actual session state before any reset
     session_intent_for_trace = None
     session_status_for_trace = None
-    if session_state:
-        session_intent_for_trace = session_state.get(
-            "intent_name") or session_state.get("intent")
-        session_status_for_trace = session_state.get("status")
+    if original_session_state:
+        session_intent_for_trace = original_session_state.get(
+            "intent_name") or original_session_state.get("intent")
+        session_status_for_trace = original_session_state.get("status")
     logger.error(
         "[INTENT_TRACE_ORCHESTRATOR] BEFORE merge_luma_with_session: "
         f"effective_intent={effective_intent}, "
         f"effective_response['intent']['name']={effective_response.get('intent', {}).get('name', '')}, "
         f"session.intent_name={session_intent_for_trace}, "
         f"session.status={session_status_for_trace}, "
+        f"session_reset_occurred={session_reset_occurred}, "
         f"user_id={user_id}{log_transaction_id}"
     )
 
@@ -1186,14 +1286,17 @@ def handle_message_legacy(
 
     # If session exists and not reset, merge slots from session
     # SESSION LIFECYCLE RULE: Merge for NEEDS_CLARIFICATION sessions OR READY sessions with durable intents
-    session_status_for_merge = session_state.get(
-        "status") if session_state else None
+    # CRITICAL: Use original_session_state (preserved before reset) for merge decision and merge call
+    # This ensures session (with intent_name + slots) is always available even if session_state was set to None
+    session_for_merge = original_session_state if original_session_state else session_state
+    session_status_for_merge = session_for_merge.get(
+        "status") if session_for_merge else None
     # CRITICAL: Session stores intent_name, not intent. Check intent_name first, then fall back to intent.
-    session_intent_for_merge = session_state.get(
-        "intent_name") if session_state else None
-    if not session_intent_for_merge and session_state:
+    session_intent_for_merge = session_for_merge.get(
+        "intent_name") if session_for_merge else None
+    if not session_intent_for_merge and session_for_merge:
         # Fallback to intent (for backward compatibility)
-        session_intent_for_merge = session_state.get("intent")
+        session_intent_for_merge = session_for_merge.get("intent")
     session_intent_str_for_merge = session_intent_for_merge if isinstance(session_intent_for_merge, str) else (
         session_intent_for_merge.get("name", "") if isinstance(session_intent_for_merge, dict) else "")
 
@@ -1209,24 +1312,65 @@ def handle_message_legacy(
                 f"Assuming not durable for merge decision."
             )
 
+    # SESSION MERGE GATING: Allow merge for:
+    # 1. NEEDS_CLARIFICATION sessions (normal follow-up turns)
+    # 2. READY sessions with durable intents (modification turns)
+    # 3. UNKNOWN → concrete intent transitions (intent materialization, preserves pre-intent slots)
+    #    Note: session_reset_occurred is False for UNKNOWN → concrete transitions (see intent_resolution.py)
+    #    This ensures pre-intent slots (e.g., date from "tomorrow") are merged when intent materializes
+
+    # DEBUG: Log merge decision inputs before computing should_merge_session
+    session_for_merge_intent = session_for_merge.get(
+        "intent_name") if session_for_merge else None
+    session_for_merge_slots = list(session_for_merge.get(
+        "slots", {}).keys()) if session_for_merge else []
+
+    # CRITICAL: Final check - who last set session_reset_occurred?
+    logger.error(
+        f"[SESSION_RESET_WRITER] FINAL_CHECK_BEFORE_MERGE: "
+        f"session_reset_occurred={session_reset_occurred} "
+        f"source={session_reset_occurred_source} "
+        f"session_for_merge_exists={session_for_merge is not None} "
+        f"session_for_merge_intent={session_for_merge_intent} "
+        f"session_for_merge_slots={session_for_merge_slots} "
+        f"session_status_for_merge={session_status_for_merge} "
+        f"will_block_merge={session_reset_occurred} "
+        f"user_id={user_id}{log_transaction_id}"
+    )
+
+    logger.error(
+        f"[ORCHESTRATOR] BEFORE should_merge_session: session_reset_occurred={session_reset_occurred} "
+        f"session_for_merge_intent={session_for_merge_intent} "
+        f"session_for_merge_slots={session_for_merge_slots} "
+        f"session_status_for_merge={session_status_for_merge} "
+        f"is_session_intent_durable={is_session_intent_durable} "
+        f"user_id={user_id}{log_transaction_id}"
+    )
+
     should_merge_session = (
-        session_state and not session_reset_occurred and (
+        session_for_merge and not session_reset_occurred and (
             session_status_for_merge == "NEEDS_CLARIFICATION" or
             (session_status_for_merge == "READY" and is_session_intent_durable)
         )
     )
 
+    # DEBUG: Log final merge decision
+    logger.error(
+        f"[ORCHESTRATOR] should_merge_session={should_merge_session} "
+        f"user_id={user_id}{log_transaction_id}"
+    )
+
     if should_merge_session:
         logger.info(
             f"[SESSION_MERGE] Merging session slots: status={session_status_for_merge}, intent={session_intent_str_for_merge}, "
-            f"session_slots={list(session_state.get('slots', {}).keys())}"
+            f"session_slots={list(session_for_merge.get('slots', {}).keys())}"
         )
-        prior_intent = session_state.get("intent")
-        prior_missing = session_state.get("missing_slots", [])
-        prior_slots = list(session_state.get("slots", {}).keys())
+        prior_intent = session_for_merge.get("intent")
+        prior_missing = session_for_merge.get("missing_slots", [])
+        prior_slots = list(session_for_merge.get("slots", {}).keys())
 
         effective_response = merge_luma_with_session(
-            effective_response, session_state, planning_only=planning_only)
+            effective_response, session_for_merge, planning_only=planning_only)
 
         # AFTER_MERGE: Log right after session merge
         effective_collected_slots = effective_response.get(
@@ -1240,7 +1384,7 @@ def handle_message_legacy(
         }
     else:
         # No session merge (first turn or session reset or READY non-CREATE_APPOINTMENT)
-        if session_state:
+        if original_session_state:
             logger.info(
                 f"[SESSION_MERGE] Skipping merge: status={session_status_for_merge}, intent={session_intent_str_for_merge}, "
                 f"session_reset_occurred={session_reset_occurred}"

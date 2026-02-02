@@ -811,6 +811,10 @@ def merge_luma_with_session(
         f"[SLOT_DURABILITY] session.slots before merge: {list(session_slots.keys())} = {session_slots}")
 
     # Start with session slots (preserve all previously resolved slots)
+    # CRITICAL MERGE ORDER: This merge MUST happen BEFORE intent-change filtering (line ~1033)
+    # to ensure valid slots from previous turns (e.g., date from UNKNOWN intent) are preserved
+    # when transitioning to concrete intents (e.g., UNKNOWN -> CREATE_APPOINTMENT).
+    # The merged_slots will be filtered later if intent changes, but only AFTER all slots are merged.
     merged_slots = session_slots.copy()
 
     # CRITICAL: Preserve raw service_id from session if Luma doesn't provide it
@@ -1001,6 +1005,12 @@ def merge_luma_with_session(
     # - Drop slots not valid for the new intent
     # - Preserve slots that overlap semantically (e.g., service_id if applicable)
     # - Recompute missing_slots from NEW intent contract ONLY
+    #
+    # CRITICAL MERGE ORDER: Session slots MUST be fully merged into merged_slots BEFORE
+    # intent-change filtering is applied. This ensures valid slots from previous turns
+    # (e.g., date from UNKNOWN intent) are preserved when transitioning to concrete intents.
+    # The merge happens at line 814 (merged_slots = session_slots.copy()) and lines 826-840
+    # (additive merge of Luma slots), so merged_slots contains all session slots at this point.
 
     session_intent_name = session_intent if isinstance(session_intent, str) else (
         session_intent.get("name", "") if isinstance(session_intent, dict) else "")
@@ -1017,6 +1027,23 @@ def merge_luma_with_session(
             f"[INTENT_CHANGE] Intent changed: previous={session_intent_name} -> new={merged_intent_name}"
         )
 
+        # CRITICAL: Ensure all session slots are in merged_slots before filtering
+        # This is a defensive check to prevent slot loss during intent transitions
+        # (e.g., UNKNOWN -> CREATE_APPOINTMENT where date should be preserved)
+        if session_slots:
+            missing_from_merge = set(session_slots.keys()) - set(merged_slots.keys())
+            if missing_from_merge:
+                logger.warning(
+                    f"[INTENT_CHANGE] Session slots missing from merged_slots before filtering! "
+                    f"Missing: {list(missing_from_merge)}, restoring..."
+                )
+                # Restore missing session slots before filtering
+                for key in missing_from_merge:
+                    merged_slots[key] = session_slots[key]
+                    logger.info(
+                        f"[INTENT_CHANGE] Restored session slot before filtering: {key} = {session_slots[key]}"
+                    )
+
         # LOG: slots before filtering
         slots_before_filtering = merged_slots.copy()
         logger.info(
@@ -1030,6 +1057,8 @@ def merge_luma_with_session(
         # CRITICAL: filter_collected_slots_for_intent must be strict
         # date/time slots from service intent must NOT leak into reservation intent
         # start_date/end_date must NOT satisfy service date implicitly
+        # NOTE: merged_slots now contains all session slots (merged at line 814) plus Luma slots,
+        # so filtering will preserve valid slots from both sources
         merged_slots = filter_collected_slots_for_intent(
             merged_slots, session_intent_name, merged_intent_name
         )
@@ -1630,16 +1659,22 @@ def merge_luma_with_session(
 
     # Assertion: session.intent determines planner path exclusively
     # Verify that merged intent matches session intent (when session exists and not reset)
+    # CRITICAL: UNKNOWN is a placeholder intent and must be allowed to materialize into concrete intents
+    # Only enforce equality for concrete session intents (not UNKNOWN)
     merged_intent = merged.get("intent", {})
     merged_intent_name = merged_intent.get(
         "name", "") if isinstance(merged_intent, dict) else ""
     if session_intent and session_status != "READY":
         session_intent_str = session_intent if isinstance(
             session_intent, str) else session_intent.get("name", "")
-        assert merged_intent_name == session_intent_str, (
-            f"Session intent mismatch: session.intent={session_intent_str}, "
-            f"merged.intent={merged_intent_name}. Session intent must determine planner path exclusively."
-        )
+        # Relax assertion for UNKNOWN → concrete intent materialization
+        # UNKNOWN is a placeholder and must be allowed to upgrade to concrete intents
+        # Only enforce equality when session intent is concrete (safety check for concrete→concrete mismatches)
+        if session_intent_str != "UNKNOWN":
+            assert merged_intent_name == session_intent_str, (
+                f"Session intent mismatch: session.intent={session_intent_str}, "
+                f"merged.intent={merged_intent_name}. Session intent must determine planner path exclusively."
+            )
 
     return merged
 
