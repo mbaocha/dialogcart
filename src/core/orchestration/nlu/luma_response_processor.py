@@ -988,6 +988,35 @@ def process_luma_response(
 
     effective_collected_slots = turn_state["effective_slots"]
     missing_slots = turn_state["missing_slots"]
+    
+    # INVESTIGATION: Log missing_slots after finalize_turn_state, before time_constraint logic
+    from core.planning.orchestration.missing_slots import get_planning_required_slots_for_intent
+    try:
+        required_slots = get_planning_required_slots_for_intent(intent_name)
+    except (ImportError, Exception):
+        required_slots = []
+    
+    # Get session slots if available (for first turn, there's no session)
+    # Session slots are in slots_for_filtering (merged session slots)
+    # For first turn, slots_for_filtering only contains current turn slots
+    # For follow-up turns, slots_for_filtering contains merged session + current turn slots
+    session_slots = slots_for_filtering  # This is the merged slots (session + current turn)
+    
+    logger.error(
+        f"[MISSING_SLOTS_TRACE] process_luma_response: AFTER finalize_turn_state, BEFORE time_constraint logic, "
+        f"intent={intent_name}, user_id={user_id}, "
+        f"required_slots={required_slots}, "
+        f"effective_collected_slots_keys={sorted(effective_collected_slots.keys())}, "
+        f"effective_collected_slots={effective_collected_slots}, "
+        f"session_slots_keys={sorted(session_slots.keys()) if isinstance(session_slots, dict) else []}, "
+        f"session_slots={session_slots}, "
+        f"slots_for_filtering_keys={sorted(slots_for_filtering.keys())}, "
+        f"missing_slots={missing_slots}, "
+        f"missing_slots_length={len(missing_slots)}, "
+        f"has_time_in_effective={('time' in effective_collected_slots)}, "
+        f"has_time_in_session={('time' in session_slots if isinstance(session_slots, dict) else False)}, "
+        f"has_time_in_slots_for_filtering={('time' in slots_for_filtering)}"
+    )
 
     # APPOINTMENT INTENT RULE: Bounded time_constraint (with both start and end) satisfies the time requirement
     # - mode=exact → satisfies time (always has start, may have end)
@@ -1009,20 +1038,89 @@ def process_luma_response(
         has_end = time_constraint_end is not None and str(time_constraint_end).strip() != ""
         is_bounded = has_start and has_end
 
-        # Bounded time_constraint (with both start and end) satisfies time requirement regardless of mode
-        # This includes: exact mode, bounded fuzzy (e.g., "afternoon" with start+end), bounded window
+        # CRITICAL: Check for concrete time slot existence
+        # "time" is satisfied ONLY if:
+        # 1. A concrete "time" slot exists in effective_collected_slots (current turn), OR
+        # 2. A concrete "time" slot exists in slots_for_filtering (session slots), OR
+        # 3. time_constraint.mode == "exact" (exact mode always satisfies, even if derived)
+        # 
+        # Do NOT treat fuzzy or windowed time constraints as satisfying "time" unless a concrete slot exists.
+        has_time_slot_current = "time" in effective_collected_slots
+        has_time_slot_session = "time" in slots_for_filtering
+        has_concrete_time_slot = has_time_slot_current or has_time_slot_session
+        is_exact_mode = time_constraint_mode == "exact"
+        
+        # GUARD: Only remove "time" from missing_slots if:
+        # a) A concrete time value exists in effective_collected_slots (e.g., "14:00", "4pm"), OR
+        # b) time_constraint.mode == "exact" (exact mode always satisfies)
+        # Do NOT remove "time" for fuzzy/bounded signals like "evening", "morning", "afternoon"
+        # even if they have bounded time_constraint with start and end.
+        # 
+        # For bounded fuzzy/window modes, a concrete time slot is REQUIRED.
+        # Only exact mode can satisfy without a concrete slot.
+        # 
+        # NARROW GUARD: For fuzzy/window modes, require concrete time slot (do not rely on bounded constraint alone)
+        if time_constraint_mode in ("fuzzy", "window"):
+            # Fuzzy/window modes: require concrete time slot (bounded constraint alone is NOT sufficient)
+            can_remove_time = has_concrete_time_slot
+        else:
+            # Exact mode or unknown mode: allow removal if concrete slot exists OR exact mode
+            can_remove_time = has_concrete_time_slot or is_exact_mode
+        
+        # Bounded time_constraint (with both start and end) satisfies time requirement ONLY if:
+        # - A concrete time slot exists, OR
+        # - Mode is exact
+        # Do NOT satisfy for fuzzy/window modes without concrete time slot
         if is_bounded:
             if "time" in missing_slots:
-                missing_slots = [s for s in missing_slots if s != "time"]
-                logger.info(
-                    f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}, bounded=True) satisfies time for CREATE_APPOINTMENT - removed 'time' from missing_slots before plan build"
-                )
-                # Update turn_state with corrected missing_slots
-                turn_state["missing_slots"] = missing_slots
+                if can_remove_time:
+                    # Time is satisfied (concrete slot exists OR exact mode) - remove from missing_slots
+                    missing_slots_before = missing_slots.copy()
+                    missing_slots = [s for s in missing_slots if s != "time"]
+                    # INVESTIGATION: Log missing_slots mutation
+                    logger.error(
+                        f"[MISSING_SLOTS_TRACE] process_luma_response: REMOVING 'time' from missing_slots (bounded time_constraint with satisfied time), "
+                        f"intent={intent_name}, user_id={user_id}, "
+                        f"required_slots={required_slots}, "
+                        f"effective_collected_slots_keys={sorted(effective_collected_slots.keys())}, "
+                        f"has_time_in_effective={has_time_slot_current}, "
+                        f"has_time_in_slots_for_filtering={has_time_slot_session}, "
+                        f"is_exact_mode={is_exact_mode}, "
+                        f"missing_slots_before={missing_slots_before}, "
+                        f"missing_slots_after={missing_slots}, "
+                        f"time_constraint_mode={time_constraint_mode}, is_bounded={is_bounded}"
+                    )
+                    logger.info(
+                        f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}, bounded=True) with satisfied time (concrete_slot={has_concrete_time_slot}, exact_mode={is_exact_mode}) satisfies time for CREATE_APPOINTMENT - removed 'time' from missing_slots before plan build"
+                    )
+                    # Update turn_state with corrected missing_slots
+                    turn_state["missing_slots"] = missing_slots
+                else:
+                    # Bounded fuzzy/window without concrete time slot - do NOT satisfy time
+                    # Guard blocked removal: fuzzy/bounded signals like "evening" require concrete time slot
+                    logger.info(
+                        f"[MISSING_SLOTS] Guard blocked removal: Bounded time_constraint (mode={time_constraint_mode}, bounded=True) without concrete time slot does NOT satisfy time for CREATE_APPOINTMENT - keeping 'time' in missing_slots. "
+                        f"Fuzzy/window constraints (e.g., 'evening', 'morning', 'afternoon') require concrete time slot. "
+                        f"Time slot check: current_turn={has_time_slot_current}, session={has_time_slot_session}, exact_mode={is_exact_mode}, can_remove_time={can_remove_time}. "
+                        f"Reason: Guard requires concrete time value (e.g., '14:00', '4pm') OR exact mode for bounded fuzzy/window constraints."
+                    )
         elif time_constraint_mode == "exact" and has_start:
             # Exact mode with start (even without end) satisfies time
             if "time" in missing_slots:
+                missing_slots_before = missing_slots.copy()
                 missing_slots = [s for s in missing_slots if s != "time"]
+                # INVESTIGATION: Log missing_slots mutation
+                logger.error(
+                    f"[MISSING_SLOTS_TRACE] process_luma_response: REMOVING 'time' from missing_slots (exact time_constraint), "
+                    f"intent={intent_name}, user_id={user_id}, "
+                    f"required_slots={required_slots}, "
+                    f"effective_collected_slots_keys={sorted(effective_collected_slots.keys())}, "
+                    f"has_time_in_effective={has_time_slot_current}, "
+                    f"has_time_in_slots_for_filtering={has_time_slot_session}, "
+                    f"missing_slots_before={missing_slots_before}, "
+                    f"missing_slots_after={missing_slots}, "
+                    f"time_constraint_mode={time_constraint_mode}, has_start={has_start}"
+                )
                 logger.info(
                     f"[MISSING_SLOTS] time_constraint (mode=exact, start={time_constraint_start}) satisfies time for CREATE_APPOINTMENT - removed 'time' from missing_slots before plan build"
                 )
@@ -1033,7 +1131,20 @@ def process_luma_response(
             # CRITICAL: Ensure "time" is in missing_slots for unbounded fuzzy/window modes
             # The planner might have removed it if it saw a time slot, but unbounded times need clarification
             if time_constraint_mode in ("fuzzy", "window") and "time" not in missing_slots:
+                missing_slots_before = missing_slots.copy()
                 missing_slots.append("time")
+                # INVESTIGATION: Log missing_slots mutation
+                logger.error(
+                    f"[MISSING_SLOTS_TRACE] process_luma_response: ADDING 'time' to missing_slots (unbounded fuzzy/window), "
+                    f"intent={intent_name}, user_id={user_id}, "
+                    f"required_slots={required_slots}, "
+                    f"effective_collected_slots_keys={sorted(effective_collected_slots.keys())}, "
+                    f"has_time_in_effective={('time' in effective_collected_slots)}, "
+                    f"has_time_in_slots_for_filtering={('time' in slots_for_filtering)}, "
+                    f"missing_slots_before={missing_slots_before}, "
+                    f"missing_slots_after={missing_slots}, "
+                    f"time_constraint_mode={time_constraint_mode}, is_bounded={is_bounded}"
+                )
                 logger.info(
                     f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}, bounded={is_bounded}) does NOT satisfy time for CREATE_APPOINTMENT - added 'time' to missing_slots"
                 )
@@ -1078,6 +1189,19 @@ def process_luma_response(
     # MUST NOT be overridden or filtered after this point
     luma_response_for_plan = luma_response.copy()
     luma_response_for_plan["missing_slots"] = missing_slots
+    
+    # INVESTIGATION: Log missing_slots before passing to build_decision_plan
+    logger.error(
+        f"[MISSING_SLOTS_TRACE] process_luma_response: BEFORE build_decision_plan, "
+        f"intent={intent_name}, user_id={user_id}, "
+        f"required_slots={required_slots}, "
+        f"effective_collected_slots_keys={sorted(effective_collected_slots.keys())}, "
+        f"has_time_in_effective={('time' in effective_collected_slots)}, "
+        f"has_time_in_slots_for_filtering={('time' in slots_for_filtering)}, "
+        f"missing_slots={missing_slots}, "
+        f"missing_slots_length={len(missing_slots)}, "
+        f"luma_response_for_plan['missing_slots']={luma_response_for_plan.get('missing_slots')}"
+    )
     # Also include effective_collected_slots for executable_actions computation
     luma_response_for_plan["_effective_collected_slots"] = effective_collected_slots
 
@@ -1114,6 +1238,16 @@ def process_luma_response(
     # Build decision plan with recomputed missing_slots (ONLY source of truth)
     from core.planning.orchestration.plan_builder import build_decision_plan
     plan = build_decision_plan(intent_name, luma_response_for_plan, domain)
+    
+    # INVESTIGATION: Log missing_slots after build_decision_plan
+    logger.error(
+        f"[MISSING_SLOTS_TRACE] process_luma_response: AFTER build_decision_plan, "
+        f"intent={intent_name}, user_id={user_id}, "
+        f"missing_slots_variable={missing_slots}, "
+        f"missing_slots_length={len(missing_slots)}, "
+        f"luma_response_for_plan['missing_slots']={luma_response_for_plan.get('missing_slots')}, "
+        f"plan.keys()={list(plan.keys())}"
+    )
 
     # Check if Luma indicates clarification is needed
     # FACT-ONLY: needs_clarification is optional - only check if present

@@ -1,0 +1,256 @@
+============================= test session starts ==============================
+platform linux -- Python 3.10.13, pytest-9.0.2, pluggy-1.6.0
+rootdir: /mnt/c/Users/user/Documents/projects/my-project/dialogcart/src
+configfile: pytest.ini
+plugins: anyio-4.12.0
+collected 83 items / 1 skipped
+
+core/tests/e2e/test_core_e2e_followup_availability.py .                  [  1%]
+core/tests/e2e/test_core_e2e_single_turn_availability.py .               [  2%]
+core/tests/execution/test_availability_execution.py ..                   [  4%]
+core/tests/execution/test_booking_execution.py ..                        [  7%]
+core/tests/execution/test_confirmation_execution.py ..                   [  9%]
+core/tests/execution/test_test_backend.py .......                        [ 18%]
+core/tests/integration/test_commit_gated_workflow.py ...                 [ 21%]
+core/tests/integration/test_lifecycle_notification.py .                  [ 22%]
+core/tests/intents/test_base_intents.py .........                        [ 33%]
+core/tests/orchestration/contracts/test_luma_contracts.py ......         [ 40%]
+core/tests/orchestration/test_non_core_intent_passthrough.py ..........  [ 53%]
+core/tests/orchestration/test_orchestrator_flow.py F.....                [ 60%]
+core/tests/orchestration/test_time_normalization.py ....F                [ 66%]
+core/tests/session/test_session_manager.py ............                  [ 80%]
+core/tests/workflows/test_workflow_invocation.py ......                  [ 87%]
+core/tests/workflows/test_workflow_manual.py ...                         [ 91%]
+core/tests/workflows/test_workflow_registry.py .......                   [100%]
+
+=================================== FAILURES ===================================
+___________________ test_resolved_flow_calls_booking_client ____________________
+core/tests/orchestration/test_orchestrator_flow.py:71: in test_resolved_flow_calls_booking_client
+    assert plan["status"] == "READY"  # Planning result, not execution
+E   AssertionError: assert 'NEEDS_CLARIFICATION' == 'READY'
+E     
+E     - READY
+E     + NEEDS_CLARIFICATION
+----------------------------- Captured stdout call -----------------------------
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=[]
+  effective_slots_for_filtering.keys()=[]
+  promoted_slots={}
+  effective_collected_slots (after filter)={}
+  effective_collected_slots.keys()=[]
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {}, "effective_collected_slots": {}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date', 'service_id', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "missing_slots": [
+    "date",
+    "service_id",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date', 'service_id', 'time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date', 'service_id', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "promoted_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date",
+    "service_id",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+------------------------------ Captured log call -------------------------------
+INFO     core.turn_log:orchestrator.py:274 {"turn": "INPUT", "user_id": "user123", "text": "book haircut tomorrow at 2pm"}
+INFO     core.turn_log:orchestrator.py:294 {"turn": "SESSION_READ", "session": null}
+INFO     core.turn_log:orchestrator.py:637 {"turn": "LUMA", "intent": "CREATE_APPOINTMENT", "slots": {}, "missing_slots": []}
+ERROR    core.planning.orchestration.intent_resolution:intent_resolution.py:128 [SESSION_RESET_WRITER] WRITER=initial_default value=False location=line_122_default reason=initial_assignment luma_intent=CREATE_APPOINTMENT user_id=user123
+ERROR    core.planning.orchestration.intent_resolution:intent_resolution.py:384 [SESSION_RESET_WRITER] FINAL_VALUE=False effective_intent=CREATE_APPOINTMENT location=line_337_before_return user_id=user123
+ERROR    core.planning.orchestration.intent_resolution:intent_resolution.py:390 [INTENT_RESOLVE] RETURNING effective_intent=CREATE_APPOINTMENT session_reset_occurred=False user_id=user123
+ERROR    core.orchestration.orchestrator:orchestrator.py:1100 [SESSION_RESET_WRITER] RECEIVED_FROM_RESOLVER value=False source=resolve_effective_intent effective_intent=CREATE_APPOINTMENT user_id=user123
+ERROR    core.orchestration.orchestrator:orchestrator.py:1108 [ORCHESTRATOR] AFTER resolve_effective_intent: effective_intent=CREATE_APPOINTMENT session_reset_occurred=False will_null_session_state=False user_id=user123
+ERROR    core.orchestration.orchestrator:orchestrator.py:1307 [INTENT_TRACE_ORCHESTRATOR] BEFORE merge_luma_with_session: effective_intent=CREATE_APPOINTMENT, effective_response['intent']['name']=CREATE_APPOINTMENT, session.intent_name=None, session.status=None, session_reset_occurred=False, user_id=user123
+ERROR    core.orchestration.orchestrator:orchestrator.py:1370 [SESSION_RESET_WRITER] FINAL_CHECK_BEFORE_MERGE: session_reset_occurred=False source=resolve_effective_intent session_for_merge_exists=False session_for_merge_intent=None session_for_merge_slots=[] session_status_for_merge=None will_block_merge=False user_id=user123
+ERROR    core.orchestration.orchestrator:orchestrator.py:1382 [ORCHESTRATOR] BEFORE should_merge_session: session_reset_occurred=False session_for_merge_intent=None session_for_merge_slots=[] session_status_for_merge=None is_session_intent_durable=False user_id=user123
+ERROR    core.orchestration.orchestrator:orchestrator.py:1399 [ORCHESTRATOR] should_merge_session=None user_id=user123
+ERROR    core.orchestration.orchestrator:orchestrator.py:1594 [INTENT_TRACE_ORCHESTRATOR] BEFORE process_luma_response: effective_response['intent']['name']=CREATE_APPOINTMENT, effective_response['_effective_intent']=CREATE_APPOINTMENT, session.intent_name=None, session.status=None, user_id=user123
+ERROR    core.orchestration.api.turn_state:turn_state.py:138 [MISSING_SLOTS_TRACE] finalize_turn_state: INITIAL computation from planner, intent=CREATE_APPOINTMENT, required_slots=['service_id', 'date', 'time'], collected_slots=[], effective_collected_slots_keys=[], missing_slots=['date', 'service_id', 'time'], missing_slots_length=3
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1005 [MISSING_SLOTS_TRACE] process_luma_response: AFTER finalize_turn_state, BEFORE time_constraint logic, intent=CREATE_APPOINTMENT, user_id=user123, required_slots=['service_id', 'date', 'time'], effective_collected_slots_keys=[], effective_collected_slots={}, session_slots_keys=[], session_slots={}, slots_for_filtering_keys=[], missing_slots=['date', 'service_id', 'time'], missing_slots_length=3, has_time_in_effective=False, has_time_in_session=False, has_time_in_slots_for_filtering=False
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1194 [MISSING_SLOTS_TRACE] process_luma_response: BEFORE build_decision_plan, intent=CREATE_APPOINTMENT, user_id=user123, required_slots=['service_id', 'date', 'time'], effective_collected_slots_keys=[], has_time_in_effective=False, has_time_in_slots_for_filtering=False, missing_slots=['date', 'service_id', 'time'], missing_slots_length=3, luma_response_for_plan['missing_slots']=['date', 'service_id', 'time']
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1211 [INTENT_TRACE_PLANNING_ENTRY] BEFORE build_decision_plan: decision.intent_name=CREATE_APPOINTMENT, facts.intent_name=, luma_response['intent']['name']=CREATE_APPOINTMENT, luma_response['_effective_intent']=CREATE_APPOINTMENT, user_id=user123
+ERROR    core.planning.orchestration.plan_builder:plan_builder.py:120 [MISSING_SLOTS_TRACE] build_decision_plan: AFTER _extract_missing_slots, intent=CREATE_APPOINTMENT, missing_slots=['date', 'service_id', 'time'], missing_slots_length=3, luma_response.missing_slots=['date', 'service_id', 'time'], luma_response.issues=None
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1243 [MISSING_SLOTS_TRACE] process_luma_response: AFTER build_decision_plan, intent=CREATE_APPOINTMENT, user_id=user123, missing_slots_variable=['date', 'service_id', 'time'], missing_slots_length=3, luma_response_for_plan['missing_slots']=['date', 'service_id', 'time'], plan.keys()=['status', 'stage', 'action', 'allowed_actions', 'blocked_actions', 'awaiting', 'executable_actions']
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1448 [FLOW_TRACE] process_luma_response building facts:
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1449 [FLOW_TRACE]   facts.slots: {} (keys: [])
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1451 [FLOW_TRACE]   facts.missing_slots: ['date', 'service_id', 'time'] (len: 3)
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1503 [FLOW_TRACE] process_luma_response RETURNING:
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1504 [FLOW_TRACE]   decision.keys(): ['intent_name', 'action_name', 'booking', 'plan', 'facts']
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1506 [FLOW_TRACE]   decision.facts: {'slots': {}, 'missing_slots': ['date', 'service_id', 'time'], 'context': {}, '_debug': {'recomputed_missing_slots': ['date', 'service_id', 'time'], 'effective_collected_slots': [], 'slots_keys': [], 'booking_has_services': True, 'service_id_in_slots': False, 'service_id_value': None}}
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1508 [FLOW_TRACE]   decision.facts.slots: {}
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1510 [FLOW_TRACE]   decision.facts.missing_slots: ['date', 'service_id', 'time']
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1512 [FLOW_TRACE]   decision.plan.stage: AVAILABILITY
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1514 [FLOW_TRACE]   decision.plan.action: SEARCH_AVAILABILITY
+ERROR    core.orchestration.orchestrator:orchestrator.py:1912 [PLAN_FINAL] stage=AVAILABILITY action=SEARCH_AVAILABILITY missing=['date', 'service_id', 'time'] slots={}
+__________________ test_time_normalized_not_in_missing_slots ___________________
+core/tests/orchestration/test_time_normalization.py:209: in test_time_normalized_not_in_missing_slots
+    assert "time_constraint" in context, f"Expected time_constraint in context, got: {list(context.keys())}"
+E   AssertionError: Expected time_constraint in context, got: ['time_mode']
+E   assert 'time_constraint' in {'time_mode': 'exact'}
+----------------------------- Captured stdout call -----------------------------
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2025-12-20"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2025-12-20"
+    }
+  },
+  "missing_slots": [],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=[] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=READY (no missing slots, no clarification needed, no pending confirmation)
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2025-12-20"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2025-12-20"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2025-12-20"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [],
+  "status": "READY",
+  "decision_reason": "READY_ALL_SATISFIED"
+}
+------------------------------ Captured log call -------------------------------
+ERROR    core.orchestration.api.turn_state:turn_state.py:138 [MISSING_SLOTS_TRACE] finalize_turn_state: INITIAL computation from planner, intent=CREATE_APPOINTMENT, required_slots=['service_id', 'date', 'time'], collected_slots=['date', 'service_id'], effective_collected_slots_keys=['date', 'service_id'], missing_slots=['time'], missing_slots_length=1
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1005 [MISSING_SLOTS_TRACE] process_luma_response: AFTER finalize_turn_state, BEFORE time_constraint logic, intent=CREATE_APPOINTMENT, user_id=test_user, required_slots=['service_id', 'date', 'time'], effective_collected_slots_keys=['date', 'service_id'], effective_collected_slots={'service_id': 'haircut', 'date': '2025-12-20'}, session_slots_keys=['date', 'service_id'], session_slots={'service_id': 'haircut', 'date': '2025-12-20'}, slots_for_filtering_keys=['date', 'service_id'], missing_slots=['time'], missing_slots_length=1, has_time_in_effective=False, has_time_in_session=False, has_time_in_slots_for_filtering=False
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1113 [MISSING_SLOTS_TRACE] process_luma_response: REMOVING 'time' from missing_slots (exact time_constraint), intent=CREATE_APPOINTMENT, user_id=test_user, required_slots=['service_id', 'date', 'time'], effective_collected_slots_keys=['date', 'service_id'], has_time_in_effective=False, has_time_in_slots_for_filtering=False, missing_slots_before=['time'], missing_slots_after=[], time_constraint_mode=exact, has_start=True
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1194 [MISSING_SLOTS_TRACE] process_luma_response: BEFORE build_decision_plan, intent=CREATE_APPOINTMENT, user_id=test_user, required_slots=['service_id', 'date', 'time'], effective_collected_slots_keys=['date', 'service_id'], has_time_in_effective=False, has_time_in_slots_for_filtering=False, missing_slots=[], missing_slots_length=0, luma_response_for_plan['missing_slots']=[]
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1211 [INTENT_TRACE_PLANNING_ENTRY] BEFORE build_decision_plan: decision.intent_name=CREATE_APPOINTMENT, facts.intent_name=, luma_response['intent']['name']=CREATE_APPOINTMENT, luma_response['_effective_intent']=, user_id=test_user
+ERROR    core.planning.orchestration.plan_builder:plan_builder.py:120 [MISSING_SLOTS_TRACE] build_decision_plan: AFTER _extract_missing_slots, intent=CREATE_APPOINTMENT, missing_slots=[], missing_slots_length=0, luma_response.missing_slots=[], luma_response.issues=None
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1243 [MISSING_SLOTS_TRACE] process_luma_response: AFTER build_decision_plan, intent=CREATE_APPOINTMENT, user_id=test_user, missing_slots_variable=[], missing_slots_length=0, luma_response_for_plan['missing_slots']=[], plan.keys()=['status', 'stage', 'action', 'allowed_actions', 'blocked_actions', 'awaiting', 'executable_actions']
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1448 [FLOW_TRACE] process_luma_response building facts:
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1449 [FLOW_TRACE]   facts.slots: {'service_id': 'haircut', 'date': '2025-12-20', 'time': '3pm'} (keys: ['service_id', 'date', 'time'])
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1451 [FLOW_TRACE]   facts.missing_slots: [] (len: 0)
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1454 [FLOW_TRACE]   facts.slots.service_id: haircut
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1503 [FLOW_TRACE] process_luma_response RETURNING:
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1504 [FLOW_TRACE]   decision.keys(): ['intent_name', 'action_name', 'booking', 'plan', 'facts']
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1506 [FLOW_TRACE]   decision.facts: {'slots': {'service_id': 'haircut', 'date': '2025-12-20', 'time': '3pm'}, 'missing_slots': [], 'context': {'time_mode': 'exact'}, '_debug': {'recomputed_missing_slots': [], 'effective_collected_slots': ['service_id', 'date'], 'slots_keys': ['service_id', 'date', 'time'], 'booking_has_services': True, 'service_id_in_slots': True, 'service_id_value': 'haircut'}}
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1508 [FLOW_TRACE]   decision.facts.slots: {'service_id': 'haircut', 'date': '2025-12-20', 'time': '3pm'}
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1510 [FLOW_TRACE]   decision.facts.missing_slots: []
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1512 [FLOW_TRACE]   decision.plan.stage: CONFIRM
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1514 [FLOW_TRACE]   decision.plan.action: CONFIRM_APPOINTMENT
+=========================== short test summary info ============================
+FAILED core/tests/orchestration/test_orchestrator_flow.py::test_resolved_flow_calls_booking_client
+FAILED core/tests/orchestration/test_time_normalization.py::test_time_normalized_not_in_missing_slots
+=================== 2 failed, 81 passed, 1 skipped in 10.30s ===================
+================================================================================
+Running tests: all
+Path: core/tests
+Working directory: /mnt/c/Users/user/Documents/projects/my-project/dialogcart/src
+================================================================================
+

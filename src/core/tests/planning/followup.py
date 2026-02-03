@@ -275,14 +275,21 @@ followup_scenarios = [
             {
                 "sentence": "afternoon",
                 "expected": {
-                    "status": "NEEDS_CLARIFICATION",
+                    "status": "READY",
                     "plan": {
                         "stage": "AVAILABILITY",
                         "action": "SEARCH_AVAILABILITY"
                     },
-                    "missing_slots": ["date"],
-                    # Date still missing because "next week" didn't create a date slot
-                    "slots": {"service_id": "facial", "time": "afternoon"}
+                    "missing_slots": [],
+                    # Bounded fuzzy times (e.g., "afternoon" with start and end) satisfy the time slot.
+                    # Date range from turn 2 persists in session and satisfies the date slot.
+                    # Both date and time are now satisfied, so status is READY.
+                    "slots": {
+                        "service_id": "facial",
+                        "date_range": {"start": "2026-01-19", "end": "2026-01-25"},
+                        "date": "next week",
+                        "time": "afternoon"
+                    }
                 }
             }
         ]

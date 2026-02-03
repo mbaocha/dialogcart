@@ -298,7 +298,9 @@ def assert_turn_expectations(
     return None
 
 
-def test_scenario(
+# Note: This is a helper function, not a pytest test
+# Renamed to avoid pytest collection
+def run_scenario_test(
     scenario: Dict[str, Any],
     scenario_id: int,
     customer_details: Dict[str, Optional[Any]],

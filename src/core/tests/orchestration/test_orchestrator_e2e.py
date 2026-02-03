@@ -225,8 +225,12 @@ def get_customer_details() -> Dict[str, Optional[Any]]:
     }
 
 
-class TestLumaClient(LumaClient):
-    """Custom LumaClient that injects tenant_context from test example aliases."""
+class MockLumaClientForTests(LumaClient):
+    """Custom LumaClient that injects tenant_context from test example aliases.
+    
+    Note: Renamed from TestLumaClient to avoid pytest collection (pytest doesn't
+    collect classes with __init__ that start with 'Test').
+    """
 
     def __init__(self, test_aliases: Optional[Dict[str, str]] = None):
         """Initialize with test aliases to inject."""
@@ -290,7 +294,7 @@ def run_example(example_num: int, example: Dict[str, Any], verbose: bool = True)
     test_aliases = example.get("aliases")
     luma_client = None
     if test_aliases:
-        luma_client = TestLumaClient(test_aliases=test_aliases)
+        luma_client = MockLumaClientForTests(test_aliases=test_aliases)
         if verbose:
             print(f"Using test aliases: {test_aliases}")
 

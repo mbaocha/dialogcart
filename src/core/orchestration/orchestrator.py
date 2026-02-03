@@ -42,6 +42,7 @@ from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.cache.catalog_cache import catalog_cache
 from core.orchestration.cache.org_domain_cache import org_domain_cache
 from core.orchestration.persistence.durable_intents import is_durable_intent
+from core.routing.workflows import get_workflow
 
 logger = logging.getLogger(__name__)
 # Dedicated turn-level logger (clean, minimal logs - ONE log per section)
@@ -185,6 +186,39 @@ def _get_org_id_from_env() -> int:
         return 1
 
 
+def _invoke_workflow_after_execute(intent_name: str, outcome: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Invoke workflow after_execute hook if a workflow is registered for the intent.
+
+    This function looks up the workflow for the given intent and calls its
+    after_execute method if it exists. If no workflow is registered or the
+    workflow doesn't implement after_execute, the outcome is returned unchanged.
+
+    Args:
+        intent_name: Intent name to look up workflow for
+        outcome: Outcome dictionary to pass to workflow
+
+    Returns:
+        Modified outcome dictionary (or original if no workflow or no changes)
+    """
+    try:
+        workflow = get_workflow(intent_name)
+        if workflow and hasattr(workflow, "after_execute"):
+            try:
+                return workflow.after_execute(outcome)
+            except Exception as e:
+                logger.warning(
+                    f"Workflow after_execute hook failed for intent '{intent_name}': {e}. "
+                    f"Returning original outcome."
+                )
+                return outcome
+    except Exception as e:
+        logger.debug(
+            f"Error looking up workflow for intent '{intent_name}': {e}")
+
+    return outcome
+
+
 def handle_message(
     text: str,
     user_id: str,
@@ -193,10 +227,15 @@ def handle_message(
     organization_client: Optional[OrganizationClient] = None,
     session_store: Optional[Any] = None,
     frozen_time: Optional[datetime] = None,
-    organization_id: Optional[int] = None
+    organization_id: Optional[int] = None,
+    **kwargs  # Backward-compat shim: ignore unknown infra parameters (e.g., domain, customer_id)  # noqa: ARG001
 ) -> Dict[str, Any]:
     """
     Canonical Core entrypoint for handling user messages.
+
+    Note: **kwargs is a backward-compatibility shim that accepts but ignores
+    unknown infrastructure parameters (e.g., domain, customer_id). These parameters
+    are not used internally and are silently ignored.
 
     This function orchestrates the full flow:
     1. Retrieves session state (if session_store provided)
@@ -219,6 +258,8 @@ def handle_message(
         session_store: Optional session store with get_session(user_id) method
         frozen_time: Optional frozen time for testing
         organization_id: Optional organization ID (defaults to ORG_ID env or 1)
+        **kwargs: Backward-compat shim - accepts but ignores unknown infrastructure parameters
+                 (e.g., domain, customer_id). These are not used internally.
 
     Returns:
         Dictionary with:

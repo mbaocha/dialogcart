@@ -115,6 +115,16 @@ def build_decision_plan(
 
     # Extract missing slots
     missing_slots = _extract_missing_slots(luma_response)
+    
+    # INVESTIGATION: Log missing_slots extraction in build_decision_plan
+    logger.error(
+        f"[MISSING_SLOTS_TRACE] build_decision_plan: AFTER _extract_missing_slots, "
+        f"intent={intent_name}, "
+        f"missing_slots={missing_slots}, "
+        f"missing_slots_length={len(missing_slots)}, "
+        f"luma_response.missing_slots={luma_response.get('missing_slots')}, "
+        f"luma_response.issues={luma_response.get('issues')}"
+    )
 
     # Determine status
     needs_clarification = luma_response.get("needs_clarification", False)
@@ -126,12 +136,13 @@ def build_decision_plan(
     print(
         f"[BUILD_PLAN] intent={intent_name} missing_slots={missing_slots} needs_clarification={needs_clarification} confirmation_state={confirmation_state}")
 
-    # UNKNOWN INTENT RULE: Always return NEEDS_CLARIFICATION when intent is UNKNOWN
-    # UNKNOWN means we don't know what the user wants, so we must clarify
+    # CRITICAL PLANNING INVARIANT: UNKNOWN intent ALWAYS requires clarification
+    # UNKNOWN means we don't know what the user wants, so we must clarify regardless of missing_slots
+    # This prevents UNKNOWN from being marked as READY even when missing_slots is empty
     if intent_name == "UNKNOWN":
         status = "NEEDS_CLARIFICATION"
         print(
-            f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because intent=UNKNOWN (must clarify user intent)")
+            f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because intent=UNKNOWN (UNKNOWN always requires clarification)")
     # CRITICAL: If missing_slots is non-empty, status MUST be NEEDS_CLARIFICATION
     # This is the authoritative rule - missing slots drive clarification, not Luma flags
     elif missing_slots:

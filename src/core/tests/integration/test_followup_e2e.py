@@ -107,7 +107,7 @@ except Exception as e:
     print(f"Error loading .env files: {e}")
 
 
-def test_followup_scenario_e2e(
+def run_followup_scenario_e2e(
     scenario: Dict[str, Any],
     scenario_index: int,
     customer_details: Dict[str, Optional[Any]],
@@ -194,7 +194,7 @@ def test_followup_scenario_e2e(
                 error_msg = result.get("error", "Unknown error")
                 return False, f"Turn {turn_index + 1} failed: handle_message returned success=false: {error_msg}"
 
-            outcome = result.get("outcome", {})
+            outcome = result.get("result", {})
             actual_status = outcome.get("status")
 
             # Extract intent from multiple possible sources
@@ -251,7 +251,7 @@ def test_followup_scenario_e2e(
                         if not confirm_result.get("success"):
                             return False, f"Turn {turn_index + 1} confirmation failed: {confirm_result.get('error', 'Unknown error')}"
                         
-                        confirm_outcome = confirm_result.get("outcome", {})
+                        confirm_outcome = confirm_result.get("result", {})
                         confirm_status = confirm_outcome.get("status")
                         
                         if confirm_status != "EXECUTED":
@@ -267,7 +267,7 @@ def test_followup_scenario_e2e(
                                 luma_client=luma_client,
                                 catalog_client=catalog_client
                             )
-                            confirm_outcome = confirm_result.get("outcome", {})
+                            confirm_outcome = confirm_result.get("result", {})
                             confirm_status = confirm_outcome.get("status")
                         
                         if confirm_status != "EXECUTED":
@@ -358,7 +358,7 @@ def run_all_followup_scenarios(
                 continue
 
             scenario = core_followup_scenarios[original_idx]
-            success, error_msg = test_followup_scenario_e2e(
+            success, error_msg = run_followup_scenario_e2e(
                 scenario, original_idx, customer_details, verbose)
 
             if success:
@@ -374,7 +374,7 @@ def run_all_followup_scenarios(
     else:
         for list_idx in range(len(scenarios)):
             scenario = scenarios[list_idx]
-            success, error_msg = test_followup_scenario_e2e(
+            success, error_msg = run_followup_scenario_e2e(
                 scenario, list_idx, customer_details, verbose)
 
             if success:
