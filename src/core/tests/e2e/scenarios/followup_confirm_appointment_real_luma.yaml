@@ -1,0 +1,18 @@
+scenarios:
+  - name: confirm_appointment_happy_path
+    description: User books appointment and confirms with all required slots
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book a haircut tomorrow"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: SEARCH_AVAILABILITY
+          missing_slots: ["time"]
+
+      - sentence: "2pm"
+        expect:
+          status: READY
+          action: CONFIRM_APPOINTMENT
+

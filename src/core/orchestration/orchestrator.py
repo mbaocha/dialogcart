@@ -336,30 +336,43 @@ def handle_message(
     # Only reached if plan status indicates readiness (not NEEDS_CLARIFICATION)
     intent_name = plan.get("intent_name") or plan.get("intent")
     slots = plan.get("slots", {})
+    plan_action = plan.get("action")
 
-    # Determine availability_resolved flag from session state
-    # (availability is resolved if it was executed in a previous turn)
-    availability_resolved = False
-    if session_state:
-        # Check if previous execution result indicates availability was resolved
-        prev_result = session_state.get("last_execution_result")
-        if prev_result and isinstance(prev_result, dict):
-            result_type = prev_result.get("type")
-            if result_type == "availability":
-                availability_resolved = True
+    # If plan already has CONFIRM_APPOINTMENT action, use it directly
+    # This respects the planner's decision to commit without requiring availability_resolved
+    execution_step = None
+    if plan_action == "CONFIRM_APPOINTMENT":
+        # Get execution steps to find CONFIRM_APPOINTMENT step config
+        from core.policy.intent_policy import get_execution_steps
+        steps = get_execution_steps(intent_name)
+        for step in steps:
+            if step.get("action") == "CONFIRM_APPOINTMENT":
+                execution_step = step
+                break
+    else:
+        # Determine availability_resolved flag from session state
+        # (availability is resolved if it was executed in a previous turn)
+        availability_resolved = False
+        if session_state:
+            # Check if previous execution result indicates availability was resolved
+            prev_result = session_state.get("last_execution_result")
+            if prev_result and isinstance(prev_result, dict):
+                result_type = prev_result.get("type")
+                if result_type == "availability":
+                    availability_resolved = True
 
-    # Select next execution step using policy
-    from core.policy.intent_policy import select_next_execution_step
+        # Select next execution step using policy
+        from core.policy.intent_policy import select_next_execution_step
 
-    flags = {
-        "availability_resolved": availability_resolved
-    }
+        flags = {
+            "availability_resolved": availability_resolved
+        }
 
-    execution_step = select_next_execution_step(
-        intent_name=intent_name,
-        slots=slots,
-        flags=flags
-    )
+        execution_step = select_next_execution_step(
+            intent_name=intent_name,
+            slots=slots,
+            flags=flags
+        )
 
     # Only execute if policy selected a step
     if execution_step:
@@ -371,10 +384,12 @@ def handle_message(
         if client_name == "availability_client":
             execution_client = availability_client
         elif client_name == "booking_client":
-            # booking_client not yet supported in handle_message
-            logger.warning(
-                f"Execution step {action} requires {client_name}, but it's not yet supported")
-            execution_step = None
+            # Extract booking_client from kwargs
+            execution_client = kwargs.get("booking_client")
+            if not execution_client:
+                logger.warning(
+                    f"Execution step {action} requires {client_name}, but it was not provided")
+                execution_step = None
         else:
             logger.warning(
                 f"Unknown client name '{client_name}' for execution step {action}")
@@ -414,6 +429,11 @@ def handle_message(
                         plan=plan,
                         availability_client=execution_client
                     )
+                elif client_name == "booking_client":
+                    execution_result = execute(
+                        plan=plan,
+                        booking_client=execution_client
+                    )
                 else:
                     # Other clients not yet supported
                     logger.warning(
@@ -422,6 +442,12 @@ def handle_message(
                         "success": True,
                         "result": plan
                     }
+
+                # For CONFIRM_APPOINTMENT with EXECUTED status, preserve the action
+                # Do not override action - use plan.action directly
+                if execution_result.get("status") == "EXECUTED" and plan.get("action") == "CONFIRM_APPOINTMENT":
+                    # Ensure plan action remains CONFIRM_APPOINTMENT (don't override)
+                    plan["action"] = "CONFIRM_APPOINTMENT"
 
                 # Return execution result
                 return {
@@ -1696,13 +1722,17 @@ def handle_message_legacy(
     blocked_actions = plan.get("blocked_actions", [])
     awaiting = plan.get("awaiting")
 
-    # PLANNING POLICY: CREATE_APPOINTMENT ALWAYS requires AVAILABILITY stage first
-    # Even when exact date/time is provided, availability must be checked before confirmation
+    # PLANNING POLICY: CREATE_APPOINTMENT requires AVAILABILITY stage first
+    # However, if planner has already set action to CONFIRM_APPOINTMENT, respect that decision
     intent_name = decision.get("intent_name", "")
+    plan_action = plan.get("action")
     if intent_name == "CREATE_APPOINTMENT":
-        # Override plan stage/action to force AVAILABILITY
-        plan["stage"] = "AVAILABILITY"
-        plan["action"] = "SEARCH_AVAILABILITY"
+        # Only override if plan doesn't already have CONFIRM_APPOINTMENT
+        # This allows planner to directly set CONFIRM_APPOINTMENT when all slots are ready
+        if plan_action != "CONFIRM_APPOINTMENT":
+            # Override plan stage/action to force AVAILABILITY
+            plan["stage"] = "AVAILABILITY"
+            plan["action"] = "SEARCH_AVAILABILITY"
 
     # PLANNING INVARIANT: Set has_datetime when plan.status == READY
     # has_datetime = true when:
