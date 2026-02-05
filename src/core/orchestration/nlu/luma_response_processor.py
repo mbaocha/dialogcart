@@ -1285,7 +1285,13 @@ def process_luma_response(
 
     # Build decision plan with recomputed missing_slots (ONLY source of truth)
     from core.planning.orchestration.plan_builder import build_decision_plan
-    plan = build_decision_plan(intent_name, luma_response_for_plan, domain, availability_resolved=availability_resolved)
+    plan = build_decision_plan(
+        intent_name, 
+        luma_response_for_plan, 
+        domain, 
+        availability_resolved=availability_resolved,
+        session_state=session_state
+    )
     
     # DEBUG LOG: Planning decision point (after planner, before any override)
     # Track fingerprint-based availability resolution for debugging

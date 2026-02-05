@@ -1,7 +1,7 @@
 """
 Plan Builder
 
-Builds decision plans from Luma responses.
+Builds decision plans from Luma responses using intent_policy.yaml as the single source of truth.
 
 This module is pure and side-effect free:
 - No external API calls
@@ -10,14 +10,11 @@ This module is pure and side-effect free:
 
 Responsibilities:
 - Building decision plans with status, allowed_actions, blocked_actions, awaiting
+- All intent-specific logic comes from intent_policy.yaml via select_next_execution_step
 """
 
 import logging
-import threading
-from pathlib import Path
 from typing import Dict, Any, Optional, List
-
-import yaml
 
 from core.routing import get_template_key, get_action_name
 from core.orchestration.errors import UnsupportedIntentError
@@ -57,19 +54,102 @@ def _extract_missing_slots(luma_response: Dict[str, Any]) -> List[str]:
     return []
 
 
+def _enforce_committing_step_invariants(
+    intent_name: str,
+    selected_step: Dict[str, Any],
+    effective_slots: Dict[str, Any],
+    flags: Dict[str, Any],
+    session_state: Optional[Dict[str, Any]] = None
+) -> None:
+    """
+    Enforce runtime invariants before executing a committing step.
+    
+    Invariants:
+    1. All required_slots must be present
+    2. All requires must be satisfied
+    3. This committing step must not have already executed in this session (idempotency guard)
+    
+    Args:
+        intent_name: Intent name
+        selected_step: Selected execution step from policy
+        effective_slots: Collected slots
+        flags: Session flags (availability_resolved, confirmation_state, etc.)
+        session_state: Optional session state for idempotency check
+        
+    Raises:
+        AssertionError: If any invariant is violated
+    """
+    mode = selected_step.get("mode", "exploratory")
+    if mode != "committing":
+        # Only enforce invariants for committing steps
+        return
+    
+    action = selected_step.get("action")
+    required_slots = selected_step.get("required_slots", [])
+    requires = selected_step.get("requires", [])
+    
+    # Invariant 1: All required_slots must be present
+    collected_slot_names = set(
+        slot_name for slot_name, slot_value in effective_slots.items()
+        if slot_value is not None
+    )
+    required_slots_set = set(required_slots)
+    missing_required = required_slots_set - collected_slot_names
+    assert not missing_required, (
+        f"Invariant violation: Cannot execute committing step {action} for {intent_name}. "
+        f"Missing required slots: {sorted(missing_required)}. "
+        f"Required: {sorted(required_slots_set)}, Collected: {sorted(collected_slot_names)}"
+    )
+    
+    # Invariant 2: All requires must be satisfied
+    availability_resolved = flags.get("availability_resolved", False)
+    confirmation_state = flags.get("confirmation_state")
+    
+    for requirement in requires:
+        if requirement == "availability_resolved":
+            assert availability_resolved, (
+                f"Invariant violation: Cannot execute committing step {action} for {intent_name}. "
+                f"Requirement 'availability_resolved' not satisfied (availability_resolved={availability_resolved})"
+            )
+        elif requirement == "confirmation_state_confirmed":
+            assert confirmation_state == "confirmed", (
+                f"Invariant violation: Cannot execute committing step {action} for {intent_name}. "
+                f"Requirement 'confirmation_state_confirmed' not satisfied (confirmation_state={confirmation_state})"
+            )
+        elif requirement == "booking_id_resolved":
+            # booking_id_resolved means booking_id must be present and non-None
+            assert "booking_id" in effective_slots and effective_slots.get("booking_id") is not None, (
+                f"Invariant violation: Cannot execute committing step {action} for {intent_name}. "
+                f"Requirement 'booking_id_resolved' not satisfied (booking_id not in slots or None)"
+            )
+    
+    # Invariant 3: Idempotency guard - cannot execute same committing step twice in same session
+    if session_state:
+        executed_actions = session_state.get("executed_actions", [])
+        if action in executed_actions:
+            logger.warning(
+                f"Idempotency guard: {action} for {intent_name} already executed in this session. "
+                f"Executed actions: {executed_actions}"
+            )
+            # Note: We log a warning but don't assert - idempotency is handled at execution layer
+            # This is just a guard to catch programming errors
+
+
 def build_decision_plan(
     intent_name: str,
     luma_response: Dict[str, Any],
     domain: str,
-    availability_resolved: bool = False
+    availability_resolved: bool = False,
+    session_state: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
-    Build a decision plan from Luma response.
+    Build a decision plan from Luma response using intent_policy.yaml as the single source of truth.
 
     PLANNING BOUNDARY:
     - missing_slots MUST come from planner (intent_policy.yaml)
     - executable_actions MUST come from planner (intent_policy.yaml)
     - commit actions come from intent_policy.yaml execution steps with mode=committing
+    - All action selection comes from select_next_execution_step()
 
     Applies rules:
     - commit.action is the irreversible commit step (from intent_policy.yaml)
@@ -80,6 +160,8 @@ def build_decision_plan(
         intent_name: Intent name from Luma
         luma_response: Luma API response (must have missing_slots from planner)
         domain: Domain for template key routing
+        availability_resolved: Whether availability has been resolved
+        session_state: Optional session state for idempotency checks
 
     Returns:
         Decision plan dictionary with:
@@ -89,26 +171,14 @@ def build_decision_plan(
         - awaiting: USER_CONFIRMATION or null
     """
     # SAFETY ASSERTION: Planning must NEVER run with invalid intent when a durable session intent exists
-    # This ensures future regressions fail fast
-    # The orchestrator should have already recovered durable session intent before calling this function
-    # However, UNKNOWN is valid on first turns when there's no session - only assert if _effective_intent
-    # is set (indicating a session exists) and is durable, but intent_name is still UNKNOWN
-    # FIRST-TURN PERMISSIVENESS: On first-turn messages with no session, Luma may return UNKNOWN intent
-    # (e.g., user says just "tomorrow" without specifying service). This is valid and should not trigger
-    # an assertion. The assertion only fires when a durable session intent exists but wasn't recovered.
     effective_intent_from_response = luma_response.get("_effective_intent", "")
-    # Only assert if _effective_intent is set (non-empty, non-UNKNOWN) and is durable, but intent_name is UNKNOWN
-    # This indicates a durable session intent should have been recovered but wasn't
     if effective_intent_from_response and effective_intent_from_response != "UNKNOWN":
-        # Check if the effective intent is durable (only durable intents should trigger the assertion)
         from core.orchestration.persistence.durable_intents import is_durable_intent
         if is_durable_intent(effective_intent_from_response):
-            # There's a durable session intent that should have been used
             assert intent_name and intent_name != "UNKNOWN", (
                 f"build_decision_plan called with invalid intent while durable session intent exists. "
                 f"intent_name={intent_name!r}, effective_intent={effective_intent_from_response}, domain={domain}"
             )
-    # Otherwise, UNKNOWN is valid (first turn with no session, or non-durable intent)
     
     # Get commit action from unified policy (intent_policy.yaml)
     from core.policy.intent_policy import get_commit_action
@@ -117,8 +187,7 @@ def build_decision_plan(
     # Extract missing slots
     missing_slots = _extract_missing_slots(luma_response)
     
-    # INVESTIGATION: Log missing_slots extraction in build_decision_plan
-    logger.error(
+    logger.debug(
         f"[MISSING_SLOTS_TRACE] build_decision_plan: AFTER _extract_missing_slots, "
         f"intent={intent_name}, "
         f"missing_slots={missing_slots}, "
@@ -130,48 +199,51 @@ def build_decision_plan(
     # Determine status
     needs_clarification = luma_response.get("needs_clarification", False)
     booking = luma_response.get("booking", {})
-    confirmation_state = booking.get(
-        "confirmation_state") if isinstance(booking, dict) else None
+    confirmation_state = booking.get("confirmation_state") if isinstance(booking, dict) else None
 
-    # DEBUG: Print decision plan building details
-    print(
-        f"[BUILD_PLAN] intent={intent_name} missing_slots={missing_slots} needs_clarification={needs_clarification} confirmation_state={confirmation_state}")
+    logger.debug(
+        f"[BUILD_PLAN] intent={intent_name} missing_slots={missing_slots} "
+        f"needs_clarification={needs_clarification} confirmation_state={confirmation_state}"
+    )
 
     # CRITICAL PLANNING INVARIANT: UNKNOWN intent ALWAYS requires clarification
-    # UNKNOWN means we don't know what the user wants, so we must clarify regardless of missing_slots
-    # This prevents UNKNOWN from being marked as READY even when missing_slots is empty
     if intent_name == "UNKNOWN":
         status = "NEEDS_CLARIFICATION"
-        print(
-            f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because intent=UNKNOWN (UNKNOWN always requires clarification)")
+        logger.debug(
+            f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because intent=UNKNOWN "
+            f"(UNKNOWN always requires clarification)"
+        )
     # CRITICAL: If missing_slots is non-empty, status MUST be NEEDS_CLARIFICATION
-    # This is the authoritative rule - missing slots drive clarification, not Luma flags
     elif missing_slots:
         status = "NEEDS_CLARIFICATION"
-        print(
-            f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots={missing_slots}")
+        logger.debug(
+            f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots={missing_slots}"
+        )
     elif needs_clarification:
         status = "NEEDS_CLARIFICATION"
-        print(
-            f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because needs_clarification=True")
+        logger.debug(
+            f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because needs_clarification=True"
+        )
     elif confirmation_state == "pending":
         status = "AWAITING_CONFIRMATION"
-        print(
-            f"[BUILD_PLAN] Setting status=AWAITING_CONFIRMATION because confirmation_state=pending")
+        logger.debug(
+            f"[BUILD_PLAN] Setting status=AWAITING_CONFIRMATION because confirmation_state=pending"
+        )
     else:
         status = "READY"
-        print(f"[BUILD_PLAN] Setting status=READY (no missing slots, no clarification needed, no pending confirmation)")
+        logger.debug(
+            f"[BUILD_PLAN] Setting status=READY "
+            f"(no missing slots, no clarification needed, no pending confirmation)"
+        )
 
     # Determine allowed and blocked actions
     allowed_actions: List[str] = []
     blocked_actions: List[str] = []
 
     # Get executable_actions from planner (ONLY source of truth for partial execution)
-    # Planner computes executable_actions from intent_policy.yaml based on collected slots
     executable_actions = []
     if intent_name:
         from core.planning.policy.action_policy import plan_intent, load_planning_policy
-        # Use effective_collected_slots if available (more accurate), otherwise use slots
         effective_slots = luma_response.get("_effective_collected_slots")
         if effective_slots is None:
             effective_slots = luma_response.get("slots", {})
@@ -181,13 +253,11 @@ def build_decision_plan(
 
     # CRITICAL: Allow exploratory actions even when planning slots are incomplete
     # Only block committing actions when missing_slots exist
-    # Planner's executable_actions are for partial execution and should be allowed
     if missing_slots:
         # Block committing actions when missing_slots exist
         if commit_action:
             blocked_actions.append(commit_action)
         # Allow exploratory actions from planner (they satisfy their own required_slots)
-        # This aligns with policy: exploratory actions can execute with partial slots
         allowed_actions.extend(executable_actions)
     else:
         # No missing slots - allow executable_actions from planner (partial execution)
@@ -195,15 +265,11 @@ def build_decision_plan(
 
         # Commit action blocking rules
         if commit_action:
-            # CRITICAL: If missing_slots is empty, allow commit immediately
-            # Tests expect READY state to execute without confirmation when slots are complete
-            # Do NOT require confirmation_state == "confirmed" when all slots are filled
             if needs_clarification:
                 # Luma explicitly says needs clarification - block commit
                 blocked_actions.append(commit_action)
             else:
                 # All slots filled and no clarification needed - allow commit
-                # Do NOT check confirmation_state - tests expect immediate execution
                 allowed_actions.append(commit_action)
 
     # Deduplicate
@@ -213,328 +279,83 @@ def build_decision_plan(
     # Determine awaiting
     awaiting = "USER_CONFIRMATION" if confirmation_state == "pending" else None
 
-    # Derive stage and action from current state
-    # Stage/action mapping based on missing_slots and executable_actions
+    # Derive stage and action using policy as the single source of truth
     stage = None
     action = None
-    action_branch = None  # Track which branch set the action for debugging
+    action_branch = None
 
-    # CONFIRM ACTION MAP: Hard mapping for complete slots (missing_slots == [])
-    CONFIRM_ACTION_MAP = {
-        "CREATE_APPOINTMENT": "CONFIRM_APPOINTMENT",
-        "CREATE_RESERVATION": "CONFIRM_RESERVATION",
-        "MODIFY_BOOKING": "APPLY_MODIFICATION",
-        "CANCEL_BOOKING": "CONFIRM_CANCELLATION"
-    }
+    # Get slots for policy selection
+    effective_slots = luma_response.get("_effective_collected_slots")
+    if effective_slots is None:
+        effective_slots = luma_response.get("slots", {})
 
-    if len(missing_slots) > 0:
-        # Missing slots - determine stage based on intent and executable actions
-        if intent_name in ("MODIFY_BOOKING", "CANCEL_BOOKING"):
-            stage = "IDENTIFY"
-            action = "FETCH_BOOKING"
-            action_branch = "missing_slots_modify_cancel"
+    # POLICY-DRIVEN SELECTION: Always use select_next_execution_step
+    # This is the single source of truth for action selection
+    if intent_name and intent_name != "UNKNOWN":
+        from core.policy.intent_policy import select_next_execution_step
+        
+        flags = {
+            "availability_resolved": availability_resolved,
+            "confirmation_state": confirmation_state
+        }
+        
+        selected_step = select_next_execution_step(intent_name, effective_slots, flags)
+        
+        if selected_step:
+            action = selected_step.get("action")
+            action_branch = "policy"
+            
+            # Enforce runtime invariants for committing steps
+            _enforce_committing_step_invariants(
+                intent_name, selected_step, effective_slots, flags, session_state
+            )
+            
+            # Determine stage based on action
+            if action == "FETCH_BOOKING":
+                stage = "IDENTIFY"
+            elif action == "SEARCH_AVAILABILITY":
+                stage = "AVAILABILITY"
+            elif action in ("CONFIRM_APPOINTMENT", "CONFIRM_RESERVATION", "APPLY_MODIFICATION", "CONFIRM_CANCELLATION"):
+                stage = "CONFIRM"
+            else:
+                # Default based on mode
+                mode = selected_step.get("mode", "exploratory")
+                stage = "AVAILABILITY" if mode == "exploratory" else "CONFIRM"
+            
+            logger.info(
+                f"[PLAN_SELECTION] Policy-driven selection: intent={intent_name}, "
+                f"missing_slots={missing_slots}, availability_resolved={availability_resolved}, "
+                f"selected_action={action}, selected_stage={stage}, "
+                f"rule=select_next_execution_step"
+            )
         else:
-            # CREATE_APPOINTMENT or CREATE_RESERVATION
-            stage = "AVAILABILITY"
-            # Use first executable action if available, otherwise default to SEARCH_AVAILABILITY
+            # Policy returned None - this should not happen for valid intents
+            # Log warning but don't fail - allow graceful degradation
+            logger.warning(
+                f"[PLAN_SELECTION] Policy returned None for intent={intent_name}. "
+                f"This may indicate a missing or incomplete policy configuration."
+            )
+            # Use first executable action as fallback
             if executable_actions:
                 action = executable_actions[0]
-            else:
-                action = "SEARCH_AVAILABILITY"
-            action_branch = "missing_slots_executable"
-    else:
-        # No missing slots - use policy-driven selection to respect 'requires' field
-        # This ensures CONFIRM_APPOINTMENT only runs when availability_resolved is true
-        
-        # Get slots for policy selection
-        effective_slots = luma_response.get("_effective_collected_slots")
-        if effective_slots is None:
-            effective_slots = luma_response.get("slots", {})
-        
-        # Use select_next_execution_step to respect policy 'requires' field
-        # Policy is the single decision authority - always pass actual availability_resolved value
-        # Policy will correctly select:
-        # - SEARCH_AVAILABILITY when availability_resolved=False
-        # - CONFIRM_APPOINTMENT when availability_resolved=True
-        if action is None:
-            from core.policy.intent_policy import select_next_execution_step
-            # Always pass the actual computed availability_resolved value
-            # Planner never lies about availability state - policy decides based on truth
-            flags = {"availability_resolved": availability_resolved}
-            selected_step = select_next_execution_step(intent_name, effective_slots, flags)
-            
-            if selected_step:
-                # Policy selected a step - use it
-                action = selected_step.get("action")
-                action_branch = "policy"
-                
-                # MODIFY_BOOKING guardrail: Allow APPLY_MODIFICATION on confirmation, otherwise SEARCH_AVAILABILITY first
-                # CRITICAL: Check confirmation_state FIRST - if confirmed, allow APPLY_MODIFICATION regardless of availability
-                if intent_name == "MODIFY_BOOKING" and action == "APPLY_MODIFICATION":
-                    # If confirmed, allow APPLY_MODIFICATION (skip availability override)
-                    if confirmation_state == "confirmed":
-                        # Confirmed - allow APPLY_MODIFICATION
-                        action = "APPLY_MODIFICATION"
-                        stage = "CONFIRM"
-                        action_branch = "modify_booking_confirmed_allow_apply"
-                        logger.info(
-                            f"[PLAN_SELECTION] MODIFY_BOOKING: Confirmed - allowing APPLY_MODIFICATION "
-                            f"(confirmation_state={confirmation_state}, availability_resolved={availability_resolved})"
-                        )
-                    # Only force SEARCH_AVAILABILITY when confirmation_state is None AND availability_resolved == False
-                    elif confirmation_state is None and not availability_resolved:
-                        # Not confirmed and availability not resolved - force SEARCH_AVAILABILITY
-                        action = "SEARCH_AVAILABILITY"
-                        stage = "AVAILABILITY"
-                        action_branch = "modify_booking_override_policy_availability_first"
-                        logger.info(
-                            f"[PLAN_SELECTION] MODIFY_BOOKING: Overriding policy selection "
-                            f"(APPLY_MODIFICATION -> SEARCH_AVAILABILITY, confirmation_state={confirmation_state}, "
-                            f"availability_resolved={availability_resolved})"
-                        )
-                    # If availability_resolved but not confirmed, still need confirmation
-                    elif confirmation_state is None and availability_resolved:
-                        # Availability resolved but not confirmed - still need confirmation
-                        action = "SEARCH_AVAILABILITY"
-                        stage = "AVAILABILITY"
-                        action_branch = "modify_booking_override_policy_confirmation_required"
-                        logger.info(
-                            f"[PLAN_SELECTION] MODIFY_BOOKING: Overriding policy selection "
-                            f"(APPLY_MODIFICATION -> SEARCH_AVAILABILITY, availability_resolved but confirmation required, "
-                            f"confirmation_state={confirmation_state})"
-                        )
-                else:
-                    # Determine stage based on action
-                    if action == "SEARCH_AVAILABILITY":
-                        stage = "AVAILABILITY"
-                    elif action in ("CONFIRM_APPOINTMENT", "CONFIRM_RESERVATION", "APPLY_MODIFICATION", "CONFIRM_CANCELLATION"):
-                        stage = "CONFIRM"
-                    else:
-                        # Default to CONFIRM for committing actions, AVAILABILITY for exploratory
-                        mode = selected_step.get("mode", "exploratory")
-                        stage = "AVAILABILITY" if mode == "exploratory" else "CONFIRM"
-                
-                logger.info(
-                    f"[PLAN_SELECTION] Policy-driven selection: intent={intent_name}, "
-                    f"missing_slots={missing_slots}, availability_resolved={availability_resolved}, "
-                    f"selected_action={action}, selected_stage={stage}, "
-                    f"rule=select_next_execution_step"
-                )
-            else:
-                # Policy didn't select a step - fall back to CONFIRM_ACTION_MAP logic
-                # CRITICAL: Only check availability_resolved when missing_slots exist
-                # When missing_slots == [] and status == READY, availability must NOT block CONFIRM_APPOINTMENT
+                action_branch = "fallback_executable"
+                stage = "AVAILABILITY"  # Default for exploratory actions
+            elif commit_action and commit_action in allowed_actions:
+                action = commit_action
+                action_branch = "fallback_commit"
                 stage = "CONFIRM"
-                
-                if intent_name in CONFIRM_ACTION_MAP:
-                    candidate_action = CONFIRM_ACTION_MAP[intent_name]
-                    
-                    # MODIFY_BOOKING guardrail: Allow APPLY_MODIFICATION on confirmation
-                    if intent_name == "MODIFY_BOOKING" and candidate_action == "APPLY_MODIFICATION":
-                        if confirmation_state == "confirmed":
-                            # Confirmed - allow APPLY_MODIFICATION
-                            action = candidate_action
-                            action_branch = "modify_booking_confirmed_allow_apply"
-                            logger.info(
-                                f"[PLAN_SELECTION] MODIFY_BOOKING: Confirmed - allowing APPLY_MODIFICATION "
-                                f"(confirmation_state={confirmation_state}, availability_resolved={availability_resolved})"
-                            )
-                        elif confirmation_state is None and not availability_resolved:
-                            # Not confirmed and availability not resolved - force SEARCH_AVAILABILITY
-                            action = "SEARCH_AVAILABILITY"
-                            stage = "AVAILABILITY"
-                            action_branch = "modify_booking_override_confirm_map_availability_first"
-                            logger.info(
-                                f"[PLAN_SELECTION] MODIFY_BOOKING: Overriding CONFIRM_ACTION_MAP selection "
-                                f"(APPLY_MODIFICATION -> SEARCH_AVAILABILITY, confirmation_state={confirmation_state}, "
-                                f"availability_resolved={availability_resolved})"
-                            )
-                        else:
-                            # Availability resolved but not confirmed, or other state
-                            action = "SEARCH_AVAILABILITY"
-                            stage = "AVAILABILITY"
-                            action_branch = "modify_booking_override_confirm_map_confirmation_required"
-                            logger.info(
-                                f"[PLAN_SELECTION] MODIFY_BOOKING: Overriding CONFIRM_ACTION_MAP selection "
-                                f"(APPLY_MODIFICATION -> SEARCH_AVAILABILITY, confirmation required, "
-                                f"confirmation_state={confirmation_state})"
-                            )
-                    # Only block CONFIRM_APPOINTMENT by availability when slots are incomplete
-                    elif (candidate_action == "CONFIRM_APPOINTMENT" 
-                            and not availability_resolved 
-                            and missing_slots != []):
-                        # Availability not resolved AND slots incomplete - select SEARCH_AVAILABILITY instead
-                        if "SEARCH_AVAILABILITY" in executable_actions:
-                            action = "SEARCH_AVAILABILITY"
-                            stage = "AVAILABILITY"
-                            action_branch = "fallback_availability_blocked"
-                            logger.info(
-                                f"[PLAN_SELECTION] Fallback with availability check: intent={intent_name}, "
-                                f"missing_slots={missing_slots}, status={status}, availability_resolved={availability_resolved}, "
-                                f"selected_action={action}, selected_stage={stage}, "
-                                f"rule=CONFIRM_APPOINTMENT_blocked_by_availability_resolved_incomplete_slots"
-                            )
-                        else:
-                            # SEARCH_AVAILABILITY not in executable_actions - use CONFIRM anyway
-                            action = candidate_action
-                            action_branch = "fallback_confirm_forced"
-                            logger.warning(
-                                f"[PLAN_SELECTION] CONFIRM_APPOINTMENT selected despite availability_resolved=False "
-                                f"because SEARCH_AVAILABILITY not in executable_actions: {executable_actions}"
-                            )
-                    else:
-                        # Slots complete OR availability resolved - allow CONFIRM_APPOINTMENT
-                        action = candidate_action
-                        action_branch = "fallback_confirm_map"
-                        logger.info(
-                            f"[PLAN_SELECTION] Fallback to CONFIRM_ACTION_MAP: intent={intent_name}, "
-                            f"missing_slots={missing_slots}, status={status}, availability_resolved={availability_resolved}, "
-                            f"selected_action={action}, rule=CONFIRM_ACTION_MAP"
-                        )
-                elif commit_action and commit_action in allowed_actions:
-                    # Commit action is available and allowed - use it
-                    # MODIFY_BOOKING guardrail: Allow APPLY_MODIFICATION on confirmation
-                    if intent_name == "MODIFY_BOOKING" and commit_action == "APPLY_MODIFICATION":
-                        if confirmation_state == "confirmed":
-                            # Confirmed - allow APPLY_MODIFICATION
-                            action = commit_action
-                            action_branch = "modify_booking_confirmed_allow_apply"
-                            logger.info(
-                                f"[PLAN_SELECTION] MODIFY_BOOKING: Confirmed - allowing APPLY_MODIFICATION "
-                                f"(confirmation_state={confirmation_state}, availability_resolved={availability_resolved})"
-                            )
-                        elif confirmation_state is None and not availability_resolved:
-                            # Not confirmed and availability not resolved - force SEARCH_AVAILABILITY
-                            action = "SEARCH_AVAILABILITY"
-                            stage = "AVAILABILITY"
-                            action_branch = "modify_booking_override_commit_allowed_availability_first"
-                            logger.info(
-                                f"[PLAN_SELECTION] MODIFY_BOOKING: Overriding commit_action selection "
-                                f"(APPLY_MODIFICATION -> SEARCH_AVAILABILITY, confirmation_state={confirmation_state}, "
-                                f"availability_resolved={availability_resolved})"
-                            )
-                        else:
-                            # Availability resolved but not confirmed, or other state
-                            action = "SEARCH_AVAILABILITY"
-                            stage = "AVAILABILITY"
-                            action_branch = "modify_booking_override_commit_allowed_confirmation_required"
-                            logger.info(
-                                f"[PLAN_SELECTION] MODIFY_BOOKING: Overriding commit_action selection "
-                                f"(APPLY_MODIFICATION -> SEARCH_AVAILABILITY, confirmation required, "
-                                f"confirmation_state={confirmation_state})"
-                            )
-                    else:
-                        action = commit_action
-                        action_branch = "fallback_commit_allowed"
-                        logger.info(
-                            f"[PLAN_SELECTION] Fallback to commit_action: intent={intent_name}, "
-                            f"missing_slots={missing_slots}, availability_resolved={availability_resolved}, "
-                            f"selected_action={action}, rule=commit_action_in_allowed"
-                        )
-                elif commit_action:
-                    # Commit action exists but is blocked - use fallback
-                    if intent_name == "MODIFY_BOOKING":
-                        # MODIFY_BOOKING: Allow APPLY_MODIFICATION on confirmation
-                        if confirmation_state == "confirmed":
-                            # Confirmed - allow APPLY_MODIFICATION
-                            action = "APPLY_MODIFICATION"
-                            action_branch = "modify_booking_confirmed_allow_apply"
-                            logger.info(
-                                f"[PLAN_SELECTION] MODIFY_BOOKING: Confirmed - allowing APPLY_MODIFICATION "
-                                f"(confirmation_state={confirmation_state}, availability_resolved={availability_resolved})"
-                            )
-                        elif confirmation_state is None and not availability_resolved:
-                            # Not confirmed and availability not resolved - force SEARCH_AVAILABILITY
-                            action = "SEARCH_AVAILABILITY"
-                            stage = "AVAILABILITY"
-                            action_branch = "modify_booking_availability_first"
-                            logger.info(
-                                f"[PLAN_SELECTION] MODIFY_BOOKING: Enforcing SEARCH_AVAILABILITY first "
-                                f"(confirmation_state={confirmation_state}, availability_resolved={availability_resolved})"
-                            )
-                        else:
-                            # Availability resolved but not confirmed, or other state
-                            action = "SEARCH_AVAILABILITY"
-                            stage = "AVAILABILITY"
-                            action_branch = "modify_booking_confirmation_required"
-                            logger.info(
-                                f"[PLAN_SELECTION] MODIFY_BOOKING: Enforcing SEARCH_AVAILABILITY first "
-                                f"(confirmation required, confirmation_state={confirmation_state})"
-                            )
-                    elif intent_name == "CANCEL_BOOKING":
-                        action = "CONFIRM_CANCELLATION"
-                        action_branch = "fallback_commit_blocked"
-                    else:
-                        # Fallback to first allowed action if no commit action
-                        filtered_actions = [
-                            a for a in allowed_actions if a != "SEARCH_AVAILABILITY"]
-                        action = filtered_actions[0] if filtered_actions else None
-                        action_branch = "fallback_commit_blocked"
-                    
-                    if action_branch == "fallback_commit_blocked":
-                        logger.info(
-                            f"[PLAN_SELECTION] Fallback to intent-specific action: intent={intent_name}, "
-                            f"missing_slots={missing_slots}, availability_resolved={availability_resolved}, "
-                            f"selected_action={action}, rule=commit_action_blocked_fallback"
-                        )
-                else:
-                    # No commit action defined - use fallback based on intent
-                    if intent_name == "MODIFY_BOOKING":
-                        # MODIFY_BOOKING: Allow APPLY_MODIFICATION on confirmation
-                        if confirmation_state == "confirmed":
-                            # Confirmed - allow APPLY_MODIFICATION
-                            action = "APPLY_MODIFICATION"
-                            action_branch = "modify_booking_confirmed_allow_apply"
-                            logger.info(
-                                f"[PLAN_SELECTION] MODIFY_BOOKING: Confirmed - allowing APPLY_MODIFICATION "
-                                f"(confirmation_state={confirmation_state}, availability_resolved={availability_resolved})"
-                            )
-                        elif confirmation_state is None and not availability_resolved:
-                            # Not confirmed and availability not resolved - force SEARCH_AVAILABILITY
-                            action = "SEARCH_AVAILABILITY"
-                            stage = "AVAILABILITY"
-                            action_branch = "modify_booking_availability_first"
-                            logger.info(
-                                f"[PLAN_SELECTION] MODIFY_BOOKING: Enforcing SEARCH_AVAILABILITY first "
-                                f"(confirmation_state={confirmation_state}, availability_resolved={availability_resolved})"
-                            )
-                        else:
-                            # Availability resolved but not confirmed, or other state
-                            action = "SEARCH_AVAILABILITY"
-                            stage = "AVAILABILITY"
-                            action_branch = "modify_booking_confirmation_required"
-                            logger.info(
-                                f"[PLAN_SELECTION] MODIFY_BOOKING: Enforcing SEARCH_AVAILABILITY first "
-                                f"(confirmation required, confirmation_state={confirmation_state})"
-                            )
-                    elif intent_name == "CANCEL_BOOKING":
-                        action = "CONFIRM_CANCELLATION"
-                        action_branch = "fallback_last_resort"
-                    else:
-                        # Last resort: use first allowed action (but never SEARCH_AVAILABILITY when slots complete)
-                        filtered_actions = [
-                            a for a in allowed_actions if a != "SEARCH_AVAILABILITY"]
-                        action = filtered_actions[0] if filtered_actions else None
-                        action_branch = "fallback_last_resort"
-                    
-                    if action_branch == "fallback_last_resort":
-                        logger.info(
-                            f"[PLAN_SELECTION] Fallback to last resort: intent={intent_name}, "
-                            f"missing_slots={missing_slots}, availability_resolved={availability_resolved}, "
-                            f"selected_action={action}, rule=no_commit_action_fallback"
-                        )
+    
+    # If still no action selected (e.g., UNKNOWN intent), set defaults
+    if action is None:
+        if executable_actions:
+            action = executable_actions[0]
+            action_branch = "fallback_executable"
+            stage = "AVAILABILITY"
+        else:
+            action_branch = "no_action"
+            stage = None
 
-    # Safety guard: MODIFY_BOOKING must not have APPLY_MODIFICATION in IDENTIFY stage
-    if intent_name == "MODIFY_BOOKING" and stage == "IDENTIFY" and action == "APPLY_MODIFICATION":
-        logger.error(
-            f"[PLAN_SELECTION] SAFETY VIOLATION: MODIFY_BOOKING with stage=IDENTIFY cannot have action=APPLY_MODIFICATION. "
-            f"Overriding to FETCH_BOOKING."
-        )
-        action = "FETCH_BOOKING"
-        action_branch = "safety_guard_identify_apply_modification_blocked"
-
-    # DEBUG: Log final plan decision before returning
-    logger.error(
+    logger.debug(
         f"[PLAN_FINAL_DECISION] intent_name={intent_name}, "
         f"missing_slots={missing_slots}, "
         f"status={status}, "

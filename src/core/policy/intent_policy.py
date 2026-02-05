@@ -384,6 +384,7 @@ def select_next_execution_step(
         slots: Current collected slots dictionary
         flags: Optional flags dictionary with:
             - availability_resolved: Boolean indicating if availability has been resolved
+            - confirmation_state: String indicating confirmation state ("confirmed", "pending", None)
 
     Returns:
         Selected execution step dictionary (same format as get_execution_steps),
@@ -403,8 +404,9 @@ def select_next_execution_step(
         # No execution steps defined in policy - return None
         return None
 
-    # Extract availability_resolved flag (defaults to False)
+    # Extract flags
     availability_resolved = flags.get("availability_resolved", False)
+    confirmation_state = flags.get("confirmation_state")
 
     # Get collected slot names (non-None values)
     collected_slot_names = set(
@@ -433,10 +435,17 @@ def select_next_execution_step(
                 continue
         else:
             # Exploratory steps only need their own required_slots
-            required_slots_set = set(required_slots)
-            if not required_slots_set.issubset(collected_slot_names):
-                # Required slots not satisfied - skip this step
-                continue
+            # SPECIAL CASE: FETCH_BOOKING can run even when booking_id is missing
+            # (it's the step that helps us GET the booking_id)
+            if action == "FETCH_BOOKING":
+                # FETCH_BOOKING is allowed to run when booking_id is missing
+                # This enables booking identification when user says "cancel my booking"
+                pass  # Skip required_slots check for FETCH_BOOKING
+            else:
+                required_slots_set = set(required_slots)
+                if not required_slots_set.issubset(collected_slot_names):
+                    # Required slots not satisfied - skip this step
+                    continue
 
         # Check prerequisites (requires)
         if "availability_resolved" in requires:
@@ -444,17 +453,32 @@ def select_next_execution_step(
                 # Prerequisite not met - skip this step
                 continue
 
-        # Check if this step should be blocked by availability_resolved status
-        # SEARCH_AVAILABILITY should only run if availability_resolved == False
-        if action == "SEARCH_AVAILABILITY":
-            if availability_resolved:
-                # Availability already resolved - don't search again
-                continue
+        # MODIFY_BOOKING and MODIFY_RESERVATION sequencing: SEARCH_AVAILABILITY runs when confirmation_state is None
+        # APPLY_MODIFICATION runs when confirmation_state == "confirmed"
+        if intent_upper in ("MODIFY_BOOKING", "MODIFY_RESERVATION"):
+            if action == "SEARCH_AVAILABILITY":
+                # SEARCH_AVAILABILITY should run when not confirmed (to get confirmation)
+                if confirmation_state == "confirmed":
+                    # Already confirmed - skip SEARCH_AVAILABILITY, will select APPLY_MODIFICATION
+                    continue
+            elif action == "APPLY_MODIFICATION":
+                # APPLY_MODIFICATION should only run when confirmed
+                if confirmation_state != "confirmed":
+                    # Not confirmed - skip APPLY_MODIFICATION, will select SEARCH_AVAILABILITY
+                    continue
+        else:
+            # For other intents, check if this step should be blocked by availability_resolved status
+            # SEARCH_AVAILABILITY should only run if availability_resolved == False
+            if action == "SEARCH_AVAILABILITY":
+                if availability_resolved:
+                    # Availability already resolved - don't search again
+                    continue
 
         # This step is ready - return it
         logger.debug(
             f"Selected execution step: {action} for intent {intent_upper} "
             f"(availability_resolved={availability_resolved}, "
+            f"confirmation_state={confirmation_state}, "
             f"collected_slots={collected_slot_names}, mode={mode})"
         )
         return step

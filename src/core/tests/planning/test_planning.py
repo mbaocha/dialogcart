@@ -36,6 +36,24 @@ import json
 import time
 import uuid
 
+# Pytest support (optional - allows running with pytest)
+try:
+    import pytest
+    PYTEST_AVAILABLE = True
+except ImportError:
+    PYTEST_AVAILABLE = False
+    # Create a dummy pytest module for when pytest is not available
+
+    class DummyPytest:
+        @staticmethod
+        def mark(*args, **kwargs):
+            return lambda f: f
+
+        @staticmethod
+        def fixture(*args, **kwargs):
+            return lambda f: f
+    pytest = DummyPytest()
+
 # Set execution mode to test for deterministic tests
 os.environ["CORE_EXECUTION_MODE"] = "test"
 
@@ -520,14 +538,14 @@ def _test_scenario(
             if session_state:
                 # Session stores intent_name as a string
                 session_intent_name = session_state.get("intent_name")
-            
+
             # Determine if the intent is durable (from intent_policy.yaml)
             # Check both final_intent (from expected) and session_intent_name (from actual session)
             intent_to_check = session_intent_name or final_intent
             is_durable = False
             if intent_to_check:
                 is_durable = is_durable_intent(intent_to_check)
-            
+
             # DURABLE INTENT RULE: Durable intents preserve session on READY
             # Verify session is preserved with correct state
             if is_durable:
@@ -558,7 +576,7 @@ def _test_scenario(
                     print(json.dumps(fail_snapshot, indent=2, default=str))
                     print(f"{'='*70}\n")
                     return False, error_msg, user_id
-                
+
                 # Verify session state is correct for durable intent
                 if session_state.get("intent_name") != intent_to_check:
                     error_msg = f"Durable intent session has wrong intent_name: expected '{intent_to_check}', got '{session_state.get('intent_name')}'"
@@ -585,7 +603,7 @@ def _test_scenario(
                     print(json.dumps(fail_snapshot, indent=2, default=str))
                     print(f"{'='*70}\n")
                     return False, error_msg, user_id
-                
+
                 if session_state.get("status") != "READY":
                     error_msg = f"Durable intent session has wrong status: expected 'READY', got '{session_state.get('status')}'"
                     fail_snapshot = {
@@ -804,8 +822,81 @@ class TeeOutput:
         return False
 
 
+# ============================================================================
+# Pytest Test Functions (Hybrid Approach)
+# ============================================================================
+# These pytest test functions allow running tests with pytest while maintaining
+# backward compatibility with the existing CLI interface.
+#
+# Usage with pytest:
+#   pytest core/tests/planning/test_planning.py                    # Run all scenarios
+#   pytest core/tests/planning/test_planning.py -k "scenario_22"    # Run specific scenario
+#   pytest core/tests/planning/test_planning.py -v                  # Verbose output
+#   pytest core/tests/planning/test_planning.py -x                  # Stop on first failure
+#
+# Usage with original CLI (still works):
+#   python -m core.tests.planning.test_planning                     # Run all scenarios
+#   python -m core.tests.planning.test_planning 22,24              # Run specific scenarios
+# ============================================================================
+
+if PYTEST_AVAILABLE:
+    @pytest.fixture(scope="session")
+    def customer_details_fixture():
+        """Pytest fixture for customer details (session-scoped)."""
+        return get_customer_details()
+
+    @pytest.fixture(scope="session")
+    def all_scenarios_fixture():
+        """Pytest fixture for all scenarios (session-scoped)."""
+        return followup_scenarios + planning_edges_scenarios
+
+    @pytest.fixture(scope="function", autouse=True)
+    def cleanup_sessions():
+        """Auto-cleanup sessions before each test."""
+        yield
+        # Cleanup happens in _test_scenario's finally block
+
+    # Generate test parameters from all scenarios
+    def _generate_scenario_params():
+        """Generate pytest parameters from scenarios."""
+        all_scenarios = followup_scenarios + planning_edges_scenarios
+        params = []
+        for index, scenario in enumerate(all_scenarios, start=1):
+            scenario_name = scenario.get("name", f"scenario_{index}")
+            params.append(pytest.param(
+                scenario,
+                index,
+                id=f"scenario_{index:03d}_{scenario_name}"
+            ))
+        return params
+
+    @pytest.mark.parametrize("scenario,scenario_id", _generate_scenario_params())
+    def test_scenario_pytest(scenario, scenario_id, customer_details_fixture):
+        """
+        Pytest test function for each scenario.
+
+        This allows running tests with pytest while maintaining backward compatibility
+        with the existing CLI interface.
+        """
+        # Generate unique run_id for pytest runs
+        run_id = f"pytest_{int(time.time())}"
+
+        # Run the scenario test
+        success, error_msg, _user_id = _test_scenario(
+            scenario=scenario,
+            scenario_id=scenario_id,
+            customer_details=customer_details_fixture,
+            verbose=False,  # Pytest handles verbose output
+            run_id=run_id
+        )
+
+        # Assert success (pytest will handle the failure reporting)
+        if not success:
+            pytest.fail(f"Scenario {scenario_id} failed: {error_msg}")
+
+
 def main():
-    """Main entry point."""
+    """Main entry point for CLI interface."""
     import argparse
 
     parser = argparse.ArgumentParser(

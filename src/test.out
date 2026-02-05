@@ -3,9 +3,8 @@ platform linux -- Python 3.10.13, pytest-9.0.2, pluggy-1.6.0
 rootdir: /mnt/c/Users/user/Documents/projects/my-project/dialogcart/src
 configfile: pytest.ini
 plugins: anyio-4.12.0
-collected 10 items
+collected 29 items
 
-core/tests/e2e/test_core_e2e_followup_confirm_appointment_real_luma.py . [ 10%]
-.........                                                                [100%]
+core/tests/planning/test_planning.py .............................       [100%]
 
-============================== 10 passed in 6.05s ==============================
+============================= 29 passed in 13.15s ==============================

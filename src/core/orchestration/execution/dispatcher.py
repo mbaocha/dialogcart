@@ -63,7 +63,7 @@ def execute(
         if not availability_client:
             raise ValueError(
                 "availability_client is required for SEARCH_AVAILABILITY action")
-        return _execute_search_availability(plan, availability_client)
+        return _execute_search_availability(plan, availability_client, booking_client)
     elif action == "CONFIRM_APPOINTMENT":
         if not booking_client:
             raise ValueError(
@@ -87,7 +87,8 @@ def execute(
 
 def _execute_search_availability(
     plan: Dict[str, Any],
-    availability_client: Any
+    availability_client: Any,
+    booking_client: Optional[Any] = None
 ) -> Dict[str, Any]:
     """
     Execute SEARCH_AVAILABILITY action.
@@ -95,6 +96,7 @@ def _execute_search_availability(
     Args:
         plan: Planning result containing slots, intent_name, time_constraint
         availability_client: Availability client instance
+        booking_client: Optional booking client instance (needed for MODIFY_BOOKING to fetch service_id)
 
     Returns:
         Normalized availability execution result
@@ -117,7 +119,9 @@ def _execute_search_availability(
             organization_id=organization_id,
             slots=slots,
             time_constraint=time_constraint,
-            availability_client=availability_client
+            availability_client=availability_client,
+            intent_name=intent_name,
+            booking_client=booking_client
         )
     elif intent_name == "CREATE_RESERVATION":
         # Reservation availability search
@@ -126,6 +130,16 @@ def _execute_search_availability(
             slots=slots,
             time_constraint=time_constraint,
             availability_client=availability_client
+        )
+    elif intent_name in ("MODIFY_BOOKING", "MODIFY_RESERVATION"):
+        # Service availability search (for MODIFY_BOOKING, service_id comes from booking)
+        return _execute_service_availability(
+            organization_id=organization_id,
+            slots=slots,
+            time_constraint=time_constraint,
+            availability_client=availability_client,
+            intent_name=intent_name,
+            booking_client=booking_client
         )
     else:
         # Default to service availability for unknown intents
@@ -136,7 +150,9 @@ def _execute_search_availability(
             organization_id=organization_id,
             slots=slots,
             time_constraint=time_constraint,
-            availability_client=availability_client
+            availability_client=availability_client,
+            intent_name=intent_name,
+            booking_client=booking_client
         )
 
 
@@ -589,7 +605,9 @@ def _execute_service_availability(
     organization_id: int,
     slots: Dict[str, Any],
     time_constraint: Optional[Dict[str, Any]],
-    availability_client: Any
+    availability_client: Any,
+    intent_name: Optional[str] = None,
+    booking_client: Optional[Any] = None
 ) -> Dict[str, Any]:
     """
     Execute service availability search.
@@ -599,12 +617,48 @@ def _execute_service_availability(
         slots: Slots dictionary (must include service_id and date)
         time_constraint: Optional time constraint
         availability_client: Availability client instance
+        intent_name: Optional intent name (needed for MODIFY_BOOKING to fetch service_id from booking)
+        booking_client: Optional booking client instance (needed for MODIFY_BOOKING to fetch service_id from booking)
 
     Returns:
         Normalized execution result
     """
     # Extract required fields
     service_id = slots.get("service_id")
+
+    # For MODIFY_BOOKING, if service_id is missing but booking_id is present, fetch booking to get service_id
+    if not service_id and intent_name == "MODIFY_BOOKING" and booking_client:
+        booking_id = slots.get("booking_id")
+        if booking_id:
+            try:
+                booking = booking_client.get_booking(str(booking_id))
+                # Extract service_id from booking (could be in different fields depending on API response)
+                if isinstance(booking, dict):
+                    # Try common field names for service_id in booking response
+                    extracted_service_id = (
+                        booking.get("service_id") or
+                        booking.get("item_id") or
+                        booking.get("service", {}).get("id") if isinstance(
+                            booking.get("service"), dict) else None
+                    )
+                    if extracted_service_id:
+                        logger.info(
+                            f"Extracted service_id={extracted_service_id} from booking_id={booking_id} for MODIFY_BOOKING"
+                        )
+                        # Update slots with service_id for availability search
+                        slots = slots.copy()
+                        slots["service_id"] = extracted_service_id
+                        service_id = extracted_service_id
+                    else:
+                        logger.warning(
+                            f"Could not extract service_id from booking_id={booking_id} for MODIFY_BOOKING. "
+                            f"Booking response: {booking}"
+                        )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to fetch booking_id={booking_id} to extract service_id for MODIFY_BOOKING: {e}"
+                )
+
     if not service_id:
         raise ValueError(
             "service_id is required in slots for service availability search")

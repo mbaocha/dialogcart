@@ -99,6 +99,27 @@ intents:
         # Can preview modifications with just booking_id
         - booking_id
     execution:
+      FETCH_BOOKING:
+        mode: exploratory
+        required_slots: []
+        resolves:
+          - booking_id
+        client: booking_client
+      SEARCH_AVAILABILITY:
+        mode: exploratory
+        required_slots:
+          - booking_id
+          - service_id
+        optional_slots:
+          - date
+          - time
+          - date_range
+        requires:
+          - booking_id_resolved
+        resolves:
+          - availability
+        client: availability_client
+
       APPLY_MODIFICATION:
         mode: committing
         required_slots:
@@ -107,6 +128,9 @@ intents:
           - date
           - time
           - date_range
+        requires:
+          - availability_resolved
+          - confirmation_state_confirmed
         client: booking_client
 
   MODIFY_RESERVATION:
@@ -123,6 +147,25 @@ intents:
         # Can preview modifications with just booking_id
         - booking_id
     execution:
+      FETCH_BOOKING:
+        mode: exploratory
+        required_slots: []
+        resolves:
+          - booking_id
+        client: booking_client
+      SEARCH_AVAILABILITY:
+        mode: exploratory
+        required_slots:
+          - booking_id
+        optional_slots:
+          - start_date
+          - end_date
+          - date_range
+        requires:
+          - booking_id_resolved
+        resolves:
+          - availability
+        client: availability_client
       APPLY_MODIFICATION:
         mode: committing
         required_slots:
@@ -131,6 +174,9 @@ intents:
           - start_date
           - end_date
           - date_range
+        requires:
+          - availability_resolved
+          - confirmation_state_confirmed
         client: booking_client
 
   CANCEL_BOOKING:
@@ -144,10 +190,18 @@ intents:
         # Can identify/fetch booking with just booking_id
         - booking_id
     execution:
+      FETCH_BOOKING:
+        mode: exploratory
+        required_slots: []
+        resolves:
+          - booking_id
+        client: booking_client
       CONFIRM_CANCELLATION:
         mode: committing
         required_slots:
           - booking_id
         optional_slots: []
+        requires:
+          - booking_id_resolved
         client: booking_client
 

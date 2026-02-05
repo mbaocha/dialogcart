@@ -518,9 +518,15 @@ def handle_message(
             try:
                 # Execute the selected step
                 if client_name == "availability_client":
+                    # For MODIFY_BOOKING, also pass booking_client to fetch service_id from booking
+                    booking_client_for_execution = None
+                    if intent_name == "MODIFY_BOOKING":
+                        booking_client_for_execution = kwargs.get(
+                            "booking_client")
                     execution_result = execute(
                         plan=plan,
-                        availability_client=execution_client
+                        availability_client=execution_client,
+                        booking_client=booking_client_for_execution
                     )
                 elif client_name == "booking_client":
                     execution_result = execute(
