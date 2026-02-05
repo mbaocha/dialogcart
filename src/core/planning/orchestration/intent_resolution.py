@@ -130,6 +130,36 @@ def resolve_effective_intent(
         f"location=line_122_default reason=initial_assignment "
         f"luma_intent={luma_intent_name} user_id={user_id}{log_transaction_id}"
     )
+    
+    # CRITICAL: CONFIRM_* intents are continuations, not intent switches, when session has durable intent
+    # This prevents MODIFY_BOOKING flow from breaking when user confirms with "yes"
+    if (luma_intent_name and luma_intent_name.startswith("CONFIRM_") and session_state):
+        session_intent = session_state.get("intent_name") or session_state.get("intent")
+        session_intent_str = session_intent if isinstance(session_intent, str) else (
+            session_intent.get("name", "") if isinstance(session_intent, dict) else "")
+        if session_intent_str:
+            session_intent_str = session_intent_str.strip()
+        else:
+            session_intent_str = ""
+        
+        if session_intent_str:
+            # Check if session intent is durable
+            try:
+                from core.policy.intent_policy import get_intent_durable
+                if get_intent_durable(session_intent_str):
+                    # CONFIRM_* is a continuation of durable session intent, not a switch
+                    effective_intent = session_intent_str
+                    session_reset_occurred = False
+                    logger.info(
+                        f"[session] confirm_intent_continuation user_id={user_id}{log_transaction_id} "
+                        f"session.intent={session_intent_str} luma.intent={luma_intent_name} "
+                        f"(CONFIRM_* treated as continuation of durable intent)"
+                    )
+            except (ImportError, Exception) as e:
+                logger.warning(
+                    f"Failed to check durable status for '{session_intent_str}': {e}. "
+                    f"Continuing with normal intent resolution."
+                )
 
     # SESSION LIFECYCLE RULE: Handle session intent override for:
     # 1. NEEDS_CLARIFICATION sessions (existing behavior)

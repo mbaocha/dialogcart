@@ -190,6 +190,37 @@ def _execute_confirm_appointment(
             "Provide datetime_range in slots or time_constraint with start/end."
         )
 
+    # IDEMPOTENCY CHECK: If booking_id already exists in slots, return existing booking
+    # This prevents duplicate booking creation when user confirms multiple times
+    existing_booking_id = slots.get("booking_id")
+    if existing_booking_id:
+        logger.info(
+            f"Idempotency check: booking_id={existing_booking_id} already exists in slots. "
+            "Returning existing booking without creating duplicate."
+        )
+        # Return existing booking structure (booking_id is already in slots)
+        # Extract booking object if available, otherwise construct from slots
+        booking = {
+            "id": existing_booking_id,
+            "booking_code": str(existing_booking_id),
+            "organization_id": organization_id,
+            "service_id": service_id,
+            "start_time": start_time,
+            "end_time": end_time
+        }
+        facts = {
+            "slots": slots,
+            "intent_name": intent_name
+        }
+        if time_constraint:
+            facts["time_constraint"] = time_constraint
+        return {
+            "status": "EXECUTED",
+            "booking": booking,
+            "facts": facts,
+            "booking_id": existing_booking_id  # Include for test compatibility
+        }
+
     # Extract optional fields
     staff_id = slots.get("staff_id")
     addons = slots.get("addons")
@@ -220,6 +251,24 @@ def _execute_confirm_appointment(
     booking = booking_response.get("booking") if isinstance(
         booking_response, dict) else booking_response
 
+    # Extract booking_id from booking object for idempotency
+    booking_id = None
+    if isinstance(booking, dict):
+        booking_id = booking.get("id") or booking.get(
+            "booking_id") or booking.get("booking_code")
+    elif hasattr(booking, "id"):
+        booking_id = booking.id
+    elif hasattr(booking, "booking_id"):
+        booking_id = booking.booking_id
+    elif hasattr(booking, "booking_code"):
+        booking_id = booking.booking_code
+
+    # Store booking_id in slots for idempotency (prevent duplicate creation on next confirmation)
+    if booking_id:
+        slots["booking_id"] = booking_id
+        logger.debug(
+            f"Stored booking_id={booking_id} in slots for idempotency")
+
     # Build execution result
     # Include original facts (slots) in the result
     facts = {
@@ -229,11 +278,17 @@ def _execute_confirm_appointment(
     if time_constraint:
         facts["time_constraint"] = time_constraint
 
-    return {
+    result = {
         "status": "EXECUTED",
         "booking": booking,
         "facts": facts
     }
+
+    # Include booking_id in result for test compatibility
+    if booking_id:
+        result["booking_id"] = booking_id
+
+    return result
 
 
 def _execute_confirm_cancellation(

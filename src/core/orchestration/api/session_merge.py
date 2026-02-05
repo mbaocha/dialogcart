@@ -884,6 +884,31 @@ def merge_luma_with_session(
     # Raw slots are persisted exactly as provided by user/Luma
     # Promotion happens in-memory before computing missing_slots, never persisted
 
+    # NEW BOOKING REQUEST DETECTION: Clear booking_id when user provides a new booking request
+    # If CREATE_APPOINTMENT intent and Luma provides new booking slots (service_id, date, or time),
+    # this indicates a new booking request, not a confirmation of the previous booking
+    # Clear booking_id and availability_fingerprint to allow fresh booking flow
+    merged_intent_name = merged.get("intent", {}).get("name", "") if isinstance(merged.get("intent"), dict) else ""
+    if merged_intent_name == "CREATE_APPOINTMENT" and "booking_id" in merged_slots:
+        # Check if Luma provided new booking-related slots (indicating a new booking request)
+        has_new_booking_slots = any(
+            key in luma_slots and luma_slots.get(key) is not None
+            for key in ["service_id", "date", "time"]
+        )
+        if has_new_booking_slots:
+            # User provided a new booking request - clear previous booking_id and availability_fingerprint
+            del merged_slots["booking_id"]
+            # Also clear availability_fingerprint from session_state to force fresh availability search
+            if session_state and "availability_fingerprint" in session_state:
+                del session_state["availability_fingerprint"]
+                logger.info(
+                    f"Cleared availability_fingerprint due to new booking request"
+                )
+            logger.info(
+                f"Cleared booking_id due to new booking request: "
+                f"intent={merged_intent_name}, new_slots={[k for k in ['service_id', 'date', 'time'] if k in luma_slots]}"
+            )
+
     # CONTRACT ENFORCEMENT: Lift explicit user-provided dates from context into slots
     # If context contains explicit date values (from user input), extract them into slots for persistence
     # This ensures dates don't disappear between turns

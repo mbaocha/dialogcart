@@ -85,7 +85,8 @@ class TurnState:
 
 def finalize_turn_state(
     intent_name: str,
-    merged_session_slots: Dict[str, Any]
+    merged_session_slots: Dict[str, Any],
+    existing_missing_slots: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Finalize turn state by computing effective_collected_slots, missing_slots, and status.
@@ -119,34 +120,48 @@ def finalize_turn_state(
             "status": "NEEDS_CLARIFICATION"
         }
     
-    # Use planner to compute missing_slots
-    # Slots are treated as an unordered, additive map
-    # CRITICAL: For MODIFY_BOOKING, use compute_missing_slots which properly handles
-    # context-aware required slots. plan_intent doesn't handle MODIFY_BOOKING correctly
-    # because it's not in intent_policy.yaml.
-    if intent_name == "MODIFY_BOOKING":
-        from core.planning.orchestration.missing_slots import compute_missing_slots
-        # Use compute_missing_slots which properly handles MODIFY_BOOKING
-        missing_slots = compute_missing_slots(
-            intent_name=intent_name,
-            collected_slots=merged_session_slots,
-            modification_context=None,  # Will be derived from collected_slots
-            session_state=None,
-            time_constraint=None
-        )
+    # CRITICAL: If missing_slots already exists (from earlier computation), use it verbatim
+    # This prevents duplicate recomputation that overwrites correct values
+    if existing_missing_slots is not None:
         # Extract collected slot names
         collected_slot_names = set([
             slot_name for slot_name, slot_value in merged_session_slots.items()
             if slot_value is not None
         ])
+        missing_slots = existing_missing_slots
+        logger.info(
+            f"[MISSING_SLOTS_TRACE] finalize_turn_state: Using existing missing_slots (no recomputation), "
+            f"intent={intent_name}, missing_slots={missing_slots}"
+        )
     else:
-        # For other intents, use plan_intent
-        policy = _get_planning_policy()
-        plan = plan_intent(intent_name, merged_session_slots, policy)
-        
-        # Extract results from planner
-        collected_slot_names = set(plan["collected_slots"])
-        missing_slots = plan["missing_slots"]
+        # Use planner to compute missing_slots
+        # Slots are treated as an unordered, additive map
+        # CRITICAL: For MODIFY_BOOKING, use compute_missing_slots which properly handles
+        # context-aware required slots. plan_intent doesn't handle MODIFY_BOOKING correctly
+        # because it's not in intent_policy.yaml.
+        if intent_name == "MODIFY_BOOKING":
+            from core.planning.orchestration.missing_slots import compute_missing_slots
+            # Use compute_missing_slots which properly handles MODIFY_BOOKING
+            missing_slots = compute_missing_slots(
+                intent_name=intent_name,
+                collected_slots=merged_session_slots,
+                modification_context=None,  # Will be derived from collected_slots
+                session_state=None,
+                time_constraint=None
+            )
+            # Extract collected slot names
+            collected_slot_names = set([
+                slot_name for slot_name, slot_value in merged_session_slots.items()
+                if slot_value is not None
+            ])
+        else:
+            # For other intents, use plan_intent
+            policy = _get_planning_policy()
+            plan = plan_intent(intent_name, merged_session_slots, policy)
+            
+            # Extract results from planner
+            collected_slot_names = set(plan["collected_slots"])
+            missing_slots = plan["missing_slots"]
     
     # INVESTIGATION: Log initial missing_slots computation from planner
     from core.planning.orchestration.missing_slots import get_planning_required_slots_for_intent
@@ -181,6 +196,37 @@ def finalize_turn_state(
         logger.info(
             f"[FINALIZE_TURN_STATE] UNKNOWN intent - forcing NEEDS_CLARIFICATION regardless of missing_slots"
         )
+    # MODIFY_BOOKING guard: Prevent premature READY when only booking_id is present
+    # Policy: required_slots = ['booking_id'], but date/time/date_range are optional
+    # If only booking_id is present, must clarify target datetime (NEEDS_CLARIFICATION)
+    # If only date is present (without time), must still clarify time (NEEDS_CLARIFICATION)
+    elif intent_name == "MODIFY_BOOKING":
+        has_booking_id = "booking_id" in effective_collected_slots and effective_collected_slots.get("booking_id") is not None
+        has_date_range = "date_range" in effective_collected_slots and effective_collected_slots.get("date_range") is not None
+        has_date = "date" in effective_collected_slots and effective_collected_slots.get("date") is not None
+        has_time = "time" in effective_collected_slots and effective_collected_slots.get("time") is not None
+        # For MODIFY_BOOKING, need either date_range OR both date AND time
+        has_complete_datetime = has_date_range or (has_date and has_time)
+        
+        if has_booking_id and not has_complete_datetime:
+            # Only booking_id present, or date without time - must clarify target datetime
+            status = "NEEDS_CLARIFICATION"
+            # Override missing_slots to include date/time for clarification
+            if has_date and not has_time:
+                missing_slots = ["time"]  # Only time missing
+            else:
+                missing_slots = ["date", "time"]  # Both missing (or neither)
+            logger.info(
+                f"[FINALIZE_TURN_STATE] MODIFY_BOOKING: Incomplete datetime info - forcing NEEDS_CLARIFICATION "
+                f"(has_booking_id={has_booking_id}, has_date={has_date}, has_time={has_time}, has_date_range={has_date_range}) "
+                f"with missing_slots={missing_slots}"
+            )
+        elif len(missing_slots) > 0:
+            # Missing slots exist - must be NEEDS_CLARIFICATION
+            status = "NEEDS_CLARIFICATION"
+        else:
+            # booking_id + complete datetime (date_range OR date+time) present - can be READY
+            status = "READY"
     # Determine status based on missing_slots
     # INVARIANT: READY only if missing_slots empty (and intent is not UNKNOWN)
     elif len(missing_slots) > 0:

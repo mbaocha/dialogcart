@@ -67,66 +67,20 @@ def get_planning_required_slots_for_intent(
         print(f"[REQUIRED_SLOTS_COMPUTE] collected_slots keys={list(collected_slots.keys())}")
         print(f"[REQUIRED_SLOTS_COMPUTE] collected_slots values={collected_slots}")
     
-    # MODIFY_BOOKING: Context-aware required slots based on what's being modified
-    # CRITICAL: If modification_context is present, it MUST override base planning slots
-    # Base slots are fallback only when modification_context is absent
-    # modification_context is authoritative and cannot be bypassed
+    # MODIFY_BOOKING: Use policy-defined required_slots (booking_id only)
+    # Policy: required_slots = ['booking_id'], optional_slots = ['date', 'time', 'date_range']
+    # 
+    # TODO: All intent-specific slot logic MUST come from intent_policy.yaml, not inline lists.
+    # This ensures policy is the single source of truth for intent behavior.
+    # Any hard-coded slot requirements (like the old ["booking_id", "date", "time"]) violate this principle.
     if intent_name == "MODIFY_BOOKING":
-        print(f"[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING path: collected_slots={collected_slots}, modification_context={modification_context}")
-        
-        # Base: ambiguous modify requires both date and time (fallback only)
-        base_required_slots = ["booking_id", "date", "time"]
-        
-        # CRITICAL: If modification_context is present, it MUST override base planning slots
-        # modification_context is authoritative - check it first, before checking collected_slots
-        if modification_context:
-            # modification_context is present - use it as authoritative source
-            has_time = modification_context.get("modifying_time", False)
-            has_date = modification_context.get("modifying_date", False)
-            print(f"[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING: Using authoritative modification_context: modifying_time={has_time}, modifying_date={has_date}")
-        else:
-            # No modification_context - fall back to checking collected_slots (semantic signals from current turn)
-            has_time = False
-            has_date = False
-            if collected_slots:
-                has_time = "time" in collected_slots and collected_slots.get("time") is not None
-                has_date = "date" in collected_slots and collected_slots.get("date") is not None
-            print(f"[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING: No modification_context, checking collected_slots: has_time={has_time}, has_date={has_date}")
-        
-        print(f"[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING analysis: has_time={has_time}, has_date={has_date}")
-        if collected_slots:
-            print(f"[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING time value={collected_slots.get('time')}")
-            print(f"[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING date value={collected_slots.get('date')}")
-        
-        # Start with booking_id (always required)
-        required_slots = ["booking_id"]
-        
-        # Narrow based on modification context (authoritative):
-        if has_time and not has_date:
-            # Time-only change: require only time
-            required_slots.append("time")
-            print(f"[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING: time-only change -> required_slots={required_slots}")
-        elif has_date and not has_time:
-            # Date-only change: require only date
-            required_slots.append("date")
-            print(f"[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING: date-only change -> required_slots={required_slots}")
-        elif has_time and has_date:
-            # Date+time change: require both
-            required_slots.extend(["date", "time"])
-            print(f"[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING: date+time change -> required_slots={required_slots}")
-        else:
-            # Both False (unknown/ambiguous): use base (require both date and time)
-            # Only fallback to base when modification_context is absent or both flags are False
-            if not modification_context:
-                required_slots = base_required_slots.copy()
-                print(f"[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING: no modification_context -> using base_required_slots={required_slots}")
-            else:
-                # modification_context present but both False - still use base (ambiguous)
-                required_slots = base_required_slots.copy()
-                print(f"[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING: modification_context present but ambiguous -> using base_required_slots={required_slots}")
-        
-        print(f"[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING FINAL: required_slots={required_slots}")
-        return sorted(list(set(required_slots)))
+        # Use policy-defined required_slots (only booking_id)
+        # date/time/date_range are optional at planning time
+        required_slots = base_planning_slots if base_planning_slots else ["booking_id"]
+        logger.debug(
+            f"[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING: Using policy-defined required_slots: {required_slots}"
+        )
+        return sorted(required_slots)
     
     # MODIFY_RESERVATION: Context-aware required slots based on what's being modified
     # CRITICAL: If modification_context is present, it MUST override base planning slots

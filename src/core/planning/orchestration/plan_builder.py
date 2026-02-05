@@ -268,24 +268,40 @@ def build_decision_plan(
                 action = selected_step.get("action")
                 action_branch = "policy"
                 
-                # MODIFY_BOOKING guardrail: Enforce SEARCH_AVAILABILITY first
-                # Never allow APPLY_MODIFICATION on first turn (before availability check)
-                if intent_name == "MODIFY_BOOKING" and action == "APPLY_MODIFICATION" and not availability_resolved:
-                    if "SEARCH_AVAILABILITY" in allowed_actions:
+                # MODIFY_BOOKING guardrail: Allow APPLY_MODIFICATION on confirmation, otherwise SEARCH_AVAILABILITY first
+                # CRITICAL: Check confirmation_state FIRST - if confirmed, allow APPLY_MODIFICATION regardless of availability
+                if intent_name == "MODIFY_BOOKING" and action == "APPLY_MODIFICATION":
+                    # If confirmed, allow APPLY_MODIFICATION (skip availability override)
+                    if confirmation_state == "confirmed":
+                        # Confirmed - allow APPLY_MODIFICATION
+                        action = "APPLY_MODIFICATION"
+                        stage = "CONFIRM"
+                        action_branch = "modify_booking_confirmed_allow_apply"
+                        logger.info(
+                            f"[PLAN_SELECTION] MODIFY_BOOKING: Confirmed - allowing APPLY_MODIFICATION "
+                            f"(confirmation_state={confirmation_state}, availability_resolved={availability_resolved})"
+                        )
+                    # Only force SEARCH_AVAILABILITY when confirmation_state is None AND availability_resolved == False
+                    elif confirmation_state is None and not availability_resolved:
+                        # Not confirmed and availability not resolved - force SEARCH_AVAILABILITY
                         action = "SEARCH_AVAILABILITY"
                         stage = "AVAILABILITY"
                         action_branch = "modify_booking_override_policy_availability_first"
                         logger.info(
                             f"[PLAN_SELECTION] MODIFY_BOOKING: Overriding policy selection "
-                            f"(APPLY_MODIFICATION -> SEARCH_AVAILABILITY, availability_resolved={availability_resolved})"
+                            f"(APPLY_MODIFICATION -> SEARCH_AVAILABILITY, confirmation_state={confirmation_state}, "
+                            f"availability_resolved={availability_resolved})"
                         )
-                    else:
-                        # SEARCH_AVAILABILITY not available - keep APPLY_MODIFICATION but log warning
-                        stage = "CONFIRM"
-                        action_branch = "modify_booking_policy_apply_forced"
-                        logger.warning(
-                            f"[PLAN_SELECTION] MODIFY_BOOKING: Policy selected APPLY_MODIFICATION "
-                            f"but availability_resolved=False and SEARCH_AVAILABILITY not in allowed_actions"
+                    # If availability_resolved but not confirmed, still need confirmation
+                    elif confirmation_state is None and availability_resolved:
+                        # Availability resolved but not confirmed - still need confirmation
+                        action = "SEARCH_AVAILABILITY"
+                        stage = "AVAILABILITY"
+                        action_branch = "modify_booking_override_policy_confirmation_required"
+                        logger.info(
+                            f"[PLAN_SELECTION] MODIFY_BOOKING: Overriding policy selection "
+                            f"(APPLY_MODIFICATION -> SEARCH_AVAILABILITY, availability_resolved but confirmation required, "
+                            f"confirmation_state={confirmation_state})"
                         )
                 else:
                     # Determine stage based on action
@@ -312,10 +328,39 @@ def build_decision_plan(
                 
                 if intent_name in CONFIRM_ACTION_MAP:
                     candidate_action = CONFIRM_ACTION_MAP[intent_name]
+                    
+                    # MODIFY_BOOKING guardrail: Allow APPLY_MODIFICATION on confirmation
+                    if intent_name == "MODIFY_BOOKING" and candidate_action == "APPLY_MODIFICATION":
+                        if confirmation_state == "confirmed":
+                            # Confirmed - allow APPLY_MODIFICATION
+                            action = candidate_action
+                            action_branch = "modify_booking_confirmed_allow_apply"
+                            logger.info(
+                                f"[PLAN_SELECTION] MODIFY_BOOKING: Confirmed - allowing APPLY_MODIFICATION "
+                                f"(confirmation_state={confirmation_state}, availability_resolved={availability_resolved})"
+                            )
+                        elif confirmation_state is None and not availability_resolved:
+                            # Not confirmed and availability not resolved - force SEARCH_AVAILABILITY
+                            action = "SEARCH_AVAILABILITY"
+                            stage = "AVAILABILITY"
+                            action_branch = "modify_booking_override_confirm_map_availability_first"
+                            logger.info(
+                                f"[PLAN_SELECTION] MODIFY_BOOKING: Overriding CONFIRM_ACTION_MAP selection "
+                                f"(APPLY_MODIFICATION -> SEARCH_AVAILABILITY, confirmation_state={confirmation_state}, "
+                                f"availability_resolved={availability_resolved})"
+                            )
+                        else:
+                            # Availability resolved but not confirmed, or other state
+                            action = "SEARCH_AVAILABILITY"
+                            stage = "AVAILABILITY"
+                            action_branch = "modify_booking_override_confirm_map_confirmation_required"
+                            logger.info(
+                                f"[PLAN_SELECTION] MODIFY_BOOKING: Overriding CONFIRM_ACTION_MAP selection "
+                                f"(APPLY_MODIFICATION -> SEARCH_AVAILABILITY, confirmation required, "
+                                f"confirmation_state={confirmation_state})"
+                            )
                     # Only block CONFIRM_APPOINTMENT by availability when slots are incomplete
-                    # When all slots are complete (missing_slots == [] and status == READY),
-                    # availability is optional and must not block confirmation
-                    if (candidate_action == "CONFIRM_APPOINTMENT" 
+                    elif (candidate_action == "CONFIRM_APPOINTMENT" 
                             and not availability_resolved 
                             and missing_slots != []):
                         # Availability not resolved AND slots incomplete - select SEARCH_AVAILABILITY instead
@@ -348,33 +393,73 @@ def build_decision_plan(
                         )
                 elif commit_action and commit_action in allowed_actions:
                     # Commit action is available and allowed - use it
-                    action = commit_action
-                    action_branch = "fallback_commit_allowed"
-                    logger.info(
-                        f"[PLAN_SELECTION] Fallback to commit_action: intent={intent_name}, "
-                        f"missing_slots={missing_slots}, availability_resolved={availability_resolved}, "
-                        f"selected_action={action}, rule=commit_action_in_allowed"
-                    )
+                    # MODIFY_BOOKING guardrail: Allow APPLY_MODIFICATION on confirmation
+                    if intent_name == "MODIFY_BOOKING" and commit_action == "APPLY_MODIFICATION":
+                        if confirmation_state == "confirmed":
+                            # Confirmed - allow APPLY_MODIFICATION
+                            action = commit_action
+                            action_branch = "modify_booking_confirmed_allow_apply"
+                            logger.info(
+                                f"[PLAN_SELECTION] MODIFY_BOOKING: Confirmed - allowing APPLY_MODIFICATION "
+                                f"(confirmation_state={confirmation_state}, availability_resolved={availability_resolved})"
+                            )
+                        elif confirmation_state is None and not availability_resolved:
+                            # Not confirmed and availability not resolved - force SEARCH_AVAILABILITY
+                            action = "SEARCH_AVAILABILITY"
+                            stage = "AVAILABILITY"
+                            action_branch = "modify_booking_override_commit_allowed_availability_first"
+                            logger.info(
+                                f"[PLAN_SELECTION] MODIFY_BOOKING: Overriding commit_action selection "
+                                f"(APPLY_MODIFICATION -> SEARCH_AVAILABILITY, confirmation_state={confirmation_state}, "
+                                f"availability_resolved={availability_resolved})"
+                            )
+                        else:
+                            # Availability resolved but not confirmed, or other state
+                            action = "SEARCH_AVAILABILITY"
+                            stage = "AVAILABILITY"
+                            action_branch = "modify_booking_override_commit_allowed_confirmation_required"
+                            logger.info(
+                                f"[PLAN_SELECTION] MODIFY_BOOKING: Overriding commit_action selection "
+                                f"(APPLY_MODIFICATION -> SEARCH_AVAILABILITY, confirmation required, "
+                                f"confirmation_state={confirmation_state})"
+                            )
+                    else:
+                        action = commit_action
+                        action_branch = "fallback_commit_allowed"
+                        logger.info(
+                            f"[PLAN_SELECTION] Fallback to commit_action: intent={intent_name}, "
+                            f"missing_slots={missing_slots}, availability_resolved={availability_resolved}, "
+                            f"selected_action={action}, rule=commit_action_in_allowed"
+                        )
                 elif commit_action:
                     # Commit action exists but is blocked - use fallback
                     if intent_name == "MODIFY_BOOKING":
-                        # MODIFY_BOOKING: Enforce two-step flow - SEARCH_AVAILABILITY first
-                        # Only allow APPLY_MODIFICATION after availability is resolved
-                        if not availability_resolved and "SEARCH_AVAILABILITY" in allowed_actions:
+                        # MODIFY_BOOKING: Allow APPLY_MODIFICATION on confirmation
+                        if confirmation_state == "confirmed":
+                            # Confirmed - allow APPLY_MODIFICATION
+                            action = "APPLY_MODIFICATION"
+                            action_branch = "modify_booking_confirmed_allow_apply"
+                            logger.info(
+                                f"[PLAN_SELECTION] MODIFY_BOOKING: Confirmed - allowing APPLY_MODIFICATION "
+                                f"(confirmation_state={confirmation_state}, availability_resolved={availability_resolved})"
+                            )
+                        elif confirmation_state is None and not availability_resolved:
+                            # Not confirmed and availability not resolved - force SEARCH_AVAILABILITY
                             action = "SEARCH_AVAILABILITY"
                             stage = "AVAILABILITY"
                             action_branch = "modify_booking_availability_first"
                             logger.info(
                                 f"[PLAN_SELECTION] MODIFY_BOOKING: Enforcing SEARCH_AVAILABILITY first "
-                                f"(availability_resolved={availability_resolved})"
+                                f"(confirmation_state={confirmation_state}, availability_resolved={availability_resolved})"
                             )
                         else:
-                            # Availability resolved or SEARCH_AVAILABILITY not available - use APPLY_MODIFICATION
-                            action = "APPLY_MODIFICATION"
-                            action_branch = "modify_booking_apply_after_availability"
+                            # Availability resolved but not confirmed, or other state
+                            action = "SEARCH_AVAILABILITY"
+                            stage = "AVAILABILITY"
+                            action_branch = "modify_booking_confirmation_required"
                             logger.info(
-                                f"[PLAN_SELECTION] MODIFY_BOOKING: Using APPLY_MODIFICATION "
-                                f"(availability_resolved={availability_resolved})"
+                                f"[PLAN_SELECTION] MODIFY_BOOKING: Enforcing SEARCH_AVAILABILITY first "
+                                f"(confirmation required, confirmation_state={confirmation_state})"
                             )
                     elif intent_name == "CANCEL_BOOKING":
                         action = "CONFIRM_CANCELLATION"
@@ -395,23 +480,32 @@ def build_decision_plan(
                 else:
                     # No commit action defined - use fallback based on intent
                     if intent_name == "MODIFY_BOOKING":
-                        # MODIFY_BOOKING: Enforce two-step flow - SEARCH_AVAILABILITY first
-                        # Only allow APPLY_MODIFICATION after availability is resolved
-                        if not availability_resolved and "SEARCH_AVAILABILITY" in allowed_actions:
+                        # MODIFY_BOOKING: Allow APPLY_MODIFICATION on confirmation
+                        if confirmation_state == "confirmed":
+                            # Confirmed - allow APPLY_MODIFICATION
+                            action = "APPLY_MODIFICATION"
+                            action_branch = "modify_booking_confirmed_allow_apply"
+                            logger.info(
+                                f"[PLAN_SELECTION] MODIFY_BOOKING: Confirmed - allowing APPLY_MODIFICATION "
+                                f"(confirmation_state={confirmation_state}, availability_resolved={availability_resolved})"
+                            )
+                        elif confirmation_state is None and not availability_resolved:
+                            # Not confirmed and availability not resolved - force SEARCH_AVAILABILITY
                             action = "SEARCH_AVAILABILITY"
                             stage = "AVAILABILITY"
                             action_branch = "modify_booking_availability_first"
                             logger.info(
                                 f"[PLAN_SELECTION] MODIFY_BOOKING: Enforcing SEARCH_AVAILABILITY first "
-                                f"(availability_resolved={availability_resolved})"
+                                f"(confirmation_state={confirmation_state}, availability_resolved={availability_resolved})"
                             )
                         else:
-                            # Availability resolved or SEARCH_AVAILABILITY not available - use APPLY_MODIFICATION
-                            action = "APPLY_MODIFICATION"
-                            action_branch = "modify_booking_apply_after_availability"
+                            # Availability resolved but not confirmed, or other state
+                            action = "SEARCH_AVAILABILITY"
+                            stage = "AVAILABILITY"
+                            action_branch = "modify_booking_confirmation_required"
                             logger.info(
-                                f"[PLAN_SELECTION] MODIFY_BOOKING: Using APPLY_MODIFICATION "
-                                f"(availability_resolved={availability_resolved})"
+                                f"[PLAN_SELECTION] MODIFY_BOOKING: Enforcing SEARCH_AVAILABILITY first "
+                                f"(confirmation required, confirmation_state={confirmation_state})"
                             )
                     elif intent_name == "CANCEL_BOOKING":
                         action = "CONFIRM_CANCELLATION"
@@ -429,6 +523,15 @@ def build_decision_plan(
                             f"missing_slots={missing_slots}, availability_resolved={availability_resolved}, "
                             f"selected_action={action}, rule=no_commit_action_fallback"
                         )
+
+    # Safety guard: MODIFY_BOOKING must not have APPLY_MODIFICATION in IDENTIFY stage
+    if intent_name == "MODIFY_BOOKING" and stage == "IDENTIFY" and action == "APPLY_MODIFICATION":
+        logger.error(
+            f"[PLAN_SELECTION] SAFETY VIOLATION: MODIFY_BOOKING with stage=IDENTIFY cannot have action=APPLY_MODIFICATION. "
+            f"Overriding to FETCH_BOOKING."
+        )
+        action = "FETCH_BOOKING"
+        action_branch = "safety_guard_identify_apply_modification_blocked"
 
     # DEBUG: Log final plan decision before returning
     logger.error(

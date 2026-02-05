@@ -982,10 +982,19 @@ def process_luma_response(
     }
 
     # Finalize turn state: compute effective_slots, missing_slots, and base status
+    # CRITICAL: If missing_slots already exists in luma_response, use it verbatim to prevent duplicate recomputation
+    existing_missing_slots = luma_response.get("missing_slots")
+    if existing_missing_slots is not None and isinstance(existing_missing_slots, list):
+        logger.info(
+            f"[MISSING_SLOTS_TRACE] process_luma_response: Using existing missing_slots from luma_response, "
+            f"intent={intent_name}, missing_slots={existing_missing_slots}"
+        )
+    
     turn_state = finalize_turn_state(
         intent_name=intent_name,
         # Use normalized slots (after time normalization)
-        merged_session_slots=slots_for_filtering
+        merged_session_slots=slots_for_filtering,
+        existing_missing_slots=existing_missing_slots if isinstance(existing_missing_slots, list) else None
     )
 
     effective_collected_slots = turn_state["effective_slots"]

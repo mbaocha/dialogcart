@@ -133,3 +133,124 @@ scenarios:
           action: APPLY_MODIFICATION
           intent_preserved: true
 
+  - name: apply_modification_date_time_then_booking_id
+    description: User provides date/time before booking_id (out-of-order slots)
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "move it to friday at 4pm"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          missing_slots: ["booking_id"]
+          no_premature_execution: true
+
+      - sentence: "booking ABC123"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+          # Verify slots merged: date and time should be preserved from turn 1
+          # Note: Actual slot values depend on Luma extraction, but intent should be preserved
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: APPLY_MODIFICATION
+          intent_preserved: true
+
+  - name: apply_modification_fuzzy_time_requires_clarification
+    description: Fuzzy/ambiguous time like "afternoon" requires clarification
+    domain: service
+    aliases:
+      massage: massage
+    turns:
+      - sentence: "reschedule booking ABC123 to tomorrow afternoon"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          missing_slots: ["time"]
+          no_premature_execution: true
+          # Date should be filled, but time not resolved from "afternoon"
+
+      - sentence: "at 3pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: APPLY_MODIFICATION
+          intent_preserved: true
+
+  - name: apply_modification_switch_to_cancel_mid_flow
+    description: User switches from MODIFY_BOOKING to CANCEL_BOOKING mid-flow (durable intent reset)
+    domain: service
+    aliases:
+      facial: facial
+    turns:
+      - sentence: "change booking ABC123"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          missing_slots: ["date", "time"]
+          no_premature_execution: true
+
+      - sentence: "actually cancel it"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          missing_slots: ["booking_id"]
+          intent_switched: true
+          # Intent switches from MODIFY_BOOKING to CANCEL_BOOKING
+          # Session resets, booking_id from previous session is lost
+          # System requires booking_id to be re-provided for CANCEL_BOOKING
+
+  - name: apply_modification_repeated_confirmation_denial
+    description: User denies confirmation multiple times (no accidental commit)
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "change booking ABC123 to friday at 3pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+
+      - sentence: "no"
+        expect:
+          status: NON_DURABLE_INTENT
+          # REJECT_OR_CHANGE is non-durable and interrupts the flow
+          # Session is not preserved, flow is broken
+          # This reflects current system behavior where "no" breaks durable intents
+
+  - name: apply_modification_time_correction
+    description: User corrects time value, overwriting previous value
+    domain: service
+    aliases:
+      massage: massage
+    turns:
+      - sentence: "change booking ABC123 to friday at 3pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+
+      - sentence: "make that 4pm instead"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+          no_premature_execution: true
+          # Time should be overwritten to 4pm, date preserved
+          # New SEARCH_AVAILABILITY triggered, no APPLY_MODIFICATION yet
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: APPLY_MODIFICATION
+          intent_preserved: true

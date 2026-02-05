@@ -541,6 +541,13 @@ def handle_message(
                 if execution_result.get("status") == "EXECUTED" and plan.get("action") == "CONFIRM_APPOINTMENT":
                     # Ensure plan action remains CONFIRM_APPOINTMENT (don't override)
                     plan["action"] = "CONFIRM_APPOINTMENT"
+                    # Persist booking_id to slots for idempotency (prevent duplicate creation on next confirmation)
+                    booking_id = execution_result.get("booking_id")
+                    if booking_id:
+                        slots["booking_id"] = booking_id
+                        plan["slots"] = slots
+                        logger.debug(
+                            f"Persisted booking_id={booking_id} to slots for idempotency")
 
                 # Persist availability fingerprint when SEARCH_AVAILABILITY succeeds
                 # This enables slot-fingerprint-based availability resolution
@@ -1775,6 +1782,23 @@ def handle_message_legacy(
 
         effective_response = merge_luma_with_session(
             effective_response, session_for_merge, planning_only=planning_only)
+
+        # CRITICAL: If CONFIRM_* intent was treated as continuation of durable session intent,
+        # set confirmation_state to "confirmed" in the booking object
+        # NOTE: Use original luma_intent_name (from line 1446) BEFORE merge, not after merge
+        # because merge_luma_with_session changes effective_response['intent']['name'] to session intent
+        if (luma_intent_name and luma_intent_name.startswith("CONFIRM_") and
+                effective_intent != luma_intent_name and is_session_intent_durable):
+            # CONFIRM_* was treated as continuation - set confirmation_state
+            if "booking" not in effective_response:
+                effective_response["booking"] = {}
+            if not isinstance(effective_response["booking"], dict):
+                effective_response["booking"] = {}
+            effective_response["booking"]["confirmation_state"] = "confirmed"
+            logger.info(
+                f"[CONFIRM_CONTINUATION] Set confirmation_state=confirmed for CONFIRM_* continuation "
+                f"of durable intent {effective_intent}, user_id={user_id}"
+            )
 
         # AFTER_MERGE: Log right after session merge
         effective_collected_slots = effective_response.get(
