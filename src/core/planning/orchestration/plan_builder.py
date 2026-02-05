@@ -60,7 +60,8 @@ def _extract_missing_slots(luma_response: Dict[str, Any]) -> List[str]:
 def build_decision_plan(
     intent_name: str,
     luma_response: Dict[str, Any],
-    domain: str
+    domain: str,
+    availability_resolved: bool = False
 ) -> Dict[str, Any]:
     """
     Build a decision plan from Luma response.
@@ -178,13 +179,16 @@ def build_decision_plan(
         planner_result = plan_intent(intent_name, effective_slots, policy)
         executable_actions = planner_result.get("executable_actions", [])
 
-    # CRITICAL: If missing_slots exist, block ALL actions (including executable_actions from planner)
-    # Planner's executable_actions are for partial execution, but we block them when missing required slots
+    # CRITICAL: Allow exploratory actions even when planning slots are incomplete
+    # Only block committing actions when missing_slots exist
+    # Planner's executable_actions are for partial execution and should be allowed
     if missing_slots:
-        # Block all actions when missing_slots exist
+        # Block committing actions when missing_slots exist
         if commit_action:
             blocked_actions.append(commit_action)
-        # Do NOT allow executable_actions while clarifying - all actions blocked
+        # Allow exploratory actions from planner (they satisfy their own required_slots)
+        # This aligns with policy: exploratory actions can execute with partial slots
+        allowed_actions.extend(executable_actions)
     else:
         # No missing slots - allow executable_actions from planner (partial execution)
         allowed_actions.extend(executable_actions)
@@ -213,6 +217,7 @@ def build_decision_plan(
     # Stage/action mapping based on missing_slots and executable_actions
     stage = None
     action = None
+    action_branch = None  # Track which branch set the action for debugging
 
     # CONFIRM ACTION MAP: Hard mapping for complete slots (missing_slots == [])
     CONFIRM_ACTION_MAP = {
@@ -227,6 +232,7 @@ def build_decision_plan(
         if intent_name in ("MODIFY_BOOKING", "CANCEL_BOOKING"):
             stage = "IDENTIFY"
             action = "FETCH_BOOKING"
+            action_branch = "missing_slots_modify_cancel"
         else:
             # CREATE_APPOINTMENT or CREATE_RESERVATION
             stage = "AVAILABILITY"
@@ -235,39 +241,205 @@ def build_decision_plan(
                 action = executable_actions[0]
             else:
                 action = "SEARCH_AVAILABILITY"
+            action_branch = "missing_slots_executable"
     else:
-        # No missing slots - CONFIRM decision
-        stage = "CONFIRM"
+        # No missing slots - use policy-driven selection to respect 'requires' field
+        # This ensures CONFIRM_APPOINTMENT only runs when availability_resolved is true
+        
+        # Get slots for policy selection
+        effective_slots = luma_response.get("_effective_collected_slots")
+        if effective_slots is None:
+            effective_slots = luma_response.get("slots", {})
+        
+        # Use select_next_execution_step to respect policy 'requires' field
+        # Policy is the single decision authority - always pass actual availability_resolved value
+        # Policy will correctly select:
+        # - SEARCH_AVAILABILITY when availability_resolved=False
+        # - CONFIRM_APPOINTMENT when availability_resolved=True
+        if action is None:
+            from core.policy.intent_policy import select_next_execution_step
+            # Always pass the actual computed availability_resolved value
+            # Planner never lies about availability state - policy decides based on truth
+            flags = {"availability_resolved": availability_resolved}
+            selected_step = select_next_execution_step(intent_name, effective_slots, flags)
+            
+            if selected_step:
+                # Policy selected a step - use it
+                action = selected_step.get("action")
+                action_branch = "policy"
+                
+                # MODIFY_BOOKING guardrail: Enforce SEARCH_AVAILABILITY first
+                # Never allow APPLY_MODIFICATION on first turn (before availability check)
+                if intent_name == "MODIFY_BOOKING" and action == "APPLY_MODIFICATION" and not availability_resolved:
+                    if "SEARCH_AVAILABILITY" in allowed_actions:
+                        action = "SEARCH_AVAILABILITY"
+                        stage = "AVAILABILITY"
+                        action_branch = "modify_booking_override_policy_availability_first"
+                        logger.info(
+                            f"[PLAN_SELECTION] MODIFY_BOOKING: Overriding policy selection "
+                            f"(APPLY_MODIFICATION -> SEARCH_AVAILABILITY, availability_resolved={availability_resolved})"
+                        )
+                    else:
+                        # SEARCH_AVAILABILITY not available - keep APPLY_MODIFICATION but log warning
+                        stage = "CONFIRM"
+                        action_branch = "modify_booking_policy_apply_forced"
+                        logger.warning(
+                            f"[PLAN_SELECTION] MODIFY_BOOKING: Policy selected APPLY_MODIFICATION "
+                            f"but availability_resolved=False and SEARCH_AVAILABILITY not in allowed_actions"
+                        )
+                else:
+                    # Determine stage based on action
+                    if action == "SEARCH_AVAILABILITY":
+                        stage = "AVAILABILITY"
+                    elif action in ("CONFIRM_APPOINTMENT", "CONFIRM_RESERVATION", "APPLY_MODIFICATION", "CONFIRM_CANCELLATION"):
+                        stage = "CONFIRM"
+                    else:
+                        # Default to CONFIRM for committing actions, AVAILABILITY for exploratory
+                        mode = selected_step.get("mode", "exploratory")
+                        stage = "AVAILABILITY" if mode == "exploratory" else "CONFIRM"
+                
+                logger.info(
+                    f"[PLAN_SELECTION] Policy-driven selection: intent={intent_name}, "
+                    f"missing_slots={missing_slots}, availability_resolved={availability_resolved}, "
+                    f"selected_action={action}, selected_stage={stage}, "
+                    f"rule=select_next_execution_step"
+                )
+            else:
+                # Policy didn't select a step - fall back to CONFIRM_ACTION_MAP logic
+                # CRITICAL: Only check availability_resolved when missing_slots exist
+                # When missing_slots == [] and status == READY, availability must NOT block CONFIRM_APPOINTMENT
+                stage = "CONFIRM"
+                
+                if intent_name in CONFIRM_ACTION_MAP:
+                    candidate_action = CONFIRM_ACTION_MAP[intent_name]
+                    # Only block CONFIRM_APPOINTMENT by availability when slots are incomplete
+                    # When all slots are complete (missing_slots == [] and status == READY),
+                    # availability is optional and must not block confirmation
+                    if (candidate_action == "CONFIRM_APPOINTMENT" 
+                            and not availability_resolved 
+                            and missing_slots != []):
+                        # Availability not resolved AND slots incomplete - select SEARCH_AVAILABILITY instead
+                        if "SEARCH_AVAILABILITY" in executable_actions:
+                            action = "SEARCH_AVAILABILITY"
+                            stage = "AVAILABILITY"
+                            action_branch = "fallback_availability_blocked"
+                            logger.info(
+                                f"[PLAN_SELECTION] Fallback with availability check: intent={intent_name}, "
+                                f"missing_slots={missing_slots}, status={status}, availability_resolved={availability_resolved}, "
+                                f"selected_action={action}, selected_stage={stage}, "
+                                f"rule=CONFIRM_APPOINTMENT_blocked_by_availability_resolved_incomplete_slots"
+                            )
+                        else:
+                            # SEARCH_AVAILABILITY not in executable_actions - use CONFIRM anyway
+                            action = candidate_action
+                            action_branch = "fallback_confirm_forced"
+                            logger.warning(
+                                f"[PLAN_SELECTION] CONFIRM_APPOINTMENT selected despite availability_resolved=False "
+                                f"because SEARCH_AVAILABILITY not in executable_actions: {executable_actions}"
+                            )
+                    else:
+                        # Slots complete OR availability resolved - allow CONFIRM_APPOINTMENT
+                        action = candidate_action
+                        action_branch = "fallback_confirm_map"
+                        logger.info(
+                            f"[PLAN_SELECTION] Fallback to CONFIRM_ACTION_MAP: intent={intent_name}, "
+                            f"missing_slots={missing_slots}, status={status}, availability_resolved={availability_resolved}, "
+                            f"selected_action={action}, rule=CONFIRM_ACTION_MAP"
+                        )
+                elif commit_action and commit_action in allowed_actions:
+                    # Commit action is available and allowed - use it
+                    action = commit_action
+                    action_branch = "fallback_commit_allowed"
+                    logger.info(
+                        f"[PLAN_SELECTION] Fallback to commit_action: intent={intent_name}, "
+                        f"missing_slots={missing_slots}, availability_resolved={availability_resolved}, "
+                        f"selected_action={action}, rule=commit_action_in_allowed"
+                    )
+                elif commit_action:
+                    # Commit action exists but is blocked - use fallback
+                    if intent_name == "MODIFY_BOOKING":
+                        # MODIFY_BOOKING: Enforce two-step flow - SEARCH_AVAILABILITY first
+                        # Only allow APPLY_MODIFICATION after availability is resolved
+                        if not availability_resolved and "SEARCH_AVAILABILITY" in allowed_actions:
+                            action = "SEARCH_AVAILABILITY"
+                            stage = "AVAILABILITY"
+                            action_branch = "modify_booking_availability_first"
+                            logger.info(
+                                f"[PLAN_SELECTION] MODIFY_BOOKING: Enforcing SEARCH_AVAILABILITY first "
+                                f"(availability_resolved={availability_resolved})"
+                            )
+                        else:
+                            # Availability resolved or SEARCH_AVAILABILITY not available - use APPLY_MODIFICATION
+                            action = "APPLY_MODIFICATION"
+                            action_branch = "modify_booking_apply_after_availability"
+                            logger.info(
+                                f"[PLAN_SELECTION] MODIFY_BOOKING: Using APPLY_MODIFICATION "
+                                f"(availability_resolved={availability_resolved})"
+                            )
+                    elif intent_name == "CANCEL_BOOKING":
+                        action = "CONFIRM_CANCELLATION"
+                        action_branch = "fallback_commit_blocked"
+                    else:
+                        # Fallback to first allowed action if no commit action
+                        filtered_actions = [
+                            a for a in allowed_actions if a != "SEARCH_AVAILABILITY"]
+                        action = filtered_actions[0] if filtered_actions else None
+                        action_branch = "fallback_commit_blocked"
+                    
+                    if action_branch == "fallback_commit_blocked":
+                        logger.info(
+                            f"[PLAN_SELECTION] Fallback to intent-specific action: intent={intent_name}, "
+                            f"missing_slots={missing_slots}, availability_resolved={availability_resolved}, "
+                            f"selected_action={action}, rule=commit_action_blocked_fallback"
+                        )
+                else:
+                    # No commit action defined - use fallback based on intent
+                    if intent_name == "MODIFY_BOOKING":
+                        # MODIFY_BOOKING: Enforce two-step flow - SEARCH_AVAILABILITY first
+                        # Only allow APPLY_MODIFICATION after availability is resolved
+                        if not availability_resolved and "SEARCH_AVAILABILITY" in allowed_actions:
+                            action = "SEARCH_AVAILABILITY"
+                            stage = "AVAILABILITY"
+                            action_branch = "modify_booking_availability_first"
+                            logger.info(
+                                f"[PLAN_SELECTION] MODIFY_BOOKING: Enforcing SEARCH_AVAILABILITY first "
+                                f"(availability_resolved={availability_resolved})"
+                            )
+                        else:
+                            # Availability resolved or SEARCH_AVAILABILITY not available - use APPLY_MODIFICATION
+                            action = "APPLY_MODIFICATION"
+                            action_branch = "modify_booking_apply_after_availability"
+                            logger.info(
+                                f"[PLAN_SELECTION] MODIFY_BOOKING: Using APPLY_MODIFICATION "
+                                f"(availability_resolved={availability_resolved})"
+                            )
+                    elif intent_name == "CANCEL_BOOKING":
+                        action = "CONFIRM_CANCELLATION"
+                        action_branch = "fallback_last_resort"
+                    else:
+                        # Last resort: use first allowed action (but never SEARCH_AVAILABILITY when slots complete)
+                        filtered_actions = [
+                            a for a in allowed_actions if a != "SEARCH_AVAILABILITY"]
+                        action = filtered_actions[0] if filtered_actions else None
+                        action_branch = "fallback_last_resort"
+                    
+                    if action_branch == "fallback_last_resort":
+                        logger.info(
+                            f"[PLAN_SELECTION] Fallback to last resort: intent={intent_name}, "
+                            f"missing_slots={missing_slots}, availability_resolved={availability_resolved}, "
+                            f"selected_action={action}, rule=no_commit_action_fallback"
+                        )
 
-        # Determine action from CONFIRM_ACTION_MAP or commit_action
-        if intent_name in CONFIRM_ACTION_MAP:
-            action = CONFIRM_ACTION_MAP[intent_name]
-        elif commit_action and commit_action in allowed_actions:
-            # Commit action is available and allowed - use it
-            action = commit_action
-        elif commit_action:
-            # Commit action exists but is blocked - use fallback
-            if intent_name == "MODIFY_BOOKING":
-                action = "APPLY_MODIFICATION"
-            elif intent_name == "CANCEL_BOOKING":
-                action = "CONFIRM_CANCELLATION"
-            else:
-                # Fallback to first allowed action if no commit action
-                # Filter out SEARCH_AVAILABILITY when all slots are complete
-                filtered_actions = [
-                    a for a in allowed_actions if a != "SEARCH_AVAILABILITY"]
-                action = filtered_actions[0] if filtered_actions else None
-        else:
-            # No commit action defined - use fallback based on intent
-            if intent_name == "MODIFY_BOOKING":
-                action = "APPLY_MODIFICATION"
-            elif intent_name == "CANCEL_BOOKING":
-                action = "CONFIRM_CANCELLATION"
-            else:
-                # Last resort: use first allowed action (but never SEARCH_AVAILABILITY when slots complete)
-                filtered_actions = [
-                    a for a in allowed_actions if a != "SEARCH_AVAILABILITY"]
-                action = filtered_actions[0] if filtered_actions else None
+    # DEBUG: Log final plan decision before returning
+    logger.error(
+        f"[PLAN_FINAL_DECISION] intent_name={intent_name}, "
+        f"missing_slots={missing_slots}, "
+        f"status={status}, "
+        f"availability_resolved={availability_resolved}, "
+        f"action={action}, "
+        f"stage={stage}, "
+        f"action_branch={action_branch}"
+    )
 
     return {
         "status": status,

@@ -1,0 +1,140 @@
+scenarios:
+  - name: confirm_reservation_happy_path
+    description: User reserves room and confirms with all required slots (two-step flow)
+    domain: reservation
+    aliases:
+      room: room
+    turns:
+      - sentence: "reserve a room from march 10 to 15"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_RESERVATION
+          intent_preserved: true
+
+  - name: confirm_reservation_service_to_date_range
+    description: User provides service, then date range
+    domain: reservation
+    aliases:
+      room: room
+    turns:
+      - sentence: "book a room"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: SEARCH_AVAILABILITY
+          missing_slots: ["date_range"]
+
+      - sentence: "march 10 to 15"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_RESERVATION
+          intent_preserved: true
+
+  - name: confirm_reservation_partial_date_range
+    description: User provides service, then partial date range, then complete
+    domain: reservation
+    aliases:
+      room: room
+    turns:
+      - sentence: "reserve a room"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: SEARCH_AVAILABILITY
+          missing_slots: ["date_range"]
+
+      - sentence: "from march 10"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: SEARCH_AVAILABILITY
+          missing_slots: ["date_range"]
+          intent_preserved: true
+
+      - sentence: "to march 15"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_RESERVATION
+          intent_preserved: true
+
+  - name: confirm_reservation_different_room_types
+    description: User reserves different room types and confirms
+    domain: reservation
+    aliases:
+      suite: suite
+      room: room
+    turns:
+      - sentence: "book a suite"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: SEARCH_AVAILABILITY
+          missing_slots: ["date_range"]
+
+      - sentence: "april 1 to 5"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_RESERVATION
+          intent_preserved: true
+
+  - name: confirm_reservation_multiple_corrections
+    description: User corrects information multiple times before confirming
+    domain: reservation
+    aliases:
+      room: room
+    turns:
+      - sentence: "reserve a room from march 10"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: SEARCH_AVAILABILITY
+          missing_slots: ["date_range"]
+
+      - sentence: "actually make it april 1 to 5"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_RESERVATION
+          intent_preserved: true
+
+  - name: confirm_reservation_all_slots_one_turn
+    description: User provides all required slots in a single turn (two-step flow required)
+    domain: reservation
+    aliases:
+      room: room
+    turns:
+      - sentence: "reserve a room from june 1 to june 7"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_RESERVATION
+          intent_preserved: true
+

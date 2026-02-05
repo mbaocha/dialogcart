@@ -1,6 +1,6 @@
 scenarios:
   - name: confirm_appointment_happy_path
-    description: User books appointment and confirms with all required slots
+    description: User books appointment and confirms with all required slots. Availability must be explicitly checked before confirmation.
     domain: service
     aliases:
       haircut: haircut
@@ -14,5 +14,24 @@ scenarios:
       - sentence: "2pm"
         expect:
           status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+
+      - sentence: "yes"
+        expect:
+          status: READY
           action: CONFIRM_APPOINTMENT
+          intent_preserved: true
+
+  - name: book_haircut_tomorrow_by_2pm
+    description: User books appointment with all information in a single turn
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book haircut tomorrow by 2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
 

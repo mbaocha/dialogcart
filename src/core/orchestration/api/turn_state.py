@@ -121,12 +121,32 @@ def finalize_turn_state(
     
     # Use planner to compute missing_slots
     # Slots are treated as an unordered, additive map
-    policy = _get_planning_policy()
-    plan = plan_intent(intent_name, merged_session_slots, policy)
-    
-    # Extract results from planner
-    collected_slot_names = set(plan["collected_slots"])
-    missing_slots = plan["missing_slots"]
+    # CRITICAL: For MODIFY_BOOKING, use compute_missing_slots which properly handles
+    # context-aware required slots. plan_intent doesn't handle MODIFY_BOOKING correctly
+    # because it's not in intent_policy.yaml.
+    if intent_name == "MODIFY_BOOKING":
+        from core.planning.orchestration.missing_slots import compute_missing_slots
+        # Use compute_missing_slots which properly handles MODIFY_BOOKING
+        missing_slots = compute_missing_slots(
+            intent_name=intent_name,
+            collected_slots=merged_session_slots,
+            modification_context=None,  # Will be derived from collected_slots
+            session_state=None,
+            time_constraint=None
+        )
+        # Extract collected slot names
+        collected_slot_names = set([
+            slot_name for slot_name, slot_value in merged_session_slots.items()
+            if slot_value is not None
+        ])
+    else:
+        # For other intents, use plan_intent
+        policy = _get_planning_policy()
+        plan = plan_intent(intent_name, merged_session_slots, policy)
+        
+        # Extract results from planner
+        collected_slot_names = set(plan["collected_slots"])
+        missing_slots = plan["missing_slots"]
     
     # INVESTIGATION: Log initial missing_slots computation from planner
     from core.planning.orchestration.missing_slots import get_planning_required_slots_for_intent

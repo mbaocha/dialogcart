@@ -1,0 +1,135 @@
+scenarios:
+  - name: apply_modification_happy_path
+    description: User modifies booking with booking_id and new date/time provided
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "reschedule my booking"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          missing_slots: ["booking_id"]
+          no_premature_execution: true
+
+      - sentence: "booking ABC12345 to tomorrow at 2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: APPLY_MODIFICATION
+          intent_preserved: true
+
+  - name: apply_modification_all_slots_one_turn
+    description: User provides booking_id and modification in same turn (two-step flow required)
+    domain: service
+    aliases:
+      massage: massage
+    turns:
+      - sentence: "change booking XYZ67890 to next monday at 3pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: APPLY_MODIFICATION
+          intent_preserved: true
+
+  - name: apply_modification_exploratory_first
+    description: User requests modification without booking_id, then provides it
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "i need to reschedule"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          missing_slots: ["booking_id"]
+          no_premature_execution: true
+
+      - sentence: "booking DEF99999"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          missing_slots: ["date", "time"]
+          intent_preserved: true
+          no_premature_execution: true
+
+      - sentence: "to tomorrow at 4pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: APPLY_MODIFICATION
+          intent_preserved: true
+
+  - name: apply_modification_booking_id_then_date_time
+    description: User provides booking_id first, then new date/time
+    domain: service
+    aliases:
+      facial: facial
+    turns:
+      - sentence: "change booking GHI11111"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          missing_slots: ["date", "time"]
+          no_premature_execution: true
+
+      - sentence: "to next friday at 5pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: APPLY_MODIFICATION
+          intent_preserved: true
+
+  - name: apply_modification_no_premature_execution
+    description: Ensure modification only executes when all required slots are present
+    domain: service
+    aliases:
+      massage: massage
+    turns:
+      - sentence: "reschedule booking JKL22222"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          missing_slots: ["date", "time"]
+          no_premature_execution: true
+
+      - sentence: "to tomorrow"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          missing_slots: ["time"]
+          intent_preserved: true
+          no_premature_execution: true
+
+      - sentence: "at 6pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: APPLY_MODIFICATION
+          intent_preserved: true
+

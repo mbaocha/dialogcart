@@ -56,7 +56,7 @@ followup_scenarios = [
                         "action": "SEARCH_AVAILABILITY"
                     },
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "haircut", "date": "tomorrow"}
+                    "slots": {"service_id": "haircut", "date": "2026-01-14"}
                 }
             },
             {
@@ -68,7 +68,7 @@ followup_scenarios = [
                         "action": "SEARCH_AVAILABILITY"
                     },
                     "missing_slots": [],
-                    "slots": {"service_id": "haircut", "date": "tomorrow", "time": "11am"}
+                    "slots": {"service_id": "haircut", "date": "2026-01-14", "time": "11am"}
                 }
             }
         ]
@@ -101,7 +101,7 @@ followup_scenarios = [
                         "action": "SEARCH_AVAILABILITY"
                     },
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "massage", "date": "this friday"}
+                    "slots": {"service_id": "massage", "date": "2026-01-16"}
                 }
             },
             {
@@ -113,7 +113,7 @@ followup_scenarios = [
                         "action": "SEARCH_AVAILABILITY"
                     },
                     "missing_slots": [],
-                    "slots": {"service_id": "massage", "date": "this friday", "time": "3pm"}
+                    "slots": {"service_id": "massage", "date": "2026-01-16", "time": "3pm"}
                 }
             }
         ]
@@ -147,7 +147,7 @@ followup_scenarios = [
                         "action": "SEARCH_AVAILABILITY"
                     },
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "facial", "date": "next monday"}
+                    "slots": {"service_id": "facial", "date": "2026-01-19"}
                 }
             },
             {
@@ -159,7 +159,7 @@ followup_scenarios = [
                         "action": "SEARCH_AVAILABILITY"
                     },
                     "missing_slots": [],
-                    "slots": {"service_id": "facial", "date": "next monday", "time": "10am"}
+                    "slots": {"service_id": "facial", "date": "2026-01-19", "time": "10am"}
                 }
             }
         ]
@@ -194,7 +194,7 @@ followup_scenarios = [
                         "action": "SEARCH_AVAILABILITY"
                     },
                     "missing_slots": [],
-                    "slots": {"service_id": "massage", "date": "tomorrow"}
+                    "slots": {"service_id": "massage", "date": "2026-01-14"}
                 }
             }
         ]
@@ -268,7 +268,7 @@ followup_scenarios = [
                     "slots": {
                         "service_id": "facial",
                         "date_range": {"start": "2026-01-19", "end": "2026-01-25"},
-                        "date": "next week"
+                        "date": "2026-01-19"
                     }
                 }
             },
@@ -287,7 +287,7 @@ followup_scenarios = [
                     "slots": {
                         "service_id": "facial",
                         "date_range": {"start": "2026-01-19", "end": "2026-01-25"},
-                        "date": "next week",
+                        "date": "2026-01-19",
                         "time": "afternoon"
                     }
                 }
@@ -311,7 +311,7 @@ followup_scenarios = [
                         "action": "SEARCH_AVAILABILITY"
                     },
                     "missing_slots": [],
-                    "slots": {"service_id": "massage", "date": "tomorrow"}
+                    "slots": {"service_id": "massage", "date": "2026-01-14"}
                 }
             }
         ]
@@ -387,8 +387,8 @@ followup_scenarios = [
                 "expected": {
                     "status": "READY",
                     "plan": {
-                        "stage": "CONFIRM",
-                        "action": "CONFIRM_RESERVATION"
+                        "stage": "AVAILABILITY",
+                        "action": "SEARCH_AVAILABILITY"
                     },
                     "missing_slots": [],
                     "slots": {"service_id": "room", "date_range": "march 10 to 15"}
@@ -679,7 +679,7 @@ followup_scenarios = [
                     "slots": {
                         "service_id": "haircut",
                         "date_range": {"start": "2026-11-01", "end": "2026-11-05"},
-                        "date": "nov 1st"
+                        "date": "2026-11-01"
                     }
                 }
             }

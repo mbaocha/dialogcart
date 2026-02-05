@@ -183,8 +183,11 @@ def facts_to_slots(
         # For appointments or other intents: handle single dates and date ranges
         if "dates" in facts and isinstance(facts["dates"], list):
             if len(facts["dates"]) == 1:
-                slots["date"] = raw_date or facts["dates"][0]
-                logger.debug(f"Promoted facts.dates[0]={facts['dates'][0]} to slots.date")
+                # CRITICAL: Always use canonical date from facts.dates[0] (Luma-resolved ISO date)
+                # This ensures availability execution receives canonical dates (e.g., "2026-01-14")
+                # instead of raw natural-language values (e.g., "tomorrow")
+                slots["date"] = facts["dates"][0]
+                logger.debug(f"Promoted canonical date from facts.dates[0]={facts['dates'][0]} to slots.date (replacing raw_date={raw_date})")
             elif len(facts["dates"]) >= 2:
                 # DATE RANGE RECOVERY: For appointments, date ranges (e.g., "next week") satisfy the date slot
                 # requirement. Promote to date_range to preserve the range information without forcing
@@ -197,13 +200,13 @@ def facts_to_slots(
                     if raw_date_range
                     else {"start": facts["dates"][0], "end": facts["dates"][-1]}
                 )
-                # Set date to first date for planning layer compatibility (satisfies "date" requirement)
-                # but date_range is authoritative and preserves the full range without collapsing
-                slots["date"] = raw_date or facts["dates"][0]
+                # CRITICAL: Use canonical date from facts.dates[0] (Luma-resolved ISO date)
+                # This ensures availability execution receives canonical dates instead of raw values
+                slots["date"] = facts["dates"][0]
                 logger.info(
                     f"Promoted facts.dates (length={len(facts['dates'])}) to slots.date_range and slots.date "
                     f"for appointment date range recovery. date_range={slots['date_range']} (authoritative), "
-                    f"date={slots['date']} (for planning compatibility)"
+                    f"date={slots['date']} (canonical, for planning compatibility)"
                 )
     
     # List mappings (take first element)
@@ -220,7 +223,9 @@ def facts_to_slots(
             # For CREATE_RESERVATION, skip "date" promotion if date_range exists
             if intent_name != "CREATE_RESERVATION" or "date_range" not in slots:
                 if "date" in first_pair:
-                    slots["date"] = raw_date or first_pair["date"]
+                    # CRITICAL: Always use canonical date from date_time_pairs (Luma-resolved ISO date)
+                    # This ensures availability execution receives canonical dates instead of raw values
+                    slots["date"] = first_pair["date"]
             if "time" in first_pair:
                 slots["time"] = raw_time or first_pair["time"]
             logger.debug(f"Promoted facts.date_time_pairs[0] to slots.date={slots.get('date')} slots.time={slots.get('time')}")

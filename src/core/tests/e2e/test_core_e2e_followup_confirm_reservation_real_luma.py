@@ -1,29 +1,29 @@
 """
-End-to-End Test: Multi-Turn Appointment Confirmation with Real Luma
+End-to-End Test: Multi-Turn Reservation Confirmation with Real Luma
 
-Tests the full flow: planning → session persistence → execution for appointment confirmation
+Tests the full flow: planning → session persistence → execution for reservation confirmation
 across multiple turns using the **real Luma client** (not mocked).
 
 This test validates:
 - Real NLU behavior with actual Luma API
 - Session state persistence across turns
 - Slot carry-over from previous turns
-- Booking execution (CONFIRM_APPOINTMENT) after all slots are supplied
+- Reservation execution (CONFIRM_RESERVATION) after all slots are supplied
 - Booking client integration
 - Session clearing after confirmation
 
 To run this test:
-  RUN_REAL_LUMA_E2E=true pytest core/tests/e2e/test_core_e2e_followup_confirm_appointment_real_luma.py
+  RUN_REAL_LUMA_E2E=true pytest core/tests/e2e/test_core_e2e_followup_confirm_reservation_real_luma.py
 
 To run a specific test by index (0-based):
-  E2E_TEST_INDEX=0 RUN_REAL_LUMA_E2E=true pytest core/tests/e2e/test_core_e2e_followup_confirm_appointment_real_luma.py
+  E2E_TEST_INDEX=0 RUN_REAL_LUMA_E2E=true pytest core/tests/e2e/test_core_e2e_followup_confirm_reservation_real_luma.py
 
 Requirements:
   - RUN_REAL_LUMA_E2E=true environment variable must be set
   - Luma service must be running (defaults to http://localhost:9001, or set LUMA_BASE_URL)
 
 Note:
-  This test is expected to FAIL initially because CONFIRM_APPOINTMENT is not yet
+  This test is expected to FAIL initially because CONFIRM_RESERVATION is not yet
   implemented in the execution dispatcher. The failure will define the exact contract
   needed for implementation.
 """
@@ -35,7 +35,7 @@ import sys
 from pathlib import Path
 from unittest.mock import Mock
 from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.execution.clients.availability_client import AvailabilityClient
@@ -60,7 +60,7 @@ if not os.getenv("RUN_REAL_LUMA_E2E"):
 def load_scenarios() -> List[Dict[str, Any]]:
     """Load test scenarios from YAML file."""
     scenarios_file = Path(__file__).parent / "scenarios" / \
-        "followup_confirm_appointment_real_luma.yaml"
+        "followup_confirm_reservation_real_luma.yaml"
     if not scenarios_file.exists():
         pytest.skip(f"Scenarios file not found: {scenarios_file}")
 
@@ -104,14 +104,8 @@ def load_scenarios() -> List[Dict[str, Any]]:
     return scenarios
 
 
-def create_mock_availability_client(frozen_time: Optional[datetime] = None) -> Mock:
-    """
-    Create a mocked availability client using tests.mocks.
-
-    Args:
-        frozen_time: Optional frozen time for resolving relative dates like "tomorrow".
-                    If provided, "tomorrow" will resolve to frozen_time + 1 day.
-    """
+def create_mock_availability_client() -> Mock:
+    """Create a mocked availability client using tests.mocks."""
     mock_availability_client = Mock(spec=AvailabilityClient)
     # Use mock_get_service_availability from tests.mocks to generate response
     # Wrap it to handle service_id type (mock expects int, but we may pass strings)
@@ -125,48 +119,10 @@ def create_mock_availability_client(frozen_time: Optional[datetime] = None) -> M
             elif isinstance(service_id, int):
                 service_id_int = service_id
 
-        # Resolve relative dates like "tomorrow" to actual dates
-        from datetime import timedelta
-        resolved_date = date
-        if date and isinstance(date, str):
-            date_lower = date.lower().strip()
-            if date_lower == "tomorrow":
-                # Resolve "tomorrow" to frozen_time + 1 day (or default if no frozen_time)
-                if frozen_time:
-                    resolved_date = (
-                        frozen_time + timedelta(days=1)).strftime("%Y-%m-%d")
-                else:
-                    resolved_date = "2026-01-16"  # Default fallback
-            elif date_lower in ("today", "now"):
-                # Resolve "today" to frozen_time date (or default if no frozen_time)
-                if frozen_time:
-                    resolved_date = frozen_time.strftime("%Y-%m-%d")
-                else:
-                    resolved_date = "2026-01-15"  # Default fallback
-            # If date is already in YYYY-MM-DD format, use it as-is
-            elif len(date_lower) == 10 and date_lower[4] == "-" and date_lower[7] == "-":
-                # Looks like YYYY-MM-DD format, use as-is
-                resolved_date = date
-            # Otherwise, try to use frozen_time + 1 day or default
-            else:
-                if frozen_time:
-                    resolved_date = (
-                        frozen_time + timedelta(days=1)).strftime("%Y-%m-%d")
-                else:
-                    resolved_date = "2026-01-16"
-
-        # Default to frozen_time + 1 day if no date provided and frozen_time is available
-        if not resolved_date:
-            if frozen_time:
-                resolved_date = (frozen_time + timedelta(days=1)
-                                 ).strftime("%Y-%m-%d")
-            else:
-                resolved_date = "2026-01-16"
-
         return mock_get_service_availability(
             organization_id=organization_id or 1,
             service_id=service_id_int,
-            date=resolved_date,
+            date=date or "2026-01-16",
             time_constraint=time_constraint,
             extra_params=extra_params,
             **kwargs
@@ -184,7 +140,7 @@ def create_mock_booking_client() -> Mock:
         return mock_create_booking(
             organization_id=organization_id or 1,
             customer_id=customer_id or 1,
-            booking_type=booking_type or "service",
+            booking_type=booking_type or "reservation",
             item_id=item_id or 1,
             start_time=start_time,
             end_time=end_time,
@@ -199,7 +155,7 @@ def create_mock_organization_client() -> Mock:
     mock_org_client = Mock(spec=OrganizationClient)
     mock_org_client.get_details.return_value = {
         "organization": {
-            "businessCategoryId": 1  # Maps to "service" domain
+            "businessCategoryId": 2  # Maps to "reservation" domain
         }
     }
     return mock_org_client
@@ -315,7 +271,7 @@ def _scenario_id(scenario: Dict[str, Any]) -> str:
     """Generate test ID with index and name."""
     # Load all scenarios to get index
     scenarios_file = Path(__file__).parent / "scenarios" / \
-        "followup_confirm_appointment_real_luma.yaml"
+        "followup_confirm_reservation_real_luma.yaml"
     if scenarios_file.exists():
         with open(scenarios_file, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
@@ -329,7 +285,7 @@ def _scenario_id(scenario: Dict[str, Any]) -> str:
 
 
 @pytest.mark.parametrize("scenario", _scenarios_for_parametrize, ids=_scenario_id)
-def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
+def test_real_luma_followup_confirm_reservation_scenario(scenario: Dict[str, Any]):
     """
     Test a single scenario from the YAML file using real Luma client.
 
@@ -340,9 +296,9 @@ def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
     turns = scenario["turns"]
 
     # Extract aliases from scenario (same pattern as planning tests)
-    # Default to common service aliases if not specified
+    # Default to common reservation aliases if not specified
     aliases = scenario.get(
-        "aliases", {"haircut": "haircut", "massage": "massage"})
+        "aliases", {"room": "room"})
 
     # Frozen time: 2026-01-15 10:00:00 UTC
     # "tomorrow" should resolve to 2026-01-16
@@ -355,9 +311,7 @@ def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
 
     # Create mocked clients for execution
     mock_org_client = create_mock_organization_client()
-    # Pass frozen_time to availability mock so it can resolve relative dates like "tomorrow"
-    mock_availability_client = create_mock_availability_client(
-        frozen_time=frozen_time)
+    mock_availability_client = create_mock_availability_client()
     mock_booking_client = create_mock_booking_client()
 
     # Create session store
@@ -412,9 +366,9 @@ def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
             if current_intent and current_intent != "":
                 previous_intent = current_intent
 
-        # Check if this turn expects CONFIRM_APPOINTMENT action
+        # Check if this turn expects CONFIRM_RESERVATION action
         expected_action = expectations.get("action")
-        if expected_action == "CONFIRM_APPOINTMENT":
+        if expected_action == "CONFIRM_RESERVATION":
             # Assert booking_client.create_booking was called exactly once
             assert mock_booking_client.create_booking.called, \
                 f"[{scenario_name}] Turn {turn_idx}: Expected booking_client.create_booking to be called, but it was not"
@@ -443,7 +397,7 @@ def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
             # Check if session was cleared (not saved for next turn)
             if turn_idx < len(turns):  # Not the last turn
                 # If there's a next turn, session should be cleared (not persisted)
-                # For CONFIRM_APPOINTMENT, session should be cleared after successful confirmation
+                # For CONFIRM_RESERVATION, session should be cleared after successful confirmation
                 next_session = session_store.get_session(user_id)
                 # Note: This assertion may need adjustment based on actual session clearing behavior
                 # For now, we check that session is either None or marked as resolved
@@ -454,7 +408,7 @@ def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
                     pass  # Placeholder - adjust based on actual behavior
 
         # Save session state for next turn (simulate persistence)
-        # Core persists session state with: intent_name, slots, missing_slots, status, availability_fingerprint
+        # Core persists session state with: intent_name, slots, missing_slots, status, last_execution_result
         if turn_idx < len(turns):  # Not the last turn
             # Extract session state from normalized result (matches Core's persisted session schema)
             plan_obj = normalized.get("plan", {})
@@ -470,43 +424,12 @@ def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
             if "action" in plan_obj:
                 session_state["action"] = plan_obj.get("action")
 
-            # CRITICAL: Preserve availability_fingerprint from execution result
-            # The orchestrator attaches it to execution_result when SEARCH_AVAILABILITY succeeds
-            # This enables slot-fingerprint-based availability resolution across turns
-            execution_result = result.get("result", {})
-            if isinstance(execution_result, dict):
-                # Check if execution_result has availability_fingerprint (from SEARCH_AVAILABILITY)
-                if execution_result.get("availability_fingerprint"):
-                    session_state["availability_fingerprint"] = execution_result.get(
-                        "availability_fingerprint")
-                # Also check plan for fingerprint (attached by orchestrator for persistence)
-                elif plan_obj.get("availability_fingerprint"):
-                    session_state["availability_fingerprint"] = plan_obj.get(
-                        "availability_fingerprint")
-
-                # CRITICAL: Preserve resolved_datetime_range from execution result
-                # The orchestrator constructs and attaches it when SEARCH_AVAILABILITY succeeds
-                # This enables CONFIRM_APPOINTMENT to reuse the validated datetime range
-                if execution_result.get("resolved_datetime_range"):
-                    session_state["resolved_datetime_range"] = execution_result.get(
-                        "resolved_datetime_range")
-                # Also check plan for resolved_datetime_range (attached by orchestrator for persistence)
-                elif plan_obj.get("resolved_datetime_range"):
-                    session_state["resolved_datetime_range"] = plan_obj.get(
-                        "resolved_datetime_range")
-
-            # Also preserve from previous session if present (cross-turn persistence)
-            previous_session = session_store.get_session(user_id)
-            if previous_session:
-                if previous_session.get("availability_fingerprint"):
-                    # Only preserve if not already set from execution result
-                    if "availability_fingerprint" not in session_state:
-                        session_state["availability_fingerprint"] = previous_session.get(
-                            "availability_fingerprint")
-                if previous_session.get("resolved_datetime_range"):
-                    # Only preserve if not already set from execution result
-                    if "resolved_datetime_range" not in session_state:
-                        session_state["resolved_datetime_range"] = previous_session.get(
-                            "resolved_datetime_range")
+            # Save execution result if SEARCH_AVAILABILITY executed (for availability_resolved tracking)
+            # Orchestrator checks last_execution_result.type == "availability" to set availability_resolved=True
+            expected_action = expectations.get("action")
+            if expected_action == "SEARCH_AVAILABILITY":
+                execution_result = result.get("result", {})
+                if isinstance(execution_result, dict) and execution_result.get("type") == "availability":
+                    session_state["last_execution_result"] = execution_result
 
             session_store.save_session(user_id, session_state)

@@ -17,6 +17,7 @@ Responsibilities:
 
 import logging
 import json
+import re
 import threading
 from pathlib import Path
 from typing import Dict, Any, Optional, List, Set
@@ -829,7 +830,8 @@ def _log_turn_outcome_snapshot(
 def process_luma_response(
     luma_response: Dict[str, Any],
     domain: str,
-    user_id: str
+    user_id: str,
+    session_state: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Process Luma response and produce a decision plan.
@@ -1235,9 +1237,65 @@ def process_luma_response(
         )
     # Otherwise, UNKNOWN is valid (first turn with no session)
 
+    # Determine availability_resolved using slot-fingerprint-based comparison
+    # Availability is resolved only if it was checked for the exact same slot combination
+    from core.orchestration.availability_fingerprint import (
+        compute_availability_fingerprint,
+        slots_match_availability_fingerprint
+    )
+    
+    # Get stored fingerprint from session (set when SEARCH_AVAILABILITY executed successfully)
+    stored_fingerprint = None
+    if session_state:
+        stored_fingerprint = session_state.get("availability_fingerprint")
+    
+    # Compute current fingerprint from effective_collected_slots
+    # Use effective_collected_slots as it represents the authoritative slot state
+    current_slots = effective_collected_slots
+    
+    # Compare fingerprints to determine if availability is resolved
+    # Fingerprint scope is conditional on time presence:
+    # - Without time: {organization_id, service_id, date}
+    # - With time: {organization_id, service_id, date, time}
+    # This ensures availability is re-checked when time is introduced
+    availability_resolved = slots_match_availability_fingerprint(
+        current_slots, stored_fingerprint, intent_name=intent_name
+    )
+    
+    # Log fingerprint comparison for debugging
+    current_fingerprint = compute_availability_fingerprint(current_slots, intent_name=intent_name)
+    logger.debug(
+        f"[AVAILABILITY_FINGERPRINT] intent={intent_name}, "
+        f"current_fingerprint={current_fingerprint}, "
+        f"stored_fingerprint={stored_fingerprint}, "
+        f"availability_resolved={availability_resolved}, "
+        f"current_slots service_id={current_slots.get('service_id')}, "
+        f"date={current_slots.get('date')}, time={current_slots.get('time')}, "
+        f"organization_id={current_slots.get('organization_id')}"
+    )
+
     # Build decision plan with recomputed missing_slots (ONLY source of truth)
     from core.planning.orchestration.plan_builder import build_decision_plan
-    plan = build_decision_plan(intent_name, luma_response_for_plan, domain)
+    plan = build_decision_plan(intent_name, luma_response_for_plan, domain, availability_resolved=availability_resolved)
+    
+    # DEBUG LOG: Planning decision point (after planner, before any override)
+    # Track fingerprint-based availability resolution for debugging
+    stored_fp = session_state.get("availability_fingerprint") if session_state else None
+    last_exec_result = session_state.get("last_execution_result") if session_state else None
+    logger.error(
+        f"[PLANNING_DECISION] AFTER planner build_decision_plan: "
+        f"intent={intent_name}, "
+        f"plan.status={plan.get('status')}, plan.stage={plan.get('stage')}, plan.action={plan.get('action')}, "
+        f"session.intent_name={session_state.get('intent_name') if session_state else None}, "
+        f"session.status={session_state.get('status') if session_state else None}, "
+        f"session.stage={session_state.get('stage') if session_state else None}, "
+        f"session.action={session_state.get('action') if session_state else None}, "
+        f"availability_fingerprint_stored={stored_fp}, "
+        f"availability_fingerprint_current={current_fingerprint}, "
+        f"availability_resolved={availability_resolved}, "
+        f"last_execution_result={last_exec_result}, "
+        f"current_slots service_id={current_slots.get('service_id')}, date={current_slots.get('date')}, time={current_slots.get('time')}, org_id={current_slots.get('organization_id')}"
+    )
     
     # INVESTIGATION: Log missing_slots after build_decision_plan
     logger.error(
@@ -1453,6 +1511,25 @@ def process_luma_response(
     if isinstance(slots, dict) and "service_id" in slots:
         logger.error("[FLOW_TRACE]   facts.slots.service_id: %s",
                      slots.get("service_id"))
+    
+    # DATE_NORMALIZATION_TRACE: Log date value in facts.slots
+    if isinstance(slots, dict) and "date" in slots:
+        date_value = slots.get("date")
+        plan_stage = plan.get("stage") if isinstance(plan, dict) else None
+        plan_action = plan.get("action") if isinstance(plan, dict) else None
+        is_iso_date = isinstance(date_value, str) and bool(re.match(r'^\d{4}-\d{2}-\d{2}$', date_value))
+        logger.info(
+            "[DATE_NORMALIZATION_TRACE] process_luma_response: date in facts.slots",
+            extra={
+                'user_id': user_id,
+                'date_value': date_value,
+                'is_iso_format': is_iso_date,
+                'intent': intent_name,
+                'plan_stage': plan_stage,
+                'plan_action': plan_action,
+                'normalization_point': 'luma_response_processor:1498'
+            }
+        )
 
     # Add debug info to facts for troubleshooting
     facts["_debug"] = {

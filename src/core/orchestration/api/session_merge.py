@@ -2003,7 +2003,8 @@ def build_session_state_from_outcome(
     outcome_status: str,
     merged_luma_response: Optional[Dict[str, Any]] = None,
     previous_session_state: Optional[Dict[str, Any]] = None,
-    user_id: Optional[str] = None
+    user_id: Optional[str] = None,
+    session_store: Optional[Any] = None
 ) -> Optional[Dict[str, Any]]:
     """
     Build session state from outcome and merged Luma response.
@@ -2457,6 +2458,116 @@ def build_session_state_from_outcome(
             session_state["time_constraint"] = time_constraint
             logger.debug(
                 f"[TIME_CONSTRAINT] Persisting time_constraint to session_state: {time_constraint}"
+            )
+
+    # Persist availability_planned flag for CREATE_APPOINTMENT
+    # This tracks when SEARCH_AVAILABILITY was planned (even if execution was blocked)
+    # Separate from availability_executed (last_execution_result.type == "availability")
+    if final_intent_name == "CREATE_APPOINTMENT":
+        # Check if plan has _availability_planned flag (set by orchestrator override)
+        plan_obj = outcome.get("plan", {})
+        if isinstance(plan_obj, dict) and plan_obj.get("_availability_planned"):
+            session_state["availability_planned"] = True
+            logger.debug(
+                f"[AVAILABILITY_PLANNED] Persisting availability_planned=true to session_state"
+            )
+        # Preserve availability_planned from previous session if it exists
+        elif previous_session_state and previous_session_state.get("availability_planned"):
+            session_state["availability_planned"] = True
+            logger.debug(
+                f"[AVAILABILITY_PLANNED] Preserving availability_planned=true from previous session"
+            )
+        # Preserve last_execution_result from previous session if it exists
+        if previous_session_state and previous_session_state.get("last_execution_result"):
+            session_state["last_execution_result"] = previous_session_state.get("last_execution_result")
+            logger.debug(
+                f"[AVAILABILITY_EXECUTED] Preserving last_execution_result from previous session"
+            )
+        # Preserve availability_fingerprint from multiple sources (priority order):
+        # 1. From outcome's execution result (if SEARCH_AVAILABILITY executed this turn)
+        # 2. From previous_session_state (cross-turn preservation)
+        # 3. From session_store (if available, for same-turn persistence)
+        # 4. From session functions (fallback)
+        availability_fingerprint_to_preserve = None
+        
+        # Priority 1: Extract from outcome's result/plan if SEARCH_AVAILABILITY executed this turn
+        # When execution happens, the fingerprint can be in:
+        # - outcome.result (execution_result with type="availability")
+        # - outcome.plan (plan dict with fingerprint attached by orchestrator)
+        # - outcome itself (if outcome is the execution_result directly)
+        if outcome and isinstance(outcome, dict):
+            # Check if outcome.result exists (full result structure)
+            result_obj = outcome.get("result")
+            if (isinstance(result_obj, dict) 
+                    and result_obj.get("type") == "availability"
+                    and result_obj.get("status") == "success"
+                    and result_obj.get("availability_fingerprint")):
+                availability_fingerprint_to_preserve = result_obj.get("availability_fingerprint")
+                logger.debug(
+                    f"[AVAILABILITY_FINGERPRINT] Extracted from outcome.result: {availability_fingerprint_to_preserve}"
+                )
+            # Check if outcome.plan has fingerprint (attached by orchestrator)
+            elif outcome.get("plan") and isinstance(outcome.get("plan"), dict):
+                plan_obj = outcome.get("plan")
+                if plan_obj.get("availability_fingerprint"):
+                    availability_fingerprint_to_preserve = plan_obj.get("availability_fingerprint")
+                    logger.debug(
+                        f"[AVAILABILITY_FINGERPRINT] Extracted from outcome.plan: {availability_fingerprint_to_preserve}"
+                    )
+            # Check if outcome itself is the execution_result (direct structure)
+            elif (outcome.get("type") == "availability"
+                    and outcome.get("status") == "success"
+                    and outcome.get("availability_fingerprint")):
+                availability_fingerprint_to_preserve = outcome.get("availability_fingerprint")
+                logger.debug(
+                    f"[AVAILABILITY_FINGERPRINT] Extracted from outcome (direct): {availability_fingerprint_to_preserve}"
+                )
+        
+        # Priority 2: From previous_session_state (cross-turn preservation)
+        if not availability_fingerprint_to_preserve:
+            if previous_session_state and previous_session_state.get("availability_fingerprint"):
+                availability_fingerprint_to_preserve = previous_session_state.get("availability_fingerprint")
+                logger.debug(
+                    f"[AVAILABILITY_FINGERPRINT] Extracted from previous_session_state: {availability_fingerprint_to_preserve}"
+                )
+        
+        # Priority 3: From session_store (if available, for same-turn persistence)
+        if not availability_fingerprint_to_preserve and session_store and user_id:
+            try:
+                if hasattr(session_store, 'get_session'):
+                    latest_session = session_store.get_session(user_id)
+                elif callable(session_store):
+                    latest_session = session_store(user_id)
+                else:
+                    latest_session = None
+                if latest_session and isinstance(latest_session, dict):
+                    availability_fingerprint_to_preserve = latest_session.get("availability_fingerprint")
+                    if availability_fingerprint_to_preserve:
+                        logger.debug(
+                            f"[AVAILABILITY_FINGERPRINT] Extracted from session_store: {availability_fingerprint_to_preserve}"
+                        )
+            except Exception as e:
+                logger.debug(f"Failed to read session from session_store for fingerprint preservation: {e}")
+        
+        # Priority 4: Fallback to session functions
+        if not availability_fingerprint_to_preserve and user_id:
+            try:
+                from core.orchestration.session import get_session
+                latest_session = get_session(user_id)
+                if latest_session and isinstance(latest_session, dict):
+                    availability_fingerprint_to_preserve = latest_session.get("availability_fingerprint")
+                    if availability_fingerprint_to_preserve:
+                        logger.debug(
+                            f"[AVAILABILITY_FINGERPRINT] Extracted from get_session: {availability_fingerprint_to_preserve}"
+                        )
+            except Exception as e:
+                logger.debug(f"Failed to read session using get_session for fingerprint preservation: {e}")
+        
+        # Preserve fingerprint in session_state
+        if availability_fingerprint_to_preserve:
+            session_state["availability_fingerprint"] = availability_fingerprint_to_preserve
+            logger.debug(
+                f"[AVAILABILITY_FINGERPRINT] Preserved in session_state: {availability_fingerprint_to_preserve}"
             )
 
     # TRACE_MERGE 5: Before persisting session

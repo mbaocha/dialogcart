@@ -268,7 +268,7 @@ planning_edges_scenarios = [
                         "action": "SEARCH_AVAILABILITY"
                     },
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "haircut", "date": "tomorrow"}
+                    "slots": {"service_id": "haircut", "date": "2026-01-14"}
                 }
             },
             {
@@ -282,7 +282,7 @@ planning_edges_scenarios = [
                         "action": "SEARCH_AVAILABILITY"
                     },
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "haircut", "date": "tomorrow"}
+                    "slots": {"service_id": "haircut", "date": "2026-01-14"}
                 }
             }
         ]
