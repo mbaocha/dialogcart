@@ -21,7 +21,14 @@ Usage:
     python3 -m core.tests.integration.test_followup_e2e 0 --verbose  # With details
 """
 
-from core.rendering.whatsapp_renderer import render_outcome_to_whatsapp
+# Optional import: whatsapp_renderer may not exist in all environments
+try:
+    from core.rendering.whatsapp_renderer import render_outcome_to_whatsapp
+    HAS_WHATSAPP_RENDERER = True
+except ImportError:
+    # whatsapp_renderer not available - skip rendering validation
+    HAS_WHATSAPP_RENDERER = False
+    render_outcome_to_whatsapp = None
 from core.orchestration.nlu import LumaClient
 from core.orchestration.clients.catalog_client import CatalogClient
 from core.orchestration.orchestrator import handle_message

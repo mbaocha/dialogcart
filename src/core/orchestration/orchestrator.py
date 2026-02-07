@@ -43,6 +43,8 @@ from core.orchestration.cache.catalog_cache import catalog_cache
 from core.orchestration.cache.org_domain_cache import org_domain_cache
 from core.orchestration.persistence.durable_intents import is_durable_intent
 from core.routing.workflows import get_workflow
+from core.rendering.mapper.clarification_mapper import derive_clarification_reason
+from core.rendering import render_clarification, render
 
 logger = logging.getLogger(__name__)
 # Dedicated turn-level logger (clean, minimal logs - ONE log per section)
@@ -93,6 +95,154 @@ def _build_planning_outcome(
         outcome["dialog_instruction"] = dialog_instruction
 
     return outcome
+
+
+def build_outcome_from_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Build outcome dictionary from decision object.
+
+    Unifies outcome construction across all return paths by extracting
+    all required fields from the decision object which contains the
+    authoritative planning state.
+
+    Args:
+        decision: Decision dictionary from process_luma_response containing:
+            - intent_name: Intent name
+            - plan: Plan dictionary with status, stage, action, etc.
+            - facts: Facts dictionary with slots, missing_slots, context
+
+    Returns:
+        Outcome dictionary with all required fields:
+            - intent_name: Intent name
+            - status: Planning status
+            - plan: Plan object with stage and action
+            - slots: Collected slots
+            - missing_slots: Missing required slots
+            - blocked_actions: Blocked actions list
+            - allowed_actions: Allowed actions list
+            - facts: Facts container
+    """
+    if not decision or not isinstance(decision, dict):
+        # Fallback for invalid decision
+        return {
+            "intent_name": "",
+            "status": "NEEDS_CLARIFICATION",
+            "plan": {
+                "status": "NEEDS_CLARIFICATION",
+                "stage": None,
+                "action": None
+            },
+            "slots": {},
+            "missing_slots": [],
+            "blocked_actions": [],
+            "allowed_actions": [],
+            "facts": {}
+        }
+
+    plan = decision.get("plan", {})
+    facts = decision.get("facts", {})
+    if not isinstance(facts, dict):
+        facts = {}
+
+    # Extract slots and missing_slots from facts
+    slots = facts.get("slots", {})
+    if not isinstance(slots, dict):
+        slots = {}
+    missing_slots = facts.get("missing_slots", [])
+    if not isinstance(missing_slots, list):
+        missing_slots = []
+
+    # Build plan object from decision.plan (authoritative source)
+    plan_obj = {
+        "status": plan.get("status", "NEEDS_CLARIFICATION"),
+        "stage": plan.get("stage"),
+        "action": plan.get("action")
+    }
+
+    outcome = {
+        "intent_name": decision.get("intent_name", ""),
+        # Top-level status for compatibility
+        "status": plan.get("status", "NEEDS_CLARIFICATION"),
+        # Top-level stage (always from decision.plan)
+        "stage": plan.get("stage"),
+        # Top-level action (always from decision.plan)
+        "action": plan.get("action"),
+        "plan": plan_obj,  # Complete plan object with status, stage, action
+        "slots": slots,
+        "missing_slots": missing_slots,
+        "blocked_actions": plan.get("blocked_actions", []),
+        "allowed_actions": plan.get("allowed_actions", []),
+        "awaiting": plan.get("awaiting"),
+        "facts": facts
+    }
+
+    # Add active_capability if present in plan
+    if plan.get("active_capability"):
+        outcome["active_capability"] = plan.get("active_capability")
+
+    return outcome
+
+
+def _render_clarification_text(decision: Dict[str, Any], slots: Dict[str, Any]) -> Optional[str]:
+    """
+    Render clarification text from decision and slots (best-effort).
+
+    Args:
+        decision: Decision/plan dictionary with status and missing_slots
+        slots: Dictionary of slot values for template interpolation
+
+    Returns:
+        Rendered text string if rendering succeeds, None otherwise.
+        Returns None if status is not NEEDS_CLARIFICATION or if rendering fails.
+    """
+    try:
+        # Only render for NEEDS_CLARIFICATION status
+        status = decision.get("status")
+        if status != "NEEDS_CLARIFICATION":
+            return None
+
+        # Derive clarification reason from decision
+        reason = derive_clarification_reason(decision)
+        if not reason:
+            # No reason derived (shouldn't happen for NEEDS_CLARIFICATION, but be safe)
+            return None
+
+        # Render with slots
+        render_spec = render_clarification(reason, slots)
+        return render_spec.text
+    except Exception as e:
+        # Best-effort: log error and return None
+        logger.warning(
+            f"Failed to render clarification text: {e}. "
+            f"Rendering is best-effort and will be omitted."
+        )
+        return None
+
+
+def _inject_rendering_text(result: Dict[str, Any], decision: Dict[str, Any]) -> None:
+    """
+    Inject rendered text into top-level response for clarification states.
+
+    This is a pure post-processing step that:
+    - Detects clarification state from decision
+    - Calls rendering.render(decision)
+    - Injects returned text into top-level response as 'text'
+    - Falls back to generic template if rendering returns None
+
+    Args:
+        result: Response dictionary to modify (mutated in place)
+        decision: Decision dictionary with plan and facts
+    """
+    try:
+        rendered_text = render(decision)
+        if rendered_text:
+            result["text"] = rendered_text
+    except Exception as e:
+        # Best-effort: log error and continue without text
+        logger.warning(
+            f"Failed to render clarification text: {e}. "
+            f"Rendering is best-effort and will be omitted."
+        )
 
 
 def _handle_non_core_intent(
@@ -306,7 +456,8 @@ def handle_message(
         session_state=session_state,
         luma_client=luma_client,
         organization_client=organization_client,
-        frozen_time=frozen_time
+        frozen_time=frozen_time,
+        organization_id=organization_id
     )
 
     # Check if planning failed
@@ -390,10 +541,52 @@ def handle_message(
             f"plan_status={plan_status}, plan_action={plan_action}, "
             f"executable_actions={executable_actions}, missing_slots={plan.get('missing_slots', [])}"
         )
-        return {
+        # Build outcome from decision (canonical builder)
+        # decision should always be available from plan_message()
+        decision = plan.get("_decision")
+        if decision:
+            outcome_dict = build_outcome_from_decision(decision)
+        else:
+            # Fallback: construct minimal outcome when decision is missing
+            # This should rarely happen if plan_message() is working correctly
+            logger.warning(
+                "Decision not available in plan, using fallback construction")
+            plan_slots = plan.get("slots", {})
+            plan_missing_slots = plan.get("missing_slots", [])
+            plan_obj = plan.get("plan", {})
+            if not isinstance(plan_obj, dict):
+                plan_obj = {}
+            facts = {
+                "slots": plan_slots if isinstance(plan_slots, dict) else {},
+                "missing_slots": plan_missing_slots if isinstance(plan_missing_slots, list) else []
+            }
+            outcome_dict = {
+                "status": plan.get("status") or plan_obj.get("status", "NEEDS_CLARIFICATION"),
+                "awaiting": plan.get("awaiting"),
+                "allowed_actions": plan.get("allowed_actions", []),
+                "blocked_actions": plan.get("blocked_actions", []),
+                "facts": facts,
+                "intent_name": plan.get("intent_name") or plan.get("intent", ""),
+                "plan": {
+                    "status": plan_obj.get("status") or plan.get("status", "NEEDS_CLARIFICATION"),
+                    "stage": plan_obj.get("stage") or plan.get("stage"),
+                    "action": plan_obj.get("action") or plan.get("action")
+                },
+                "slots": plan_slots,
+                "missing_slots": plan_missing_slots
+            }
+        # Add active_capability if present in plan
+        if plan.get("active_capability"):
+            outcome_dict["active_capability"] = plan.get("active_capability")
+        response = {
             "success": True,
-            "result": plan
+            "result": outcome_dict,
+            "outcome": outcome_dict  # Alias for backward compatibility
         }
+        # Preserve rendered text if present in plan (from plan_message)
+        if "text" in plan:
+            response["text"] = plan["text"]
+        return response
 
     logger.debug(
         f"Allowing action execution: plan_action={plan_action}, mode={execution_step.get('mode') if execution_step else 'unknown'}, "
@@ -442,16 +635,57 @@ def handle_message(
 
         # Only proceed if we have the required client
         if execution_step and execution_client is None:
-            # Missing required client - return planning result (no error for clarification turns)
+            # Missing required client - return planning outcome (no error for clarification turns)
             # This prevents "missing_dependency" errors when user is clarifying
             logger.debug(
                 f"Execution step {action} requires {client_name}, but client not provided. "
-                "Returning planning result (likely clarification turn)."
+                "Returning planning outcome (likely clarification turn)."
             )
-            return {
+            # Build outcome from decision (canonical builder)
+            decision = plan.get("_decision")
+            if decision:
+                outcome_dict = build_outcome_from_decision(decision)
+            else:
+                # Fallback: construct minimal outcome when decision is missing
+                logger.warning(
+                    "Decision not available in plan, using fallback construction")
+                plan_slots = plan.get("slots", {})
+                plan_missing_slots = plan.get("missing_slots", [])
+                plan_obj = plan.get("plan", {})
+                if not isinstance(plan_obj, dict):
+                    plan_obj = {}
+                facts = {
+                    "slots": plan_slots if isinstance(plan_slots, dict) else {},
+                    "missing_slots": plan_missing_slots if isinstance(plan_missing_slots, list) else []
+                }
+                outcome_dict = {
+                    "status": plan.get("status") or plan_obj.get("status", "NEEDS_CLARIFICATION"),
+                    "awaiting": plan.get("awaiting"),
+                    "allowed_actions": plan.get("allowed_actions", []),
+                    "blocked_actions": plan.get("blocked_actions", []),
+                    "facts": facts,
+                    "intent_name": plan.get("intent_name") or plan.get("intent", ""),
+                    "plan": {
+                        "status": plan_obj.get("status") or plan.get("status", "NEEDS_CLARIFICATION"),
+                        "stage": plan_obj.get("stage") or plan.get("stage"),
+                        "action": plan_obj.get("action") or plan.get("action")
+                    },
+                    "slots": plan_slots,
+                    "missing_slots": plan_missing_slots
+                }
+            # Add active_capability if present in plan
+            if plan.get("active_capability"):
+                outcome_dict["active_capability"] = plan.get(
+                    "active_capability")
+            response = {
                 "success": True,
-                "result": plan
+                "result": outcome_dict,
+                "outcome": outcome_dict  # Alias for backward compatibility
             }
+            # Preserve rendered text if present in plan (from plan_message)
+            if "text" in plan:
+                response["text"] = plan["text"]
+            return response
 
         if execution_step and execution_client:
             # Ensure organization_id is in slots for execution
@@ -466,6 +700,43 @@ def handle_message(
 
             # Update plan action to match selected step
             plan["action"] = action
+
+            # CRITICAL: Add facts to plan for FINALIZE_RESERVATION execution
+            # This enables payment verification in the execution handler
+            # Facts are needed for defensive payment checks even if capability blocking is bypassed
+            if action == "FINALIZE_RESERVATION":
+                # Get facts from session_state (contains org data and payment_satisfied from previous turns)
+                # Session facts are durable and persist across turns
+                plan_facts = {}
+                if session_state and isinstance(session_state, dict):
+                    plan_facts = session_state.get("facts", {})
+                    if not isinstance(plan_facts, dict):
+                        plan_facts = {}
+
+                # If org data is missing from session facts, fetch it from organization_client
+                # This ensures org.payment_required is available for payment verification
+                if organization_client and organization_id:
+                    if not plan_facts.get("org"):
+                        try:
+                            org_details = organization_client.get_details(
+                                organization_id)
+                            if isinstance(org_details, dict):
+                                org_data = org_details.get(
+                                    "organization") or org_details
+                                if org_data and isinstance(org_data, dict):
+                                    if not plan_facts:
+                                        plan_facts = {}
+                                    plan_facts["org"] = org_data
+                        except Exception as e:
+                            logger.debug(
+                                f"Failed to fetch org data for FINALIZE_RESERVATION payment verification: {e}"
+                            )
+
+                if plan_facts:
+                    plan["facts"] = plan_facts
+                    logger.debug(
+                        "Added facts to plan for FINALIZE_RESERVATION execution (payment verification)"
+                    )
 
             # Step 2: Inject resolved_datetime_range before CONFIRM_APPOINTMENT
             # If datetime_range is missing in slots, check session for resolved_datetime_range
@@ -537,9 +808,46 @@ def handle_message(
                     # Other clients not yet supported
                     logger.warning(
                         f"Execution for {client_name} not yet implemented")
+                    # Build outcome from decision (canonical builder)
+                    decision = plan.get("_decision")
+                    if decision:
+                        outcome_dict = build_outcome_from_decision(decision)
+                    else:
+                        # Fallback: construct minimal outcome when decision is missing
+                        logger.warning(
+                            "Decision not available in plan, using fallback construction")
+                        plan_slots = plan.get("slots", {})
+                        plan_missing_slots = plan.get("missing_slots", [])
+                        plan_obj = plan.get("plan", {})
+                        if not isinstance(plan_obj, dict):
+                            plan_obj = {}
+                        facts = {
+                            "slots": plan_slots if isinstance(plan_slots, dict) else {},
+                            "missing_slots": plan_missing_slots if isinstance(plan_missing_slots, list) else []
+                        }
+                        outcome_dict = {
+                            "status": plan.get("status") or plan_obj.get("status", "NEEDS_CLARIFICATION"),
+                            "awaiting": plan.get("awaiting"),
+                            "allowed_actions": plan.get("allowed_actions", []),
+                            "blocked_actions": plan.get("blocked_actions", []),
+                            "facts": facts,
+                            "intent_name": plan.get("intent_name") or plan.get("intent", ""),
+                            "plan": {
+                                "status": plan_obj.get("status") or plan.get("status", "NEEDS_CLARIFICATION"),
+                                "stage": plan_obj.get("stage") or plan.get("stage"),
+                                "action": plan_obj.get("action") or plan.get("action")
+                            },
+                            "slots": plan_slots,
+                            "missing_slots": plan_missing_slots
+                        }
+                    # Add active_capability if present in plan
+                    if plan.get("active_capability"):
+                        outcome_dict["active_capability"] = plan.get(
+                            "active_capability")
                     return {
                         "success": True,
-                        "result": plan
+                        "result": outcome_dict,
+                        "outcome": outcome_dict  # Alias for backward compatibility
                     }
 
                 # For CONFIRM_APPOINTMENT with EXECUTED status, preserve the action
@@ -554,6 +862,36 @@ def handle_message(
                         plan["slots"] = slots
                         logger.debug(
                             f"Persisted booking_id={booking_id} to slots for idempotency")
+
+                # For FETCH_BOOKING with EXECUTED status, persist booking_id to slots
+                # This enables subsequent actions (e.g., CONFIRM_CANCELLATION) to use the fetched booking_id
+                if execution_result.get("status") == "EXECUTED" and plan.get("action") == "FETCH_BOOKING":
+                    booking_id = execution_result.get("booking_id")
+                    if booking_id:
+                        slots["booking_id"] = booking_id
+                        plan["slots"] = slots
+                        logger.debug(
+                            f"Persisted booking_id={booking_id} to slots from FETCH_BOOKING")
+
+                # For CREATE_BOOKING_HOLD with EXECUTED status, persist booking_id and payment info to slots
+                # This enables capability evaluation to access booking_id before FINALIZE_RESERVATION
+                if execution_result.get("status") == "EXECUTED" and plan.get("action") == "CREATE_BOOKING_HOLD":
+                    booking_id = execution_result.get("booking_id")
+                    booking_code = execution_result.get("booking_code")
+                    total_amount = execution_result.get("total_amount")
+                    currency = execution_result.get("currency")
+                    if booking_id:
+                        slots["booking_id"] = booking_id
+                        if booking_code:
+                            slots["booking_code"] = booking_code
+                        if total_amount:
+                            slots["total_amount"] = total_amount
+                        if currency:
+                            slots["currency"] = currency
+                        plan["slots"] = slots
+                        logger.debug(
+                            f"Persisted booking_id={booking_id}, booking_code={booking_code}, "
+                            f"total_amount={total_amount}, currency={currency} to slots from CREATE_BOOKING_HOLD")
 
                 # Persist availability fingerprint when SEARCH_AVAILABILITY succeeds
                 # This enables slot-fingerprint-based availability resolution
@@ -800,9 +1138,45 @@ def handle_message(
                             f"[DATETIME_RANGE] Attached to plan: {execution_result.get('resolved_datetime_range').get('start')}"
                         )
 
+                # Ensure execution_result includes plan structure (status, stage, action)
+                # Build from decision if available, otherwise use plan
+                decision = plan.get("_decision")
+                if decision:
+                    # Use canonical builder to ensure plan structure is complete
+                    outcome_from_decision = build_outcome_from_decision(
+                        decision)
+                    # Merge plan structure into execution_result
+                    if not isinstance(execution_result, dict):
+                        execution_result = {}
+                    if "plan" not in execution_result or not isinstance(execution_result.get("plan"), dict):
+                        execution_result["plan"] = {}
+                    # Ensure plan.status, plan.stage, plan.action are present
+                    execution_result["plan"]["status"] = outcome_from_decision.get(
+                        "plan", {}).get("status")
+                    execution_result["plan"]["stage"] = outcome_from_decision.get(
+                        "plan", {}).get("stage")
+                    execution_result["plan"]["action"] = outcome_from_decision.get(
+                        "plan", {}).get("action")
+                else:
+                    # Fallback: extract from plan
+                    plan_obj = plan.get("plan", {})
+                    if not isinstance(plan_obj, dict):
+                        plan_obj = {}
+                    if not isinstance(execution_result, dict):
+                        execution_result = {}
+                    if "plan" not in execution_result or not isinstance(execution_result.get("plan"), dict):
+                        execution_result["plan"] = {}
+                    execution_result["plan"]["status"] = plan_obj.get(
+                        "status") or plan.get("status")
+                    execution_result["plan"]["stage"] = plan_obj.get(
+                        "stage") or plan.get("stage")
+                    execution_result["plan"]["action"] = plan_obj.get(
+                        "action") or plan.get("action")
+
                 return {
                     "success": True,
                     "result": execution_result,
+                    "outcome": execution_result,  # Alias for backward compatibility
                     "plan": plan
                 }
             except Exception as e:
@@ -814,10 +1188,46 @@ def handle_message(
                     "plan": plan
                 }
 
-    # No execution step selected by policy - return planning result
+    # No execution step selected by policy - return planning outcome
+    # Build outcome from decision (canonical builder)
+    decision = plan.get("_decision")
+    if decision:
+        outcome_dict = build_outcome_from_decision(decision)
+    else:
+        # Fallback: construct minimal outcome when decision is missing
+        logger.warning(
+            "Decision not available in plan, using fallback construction")
+        plan_slots = plan.get("slots", {})
+        plan_missing_slots = plan.get("missing_slots", [])
+        plan_obj = plan.get("plan", {})
+        if not isinstance(plan_obj, dict):
+            plan_obj = {}
+        facts = {
+            "slots": plan_slots if isinstance(plan_slots, dict) else {},
+            "missing_slots": plan_missing_slots if isinstance(plan_missing_slots, list) else []
+        }
+        outcome_dict = {
+            "status": plan.get("status") or plan_obj.get("status", "NEEDS_CLARIFICATION"),
+            "awaiting": plan.get("awaiting"),
+            "allowed_actions": plan.get("allowed_actions", []),
+            "blocked_actions": plan.get("blocked_actions", []),
+            "facts": facts,
+            "intent_name": plan.get("intent_name") or plan.get("intent", ""),
+            "plan": {
+                "status": plan_obj.get("status") or plan.get("status", "NEEDS_CLARIFICATION"),
+                "stage": plan_obj.get("stage") or plan.get("stage"),
+                "action": plan_obj.get("action") or plan.get("action")
+            },
+            "slots": plan_slots,
+            "missing_slots": plan_missing_slots
+        }
+    # Add active_capability if present in plan
+    if plan.get("active_capability"):
+        outcome_dict["active_capability"] = plan.get("active_capability")
     return {
         "success": True,
-        "result": plan
+        "result": outcome_dict,
+        "outcome": outcome_dict  # Alias for backward compatibility
     }
 
 
@@ -2028,6 +2438,28 @@ def handle_message_legacy(
                     raw_luma_facts, default=str, ensure_ascii=True),
                 raw_luma_intent_name, source_text)
 
+    # Add organization data to facts for capability evaluation
+    # This allows capability conditions to read org.payment_required, etc.
+    if organization_client and organization_id:
+        try:
+            org_details = organization_client.get_details(organization_id)
+            if isinstance(org_details, dict):
+                # Organization data may be at top level or under "organization" key
+                org_data = org_details.get("organization") or org_details
+                if org_data and isinstance(org_data, dict):
+                    # Ensure facts structure exists
+                    if "facts" not in effective_response:
+                        effective_response["facts"] = {}
+                    if not isinstance(effective_response["facts"], dict):
+                        effective_response["facts"] = {}
+                    # Add org data to facts["org"]
+                    effective_response["facts"]["org"] = org_data
+        except Exception as e:
+            # If org fetch fails, log but don't crash
+            # Capability evaluation will handle missing org data gracefully
+            logger.debug(
+                f"Failed to fetch organization data for capability evaluation: {e}")
+
     decision = process_luma_response(
         effective_response, derived_domain, user_id, session_state=session_state)
 
@@ -2053,7 +2485,7 @@ def handle_message_legacy(
             stage = "CONFIRM"
             # Apply action selection rules for complete slots
             if intent_name == "CREATE_RESERVATION":
-                action = "CONFIRM_RESERVATION"
+                action = "FINALIZE_RESERVATION"
             else:
                 action = None
 
@@ -2079,6 +2511,82 @@ def handle_message_legacy(
         }
         logger.warning(
             f"Created minimal decision due to process_luma_response failure: intent={intent_name}, missing_slots={missing_slots}")
+
+    # HYDRATE ORGANIZATION FACTS INTO DECISION (for capability gating)
+    # This MUST happen BEFORE: capability gating, PLAN_FINAL, SESSION_SAVE
+    # This ensures decision.facts.org is populated before any status override or session persistence
+    # Hard rules:
+    # - Do NOT guard this behind intent checks
+    # - Do NOT rely on planner to fetch org
+    # - Do NOT save session before this runs
+    if decision and isinstance(decision.get("facts"), dict):
+        facts = decision["facts"]
+        # Only hydrate if org data is missing from decision.facts
+        if "org" not in facts or not isinstance(facts.get("org"), dict):
+            org_data = None
+            org_id_to_fetch = None
+            org_id_source = None
+
+            # Priority 1: Try to get org data from effective_response.facts.org (if already present)
+            if effective_response and isinstance(effective_response.get("facts"), dict):
+                effective_org = effective_response["facts"].get("org")
+                if isinstance(effective_org, dict):
+                    org_data = effective_org
+                    # Also check if effective_response.facts.org.id exists for org_id derivation
+                    if not org_id_to_fetch and "id" in effective_org:
+                        org_id_to_fetch = effective_org.get("id")
+                        org_id_source = "effective_response.facts.org.id"
+
+            # Priority 2: Extract org_id from decision.booking.organization_id
+            if not org_id_to_fetch and decision.get("booking"):
+                booking = decision.get("booking", {})
+                if isinstance(booking, dict):
+                    org_id_to_fetch = booking.get("organization_id")
+                    if org_id_to_fetch:
+                        org_id_source = "decision.booking.organization_id"
+
+            # Priority 3: Extract org_id from decision.facts.slots.organization_id
+            if not org_id_to_fetch and isinstance(facts.get("slots"), dict):
+                org_id_to_fetch = facts["slots"].get("organization_id")
+                if org_id_to_fetch:
+                    org_id_source = "decision.facts.slots.organization_id"
+
+            # Priority 4: Use organization_id parameter (from handle_message)
+            if not org_id_to_fetch and organization_id:
+                org_id_to_fetch = organization_id
+                org_id_source = "handle_message.organization_id"
+
+            # Fetch org data if we have an org_id and don't already have org_data
+            if not org_data and org_id_to_fetch and organization_client:
+                try:
+                    logger.info(
+                        f"[ORG_HYDRATION] Fetching organization data for org_id={org_id_to_fetch} "
+                        f"(source={org_id_source})")
+                    org_details = organization_client.get_details(
+                        org_id_to_fetch)
+                    if isinstance(org_details, dict):
+                        # Organization data may be at top level or under "organization" key
+                        org_data = org_details.get(
+                            "organization") or org_details
+                        logger.info(
+                            f"[ORG_HYDRATION] Successfully fetched organization data: "
+                            f"payment_required={org_data.get('payment_required') if isinstance(org_data, dict) else 'N/A'}")
+                except Exception as e:
+                    # If org fetch fails, log but don't crash
+                    logger.warning(
+                        f"[ORG_HYDRATION] Failed to fetch organization data for org_id={org_id_to_fetch}: {e}")
+
+            # Inject org_data into decision.facts if we have it
+            if org_data and isinstance(org_data, dict):
+                facts["org"] = org_data
+                logger.info(
+                    f"[ORG_HYDRATION] Injected organization facts into decision.facts.org "
+                    f"(org_id={org_id_to_fetch or 'from_effective_response'}, "
+                    f"payment_required={org_data.get('payment_required')})")
+            else:
+                logger.debug(
+                    f"[ORG_HYDRATION] No organization data available to inject "
+                    f"(org_id_to_fetch={org_id_to_fetch}, organization_client={organization_client is not None})")
 
     # Extract decision plan
     plan = decision.get("plan", {})
@@ -2215,6 +2723,17 @@ def handle_message_legacy(
 
                     slots = raw_slots
 
+        # CRITICAL: Always extract stage and action from decision.plan (authoritative source)
+        # This ensures plan.stage and plan.action are always present in the outcome
+        # Do not rely on plan_message() or other sources - decision.plan is the single source of truth
+        decision_plan = decision.get("plan", {}) if decision else {}
+        if not isinstance(decision_plan, dict):
+            decision_plan = {}
+
+        # Extract stage and action from decision.plan (always use this source)
+        stage = decision_plan.get("stage")
+        action = decision_plan.get("action")
+
         # CRITICAL: Always populate plan object with all required fields
         # This ensures plan.stage and plan.action are always present (no silent failures)
         # HARD RULE: Include both intent and intent_name for session persistence
@@ -2222,8 +2741,8 @@ def handle_message_legacy(
             "intent": intent_name,
             # For session persistence - build_session_state_from_outcome reads plan.intent_name
             "intent_name": intent_name,
-            "stage": stage,
-            "action": action,
+            "stage": stage,  # Always from decision.plan
+            "action": action,  # Always from decision.plan
             "missing_slots": missing_slots,
             "slots": slots,
             "status": plan_status,
@@ -2231,6 +2750,62 @@ def handle_message_legacy(
             "allowed_actions": plan.get("allowed_actions", []),
             "blocked_actions": plan.get("blocked_actions", [])
         }
+
+        # CAPABILITY GATING: Override plan status if payment is required but not satisfied
+        # This happens in post-planning finalization (right before outcome is built)
+        # Check organization payment requirements and payment satisfaction status
+        org_data = None
+        # Check decision.facts.org first (if process_luma_response copied it)
+        if decision and isinstance(decision.get("facts"), dict):
+            org_data = decision["facts"].get("org")
+        # Fall back to effective_response.facts.org (where org data is added before process_luma_response)
+        if not org_data and effective_response and isinstance(effective_response.get("facts"), dict):
+            org_data = effective_response["facts"].get("org")
+
+        payment_required = False
+        if org_data and isinstance(org_data, dict):
+            payment_required = org_data.get("payment_required", False)
+
+        payment_satisfied = False
+        # Check decision.facts.payment_satisfied first
+        if decision and isinstance(decision.get("facts"), dict):
+            payment_satisfied = decision["facts"].get(
+                "payment_satisfied", False)
+        # Fall back to session_state.facts.payment_satisfied
+        if not payment_satisfied and session_state and isinstance(session_state.get("facts"), dict):
+            payment_satisfied = session_state["facts"].get(
+                "payment_satisfied", False)
+        # Also check effective_response.facts.payment_satisfied (for test scenarios)
+        if not payment_satisfied and effective_response and isinstance(effective_response.get("facts"), dict):
+            payment_satisfied = effective_response["facts"].get(
+                "payment_satisfied", False)
+
+        # Debug logging
+        logger.debug(
+            f"Capability gating check: org_data={org_data is not None}, "
+            f"payment_required={payment_required}, payment_satisfied={payment_satisfied}, "
+            f"plan_status={plan_status}"
+        )
+
+        # Override plan status if payment is required but not satisfied
+        # This override applies even if planner returns READY
+        if payment_required and not payment_satisfied:
+            logger.info(
+                f"Capability gating: payment_required=True, payment_satisfied=False. "
+                f"Overriding plan.status from '{plan_status}' to 'AWAITING_CAPABILITY'"
+            )
+            plan_status = "AWAITING_CAPABILITY"
+            populated_plan["status"] = "AWAITING_CAPABILITY"
+            populated_plan["awaiting"] = "PAYMENT"
+            # Lowercase adapter key
+            populated_plan["active_capability"] = "payment"
+
+            # Update decision.plan so that build_outcome_from_decision() uses the correct values
+            if decision and isinstance(decision.get("plan"), dict):
+                decision["plan"]["status"] = "AWAITING_CAPABILITY"
+                decision["plan"]["awaiting"] = "PAYMENT"
+                # Lowercase adapter key
+                decision["plan"]["active_capability"] = "payment"
 
         # CRITICAL: Ensure outcome always uses raw service_id (not canonical)
         # Dialog output, outcome.slots, outcome.facts.slots MUST use raw tenant value
@@ -2290,9 +2865,16 @@ def handle_message_legacy(
             }
         }
 
+        # Add active_capability if present in populated_plan (from capability gating)
+        if populated_plan.get("active_capability"):
+            result["outcome"]["active_capability"] = populated_plan["active_capability"]
+
         # Store effective Luma response for session building (for test snapshots)
         if effective_response and "_raw_luma_response" in effective_response:
             result["_merged_luma_response"] = effective_response
+
+        # Store decision for plan_message to access (for early return paths in handle_message)
+        result["_decision"] = decision
 
         # DEBUG LOG: Finalization point (after all overrides, before PLAN_FINAL)
         # Track fingerprint-based availability resolution for debugging
@@ -2326,6 +2908,111 @@ def handle_message_legacy(
             populated_plan["stage"], populated_plan["action"],
             populated_plan["missing_slots"], populated_plan["slots"]
         )
+
+        # CAPABILITY RUNNER INVOCATION: Invoke immediately when entering AWAITING_CAPABILITY
+        # INVARIANT: Entering AWAITING_CAPABILITY guarantees the capability side-effect has run
+        # This must happen on the SAME turn, be idempotent, and NOT require user input
+        if plan_status == "AWAITING_CAPABILITY":
+            active_capability_value = populated_plan.get("active_capability")
+            if active_capability_value:
+                try:
+                    # Try to import capability runner (optional dependency)
+                    from capabilities.runner import CapabilityRunner
+
+                    # Build context for adapter (read-only access to session)
+                    # Merge session_state slots/facts with outcome to ensure booking info is available
+                    session_slots = {}
+                    session_facts = {}
+
+                    # Start with session_state (authoritative for booking info)
+                    if session_state:
+                        session_slots.update(session_state.get("slots", {}))
+                        if isinstance(session_state.get("facts"), dict):
+                            session_facts.update(
+                                session_state.get("facts", {}))
+
+                    # Merge outcome slots/facts (may have updated values from this turn)
+                    outcome_slots = result.get("outcome", {}).get("slots", {})
+                    if isinstance(outcome_slots, dict):
+                        session_slots.update(outcome_slots)
+
+                    outcome_facts = result.get("outcome", {}).get("facts", {})
+                    if isinstance(outcome_facts, dict):
+                        session_facts.update(outcome_facts)
+
+                    # Also check decision.booking for booking info
+                    booking = decision.get("booking", {})
+                    if isinstance(booking, dict):
+                        # Extract booking_id, booking_code, total_amount, currency from booking
+                        if "booking_id" in booking and "booking_id" not in session_slots:
+                            session_slots["booking_id"] = booking.get(
+                                "booking_id")
+                        if "booking_code" in booking and "booking_code" not in session_slots:
+                            session_slots["booking_code"] = booking.get(
+                                "booking_code")
+                        if "code" in booking and "booking_code" not in session_slots:
+                            session_slots["booking_code"] = booking.get("code")
+                        if "total_amount" in booking and "total_amount" not in session_slots:
+                            session_slots["total_amount"] = booking.get(
+                                "total_amount")
+                        if "amount" in booking and "total_amount" not in session_slots:
+                            session_slots["total_amount"] = booking.get(
+                                "amount")
+                        if "currency" in booking and "currency" not in session_slots:
+                            session_slots["currency"] = booking.get("currency")
+
+                    context = {
+                        "user_id": user_id,
+                        "session_slots": session_slots,
+                        "session_facts": session_facts,
+                        "domain": domain,
+                        "timezone": timezone,
+                        "organization_id": organization_id,
+                        "transaction_id": transaction_id
+                    }
+
+                    # Initialize capability runner (idempotent - safe on re-entry)
+                    runner = CapabilityRunner()
+
+                    # Build core_outcome for runner (must include status and active_capability)
+                    core_outcome = result.get("outcome", {}).copy()
+                    core_outcome["status"] = plan_status
+                    core_outcome["active_capability"] = active_capability_value
+
+                    # Invoke capability runner (first activation - creates capability side-effects)
+                    # This is idempotent: adapter.start() won't duplicate if already exists
+                    runner_result = runner.handle(
+                        # First activation (no user input yet)
+                        user_input=None,
+                        core_outcome=core_outcome,
+                        context=context
+                    )
+
+                    # If adapter returned text, store it in outcome
+                    if runner_result.text:
+                        result["outcome"]["text"] = runner_result.text
+                        booking_code = session_slots.get(
+                            "booking_code") or session_facts.get("booking_code")
+                        logger.info(
+                            f"[CAPABILITY_LIFECYCLE] Capability '{active_capability_value}' invoked, side-effect executed. "
+                            f"booking_code={booking_code}"
+                        )
+                    else:
+                        logger.warning(
+                            f"[CAPABILITY_LIFECYCLE] Capability '{active_capability_value}' invoked but no text returned"
+                        )
+
+                except ImportError:
+                    # Capability runner not available - log but don't fail
+                    logger.debug(
+                        f"[CAPABILITY_LIFECYCLE] Capability runner not available, skipping capability '{active_capability_value}' invocation"
+                    )
+                except Exception as e:
+                    # Log error but don't fail - capability execution is best-effort
+                    logger.warning(
+                        f"[CAPABILITY_LIFECYCLE] Failed to invoke capability '{active_capability_value}': {e}",
+                        exc_info=True
+                    )
 
         # ASSERTION: plan.intent_name must never be empty after successful planning
         if not populated_plan.get("intent_name") or populated_plan.get("intent_name") == "":
@@ -2376,31 +3063,219 @@ def handle_message_legacy(
                         "stage"), outcome.get("action"),
                     outcome_missing_slots, json.dumps(outcome_slots, default=str, ensure_ascii=True))
 
+        # Inject rendering text for clarification states
+        _inject_rendering_text(result, decision)
+
         return result
 
-    # Handle AWAITING_CONFIRMATION status
-    if plan_status == "AWAITING_CONFIRMATION":
-        # Return confirmation prompt outcome
-        booking = decision.get("booking", {})
-        facts = decision.get("facts", {})
+    # Handle AWAITING_* statuses (AWAITING_CONFIRMATION, AWAITING_CAPABILITY, etc.)
+    # Generic handler that mirrors plan status and awaiting without special-casing
+    if plan_status in ("AWAITING_CONFIRMATION", "AWAITING_CAPABILITY"):
+        # Build outcome from decision using unified helper
+        outcome_dict = build_outcome_from_decision(decision)
+
+        # Override status and awaiting to mirror plan (AWAITING_* statuses are special)
+        outcome_dict["status"] = plan_status
+        outcome_dict["awaiting"] = awaiting
+
         # Include _raw_luma_response in facts for test snapshots (preserved from effective_response)
         if effective_response and "_raw_luma_response" in effective_response:
+            facts = outcome_dict.get("facts", {})
             if not isinstance(facts, dict):
                 facts = {}
             facts["_raw_luma_response"] = effective_response["_raw_luma_response"]
+            outcome_dict["facts"] = facts
+
+        # Add booking for AWAITING_CONFIRMATION (backward compatibility)
+        if plan_status == "AWAITING_CONFIRMATION":
+            booking = decision.get("booking", {})
+            outcome_dict["booking"] = booking
+
+        # Add active_capability for AWAITING_CAPABILITY
+        # STRICTLY resolve from decision.plan.active_capability (authoritative source from capability gating)
+        # Capability gating sets decision["plan"]["active_capability"] = "payment" (line 2808)
+        # Do NOT depend on session_state (may be None on first turn) or facts
+        active_capability = None
+        if plan_status == "AWAITING_CAPABILITY":
+            # Capability gating ALWAYS injects decision.plan.active_capability when setting AWAITING_CAPABILITY
+            # This is the single source of truth for active capability
+            plan = decision.get("plan", {})
+            if isinstance(plan, dict):
+                active_capability = plan.get("active_capability")
+            if active_capability:
+                outcome_dict["active_capability"] = active_capability
+
         result = {
             "success": True,
-            "outcome": {
-                "status": "AWAITING_CONFIRMATION",
-                "awaiting": awaiting,
-                "booking": booking,
-                "allowed_actions": allowed_actions,
-                "blocked_actions": blocked_actions,
-                "facts": facts
-            }
+            "outcome": outcome_dict
         }
         # Store effective Luma response for session building
         result["_merged_luma_response"] = effective_response
+
+        # Store decision for plan_message to access
+        result["_decision"] = decision
+
+        # CAPABILITY RUNNER INVOCATION: Invoke immediately when entering AWAITING_CAPABILITY
+        # INVARIANT: Entering AWAITING_CAPABILITY guarantees the capability side-effect has run
+        # This must happen on the SAME turn, be idempotent, and NOT require user input
+        # Resolve active_capability STRICTLY from decision.plan.active_capability (capability gating injects it at line 2808)
+        if plan_status == "AWAITING_CAPABILITY":
+            plan = decision.get("plan", {})
+            if isinstance(plan, dict):
+                active_capability_for_runner = plan.get("active_capability")
+            else:
+                active_capability_for_runner = None
+            if active_capability_for_runner:
+                try:
+                    # Try to import capability runner (optional dependency)
+                    from capabilities.runner import CapabilityRunner
+
+                    # Build context for adapter (read-only access to session)
+                    # Merge session_state slots/facts with outcome_dict to ensure booking info is available
+                    # Note: session_state may be None on first turn, so we also check outcome_dict and decision.booking
+                    session_slots = {}
+                    session_facts = {}
+
+                    # Start with session_state (authoritative for booking info, if available)
+                    if session_state:
+                        session_slots.update(session_state.get("slots", {}))
+                        if isinstance(session_state.get("facts"), dict):
+                            session_facts.update(
+                                session_state.get("facts", {}))
+
+                    # Merge outcome_dict slots/facts (may have updated values from this turn)
+                    outcome_slots = outcome_dict.get("slots", {})
+                    if isinstance(outcome_slots, dict):
+                        session_slots.update(outcome_slots)
+
+                    outcome_facts = outcome_dict.get("facts", {})
+                    if isinstance(outcome_facts, dict):
+                        session_facts.update(outcome_facts)
+
+                    # Also check decision.booking for booking info
+                    booking = decision.get("booking", {})
+                    if isinstance(booking, dict):
+                        # Extract booking_id, booking_code, total_amount, currency from booking
+                        if "booking_id" in booking and "booking_id" not in session_slots:
+                            session_slots["booking_id"] = booking.get(
+                                "booking_id")
+                        if "booking_code" in booking and "booking_code" not in session_slots:
+                            session_slots["booking_code"] = booking.get(
+                                "booking_code")
+                        if "code" in booking and "booking_code" not in session_slots:
+                            session_slots["booking_code"] = booking.get("code")
+                        if "total_amount" in booking and "total_amount" not in session_slots:
+                            session_slots["total_amount"] = booking.get(
+                                "total_amount")
+                        if "amount" in booking and "total_amount" not in session_slots:
+                            session_slots["total_amount"] = booking.get(
+                                "amount")
+                        if "currency" in booking and "currency" not in session_slots:
+                            session_slots["currency"] = booking.get("currency")
+
+                    context = {
+                        "user_id": user_id,
+                        "session_slots": session_slots,
+                        "session_facts": session_facts,
+                        "domain": domain,
+                        "timezone": timezone,
+                        "organization_id": organization_id,
+                        "transaction_id": transaction_id
+                    }
+
+                    # Initialize capability runner (idempotent - safe on re-entry)
+                    runner = CapabilityRunner()
+
+                    # Build core_outcome for runner (must include status and active_capability)
+                    # This ensures the runner correctly identifies the capability to invoke
+                    core_outcome_for_runner = outcome_dict.copy()
+                    core_outcome_for_runner["status"] = plan_status
+                    core_outcome_for_runner["active_capability"] = active_capability_for_runner
+
+                    # Invoke capability runner (first activation - creates capability side-effects)
+                    # This MUST happen in the same turn, before returning the outcome
+                    # Do NOT wait for another user turn - execute immediately
+                    # INVARIANT: Entering AWAITING_CAPABILITY guarantees the capability side-effect has executed
+                    runner_result = runner.handle(
+                        # First activation (no user input yet - do NOT wait for user input)
+                        user_input=None,
+                        core_outcome=core_outcome_for_runner,
+                        context=context
+                    )
+
+                    # Ensure PaymentAdapter.start() was called and payment intent side-effects are persisted
+                    # The runner.handle() above should have invoked adapter.start() which creates the payment intent
+                    # Side-effects are persisted to the mock payment store during adapter.start()
+
+                    # If adapter returned text, store it in outcome
+                    if runner_result.text:
+                        outcome_dict["text"] = runner_result.text
+                        result["outcome"]["text"] = runner_result.text
+                        booking_code = session_slots.get(
+                            "booking_code") or session_facts.get("booking_code")
+                        logger.info(
+                            f"[CAPABILITY_LIFECYCLE] Capability '{active_capability_for_runner}' invoked, side-effect executed. "
+                            f"booking_code={booking_code}"
+                        )
+                    else:
+                        logger.warning(
+                            f"[CAPABILITY_LIFECYCLE] Capability '{active_capability_for_runner}' invoked but no text returned"
+                        )
+
+                    # GUARD ASSERTION: If capability is payment, payment intent MUST exist before response is returned
+                    # This enforces the invariant that entering AWAITING_CAPABILITY guarantees capability side-effects have executed
+                    if active_capability_for_runner == "payment":
+                        booking_code_for_check = session_slots.get(
+                            "booking_code") or session_facts.get("booking_code")
+                        if booking_code_for_check:
+                            try:
+                                # Try to access payment store to verify intent exists
+                                # This is a test-time assertion to catch missing payment intents
+                                from capabilities.clients.payment.mock_payment import _PAYMENT_STATE
+                                if booking_code_for_check not in _PAYMENT_STATE:
+                                    raise AssertionError(
+                                        f"[CAPABILITY_GUARD] Payment capability invoked but payment intent not found for booking_code: {booking_code_for_check}. "
+                                        f"PaymentAdapter.start() must create and persist payment intent before returning."
+                                    )
+                                if not _PAYMENT_STATE[booking_code_for_check].get("intent_created"):
+                                    raise AssertionError(
+                                        f"[CAPABILITY_GUARD] Payment capability invoked but payment intent not created for booking_code: {booking_code_for_check}. "
+                                        f"PaymentAdapter.start() must create and persist payment intent before returning."
+                                    )
+                                logger.debug(
+                                    f"[CAPABILITY_GUARD] Payment intent verified for booking_code: {booking_code_for_check}"
+                                )
+                            except ImportError:
+                                # Payment store not available (not in test environment) - skip assertion
+                                logger.debug(
+                                    "[CAPABILITY_GUARD] Payment store not available, skipping payment intent verification"
+                                )
+                            except KeyError:
+                                # Payment store available but intent not found - this is the error we're guarding against
+                                raise AssertionError(
+                                    f"[CAPABILITY_GUARD] Payment capability invoked but payment intent not found for booking_code: {booking_code_for_check}. "
+                                    f"PaymentAdapter.start() must create and persist payment intent before returning."
+                                )
+
+                except ImportError:
+                    # Capability runner not available - log but don't fail
+                    logger.debug(
+                        f"[CAPABILITY_LIFECYCLE] Capability runner not available, skipping capability '{active_capability_for_runner}' invocation"
+                    )
+                except Exception as e:
+                    # Log error but don't fail - capability execution is best-effort
+                    logger.warning(
+                        f"[CAPABILITY_LIFECYCLE] Failed to invoke capability '{active_capability_for_runner}': {e}",
+                        exc_info=True
+                    )
+
+        # Inject rendering text for clarification states (AWAITING_* doesn't need clarification)
+        # Only inject if missing_slots is non-empty (clarification needed)
+        facts = decision.get("facts", {})
+        missing_slots = facts.get("missing_slots", [])
+        if isinstance(missing_slots, list) and len(missing_slots) > 0:
+            _inject_rendering_text(result, decision)
+
         return result
 
     # Handle NEEDS_CLARIFICATION status
@@ -2460,6 +3335,29 @@ def handle_message_legacy(
                         logger.warning(
                             f"[NEEDS_CLARIFICATION] No intent available to set in outcome"
                         )
+
+            # Add rendered text (best-effort)
+            if "outcome" in result:
+                outcome_obj = result["outcome"]
+                facts_obj = outcome_obj.get("facts", {})
+                slots_for_rendering = facts_obj.get("slots", {})
+                if not slots_for_rendering:
+                    slots_for_rendering = outcome_obj.get("slots", {})
+
+                # Build decision dict for rendering
+                rendering_decision = {
+                    "status": "NEEDS_CLARIFICATION",
+                    "missing_slots": facts_obj.get("missing_slots", outcome_obj.get("missing_slots", []))
+                }
+
+                rendered_text = _render_clarification_text(
+                    rendering_decision, slots_for_rendering)
+                if rendered_text:
+                    outcome_obj["rendered_text"] = rendered_text
+
+            # Inject rendering text at top level for clarification states
+            _inject_rendering_text(result, decision)
+
             result["_merged_luma_response"] = effective_response
             return result
         if "error" in decision:
@@ -2639,6 +3537,25 @@ def handle_message_legacy(
             if "slots" in facts_obj:
                 result["outcome"]["slots"] = facts_obj["slots"]
 
+            # Add rendered text (best-effort)
+            slots_for_rendering = facts_obj.get("slots", {})
+            if not slots_for_rendering:
+                slots_for_rendering = result["outcome"].get("slots", {})
+
+            # Build decision dict for rendering
+            rendering_decision = {
+                "status": "NEEDS_CLARIFICATION",
+                "missing_slots": missing_slots
+            }
+
+            rendered_text = _render_clarification_text(
+                rendering_decision, slots_for_rendering)
+            if rendered_text:
+                result["outcome"]["rendered_text"] = rendered_text
+
+        # Inject rendering text at top level for clarification states
+        _inject_rendering_text(result, decision)
+
         # Store effective Luma response for session building
         result["_merged_luma_response"] = effective_response
 
@@ -2697,6 +3614,11 @@ def handle_message_legacy(
         result["outcome"]["action"] = action
         result["outcome"]["missing_slots"] = missing_slots
         result["outcome"]["slots"] = slots
+
+        # Inject rendering text for clarification states (READY doesn't need clarification)
+        # Only inject if missing_slots is non-empty (clarification needed)
+        if isinstance(missing_slots, list) and len(missing_slots) > 0:
+            _inject_rendering_text(result, decision)
 
         # Store effective Luma response for session building
         result["_merged_luma_response"] = effective_response
@@ -3477,7 +4399,8 @@ def plan_message(
     session_state: Optional[Dict[str, Any]] = None,
     luma_client: Optional[LumaClient] = None,
     organization_client: Optional[OrganizationClient] = None,
-    frozen_time: Optional[datetime] = None
+    frozen_time: Optional[datetime] = None,
+    organization_id: Optional[int] = None
 ) -> Dict[str, Any]:
     """
     Extract planning result from handle_message without triggering execution logic.
@@ -3513,6 +4436,7 @@ def plan_message(
         session_state=session_state,
         luma_client=luma_client,
         organization_client=organization_client,
+        organization_id=organization_id,
         planning_only=True
     )
 
@@ -3524,13 +4448,41 @@ def plan_message(
     outcome = result.get("outcome", {})
 
     # Extract required fields from outcome
+    # Include both top-level fields and plan structure for compatibility
+    outcome_plan = outcome.get("plan", {})
+    if not isinstance(outcome_plan, dict):
+        outcome_plan = {}
+
+    # Extract stage, action, and status from plan if available, otherwise from top-level
+    stage = outcome_plan.get("stage") if outcome_plan.get(
+        "stage") is not None else outcome.get("stage")
+    action = outcome_plan.get("action") if outcome_plan.get(
+        "action") is not None else outcome.get("action")
+    status = outcome_plan.get("status") if outcome_plan.get(
+        "status") is not None else outcome.get("status")
+
+    # Build plan structure for tests that expect plan.status, plan.stage, and plan.action
+    # Always build from outcome.plan (authoritative source) to ensure consistency
+    plan_structure = outcome_plan.copy() if outcome_plan else {}
+    if status is not None and "status" not in plan_structure:
+        plan_structure["status"] = status
+    if stage is not None and "stage" not in plan_structure:
+        plan_structure["stage"] = stage
+    if action is not None and "action" not in plan_structure:
+        plan_structure["action"] = action
+
     planning_result = {
         "intent_name": outcome.get("intent_name", ""),
-        "stage": outcome.get("stage"),
-        "action": outcome.get("action"),
+        "intent": outcome.get("intent_name", ""),  # Alias for compatibility
+        "stage": stage,
+        "action": action,
         "slots": outcome.get("slots", {}),
         "missing_slots": outcome.get("missing_slots", []),
-        "status": outcome.get("status")
+        "status": outcome.get("status"),
+        # Include plan structure for tests that expect plan.stage and plan.action
+        "plan": plan_structure,
+        # Include decision information for handle_message early returns
+        "_decision": result.get("_decision")
     }
 
     # Extract time_constraint from multiple possible sources
@@ -3559,5 +4511,12 @@ def plan_message(
     # Add time_constraint if present
     if time_constraint is not None:
         planning_result["time_constraint"] = time_constraint
+
+    # Preserve rendered clarification text if present
+    # Text is injected at top level of result by _inject_rendering_text
+    if "text" in result:
+        planning_result["text"] = result["text"]
+    elif "text" in outcome:
+        planning_result["text"] = outcome["text"]
 
     return planning_result

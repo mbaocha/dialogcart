@@ -253,3 +253,4 @@ class BookingClient(BaseClient):
         return self._request("POST", "/api/internal/bookings/intent", json=payload)
 
 
+

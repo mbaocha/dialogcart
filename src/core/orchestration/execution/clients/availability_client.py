@@ -81,3 +81,4 @@ class AvailabilityClient(BaseClient):
         return self._request("GET", "/api/internal/availability/staff", params=params)
 
 
+

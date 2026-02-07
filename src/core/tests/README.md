@@ -88,12 +88,19 @@ pytest src/core/tests/intents/
 pytest src/core/tests/orchestration/test_orchestrator_flow.py
 ```
 
-#### E2E tests (require services running)
+#### E2E tests
 ```bash
-# From project root (dialogcart/)
-python3 -m core.tests.orchestration.test_orchestrator_e2e
+# E2E tests MUST be run with pytest (not directly with python)
+# Pytest automatically configures PYTHONPATH via pytest.ini
 
-# Note: Don't use .py extension when running as module
+# Run all E2E tests
+pytest src/core/tests/e2e/
+
+# Run specific E2E test
+pytest src/core/tests/e2e/test_core_capability_noop_e2e.py
+
+# Note: Direct execution with `python` is NOT supported for E2E tests
+# because they rely on pytest's automatic PYTHONPATH configuration
 ```
 
 #### Interactive tests

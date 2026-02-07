@@ -18,7 +18,7 @@ This document marks code that can be safely deleted once CREATE_RESERVATION pari
 **Current Code**:
 ```python
 CONFIRM_ACTION_MAP = {
-    "CREATE_RESERVATION": "CONFIRM_RESERVATION",  # ← DELETE THIS LINE
+    "CREATE_RESERVATION": "FINALIZE_RESERVATION",  # ← DELETE THIS LINE
     "MODIFY_BOOKING": "APPLY_MODIFICATION",
     "CANCEL_BOOKING": "CONFIRM_CANCELLATION"
 }
@@ -32,7 +32,7 @@ CONFIRM_ACTION_MAP = {
 }
 ```
 
-**Rationale**: Once policy is enabled for CREATE_RESERVATION, `select_next_execution_step` will always return a step (either SEARCH_AVAILABILITY or CONFIRM_RESERVATION based on `requires: [availability_resolved]`). The fallback to CONFIRM_ACTION_MAP should never be hit for CREATE_RESERVATION.
+**Rationale**: Once policy is enabled for CREATE_RESERVATION, `select_next_execution_step` will always return a step (either SEARCH_AVAILABILITY or FINALIZE_RESERVATION based on `requires: [availability_resolved]`). The fallback to CONFIRM_ACTION_MAP should never be hit for CREATE_RESERVATION.
 
 ### 2. Generic Comment Update
 
@@ -77,8 +77,8 @@ CONFIRM_ACTION_MAP = {
 ## YAML Configuration
 
 CREATE_RESERVATION YAML already has:
-- `CONFIRM_RESERVATION` with `requires: [availability_resolved]` ✅
-- `CONFIRM_RESERVATION` with `required_slots: [service_id, date_range]` ✅
+- `FINALIZE_RESERVATION` with `requires: [availability_resolved]` ✅
+- `FINALIZE_RESERVATION` with `required_slots: [service_id, date_range]` ✅
 - `SEARCH_AVAILABILITY` as exploratory step ✅
 
 Policy should handle all gating logic correctly.

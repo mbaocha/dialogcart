@@ -418,7 +418,7 @@ def _build_decision_plan(
     # CONFIRM ACTION MAP: Hard mapping for complete slots (missing_slots == [])
     CONFIRM_ACTION_MAP = {
         "CREATE_APPOINTMENT": "CONFIRM_APPOINTMENT",
-        "CREATE_RESERVATION": "CONFIRM_RESERVATION",
+        "CREATE_RESERVATION": "FINALIZE_RESERVATION",
         "MODIFY_BOOKING": "APPLY_MODIFICATION",
         "CANCEL_BOOKING": "CONFIRM_CANCELLATION"
     }
@@ -897,7 +897,13 @@ def process_luma_response(
         logger.error(
             f"Missing intent name in Luma response for user {user_id} (luma_intent='{luma_intent_name}', effective_intent={effective_intent})")
         # Extract facts container even for error cases
+        # Preserve existing facts (capability reconciliation)
+        existing_facts = luma_response.get("facts", {})
+        if not isinstance(existing_facts, dict):
+            existing_facts = {}
         facts = {
+            # Preserve all existing facts (e.g., payment_satisfied)
+            **existing_facts,
             "slots": luma_response.get("slots", {}),
             "missing_slots": luma_response.get("missing_slots", []),
             "context": luma_response.get("context", {})
@@ -989,30 +995,32 @@ def process_luma_response(
             f"[MISSING_SLOTS_TRACE] process_luma_response: Using existing missing_slots from luma_response, "
             f"intent={intent_name}, missing_slots={existing_missing_slots}"
         )
-    
+
     turn_state = finalize_turn_state(
         intent_name=intent_name,
         # Use normalized slots (after time normalization)
         merged_session_slots=slots_for_filtering,
-        existing_missing_slots=existing_missing_slots if isinstance(existing_missing_slots, list) else None
+        existing_missing_slots=existing_missing_slots if isinstance(
+            existing_missing_slots, list) else None
     )
 
     effective_collected_slots = turn_state["effective_slots"]
     missing_slots = turn_state["missing_slots"]
-    
+
     # INVESTIGATION: Log missing_slots after finalize_turn_state, before time_constraint logic
     from core.planning.orchestration.missing_slots import get_planning_required_slots_for_intent
     try:
         required_slots = get_planning_required_slots_for_intent(intent_name)
     except (ImportError, Exception):
         required_slots = []
-    
+
     # Get session slots if available (for first turn, there's no session)
     # Session slots are in slots_for_filtering (merged session slots)
     # For first turn, slots_for_filtering only contains current turn slots
     # For follow-up turns, slots_for_filtering contains merged session + current turn slots
-    session_slots = slots_for_filtering  # This is the merged slots (session + current turn)
-    
+    # This is the merged slots (session + current turn)
+    session_slots = slots_for_filtering
+
     logger.error(
         f"[MISSING_SLOTS_TRACE] process_luma_response: AFTER finalize_turn_state, BEFORE time_constraint logic, "
         f"intent={intent_name}, user_id={user_id}, "
@@ -1045,8 +1053,10 @@ def process_luma_response(
             time_constraint_end = time_constraint.get("end")
 
         # Check if time_constraint is bounded (has both start and end)
-        has_start = time_constraint_start is not None and str(time_constraint_start).strip() != ""
-        has_end = time_constraint_end is not None and str(time_constraint_end).strip() != ""
+        has_start = time_constraint_start is not None and str(
+            time_constraint_start).strip() != ""
+        has_end = time_constraint_end is not None and str(
+            time_constraint_end).strip() != ""
         is_bounded = has_start and has_end
 
         # CRITICAL: Check for concrete time slot existence
@@ -1054,22 +1064,22 @@ def process_luma_response(
         # 1. A concrete "time" slot exists in effective_collected_slots (current turn), OR
         # 2. A concrete "time" slot exists in slots_for_filtering (session slots), OR
         # 3. time_constraint.mode == "exact" (exact mode always satisfies, even if derived)
-        # 
+        #
         # Do NOT treat fuzzy or windowed time constraints as satisfying "time" unless a concrete slot exists.
         has_time_slot_current = "time" in effective_collected_slots
         has_time_slot_session = "time" in slots_for_filtering
         has_concrete_time_slot = has_time_slot_current or has_time_slot_session
         is_exact_mode = time_constraint_mode == "exact"
-        
+
         # GUARD: Only remove "time" from missing_slots if:
         # a) A concrete time value exists in effective_collected_slots (e.g., "14:00", "4pm"), OR
         # b) time_constraint.mode == "exact" (exact mode always satisfies)
         # Do NOT remove "time" for fuzzy/bounded signals like "evening", "morning", "afternoon"
         # even if they have bounded time_constraint with start and end.
-        # 
+        #
         # For bounded fuzzy/window modes, a concrete time slot is REQUIRED.
         # Only exact mode can satisfy without a concrete slot.
-        # 
+        #
         # NARROW GUARD: For fuzzy/window modes, require concrete time slot (do not rely on bounded constraint alone)
         if time_constraint_mode in ("fuzzy", "window"):
             # Fuzzy/window modes: require concrete time slot (bounded constraint alone is NOT sufficient)
@@ -1077,7 +1087,7 @@ def process_luma_response(
         else:
             # Exact mode or unknown mode: allow removal if concrete slot exists OR exact mode
             can_remove_time = has_concrete_time_slot or is_exact_mode
-        
+
         # Bounded time_constraint (with both start and end) satisfies time requirement ONLY if:
         # - A concrete time slot exists, OR
         # - Mode is exact
@@ -1200,7 +1210,7 @@ def process_luma_response(
     # MUST NOT be overridden or filtered after this point
     luma_response_for_plan = luma_response.copy()
     luma_response_for_plan["missing_slots"] = missing_slots
-    
+
     # INVESTIGATION: Log missing_slots before passing to build_decision_plan
     logger.error(
         f"[MISSING_SLOTS_TRACE] process_luma_response: BEFORE build_decision_plan, "
@@ -1218,7 +1228,8 @@ def process_luma_response(
 
     # PHASE 1 INSTRUMENTATION: Log intent state BEFORE build_decision_plan
     decision_intent = intent_name
-    facts_intent = luma_response.get("facts", {}).get("intent_name", "") if isinstance(luma_response.get("facts"), dict) else ""
+    facts_intent = luma_response.get("facts", {}).get(
+        "intent_name", "") if isinstance(luma_response.get("facts"), dict) else ""
     logger.error(
         "[INTENT_TRACE_PLANNING_ENTRY] BEFORE build_decision_plan: "
         f"decision.intent_name={decision_intent}, "
@@ -1252,16 +1263,16 @@ def process_luma_response(
         compute_availability_fingerprint,
         slots_match_availability_fingerprint
     )
-    
+
     # Get stored fingerprint from session (set when SEARCH_AVAILABILITY executed successfully)
     stored_fingerprint = None
     if session_state:
         stored_fingerprint = session_state.get("availability_fingerprint")
-    
+
     # Compute current fingerprint from effective_collected_slots
     # Use effective_collected_slots as it represents the authoritative slot state
     current_slots = effective_collected_slots
-    
+
     # Compare fingerprints to determine if availability is resolved
     # Fingerprint scope is conditional on time presence:
     # - Without time: {organization_id, service_id, date}
@@ -1270,9 +1281,10 @@ def process_luma_response(
     availability_resolved = slots_match_availability_fingerprint(
         current_slots, stored_fingerprint, intent_name=intent_name
     )
-    
+
     # Log fingerprint comparison for debugging
-    current_fingerprint = compute_availability_fingerprint(current_slots, intent_name=intent_name)
+    current_fingerprint = compute_availability_fingerprint(
+        current_slots, intent_name=intent_name)
     logger.debug(
         f"[AVAILABILITY_FINGERPRINT] intent={intent_name}, "
         f"current_fingerprint={current_fingerprint}, "
@@ -1286,17 +1298,19 @@ def process_luma_response(
     # Build decision plan with recomputed missing_slots (ONLY source of truth)
     from core.planning.orchestration.plan_builder import build_decision_plan
     plan = build_decision_plan(
-        intent_name, 
-        luma_response_for_plan, 
-        domain, 
+        intent_name,
+        luma_response_for_plan,
+        domain,
         availability_resolved=availability_resolved,
         session_state=session_state
     )
-    
+
     # DEBUG LOG: Planning decision point (after planner, before any override)
     # Track fingerprint-based availability resolution for debugging
-    stored_fp = session_state.get("availability_fingerprint") if session_state else None
-    last_exec_result = session_state.get("last_execution_result") if session_state else None
+    stored_fp = session_state.get(
+        "availability_fingerprint") if session_state else None
+    last_exec_result = session_state.get(
+        "last_execution_result") if session_state else None
     logger.error(
         f"[PLANNING_DECISION] AFTER planner build_decision_plan: "
         f"intent={intent_name}, "
@@ -1311,7 +1325,7 @@ def process_luma_response(
         f"last_execution_result={last_exec_result}, "
         f"current_slots service_id={current_slots.get('service_id')}, date={current_slots.get('date')}, time={current_slots.get('time')}, org_id={current_slots.get('organization_id')}"
     )
-    
+
     # INVESTIGATION: Log missing_slots after build_decision_plan
     logger.error(
         f"[MISSING_SLOTS_TRACE] process_luma_response: AFTER build_decision_plan, "
@@ -1367,7 +1381,13 @@ def process_luma_response(
                         )
 
         # FACT-ONLY: Use context extracted above (from facts.facts or top level)
+        # Preserve existing facts (capability reconciliation)
+        existing_facts = luma_response.get("facts", {})
+        if not isinstance(existing_facts, dict):
+            existing_facts = {}
         facts = {
+            # Preserve all existing facts (e.g., payment_satisfied)
+            **existing_facts,
             # Use normalized slots (includes derived time for compatibility)
             "slots": clarification_slots,
             "missing_slots": facts_missing_slots,
@@ -1449,7 +1469,13 @@ def process_luma_response(
                         )
 
         # Extract facts container
+        # Preserve existing facts (capability reconciliation)
+        existing_facts = luma_response.get("facts", {})
+        if not isinstance(existing_facts, dict):
+            existing_facts = {}
         facts = {
+            # Preserve all existing facts (e.g., payment_satisfied)
+            **existing_facts,
             "slots": no_action_slots,
             "missing_slots": missing_slots,
             "context": luma_response.get("context", {})
@@ -1510,11 +1536,22 @@ def process_luma_response(
     else:
         effective_context = luma_response.get("context", {})
 
+    # CAPABILITY RECONCILIATION: Preserve non-LUMA facts when building decision.facts
+    # Start from existing effective_response.facts (which already includes merged session and capability facts)
+    # Overlay LUMA-derived fields (slots, missing_slots, context)
+    # Do NOT discard existing facts such as payment_satisfied or payment_reference
+    # This ensures capability completion markers survive LUMA processing
+    existing_facts = luma_response.get("facts", {})
+    if not isinstance(existing_facts, dict):
+        existing_facts = {}
+
     facts = {
-        "slots": slots,
+        # Preserve all existing facts (e.g., payment_satisfied, payment_reference, org)
+        **existing_facts,
+        "slots": slots,  # Overlay with computed slots
         # Use recomputed missing_slots (ONLY source of truth)
-        "missing_slots": missing_slots,
-        "context": effective_context
+        "missing_slots": missing_slots,  # Overlay with computed missing_slots
+        "context": effective_context  # Overlay with computed context
     }
 
     # DIAGNOSTIC: Log facts structure before returning
@@ -1526,13 +1563,14 @@ def process_luma_response(
     if isinstance(slots, dict) and "service_id" in slots:
         logger.error("[FLOW_TRACE]   facts.slots.service_id: %s",
                      slots.get("service_id"))
-    
+
     # DATE_NORMALIZATION_TRACE: Log date value in facts.slots
     if isinstance(slots, dict) and "date" in slots:
         date_value = slots.get("date")
         plan_stage = plan.get("stage") if isinstance(plan, dict) else None
         plan_action = plan.get("action") if isinstance(plan, dict) else None
-        is_iso_date = isinstance(date_value, str) and bool(re.match(r'^\d{4}-\d{2}-\d{2}$', date_value))
+        is_iso_date = isinstance(date_value, str) and bool(
+            re.match(r'^\d{4}-\d{2}-\d{2}$', date_value))
         logger.info(
             "[DATE_NORMALIZATION_TRACE] process_luma_response: date in facts.slots",
             extra={

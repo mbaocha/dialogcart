@@ -265,7 +265,25 @@ def merge_luma_with_session(
             f"luma_intent={luma_intent_name}"
         )
 
-    # STEP 2: Extract slots from Luma response
+    # STEP 2: Merge session facts with Luma facts (new facts override old)
+    # Facts are a first-class, durable part of session state (same status as slots)
+    # This ensures capability facts (e.g., payment_satisfied) persist across turns
+    session_facts = session_state.get("facts", {}) if session_state else {}
+    if not isinstance(session_facts, dict):
+        session_facts = {}
+    
+    luma_facts = merged.get("facts", {})
+    if not isinstance(luma_facts, dict):
+        luma_facts = {}
+    
+    # Merge: new facts from Luma override old facts from session
+    # This allows capabilities to update facts (e.g., payment_satisfied: True)
+    merged_facts = {**session_facts, **luma_facts}
+    
+    # Update merged response with merged facts
+    merged["facts"] = merged_facts
+    
+    # STEP 3: Extract slots from Luma response
     # FACT-ONLY: Promote facts to slots BEFORE merging with session
     # This ensures facts.service_id, facts.times, etc. are available for planning
     from core.orchestration.luma_facts_adapter import facts_to_slots
@@ -2090,10 +2108,26 @@ def build_session_state_from_outcome(
             f"[ERROR] build_session_state_from_outcome: outcome has no intent_name or intent: {outcome}")
         return None
 
-    # Extract facts (contains slots and missing_slots)
-    facts = outcome.get("facts", {})
-    if not isinstance(facts, dict):
-        facts = {}
+    # Extract facts (contains slots, missing_slots, and capability facts like payment_satisfied)
+    # Facts are a first-class, durable part of session state (same status as slots)
+    outcome_facts = outcome.get("facts", {})
+    if not isinstance(outcome_facts, dict):
+        outcome_facts = {}
+    
+    # Merge with previous session facts (new facts override old keys)
+    # This ensures capability facts (e.g., payment_satisfied) persist across turns
+    previous_facts = {}
+    if previous_session_state and isinstance(previous_session_state, dict):
+        previous_facts = previous_session_state.get("facts", {})
+        if not isinstance(previous_facts, dict):
+            previous_facts = {}
+    
+    # Merge: new facts from outcome override old facts from session
+    # This allows capabilities to update facts (e.g., payment_satisfied: True)
+    merged_facts = {**previous_facts, **outcome_facts}
+    
+    # Extract facts for backward compatibility (used for slots extraction below)
+    facts = merged_facts
 
     # ARCHITECTURAL INVARIANT: Persist ALL collected slots, not only effective or required ones
     # session.slots is the single source of truth for collected slots
@@ -2338,7 +2372,7 @@ def build_session_state_from_outcome(
 
     # Determine status
     status = "NEEDS_CLARIFICATION" if outcome_status in (
-        "NEEDS_CLARIFICATION", "AWAITING_CONFIRMATION") else "READY"
+        "NEEDS_CLARIFICATION", "AWAITING_CONFIRMATION", "AWAITING_CAPABILITY") else "READY"
 
     # Build session state WITH missing_slots (for conversation continuity)
     # missing_slots are recomputed from effective_collected_slots (post-promotion) and persisted
@@ -2429,6 +2463,36 @@ def build_session_state_from_outcome(
                 final_intent_name
             )
 
+    # Extract active_capability from previous session only (optional passthrough)
+    # Core must never read from its own output (outcome)
+    active_capability = None
+    if previous_session_state:
+        active_capability = previous_session_state.get("active_capability")
+
+    # CRITICAL: Ensure facts are JSON-serializable before persistence
+    # Facts must be a dict with JSON-serializable values (no objects, no functions)
+    # Filter out any non-serializable values to prevent session save failures
+    serializable_facts = {}
+    if merged_facts:
+        try:
+            # Test JSON serialization
+            json.dumps(merged_facts, default=str)
+            serializable_facts = merged_facts
+        except (TypeError, ValueError) as e:
+            logger.warning(
+                f"[FACTS_PERSISTENCE] Facts contain non-serializable values, filtering: {e}. "
+                f"Original facts keys: {list(merged_facts.keys())}"
+            )
+            # Filter to only JSON-serializable values
+            for key, value in merged_facts.items():
+                try:
+                    json.dumps(value, default=str)
+                    serializable_facts[key] = value
+                except (TypeError, ValueError):
+                    logger.warning(
+                        f"[FACTS_PERSISTENCE] Skipping non-serializable fact key: {key}"
+                    )
+    
     # DURABLE INTENTS RULE: Gate slot persistence by durable intent
     # Only durable intents may be persisted in session
     if final_intent_name and is_durable_intent(final_intent_name):
@@ -2438,23 +2502,28 @@ def build_session_state_from_outcome(
             "intent_name": final_intent_name,
             "missing_slots": missing_slots_to_persist,
             "slots": filtered_slots,  # Only durable slots for this intent
-            "status": status
+            "facts": serializable_facts,  # First-class, durable facts (same status as slots)
+            "status": status,
+            "active_capability": active_capability  # optional passthrough
         }
         logger.debug(
             f"[build_session_state_from_outcome] Persisting durable intent={final_intent_name} "
-            f"with {len(filtered_slots)} filtered slots"
+            f"with {len(filtered_slots)} filtered slots and {len(serializable_facts)} facts"
         )
     else:
         # Ephemeral intent: do NOT persist intent or slots
+        # But still persist facts (capability facts may be set even for ephemeral intents)
         session_state = {
             "intent_name": None,  # Explicitly None for ephemeral
             "missing_slots": [],
             "slots": {},  # No slot persistence for ephemeral intents
-            "status": status
+            "facts": serializable_facts,  # Facts persist even for ephemeral intents
+            "status": status,
+            "active_capability": active_capability  # optional passthrough
         }
         logger.debug(
             f"[build_session_state_from_outcome] Ephemeral intent={final_intent_name} - "
-            f"NOT persisting intent or slots"
+            f"NOT persisting intent or slots, but persisting {len(serializable_facts)} facts"
         )
 
     # SESSION_SAVE_DEBUG: Guard logging before session save

@@ -48,3 +48,4 @@ def mock_cancel_booking(
         "cancellation_type": cancellation_type
     }
 
+

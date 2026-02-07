@@ -36,7 +36,7 @@ This document tracks the incremental migration of planning logic from `plan_buil
 ### 3. CREATE_RESERVATION Migration ✅ COMPLETE
 - **Status**: ✅ **MIGRATION COMPLETE** - Parity tests pass, code deleted
 - **Deleted**: CREATE_RESERVATION entry from CONFIRM_ACTION_MAP (policy is now sole source of truth)
-- **YAML Configuration**: ✅ Already has `requires: [availability_resolved]` for CONFIRM_RESERVATION
+- **YAML Configuration**: ✅ Already has `requires: [availability_resolved]` for FINALIZE_RESERVATION
 - **Tests**: ✅ Parity tests pass with `enabled_intents="CREATE_RESERVATION"`
 - **Result**: Policy-based selection now handles CREATE_RESERVATION correctly via YAML
 

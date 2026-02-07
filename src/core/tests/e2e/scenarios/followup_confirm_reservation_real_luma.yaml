@@ -14,7 +14,7 @@ scenarios:
       - sentence: "yes"
         expect:
           status: READY
-          action: CONFIRM_RESERVATION
+          action: FINALIZE_RESERVATION
           intent_preserved: true
 
   - name: confirm_reservation_service_to_date_range
@@ -38,7 +38,7 @@ scenarios:
       - sentence: "yes"
         expect:
           status: READY
-          action: CONFIRM_RESERVATION
+          action: FINALIZE_RESERVATION
           intent_preserved: true
 
   - name: confirm_reservation_partial_date_range
@@ -69,7 +69,7 @@ scenarios:
       - sentence: "yes"
         expect:
           status: READY
-          action: CONFIRM_RESERVATION
+          action: FINALIZE_RESERVATION
           intent_preserved: true
 
   - name: confirm_reservation_different_room_types
@@ -93,7 +93,7 @@ scenarios:
       - sentence: "yes"
         expect:
           status: READY
-          action: CONFIRM_RESERVATION
+          action: FINALIZE_RESERVATION
           intent_preserved: true
 
   - name: confirm_reservation_multiple_corrections
@@ -117,7 +117,7 @@ scenarios:
       - sentence: "yes"
         expect:
           status: READY
-          action: CONFIRM_RESERVATION
+          action: FINALIZE_RESERVATION
           intent_preserved: true
 
   - name: confirm_reservation_all_slots_one_turn
@@ -135,6 +135,6 @@ scenarios:
       - sentence: "yes"
         expect:
           status: READY
-          action: CONFIRM_RESERVATION
+          action: FINALIZE_RESERVATION
           intent_preserved: true
 

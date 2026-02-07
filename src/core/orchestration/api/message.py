@@ -23,8 +23,27 @@ from core.orchestration.errors import ContractViolation, UpstreamError
 from core.orchestration.session import get_session, save_session, clear_session
 from core.orchestration.api.session_merge import build_session_state_from_outcome
 
+# Capability runner (optional - only used when AWAITING_CAPABILITY)
+# This is the SINGLE integration point between core and capabilities.
+# Core never imports adapters or branches on capability names.
+try:
+    from capabilities.runner import CapabilityRunner
+    _capability_runner = CapabilityRunner()
+    _capability_runner_available = True
+except ImportError:
+    # Capabilities module not available - runner will not be used
+    # Removing capabilities restores exact previous behavior (no crashes, no side effects)
+    _capability_runner = None
+    _capability_runner_available = False
+
+# Bootstrap flag to ensure adapters are registered exactly once
+_BOOTSTRAPPED = False
+
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+# Bootstrap flag to ensure adapters are registered exactly once
+_BOOTSTRAPPED = False
 
 
 class MessageRequest(BaseModel):
@@ -53,8 +72,14 @@ async def post_message(request: MessageRequest):
     Session handling:
     - Loads session at request start (if status == "NEEDS_CLARIFICATION")
     - Merges session state with Luma response (handled in handle_message)
-    - Saves session if outcome.status == "NEEDS_CLARIFICATION"
-    - Clears session if outcome.status == "READY"
+    - Saves session if outcome.status == "NEEDS_CLARIFICATION" or "AWAITING_CAPABILITY"
+    - Preserves session if outcome.status == "READY"
+    
+    Capability handling:
+    - If core emits AWAITING_CAPABILITY, routes to capability runner
+    - Runner manages adapter lifecycle and returns facts when complete
+    - Facts are merged into outcome.facts and saved to session
+    - On next turn, core reads facts from session and proceeds
     
     Args:
         request: Message request with user_id, text, domain, timezone
@@ -62,6 +87,21 @@ async def post_message(request: MessageRequest):
     Returns:
         Message response with success status and outcome or error
     """
+    # Bootstrap capability adapters (once per process)
+    global _BOOTSTRAPPED
+    if not _BOOTSTRAPPED and _capability_runner_available:
+        try:
+            from capabilities.bootstrap import register_default_adapters
+            register_default_adapters(organization_id=request.organization_id)
+            _BOOTSTRAPPED = True
+        except ImportError:
+            # Bootstrap module not available - adapters will not be registered
+            # This is fine - runner will passthrough if adapter not found
+            logger.debug("Capability bootstrap module not available - adapters not registered")
+        except Exception as e:
+            # Bootstrap failed - log but don't crash
+            logger.warning(f"Failed to bootstrap capability adapters: {e}. Continuing without capabilities.")
+    
     try:
         # Generate transaction_id if not provided (per-request tracing only)
         transaction_id = request.transaction_id or str(uuid.uuid4())
@@ -78,8 +118,9 @@ async def post_message(request: MessageRequest):
             "intent": session_state.get("intent") if session_state else None
         })
         
-        # Only consider session if status == "NEEDS_CLARIFICATION"
-        if session_state and session_state.get("status") != "NEEDS_CLARIFICATION":
+        # Only consider session if status == "NEEDS_CLARIFICATION" or "AWAITING_CAPABILITY"
+        # AWAITING_CAPABILITY sessions need to be loaded to preserve active_capability
+        if session_state and session_state.get("status") not in ("NEEDS_CLARIFICATION", "AWAITING_CAPABILITY"):
             session_state = None
         
         # Note: missing_slots are NOT persisted in session anymore
@@ -97,12 +138,77 @@ async def post_message(request: MessageRequest):
             transaction_id=transaction_id
         )
         
-        # Handle session persistence after response
+        # Handle capability activation (if core emits AWAITING_CAPABILITY)
         outcome = result.get("outcome")
+        if outcome and isinstance(outcome, dict) and outcome.get("status") == "AWAITING_CAPABILITY":
+            if _capability_runner_available and _capability_runner:
+                # Build context for adapter (read-only access to session)
+                context = {
+                    "user_id": request.user_id,
+                    "session_slots": session_state.get("slots", {}) if session_state else {},
+                    "session_facts": outcome.get("facts", {}),
+                    "domain": request.domain,
+                    "timezone": request.timezone,
+                    "organization_id": request.organization_id,
+                    "transaction_id": transaction_id
+                }
+                
+                # Route to capability runner
+                runner_result = _capability_runner.handle(
+                    user_input=request.text,
+                    core_outcome=outcome,
+                    context=context
+                )
+                
+                if not runner_result.passthrough:
+                    # Adapter is active → return adapter prompt
+                    # Do not proceed to session persistence or core execution
+                    return MessageResponse(
+                        success=True,
+                        outcome={
+                            "status": "AWAITING_CAPABILITY",
+                            "text": runner_result.text,
+                            "active_capability": runner_result.active_capability,
+                            "awaiting": "CAPABILITY"
+                        }
+                    )
+                
+                # Adapter completed → merge facts into session
+                if runner_result.facts:
+                    # Merge adapter facts into outcome.facts
+                    if "facts" not in outcome:
+                        outcome["facts"] = {}
+                    if not isinstance(outcome["facts"], dict):
+                        outcome["facts"] = {}
+                    
+                    # Merge adapter facts (e.g., payment_satisfied: True)
+                    outcome["facts"].update(runner_result.facts)
+                    
+                    # Clear active_capability (adapter completed)
+                    outcome["active_capability"] = None
+                    
+                    # Update status to allow core to proceed on next turn
+                    # Status will be re-evaluated by core with merged facts
+                    outcome["status"] = "READY"
+                    outcome["awaiting"] = None
+                    
+                    # Update result with merged outcome
+                    result["outcome"] = outcome
+                    
+                    logger.info(
+                        f"[capability] Adapter completed, merged facts: {list(runner_result.facts.keys())} "
+                        f"user_id={request.user_id} transaction_id={transaction_id}"
+                    )
+                    
+                    # Re-enter core normally on next turn
+                    # Facts are merged into outcome.facts, which will be available
+                    # when core runs again (via session merge or direct outcome)
+        
+        # Handle session persistence after response
         if outcome and isinstance(outcome, dict):
             outcome_status = outcome.get("status")
             
-            if outcome_status == "NEEDS_CLARIFICATION":
+            if outcome_status in ("NEEDS_CLARIFICATION", "AWAITING_CAPABILITY"):
                 # Save session state for follow-up
                 # Extract merged Luma response from result (private field)
                 merged_luma_response = result.get("_merged_luma_response")

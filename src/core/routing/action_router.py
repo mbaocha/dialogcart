@@ -35,7 +35,7 @@ from typing import Dict, Optional, List
 ACTION_HANDLERS: Dict[str, str] = {
     # Commit actions
     "CONFIRM_APPOINTMENT": "booking.create",
-    "CONFIRM_RESERVATION": "booking.create",
+    "FINALIZE_RESERVATION": "booking.create",
 
     # Fallback actions (non-destructive)
     # Placeholder - may need dedicated handler

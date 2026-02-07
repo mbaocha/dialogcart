@@ -76,13 +76,21 @@ intents:
           - availability
         client: availability_client
 
-      CONFIRM_RESERVATION:
+      CREATE_BOOKING_HOLD:
         mode: committing
         required_slots:
           - service_id
           - date_range
         requires:
           - availability_resolved
+        client: booking_client
+      FINALIZE_RESERVATION:
+        mode: exploratory
+        required_slots:
+          - booking_id
+          - booking_code
+        requires:
+          - booking_hold_created
         client: booking_client
 
   MODIFY_BOOKING:

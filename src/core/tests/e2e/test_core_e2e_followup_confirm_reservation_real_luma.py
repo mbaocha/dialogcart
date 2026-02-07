@@ -8,7 +8,7 @@ This test validates:
 - Real NLU behavior with actual Luma API
 - Session state persistence across turns
 - Slot carry-over from previous turns
-- Reservation execution (CONFIRM_RESERVATION) after all slots are supplied
+- Reservation execution (FINALIZE_RESERVATION) after all slots are supplied
 - Booking client integration
 - Session clearing after confirmation
 
@@ -23,7 +23,7 @@ Requirements:
   - Luma service must be running (defaults to http://localhost:9001, or set LUMA_BASE_URL)
 
 Note:
-  This test is expected to FAIL initially because CONFIRM_RESERVATION is not yet
+  This test is expected to FAIL initially because FINALIZE_RESERVATION is not yet
   implemented in the execution dispatcher. The failure will define the exact contract
   needed for implementation.
 """
@@ -366,9 +366,9 @@ def test_real_luma_followup_confirm_reservation_scenario(scenario: Dict[str, Any
             if current_intent and current_intent != "":
                 previous_intent = current_intent
 
-        # Check if this turn expects CONFIRM_RESERVATION action
+        # Check if this turn expects FINALIZE_RESERVATION action
         expected_action = expectations.get("action")
-        if expected_action == "CONFIRM_RESERVATION":
+        if expected_action == "FINALIZE_RESERVATION":
             # Assert booking_client.create_booking was called exactly once
             assert mock_booking_client.create_booking.called, \
                 f"[{scenario_name}] Turn {turn_idx}: Expected booking_client.create_booking to be called, but it was not"
@@ -397,7 +397,7 @@ def test_real_luma_followup_confirm_reservation_scenario(scenario: Dict[str, Any
             # Check if session was cleared (not saved for next turn)
             if turn_idx < len(turns):  # Not the last turn
                 # If there's a next turn, session should be cleared (not persisted)
-                # For CONFIRM_RESERVATION, session should be cleared after successful confirmation
+                # For FINALIZE_RESERVATION, session should be cleared after successful confirmation
                 next_session = session_store.get_session(user_id)
                 # Note: This assertion may need adjustment based on actual session clearing behavior
                 # For now, we check that session is either None or marked as resolved

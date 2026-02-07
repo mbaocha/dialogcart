@@ -1,0 +1,14 @@
+MISSING_TIME:
+  template: "What time would you like the {{service}} appointment?"
+  required_fields:
+    - service
+
+MISSING_DATE:
+  template: "What day should I book the {{service}} for?"
+  required_fields:
+    - service
+
+NEEDS_CLARIFICATION:
+  template: "I need a bit more information to help you."
+  required_fields: []
+

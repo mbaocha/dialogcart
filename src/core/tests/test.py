@@ -34,7 +34,7 @@ def setup_path():
     # __file__ = src/core/tests/test.py
     # parent.parent.parent.parent = dialogcart/ or src/
     base_path = Path(__file__).parent.parent.parent.parent
-    
+
     # If we're in dialogcart/, src/ is a subdirectory
     # If we're in src/, src/ is the current directory
     if (base_path / "src").exists():
@@ -44,7 +44,7 @@ def setup_path():
     else:
         # Fallback: assume src/ is at base_path
         src_path = base_path
-    
+
     if str(src_path) not in sys.path:
         sys.path.insert(0, str(src_path))
 
@@ -60,6 +60,7 @@ TEST_CATEGORIES = {
     "session": "core/tests/session",
     "workflows": "core/tests/workflows",
     "intents": "core/tests/intents",
+    "rendering": "core/tests/rendering",
 }
 
 
@@ -85,7 +86,7 @@ def run_tests(category: str = "all", pytest_args: list = None) -> int:
     # __file__ = src/core/tests/test.py
     # parent.parent.parent.parent = dialogcart/ or src/
     base_path = Path(__file__).parent.parent.parent.parent
-    
+
     # Find src/ directory (where pytest.ini is located)
     if (base_path / "src").exists():
         # We're in dialogcart/, src/ is a subdirectory
@@ -96,7 +97,7 @@ def run_tests(category: str = "all", pytest_args: list = None) -> int:
     else:
         # Fallback: assume base_path is src/
         src_dir = base_path
-    
+
     # Build pytest command (paths relative to src/)
     cmd = ["python", "-m", "pytest", test_path]
 
@@ -118,7 +119,8 @@ def run_tests(category: str = "all", pytest_args: list = None) -> int:
     if category == "e2e" and "test_core_e2e_followup_availability_real_luma.py" in str(test_path):
         if not os.getenv("RUN_REAL_LUMA_E2E"):
             print("⚠️  WARNING: E2E tests with real Luma require RUN_REAL_LUMA_E2E=true")
-            print("   Some tests may be skipped. Set environment variable to run all E2E tests.")
+            print(
+                "   Some tests may be skipped. Set environment variable to run all E2E tests.")
             print()
 
     # Run pytest from src/ directory (where pytest.ini is located)
@@ -154,6 +156,9 @@ Examples:
 
   # Run E2E tests with real Luma
   RUN_REAL_LUMA_E2E=true python core/tests/test.py --category e2e
+
+  # Run rendering tests
+  python core/tests/test.py --category rendering
         """,
     )
 
@@ -191,4 +196,3 @@ Examples:
 
 if __name__ == "__main__":
     sys.exit(main())
-
