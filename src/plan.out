@@ -1,0 +1,5980 @@
+Running planning tests (29 scenarios)...
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'haircut'}
+  effective_collected_slots (after filter)={'service_id': 'haircut'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut"}, "effective_collected_slots": {"service_id": "haircut"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date', 'time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date', 'time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date', 'time']
+
+[SESSION AFTER TURN 1] user_id=test_session_001_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_001_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id'] = {'service_id': 'haircut'}
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+  effective_slots_for_filtering.keys()=['service_id', 'date']
+  promoted_slots={'service_id': 'haircut', 'date': 'tomorrow'}
+  effective_collected_slots (after filter)={'service_id': 'haircut', 'date': 'tomorrow'}
+  effective_collected_slots.keys()=['service_id', 'date']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow"
+    }
+  },
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [
+      "date"
+    ],
+    "values": {
+      "date": "tomorrow"
+    }
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date'], status=NEEDS_CLARIFICATION, missing_slots=['time']
+
+[SESSION AFTER TURN 2] user_id=test_session_001_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut",
+    "date": "tomorrow"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 3] user_id=test_session_001_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut",
+    "date": "tomorrow"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id', 'date'] = {'service_id': 'haircut', 'date': 'tomorrow'}
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+  effective_slots_for_filtering.keys()=['service_id', 'date', 'time', 'has_datetime']
+  promoted_slots={'service_id': 'haircut', 'date': 'tomorrow', 'time': '11am', 'has_datetime': True}
+  effective_collected_slots (after filter)={'service_id': 'haircut', 'date': 'tomorrow', 'time': '11am'}
+  effective_collected_slots.keys()=['service_id', 'date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow",
+      "time": "11am",
+      "has_datetime": "True"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow",
+      "time": "11am",
+      "has_datetime": "True"
+    }
+  },
+  "missing_slots": [],
+  "status": "READY"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=[] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=READY (no missing slots, no clarification needed, no pending confirmation)
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [
+      "time"
+    ],
+    "values": {
+      "time": "11am"
+    }
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow",
+      "time": "11am",
+      "has_datetime": "True"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow",
+      "time": "11am",
+      "has_datetime": "True"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow",
+      "time": "11am",
+      "has_datetime": "True"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [],
+  "status": "READY",
+  "decision_reason": "READY_ALL_SATISFIED"
+}
+
+[OUTCOME STATUS] Turn 3 outcome_status=READY outcome_keys=['intent_name', 'stage', 'action', 'slots', 'missing_slots', 'status', 'time_constraint']
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date', 'time', 'has_datetime']
+[SESSION_CLEAR_DEBUG] intent_name=CREATE_APPOINTMENT, outcome_status=READY, is_durable=True, action=PRESERVED
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date', 'time', 'has_datetime'], status=READY, missing_slots=[]
+
+[SESSION AFTER TURN 3] user_id=test_session_001_e99efb7d - SAVED (status=READY, preserved for modifications)
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [],
+  "slots": {
+    "service_id": "haircut",
+    "date": "tomorrow",
+    "time": "11am",
+    "has_datetime": true
+  },
+  "status": "READY"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "massage"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'massage'}
+  effective_collected_slots (after filter)={'service_id': 'massage'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "massage"}, "effective_collected_slots": {"service_id": "massage"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "massage"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "massage"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "massage"
+    }
+  },
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date', 'time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "massage"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "massage"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "massage"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date', 'time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date', 'time']
+
+[SESSION AFTER TURN 1] user_id=test_session_002_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "massage"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_002_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "massage"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id'] = {'service_id': 'massage'}
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+  effective_slots_for_filtering.keys()=['service_id', 'date']
+  promoted_slots={'service_id': 'massage', 'date': 'this friday'}
+  effective_collected_slots (after filter)={'service_id': 'massage', 'date': 'this friday'}
+  effective_collected_slots.keys()=['service_id', 'date']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "massage",
+      "date": "this friday"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "massage",
+      "date": "this friday"
+    }
+  },
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [
+      "date"
+    ],
+    "values": {
+      "date": "this friday"
+    }
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "massage",
+      "date": "this friday"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "massage",
+      "date": "this friday"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "massage",
+      "date": "this friday"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date'], status=NEEDS_CLARIFICATION, missing_slots=['time']
+
+[SESSION AFTER TURN 2] user_id=test_session_002_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "massage",
+    "date": "this friday"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 3] user_id=test_session_002_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "massage",
+    "date": "this friday"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id', 'date'] = {'service_id': 'massage', 'date': 'this friday'}
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+  effective_slots_for_filtering.keys()=['service_id', 'date', 'time', 'has_datetime']
+  promoted_slots={'service_id': 'massage', 'date': 'this friday', 'time': '3pm', 'has_datetime': True}
+  effective_collected_slots (after filter)={'service_id': 'massage', 'date': 'this friday', 'time': '3pm'}
+  effective_collected_slots.keys()=['service_id', 'date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "massage",
+      "date": "this friday",
+      "time": "3pm",
+      "has_datetime": "True"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "massage",
+      "date": "this friday",
+      "time": "3pm",
+      "has_datetime": "True"
+    }
+  },
+  "missing_slots": [],
+  "status": "READY"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=[] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=READY (no missing slots, no clarification needed, no pending confirmation)
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [
+      "time"
+    ],
+    "values": {
+      "time": "3pm"
+    }
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "massage",
+      "date": "this friday",
+      "time": "3pm",
+      "has_datetime": "True"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "massage",
+      "date": "this friday",
+      "time": "3pm",
+      "has_datetime": "True"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "massage",
+      "date": "this friday",
+      "time": "3pm",
+      "has_datetime": "True"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [],
+  "status": "READY",
+  "decision_reason": "READY_ALL_SATISFIED"
+}
+
+[OUTCOME STATUS] Turn 3 outcome_status=READY outcome_keys=['intent_name', 'stage', 'action', 'slots', 'missing_slots', 'status', 'time_constraint']
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date', 'time', 'has_datetime']
+[SESSION_CLEAR_DEBUG] intent_name=CREATE_APPOINTMENT, outcome_status=READY, is_durable=True, action=PRESERVED
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date', 'time', 'has_datetime'], status=READY, missing_slots=[]
+
+[SESSION AFTER TURN 3] user_id=test_session_002_e99efb7d - SAVED (status=READY, preserved for modifications)
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [],
+  "slots": {
+    "service_id": "massage",
+    "date": "this friday",
+    "time": "3pm",
+    "has_datetime": true
+  },
+  "status": "READY"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "facial"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'facial'}
+  effective_collected_slots (after filter)={'service_id': 'facial'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "facial"}, "effective_collected_slots": {"service_id": "facial"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "facial"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date', 'time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date', 'time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date', 'time']
+
+[SESSION AFTER TURN 1] user_id=test_session_003_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "facial"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_003_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "facial"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id'] = {'service_id': 'facial'}
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+  effective_slots_for_filtering.keys()=['service_id', 'date']
+  promoted_slots={'service_id': 'facial', 'date': 'next monday'}
+  effective_collected_slots (after filter)={'service_id': 'facial', 'date': 'next monday'}
+  effective_collected_slots.keys()=['service_id', 'date']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date": "next monday"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date": "next monday"
+    }
+  },
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [
+      "date"
+    ],
+    "values": {
+      "date": "next monday"
+    }
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date": "next monday"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date": "next monday"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date": "next monday"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date'], status=NEEDS_CLARIFICATION, missing_slots=['time']
+
+[SESSION AFTER TURN 2] user_id=test_session_003_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "facial",
+    "date": "next monday"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 3] user_id=test_session_003_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "facial",
+    "date": "next monday"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id', 'date'] = {'service_id': 'facial', 'date': 'next monday'}
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+  effective_slots_for_filtering.keys()=['service_id', 'date', 'time', 'has_datetime']
+  promoted_slots={'service_id': 'facial', 'date': 'next monday', 'time': '10am', 'has_datetime': True}
+  effective_collected_slots (after filter)={'service_id': 'facial', 'date': 'next monday', 'time': '10am'}
+  effective_collected_slots.keys()=['service_id', 'date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date": "next monday",
+      "time": "10am",
+      "has_datetime": "True"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date": "next monday",
+      "time": "10am",
+      "has_datetime": "True"
+    }
+  },
+  "missing_slots": [],
+  "status": "READY"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=[] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=READY (no missing slots, no clarification needed, no pending confirmation)
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [
+      "time"
+    ],
+    "values": {
+      "time": "10am"
+    }
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date": "next monday",
+      "time": "10am",
+      "has_datetime": "True"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date": "next monday",
+      "time": "10am",
+      "has_datetime": "True"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date": "next monday",
+      "time": "10am",
+      "has_datetime": "True"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [],
+  "status": "READY",
+  "decision_reason": "READY_ALL_SATISFIED"
+}
+
+[OUTCOME STATUS] Turn 3 outcome_status=READY outcome_keys=['intent_name', 'stage', 'action', 'slots', 'missing_slots', 'status', 'time_constraint']
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date', 'time', 'has_datetime']
+[SESSION_CLEAR_DEBUG] intent_name=CREATE_APPOINTMENT, outcome_status=READY, is_durable=True, action=PRESERVED
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date', 'time', 'has_datetime'], status=READY, missing_slots=[]
+
+[SESSION AFTER TURN 3] user_id=test_session_003_e99efb7d - SAVED (status=READY, preserved for modifications)
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [],
+  "slots": {
+    "service_id": "facial",
+    "date": "next monday",
+    "time": "10am",
+    "has_datetime": true
+  },
+  "status": "READY"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "massage"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'massage'}
+  effective_collected_slots (after filter)={'service_id': 'massage'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "massage"}, "effective_collected_slots": {"service_id": "massage"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "massage"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "massage"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "massage"
+    }
+  },
+  "missing_slots": [
+    "date"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "massage"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "massage"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "massage"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'time']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'time'], status=NEEDS_CLARIFICATION, missing_slots=['date']
+
+[SESSION AFTER TURN 1] user_id=test_session_004_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date"
+  ],
+  "slots": {
+    "service_id": "massage",
+    "time": "2pm"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_004_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date"
+  ],
+  "slots": {
+    "service_id": "massage",
+    "time": "2pm"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id', 'time'] = {'service_id': 'massage', 'time': '2pm'}
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+  effective_slots_for_filtering.keys()=['service_id', 'time', 'date', 'has_datetime']
+  promoted_slots={'service_id': 'massage', 'time': '2pm', 'date': 'tomorrow', 'has_datetime': True}
+  effective_collected_slots (after filter)={'service_id': 'massage', 'time': '2pm', 'date': 'tomorrow'}
+  effective_collected_slots.keys()=['service_id', 'time', 'date']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "time",
+      "date",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "massage",
+      "time": "2pm",
+      "date": "tomorrow",
+      "has_datetime": "True"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "time",
+      "date",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "massage",
+      "time": "2pm",
+      "date": "tomorrow",
+      "has_datetime": "True"
+    }
+  },
+  "missing_slots": [],
+  "status": "READY"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=[] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=READY (no missing slots, no clarification needed, no pending confirmation)
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [
+      "date"
+    ],
+    "values": {
+      "date": "tomorrow"
+    }
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "time",
+      "date",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "massage",
+      "time": "2pm",
+      "date": "tomorrow",
+      "has_datetime": "True"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "time",
+      "date",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "massage",
+      "time": "2pm",
+      "date": "tomorrow",
+      "has_datetime": "True"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "time",
+      "date",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "massage",
+      "time": "2pm",
+      "date": "tomorrow",
+      "has_datetime": "True"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [],
+  "status": "READY",
+  "decision_reason": "READY_ALL_SATISFIED"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'time', 'date', 'has_datetime']
+[SESSION_CLEAR_DEBUG] intent_name=CREATE_APPOINTMENT, outcome_status=READY, is_durable=True, action=PRESERVED
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'time', 'date', 'has_datetime'], status=READY, missing_slots=[]
+
+[SESSION AFTER TURN 2] user_id=test_session_004_e99efb7d - SAVED (status=READY, preserved for modifications)
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [],
+  "slots": {
+    "service_id": "massage",
+    "time": "2pm",
+    "date": "tomorrow",
+    "has_datetime": true
+  },
+  "status": "READY"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'haircut'}
+  effective_collected_slots (after filter)={'service_id': 'haircut'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut"}, "effective_collected_slots": {"service_id": "haircut"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "missing_slots": [
+    "date"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'time']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'time'], status=NEEDS_CLARIFICATION, missing_slots=['date']
+
+[SESSION AFTER TURN 1] user_id=test_session_005_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date"
+  ],
+  "slots": {
+    "service_id": "haircut",
+    "time": "10am"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_005_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date"
+  ],
+  "slots": {
+    "service_id": "haircut",
+    "time": "10am"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id', 'time'] = {'service_id': 'haircut', 'time': '10am'}
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+  effective_slots_for_filtering.keys()=['service_id', 'time', 'date', 'has_datetime']
+  promoted_slots={'service_id': 'haircut', 'time': '10am', 'date': '2026-01-16', 'has_datetime': True}
+  effective_collected_slots (after filter)={'service_id': 'haircut', 'time': '10am', 'date': '2026-01-16'}
+  effective_collected_slots.keys()=['service_id', 'time', 'date']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "time",
+      "date",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "time": "10am",
+      "date": "2026-01-16",
+      "has_datetime": "True"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "time",
+      "date",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "time": "10am",
+      "date": "2026-01-16",
+      "has_datetime": "True"
+    }
+  },
+  "missing_slots": [],
+  "status": "READY"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=[] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=READY (no missing slots, no clarification needed, no pending confirmation)
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [
+      "date"
+    ],
+    "values": {
+      "date": "2026-01-16"
+    }
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "time",
+      "date",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "time": "10am",
+      "date": "2026-01-16",
+      "has_datetime": "True"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "time",
+      "date",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "time": "10am",
+      "date": "2026-01-16",
+      "has_datetime": "True"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "time",
+      "date",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "time": "10am",
+      "date": "2026-01-16",
+      "has_datetime": "True"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [],
+  "status": "READY",
+  "decision_reason": "READY_ALL_SATISFIED"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'time', 'date', 'has_datetime']
+[SESSION_CLEAR_DEBUG] intent_name=CREATE_APPOINTMENT, outcome_status=READY, is_durable=True, action=PRESERVED
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'time', 'date', 'has_datetime'], status=READY, missing_slots=[]
+
+[SESSION AFTER TURN 2] user_id=test_session_005_e99efb7d - SAVED (status=READY, preserved for modifications)
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [],
+  "slots": {
+    "service_id": "haircut",
+    "time": "10am",
+    "date": "2026-01-16",
+    "has_datetime": true
+  },
+  "status": "READY"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "facial"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'facial'}
+  effective_collected_slots (after filter)={'service_id': 'facial'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "facial"}, "effective_collected_slots": {"service_id": "facial"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "facial"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date', 'time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date', 'time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date', 'time']
+
+[SESSION AFTER TURN 1] user_id=test_session_006_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "facial"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_006_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "facial"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id'] = {'service_id': 'facial'}
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+  effective_slots_for_filtering.keys()=['service_id', 'date_range', 'date']
+  promoted_slots={'service_id': 'facial', 'date_range': {'start': '2026-01-19', 'end': '2026-01-25'}, 'date': 'next week'}
+  effective_collected_slots (after filter)={'service_id': 'facial', 'date': 'next week'}
+  effective_collected_slots.keys()=['service_id', 'date']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date_range",
+      "date"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date_range": "{'start': '2026-01-19', 'end': '2026-01-25'}",
+      "date": "next week"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date_range",
+      "date"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date_range": "{'start': '2026-01-19', 'end': '2026-01-25'}",
+      "date": "next week"
+    }
+  },
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [
+      "date_range",
+      "date"
+    ],
+    "values": {
+      "date_range": "{'start': '2026-01-19', 'end': '2026-01-25'}",
+      "date": "next week"
+    }
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date_range",
+      "date"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date_range": "{'start': '2026-01-19', 'end': '2026-01-25'}",
+      "date": "next week"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date_range",
+      "date"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date_range": "{'start': '2026-01-19', 'end': '2026-01-25'}",
+      "date": "next week"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date_range",
+      "date"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date_range": "{'start': '2026-01-19', 'end': '2026-01-25'}",
+      "date": "next week"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date_range', 'date']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date_range', 'date'], status=NEEDS_CLARIFICATION, missing_slots=['time']
+
+[SESSION AFTER TURN 2] user_id=test_session_006_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "facial",
+    "date_range": {
+      "start": "2026-01-19",
+      "end": "2026-01-25"
+    },
+    "date": "next week"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 3] user_id=test_session_006_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "facial",
+    "date_range": {
+      "start": "2026-01-19",
+      "end": "2026-01-25"
+    },
+    "date": "next week"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id', 'date_range', 'date'] = {'service_id': 'facial', 'date_range': {'start': '2026-01-19', 'end': '2026-01-25'}, 'date': 'next week'}
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+  effective_slots_for_filtering.keys()=['service_id', 'date_range', 'date', 'time', 'has_datetime']
+  promoted_slots={'service_id': 'facial', 'date_range': {'start': '2026-01-19', 'end': '2026-01-25'}, 'date': 'next week', 'time': 'afternoon', 'has_datetime': True}
+  effective_collected_slots (after filter)={'service_id': 'facial', 'date': 'next week', 'time': 'afternoon'}
+  effective_collected_slots.keys()=['service_id', 'date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date_range",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date_range": "{'start': '2026-01-19', 'end': '2026-01-25'}",
+      "date": "next week",
+      "time": "afternoon",
+      "has_datetime": "True"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date_range",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date_range": "{'start': '2026-01-19', 'end': '2026-01-25'}",
+      "date": "next week",
+      "time": "afternoon",
+      "has_datetime": "True"
+    }
+  },
+  "missing_slots": [
+    "time"
+  ],
+  "status": "READY"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [
+      "time"
+    ],
+    "values": {
+      "time": "afternoon"
+    }
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date_range",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date_range": "{'start': '2026-01-19', 'end': '2026-01-25'}",
+      "date": "next week",
+      "time": "afternoon",
+      "has_datetime": "True"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date_range",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date_range": "{'start': '2026-01-19', 'end': '2026-01-25'}",
+      "date": "next week",
+      "time": "afternoon",
+      "has_datetime": "True"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date_range",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "facial",
+      "date_range": "{'start': '2026-01-19', 'end': '2026-01-25'}",
+      "date": "next week",
+      "time": "afternoon",
+      "has_datetime": "True"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+
+[OUTCOME STATUS] Turn 3 outcome_status=NEEDS_CLARIFICATION outcome_keys=['intent_name', 'stage', 'action', 'slots', 'missing_slots', 'status', 'time_constraint']
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date_range', 'date', 'time', 'has_datetime']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): []
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date_range', 'date', 'time', 'has_datetime'], status=NEEDS_CLARIFICATION, missing_slots=[]
+
+[SESSION AFTER TURN 3] user_id=test_session_006_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [],
+  "slots": {
+    "service_id": "facial",
+    "date_range": {
+      "start": "2026-01-19",
+      "end": "2026-01-25"
+    },
+    "date": "next week",
+    "time": "afternoon",
+    "has_datetime": true
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+======================================================================
+FAIL_SNAPSHOT: scenario=service_to_date_to_time_reverse_order turn=3 user_id=test_session_006_e99efb7d
+======================================================================
+{
+  "expected": {
+    "status": "NEEDS_CLARIFICATION",
+    "plan": {
+      "stage": "AVAILABILITY",
+      "action": "SEARCH_AVAILABILITY"
+    },
+    "missing_slots": [
+      "date"
+    ],
+    "slots": {
+      "service_id": "facial",
+      "time": "afternoon"
+    }
+  },
+  "got": {
+    "intent": "CREATE_APPOINTMENT",
+    "status": "NEEDS_CLARIFICATION",
+    "missing_slots": [
+      "time"
+    ],
+    "slots": {
+      "service_id": "facial",
+      "date_range": {
+        "start": "2026-01-19",
+        "end": "2026-01-25"
+      },
+      "date": "next week",
+      "time": "afternoon",
+      "has_datetime": true
+    }
+  },
+  "session_before": {
+    "intent_name": "CREATE_APPOINTMENT",
+    "missing_slots": [
+      "time"
+    ],
+    "slots": {
+      "service_id": "facial",
+      "date_range": {
+        "start": "2026-01-19",
+        "end": "2026-01-25"
+      },
+      "date": "next week"
+    },
+    "status": "NEEDS_CLARIFICATION"
+  },
+  "session_after": {
+    "intent_name": "CREATE_APPOINTMENT",
+    "missing_slots": [],
+    "slots": {
+      "service_id": "facial",
+      "date_range": {
+        "start": "2026-01-19",
+        "end": "2026-01-25"
+      },
+      "date": "next week",
+      "time": "afternoon",
+      "has_datetime": true
+    },
+    "status": "NEEDS_CLARIFICATION"
+  },
+  "merged_luma_response": null,
+  "final_plan": {
+    "stage": "AVAILABILITY",
+    "action": "SEARCH_AVAILABILITY"
+  },
+  "facts": {
+    "slots": {
+      "service_id": "facial",
+      "date_range": {
+        "start": "2026-01-19",
+        "end": "2026-01-25"
+      },
+      "date": "next week",
+      "time": "afternoon",
+      "has_datetime": true
+    },
+    "missing_slots": [
+      "time"
+    ]
+  }
+}
+======================================================================
+
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "massage", "date": "tomorrow"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id', 'date']
+  effective_slots_for_filtering.keys()=['service_id', 'date']
+  promoted_slots={'service_id': 'massage', 'date': 'tomorrow'}
+  effective_collected_slots (after filter)={'service_id': 'massage', 'date': 'tomorrow'}
+  effective_collected_slots.keys()=['service_id', 'date']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "massage", "date": "tomorrow"}, "effective_collected_slots": {"service_id": "massage", "date": "tomorrow"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "massage", "date": "tomorrow"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=[]
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "massage",
+      "date": "tomorrow"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "massage",
+      "date": "tomorrow"
+    }
+  },
+  "missing_slots": [],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=[] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=READY (no missing slots, no clarification needed, no pending confirmation)
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "massage",
+      "date": "tomorrow"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "massage",
+      "date": "tomorrow"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "massage",
+      "date": "tomorrow"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [],
+  "status": "READY",
+  "decision_reason": "READY_ALL_SATISFIED"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date', 'time', 'has_datetime']
+[SESSION_CLEAR_DEBUG] intent_name=CREATE_APPOINTMENT, outcome_status=READY, is_durable=True, action=PRESERVED
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date', 'time', 'has_datetime'], status=READY, missing_slots=[]
+
+[SESSION AFTER TURN 1] user_id=test_session_007_e99efb7d - SAVED (status=READY, preserved for modifications)
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [],
+  "slots": {
+    "service_id": "massage",
+    "date": "tomorrow",
+    "time": "3pm",
+    "has_datetime": true
+  },
+  "status": "READY"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_RESERVATION", "is_first_turn": true, "raw_luma_slots": {"service_id": "room"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'room'}
+  effective_collected_slots (after filter)={'service_id': 'room'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_RESERVATION", "modification_context": null, "promoted_slots": {"service_id": "room"}, "effective_collected_slots": {"service_id": "room"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_RESERVATION", "slots_used": {"service_id": "room"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_RESERVATION, missing_slots=['date_range']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_RESERVATION",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_RESERVATION missing_slots=['date_range'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date_range']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+TURN_STATE: {
+  "intent": "CREATE_RESERVATION",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date_range"
+  ],
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date_range']
+[BUILD_SESSION] Built session state: intent=CREATE_RESERVATION, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date_range']
+
+[SESSION AFTER TURN 1] user_id=test_session_008_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "room"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_008_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "room"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id'] = {'service_id': 'room'}
+[INFORMATIONAL_TURN] Detected informational turn: luma_intent=CREATE_RESERVATION, session_intent=CREATE_RESERVATION, has_new_slots=False
+[INFORMATIONAL_TURN] Preserved slots: ['service_id']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'dict'>, value={'service_id': 'room'}
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] collected_slots keys=['service_id']
+[REQUIRED_SLOTS_COMPUTE] collected_slots values={'service_id': 'room'}
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+[INFORMATIONAL_TURN] Preserved missing_slots: ['date_range']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_RESERVATION",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_RESERVATION missing_slots=['date_range'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date_range']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+TURN_STATE: {
+  "intent": "CREATE_RESERVATION",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date_range"
+  ],
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date_range']
+[BUILD_SESSION] Built session state: intent=CREATE_RESERVATION, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date_range']
+
+[SESSION AFTER TURN 2] user_id=test_session_008_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "room"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 3] user_id=test_session_008_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "room"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id'] = {'service_id': 'room'}
+[INFORMATIONAL_TURN] Detected informational turn: luma_intent=CREATE_RESERVATION, session_intent=CREATE_RESERVATION, has_new_slots=False
+[INFORMATIONAL_TURN] Preserved slots: ['service_id']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'dict'>, value={'service_id': 'room'}
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] collected_slots keys=['service_id']
+[REQUIRED_SLOTS_COMPUTE] collected_slots values={'service_id': 'room'}
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+[INFORMATIONAL_TURN] Preserved missing_slots: ['date_range']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_RESERVATION",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_RESERVATION missing_slots=['date_range'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date_range']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+TURN_STATE: {
+  "intent": "CREATE_RESERVATION",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date_range"
+  ],
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+
+[OUTCOME STATUS] Turn 3 outcome_status=NEEDS_CLARIFICATION outcome_keys=['intent_name', 'stage', 'action', 'slots', 'missing_slots', 'status']
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date_range']
+[BUILD_SESSION] Built session state: intent=CREATE_RESERVATION, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date_range']
+
+[SESSION AFTER TURN 3] user_id=test_session_008_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "room"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_RESERVATION", "is_first_turn": true, "raw_luma_slots": {"service_id": "room"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'room'}
+  effective_collected_slots (after filter)={'service_id': 'room'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_RESERVATION", "modification_context": null, "promoted_slots": {"service_id": "room"}, "effective_collected_slots": {"service_id": "room"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_RESERVATION", "slots_used": {"service_id": "room"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_RESERVATION, missing_slots=['date_range']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_RESERVATION",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_RESERVATION missing_slots=['date_range'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date_range']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+TURN_STATE: {
+  "intent": "CREATE_RESERVATION",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date_range"
+  ],
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date_range']
+[BUILD_SESSION] Built session state: intent=CREATE_RESERVATION, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date_range']
+
+[SESSION AFTER TURN 1] user_id=test_session_009_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "room"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_009_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "room"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id'] = {'service_id': 'room'}
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+  effective_slots_for_filtering.keys()=['service_id', 'date_range']
+  promoted_slots={'service_id': 'room', 'date_range': 'march 10 to 15'}
+  effective_collected_slots (after filter)={'service_id': 'room', 'date_range': 'march 10 to 15'}
+  effective_collected_slots.keys()=['service_id', 'date_range']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_RESERVATION",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date_range"
+    ],
+    "values": {
+      "service_id": "room",
+      "date_range": "march 10 to 15"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date_range"
+    ],
+    "values": {
+      "service_id": "room",
+      "date_range": "march 10 to 15"
+    }
+  },
+  "missing_slots": [],
+  "status": "READY"
+}
+[BUILD_PLAN] intent=CREATE_RESERVATION missing_slots=[] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=READY (no missing slots, no clarification needed, no pending confirmation)
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+TURN_STATE: {
+  "intent": "CREATE_RESERVATION",
+  "raw_luma_slots": {
+    "keys": [
+      "date_range"
+    ],
+    "values": {
+      "date_range": "march 10 to 15"
+    }
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date_range"
+    ],
+    "values": {
+      "service_id": "room",
+      "date_range": "march 10 to 15"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date_range"
+    ],
+    "values": {
+      "service_id": "room",
+      "date_range": "march 10 to 15"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date_range"
+    ],
+    "values": {
+      "service_id": "room",
+      "date_range": "march 10 to 15"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date_range"
+  ],
+  "missing_slots": [],
+  "status": "READY",
+  "decision_reason": "READY_ALL_SATISFIED"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date_range']
+[SESSION_CLEAR_DEBUG] intent_name=CREATE_RESERVATION, outcome_status=READY, is_durable=True, action=PRESERVED
+[BUILD_SESSION] Built session state: intent=CREATE_RESERVATION, slots=['service_id', 'date_range'], status=READY, missing_slots=[]
+
+[SESSION AFTER TURN 2] user_id=test_session_009_e99efb7d - SAVED (status=READY, preserved for modifications)
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [],
+  "slots": {
+    "service_id": "room",
+    "date_range": "march 10 to 15"
+  },
+  "status": "READY"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'haircut'}
+  effective_collected_slots (after filter)={'service_id': 'haircut'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut"}, "effective_collected_slots": {"service_id": "haircut"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date', 'time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date', 'time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date', 'time']
+
+[SESSION AFTER TURN 1] user_id=test_session_010_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_010_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CANCEL_BOOKING", "is_first_turn": true, "raw_luma_slots": {}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=[]
+  effective_slots_for_filtering.keys()=[]
+  promoted_slots={}
+  effective_collected_slots (after filter)={}
+  effective_collected_slots.keys()=[]
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CANCEL_BOOKING", "modification_context": null, "promoted_slots": {}, "effective_collected_slots": {}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CANCEL_BOOKING", "slots_used": {}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CANCEL_BOOKING, missing_slots=['booking_id']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CANCEL_BOOKING",
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "missing_slots": [
+    "booking_id"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CANCEL_BOOKING missing_slots=['booking_id'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['booking_id']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CANCEL_BOOKING, base_slots=['booking_id']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CANCEL_BOOKING -> base_planning_slots=['booking_id']
+TURN_STATE: {
+  "intent": "CANCEL_BOOKING",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "promoted_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "required_slots": [
+    "booking_id"
+  ],
+  "missing_slots": [
+    "booking_id"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['booking_id']
+[BUILD_SESSION] Built session state: intent=CANCEL_BOOKING, slots=[], status=NEEDS_CLARIFICATION, missing_slots=['booking_id']
+
+[SESSION AFTER TURN 2] user_id=test_session_010_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CANCEL_BOOKING",
+  "missing_slots": [
+    "booking_id"
+  ],
+  "slots": {},
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "facial"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'facial'}
+  effective_collected_slots (after filter)={'service_id': 'facial'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "facial"}, "effective_collected_slots": {"service_id": "facial"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "facial"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date', 'time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date', 'time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date', 'time']
+
+[SESSION AFTER TURN 1] user_id=test_session_011_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "facial"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_011_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "facial"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CANCEL_BOOKING", "is_first_turn": true, "raw_luma_slots": {}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=[]
+  effective_slots_for_filtering.keys()=[]
+  promoted_slots={}
+  effective_collected_slots (after filter)={}
+  effective_collected_slots.keys()=[]
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CANCEL_BOOKING", "modification_context": null, "promoted_slots": {}, "effective_collected_slots": {}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CANCEL_BOOKING", "slots_used": {}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CANCEL_BOOKING, missing_slots=['booking_id']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CANCEL_BOOKING",
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "missing_slots": [
+    "booking_id"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CANCEL_BOOKING missing_slots=['booking_id'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['booking_id']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CANCEL_BOOKING, base_slots=['booking_id']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CANCEL_BOOKING -> base_planning_slots=['booking_id']
+TURN_STATE: {
+  "intent": "CANCEL_BOOKING",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "promoted_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "required_slots": [
+    "booking_id"
+  ],
+  "missing_slots": [
+    "booking_id"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['booking_id']
+[BUILD_SESSION] Built session state: intent=CANCEL_BOOKING, slots=[], status=NEEDS_CLARIFICATION, missing_slots=['booking_id']
+
+[SESSION AFTER TURN 2] user_id=test_session_011_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CANCEL_BOOKING",
+  "missing_slots": [
+    "booking_id"
+  ],
+  "slots": {},
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "MODIFY_BOOKING", "is_first_turn": true, "raw_luma_slots": {}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=[]
+  effective_slots_for_filtering.keys()=[]
+  promoted_slots={}
+  effective_collected_slots (after filter)={}
+  effective_collected_slots.keys()=[]
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "MODIFY_BOOKING", "modification_context": {"modifying_time": false, "modifying_date": false}, "promoted_slots": {}, "effective_collected_slots": {}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "MODIFY_BOOKING", "slots_used": {}, "session_slots": null, "modification_context": {"modifying_time": false, "modifying_date": false}}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=MODIFY_BOOKING, missing_slots=['booking_id']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "MODIFY_BOOKING",
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "missing_slots": [
+    "booking_id"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=MODIFY_BOOKING missing_slots=['booking_id'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['booking_id']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=MODIFY_BOOKING, base_slots=['booking_id']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING path: collected_slots=None, modification_context=None
+[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING: No modification_context, checking collected_slots: has_time=False, has_date=False
+[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING analysis: has_time=False, has_date=False
+[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING: no modification_context -> using base_required_slots=['booking_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING FINAL: required_slots=['booking_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "MODIFY_BOOKING",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "promoted_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "required_slots": [
+    "booking_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "booking_id"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['booking_id']
+[BUILD_SESSION] Built session state: intent=MODIFY_BOOKING, slots=[], status=NEEDS_CLARIFICATION, missing_slots=['booking_id']
+
+[SESSION AFTER TURN 1] user_id=test_session_012_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "MODIFY_BOOKING",
+  "missing_slots": [
+    "booking_id"
+  ],
+  "slots": {},
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_012_e99efb7d
+  Session state: {
+  "intent_name": "MODIFY_BOOKING",
+  "missing_slots": [
+    "booking_id"
+  ],
+  "slots": {},
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CANCEL_BOOKING", "is_first_turn": true, "raw_luma_slots": {}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=[]
+  effective_slots_for_filtering.keys()=[]
+  promoted_slots={}
+  effective_collected_slots (after filter)={}
+  effective_collected_slots.keys()=[]
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CANCEL_BOOKING", "modification_context": null, "promoted_slots": {}, "effective_collected_slots": {}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CANCEL_BOOKING", "slots_used": {}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CANCEL_BOOKING, missing_slots=['booking_id']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CANCEL_BOOKING",
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "missing_slots": [
+    "booking_id"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CANCEL_BOOKING missing_slots=['booking_id'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['booking_id']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CANCEL_BOOKING, base_slots=['booking_id']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CANCEL_BOOKING -> base_planning_slots=['booking_id']
+TURN_STATE: {
+  "intent": "CANCEL_BOOKING",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "promoted_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "required_slots": [
+    "booking_id"
+  ],
+  "missing_slots": [
+    "booking_id"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['booking_id']
+[BUILD_SESSION] Built session state: intent=CANCEL_BOOKING, slots=[], status=NEEDS_CLARIFICATION, missing_slots=['booking_id']
+
+[SESSION AFTER TURN 2] user_id=test_session_012_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CANCEL_BOOKING",
+  "missing_slots": [
+    "booking_id"
+  ],
+  "slots": {},
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CANCEL_BOOKING", "is_first_turn": true, "raw_luma_slots": {}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=[]
+  effective_slots_for_filtering.keys()=[]
+  promoted_slots={}
+  effective_collected_slots (after filter)={}
+  effective_collected_slots.keys()=[]
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CANCEL_BOOKING", "modification_context": null, "promoted_slots": {}, "effective_collected_slots": {}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CANCEL_BOOKING", "slots_used": {}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CANCEL_BOOKING, missing_slots=['booking_id']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CANCEL_BOOKING",
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "missing_slots": [
+    "booking_id"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CANCEL_BOOKING missing_slots=['booking_id'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['booking_id']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CANCEL_BOOKING, base_slots=['booking_id']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CANCEL_BOOKING -> base_planning_slots=['booking_id']
+TURN_STATE: {
+  "intent": "CANCEL_BOOKING",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "promoted_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "required_slots": [
+    "booking_id"
+  ],
+  "missing_slots": [
+    "booking_id"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['booking_id']
+[BUILD_SESSION] Built session state: intent=CANCEL_BOOKING, slots=[], status=NEEDS_CLARIFICATION, missing_slots=['booking_id']
+
+[SESSION AFTER TURN 1] user_id=test_session_013_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CANCEL_BOOKING",
+  "missing_slots": [
+    "booking_id"
+  ],
+  "slots": {},
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_013_e99efb7d
+  Session state: {
+  "intent_name": "CANCEL_BOOKING",
+  "missing_slots": [
+    "booking_id"
+  ],
+  "slots": {},
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: [] = {}
+[INFORMATIONAL_TURN] Detected informational turn: luma_intent=CANCEL_BOOKING, session_intent=CANCEL_BOOKING, has_new_slots=False
+[INFORMATIONAL_TURN] Preserved slots: []
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CANCEL_BOOKING, base_slots=['booking_id']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'dict'>, value={}
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CANCEL_BOOKING -> base_planning_slots=['booking_id']
+[INFORMATIONAL_TURN] Preserved missing_slots: ['booking_id']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CANCEL_BOOKING",
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "missing_slots": [
+    "booking_id"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CANCEL_BOOKING missing_slots=['booking_id'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['booking_id']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CANCEL_BOOKING, base_slots=['booking_id']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CANCEL_BOOKING -> base_planning_slots=['booking_id']
+TURN_STATE: {
+  "intent": "CANCEL_BOOKING",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "promoted_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "required_slots": [
+    "booking_id"
+  ],
+  "missing_slots": [
+    "booking_id"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['booking_id']
+[BUILD_SESSION] Built session state: intent=CANCEL_BOOKING, slots=[], status=NEEDS_CLARIFICATION, missing_slots=['booking_id']
+
+[SESSION AFTER TURN 2] user_id=test_session_013_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CANCEL_BOOKING",
+  "missing_slots": [
+    "booking_id"
+  ],
+  "slots": {},
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_RESERVATION", "is_first_turn": true, "raw_luma_slots": {"service_id": "suite"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'suite'}
+  effective_collected_slots (after filter)={'service_id': 'suite'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_RESERVATION", "modification_context": null, "promoted_slots": {"service_id": "suite"}, "effective_collected_slots": {"service_id": "suite"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_RESERVATION", "slots_used": {"service_id": "suite"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_RESERVATION, missing_slots=['date_range']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_RESERVATION",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "suite"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "suite"
+    }
+  },
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_RESERVATION missing_slots=['date_range'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date_range']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+TURN_STATE: {
+  "intent": "CREATE_RESERVATION",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "suite"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "suite"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "suite"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date_range"
+  ],
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date_range']
+[BUILD_SESSION] Built session state: intent=CREATE_RESERVATION, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date_range']
+
+[SESSION AFTER TURN 1] user_id=test_session_014_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "suite"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_014_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "suite"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id'] = {'service_id': 'suite'}
+[INFORMATIONAL_TURN] Detected informational turn: luma_intent=CREATE_RESERVATION, session_intent=CREATE_RESERVATION, has_new_slots=False
+[INFORMATIONAL_TURN] Preserved slots: ['service_id']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'dict'>, value={'service_id': 'suite'}
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] collected_slots keys=['service_id']
+[REQUIRED_SLOTS_COMPUTE] collected_slots values={'service_id': 'suite'}
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+[INFORMATIONAL_TURN] Preserved missing_slots: ['date_range']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_RESERVATION",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "suite"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "suite"
+    }
+  },
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_RESERVATION missing_slots=['date_range'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date_range']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+TURN_STATE: {
+  "intent": "CREATE_RESERVATION",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "suite"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "suite"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "suite"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date_range"
+  ],
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date_range']
+[BUILD_SESSION] Built session state: intent=CREATE_RESERVATION, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date_range']
+
+[SESSION AFTER TURN 2] user_id=test_session_014_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "suite"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 3] user_id=test_session_014_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "suite"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id'] = {'service_id': 'suite'}
+[INFORMATIONAL_TURN] Detected informational turn: luma_intent=CREATE_RESERVATION, session_intent=CREATE_RESERVATION, has_new_slots=False
+[INFORMATIONAL_TURN] Preserved slots: ['service_id']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'dict'>, value={'service_id': 'suite'}
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] collected_slots keys=['service_id']
+[REQUIRED_SLOTS_COMPUTE] collected_slots values={'service_id': 'suite'}
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+[INFORMATIONAL_TURN] Preserved missing_slots: ['date_range']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_RESERVATION",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "suite"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "suite"
+    }
+  },
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_RESERVATION missing_slots=['date_range'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date_range']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+TURN_STATE: {
+  "intent": "CREATE_RESERVATION",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "suite"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "suite"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "suite"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date_range"
+  ],
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+
+[OUTCOME STATUS] Turn 3 outcome_status=NEEDS_CLARIFICATION outcome_keys=['intent_name', 'stage', 'action', 'slots', 'missing_slots', 'status']
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date_range']
+[BUILD_SESSION] Built session state: intent=CREATE_RESERVATION, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date_range']
+
+[SESSION AFTER TURN 3] user_id=test_session_014_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "suite"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_RESERVATION", "is_first_turn": true, "raw_luma_slots": {"service_id": "deluxe"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'deluxe'}
+  effective_collected_slots (after filter)={'service_id': 'deluxe'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_RESERVATION", "modification_context": null, "promoted_slots": {"service_id": "deluxe"}, "effective_collected_slots": {"service_id": "deluxe"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_RESERVATION", "slots_used": {"service_id": "deluxe"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_RESERVATION, missing_slots=['date_range']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_RESERVATION",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "deluxe"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "deluxe"
+    }
+  },
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_RESERVATION missing_slots=['date_range'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date_range']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+TURN_STATE: {
+  "intent": "CREATE_RESERVATION",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "deluxe"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "deluxe"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "deluxe"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date_range"
+  ],
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date_range']
+[BUILD_SESSION] Built session state: intent=CREATE_RESERVATION, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date_range']
+
+[SESSION AFTER TURN 1] user_id=test_session_015_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "deluxe"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_015_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "deluxe"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id'] = {'service_id': 'deluxe'}
+[INFORMATIONAL_TURN] Detected informational turn: luma_intent=CREATE_RESERVATION, session_intent=CREATE_RESERVATION, has_new_slots=False
+[INFORMATIONAL_TURN] Preserved slots: ['service_id']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'dict'>, value={'service_id': 'deluxe'}
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] collected_slots keys=['service_id']
+[REQUIRED_SLOTS_COMPUTE] collected_slots values={'service_id': 'deluxe'}
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+[INFORMATIONAL_TURN] Preserved missing_slots: ['date_range']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_RESERVATION",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "deluxe"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "deluxe"
+    }
+  },
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_RESERVATION missing_slots=['date_range'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date_range']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+TURN_STATE: {
+  "intent": "CREATE_RESERVATION",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "deluxe"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "deluxe"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "deluxe"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date_range"
+  ],
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date_range']
+[BUILD_SESSION] Built session state: intent=CREATE_RESERVATION, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date_range']
+
+[SESSION AFTER TURN 2] user_id=test_session_015_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "deluxe"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_RESERVATION", "is_first_turn": true, "raw_luma_slots": {"service_id": "room"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'room'}
+  effective_collected_slots (after filter)={'service_id': 'room'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_RESERVATION", "modification_context": null, "promoted_slots": {"service_id": "room"}, "effective_collected_slots": {"service_id": "room"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_RESERVATION", "slots_used": {"service_id": "room"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_RESERVATION, missing_slots=['date_range']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_RESERVATION",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_RESERVATION missing_slots=['date_range'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date_range']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+TURN_STATE: {
+  "intent": "CREATE_RESERVATION",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date_range"
+  ],
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date_range']
+[BUILD_SESSION] Built session state: intent=CREATE_RESERVATION, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date_range']
+
+[SESSION AFTER TURN 1] user_id=test_session_016_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "room"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_016_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "room"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id'] = {'service_id': 'room'}
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+  effective_slots_for_filtering.keys()=['service_id', 'time']
+  promoted_slots={'service_id': 'room', 'time': '3pm'}
+  effective_collected_slots (after filter)={'service_id': 'room'}
+  effective_collected_slots.keys()=['service_id']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_RESERVATION",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "time"
+    ],
+    "values": {
+      "service_id": "room",
+      "time": "3pm"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "time"
+    ],
+    "values": {
+      "service_id": "room",
+      "time": "3pm"
+    }
+  },
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_RESERVATION missing_slots=['date_range'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date_range']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+TURN_STATE: {
+  "intent": "CREATE_RESERVATION",
+  "raw_luma_slots": {
+    "keys": [
+      "time"
+    ],
+    "values": {
+      "time": "3pm"
+    }
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "time"
+    ],
+    "values": {
+      "service_id": "room",
+      "time": "3pm"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "time"
+    ],
+    "values": {
+      "service_id": "room",
+      "time": "3pm"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "time"
+    ],
+    "values": {
+      "service_id": "room",
+      "time": "3pm"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date_range"
+  ],
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'time']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date_range']
+[BUILD_SESSION] Built session state: intent=CREATE_RESERVATION, slots=['service_id', 'time'], status=NEEDS_CLARIFICATION, missing_slots=['date_range']
+
+[SESSION AFTER TURN 2] user_id=test_session_016_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "room",
+    "time": "3pm"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'haircut'}
+  effective_collected_slots (after filter)={'service_id': 'haircut'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut"}, "effective_collected_slots": {"service_id": "haircut"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date', 'time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date', 'time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date', 'time']
+
+[SESSION AFTER TURN 1] user_id=test_session_017_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_017_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id'] = {'service_id': 'haircut'}
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+  effective_slots_for_filtering.keys()=['service_id', 'date_range', 'date']
+  promoted_slots={'service_id': 'haircut', 'date_range': {'start': '2026-11-01', 'end': '2026-11-05'}, 'date': 'nov 1st'}
+  effective_collected_slots (after filter)={'service_id': 'haircut', 'date': 'nov 1st'}
+  effective_collected_slots.keys()=['service_id', 'date']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date_range",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date_range": "{'start': '2026-11-01', 'end': '2026-11-05'}",
+      "date": "nov 1st"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date_range",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date_range": "{'start': '2026-11-01', 'end': '2026-11-05'}",
+      "date": "nov 1st"
+    }
+  },
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [
+      "date_range",
+      "date"
+    ],
+    "values": {
+      "date_range": "{'start': '2026-11-01', 'end': '2026-11-05'}",
+      "date": "nov 1st"
+    }
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date_range",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date_range": "{'start': '2026-11-01', 'end': '2026-11-05'}",
+      "date": "nov 1st"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date_range",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date_range": "{'start': '2026-11-01', 'end': '2026-11-05'}",
+      "date": "nov 1st"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date_range",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date_range": "{'start': '2026-11-01', 'end': '2026-11-05'}",
+      "date": "nov 1st"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date_range', 'date']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date_range', 'date'], status=NEEDS_CLARIFICATION, missing_slots=['time']
+
+[SESSION AFTER TURN 2] user_id=test_session_017_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut",
+    "date_range": {
+      "start": "2026-11-01",
+      "end": "2026-11-05"
+    },
+    "date": "nov 1st"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "massage"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'massage'}
+  effective_collected_slots (after filter)={'service_id': 'massage'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "massage"}, "effective_collected_slots": {"service_id": "massage"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "massage"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "massage"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "massage"
+    }
+  },
+  "missing_slots": [
+    "date"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "massage"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "massage"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "massage"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'time']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'time'], status=NEEDS_CLARIFICATION, missing_slots=['date']
+
+[SESSION AFTER TURN 1] user_id=test_session_018_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date"
+  ],
+  "slots": {
+    "service_id": "massage",
+    "time": "3pm"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_RESERVATION", "is_first_turn": true, "raw_luma_slots": {"service_id": "room"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'room'}
+  effective_collected_slots (after filter)={'service_id': 'room'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_RESERVATION", "modification_context": null, "promoted_slots": {"service_id": "room"}, "effective_collected_slots": {"service_id": "room"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_RESERVATION", "slots_used": {"service_id": "room"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_RESERVATION, missing_slots=['date_range']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_RESERVATION",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_RESERVATION missing_slots=['date_range'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date_range']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_RESERVATION, base_slots=['service_id', 'date_range']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_RESERVATION -> base_planning_slots=['service_id', 'date_range']
+TURN_STATE: {
+  "intent": "CREATE_RESERVATION",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "room"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date_range"
+  ],
+  "missing_slots": [
+    "date_range"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date_range']
+[BUILD_SESSION] Built session state: intent=CREATE_RESERVATION, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date_range']
+
+[SESSION AFTER TURN 1] user_id=test_session_019_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_RESERVATION",
+  "missing_slots": [
+    "date_range"
+  ],
+  "slots": {
+    "service_id": "room"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "MODIFY_BOOKING", "is_first_turn": true, "raw_luma_slots": {}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=[]
+  effective_slots_for_filtering.keys()=[]
+  promoted_slots={}
+  effective_collected_slots (after filter)={}
+  effective_collected_slots.keys()=[]
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "MODIFY_BOOKING", "modification_context": {"modifying_time": false, "modifying_date": false}, "promoted_slots": {}, "effective_collected_slots": {}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "MODIFY_BOOKING", "slots_used": {}, "session_slots": null, "modification_context": {"modifying_time": false, "modifying_date": false}}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=MODIFY_BOOKING, missing_slots=['booking_id']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "MODIFY_BOOKING",
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "missing_slots": [
+    "booking_id"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=MODIFY_BOOKING missing_slots=['booking_id'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['booking_id']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=MODIFY_BOOKING, base_slots=['booking_id']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING path: collected_slots=None, modification_context=None
+[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING: No modification_context, checking collected_slots: has_time=False, has_date=False
+[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING analysis: has_time=False, has_date=False
+[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING: no modification_context -> using base_required_slots=['booking_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] MODIFY_BOOKING FINAL: required_slots=['booking_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "MODIFY_BOOKING",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "promoted_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "effective_collected_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "required_slots": [
+    "booking_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "booking_id"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['booking_id']
+[BUILD_SESSION] Built session state: intent=MODIFY_BOOKING, slots=[], status=NEEDS_CLARIFICATION, missing_slots=['booking_id']
+
+[SESSION AFTER TURN 1] user_id=test_session_020_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "MODIFY_BOOKING",
+  "missing_slots": [
+    "booking_id"
+  ],
+  "slots": {},
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut", "date": "2026-01-16"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id', 'date']
+  effective_slots_for_filtering.keys()=['service_id', 'date']
+  promoted_slots={'service_id': 'haircut', 'date': '2026-01-16'}
+  effective_collected_slots (after filter)={'service_id': 'haircut', 'date': '2026-01-16'}
+  effective_collected_slots.keys()=['service_id', 'date']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut", "date": "2026-01-16"}, "effective_collected_slots": {"service_id": "haircut", "date": "2026-01-16"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut", "date": "2026-01-16"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date'], status=NEEDS_CLARIFICATION, missing_slots=['time']
+
+[SESSION AFTER TURN 1] user_id=test_session_021_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut",
+    "date": "2026-01-16"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "facial"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'facial'}
+  effective_collected_slots (after filter)={'service_id': 'facial'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "facial"}, "effective_collected_slots": {"service_id": "facial"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "facial"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date', 'time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "facial"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date', 'time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date', 'time']
+
+[SESSION AFTER TURN 1] user_id=test_session_022_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "facial"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut", "date": "2026-01-16"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id', 'date']
+  effective_slots_for_filtering.keys()=['service_id', 'date']
+  promoted_slots={'service_id': 'haircut', 'date': '2026-01-16'}
+  effective_collected_slots (after filter)={'service_id': 'haircut', 'date': '2026-01-16'}
+  effective_collected_slots.keys()=['service_id', 'date']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut", "date": "2026-01-16"}, "effective_collected_slots": {"service_id": "haircut", "date": "2026-01-16"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut", "date": "2026-01-16"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date'], status=NEEDS_CLARIFICATION, missing_slots=['time']
+
+[SESSION AFTER TURN 1] user_id=test_session_023_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut",
+    "date": "2026-01-16"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_023_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut",
+    "date": "2026-01-16"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id', 'date'] = {'service_id': 'haircut', 'date': '2026-01-16'}
+[INFORMATIONAL_TURN] Detected informational turn: luma_intent=CREATE_APPOINTMENT, session_intent=CREATE_APPOINTMENT, has_new_slots=False
+[INFORMATIONAL_TURN] Preserved slots: ['service_id', 'date']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'dict'>, value={'service_id': 'haircut', 'date': '2026-01-16'}
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] collected_slots keys=['service_id', 'date']
+[REQUIRED_SLOTS_COMPUTE] collected_slots values={'service_id': 'haircut', 'date': '2026-01-16'}
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+[INFORMATIONAL_TURN] Preserved missing_slots: ['time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-17"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-17"
+    }
+  },
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [
+      "date"
+    ],
+    "values": {
+      "date": "2026-01-17"
+    }
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-17"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-17"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-17"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date'], status=NEEDS_CLARIFICATION, missing_slots=['time']
+
+[SESSION AFTER TURN 2] user_id=test_session_023_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut",
+    "date": "2026-01-17"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut", "date": "2026-01-16"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id', 'date']
+  effective_slots_for_filtering.keys()=['service_id', 'date']
+  promoted_slots={'service_id': 'haircut', 'date': '2026-01-16'}
+  effective_collected_slots (after filter)={'service_id': 'haircut', 'date': '2026-01-16'}
+  effective_collected_slots.keys()=['service_id', 'date']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut", "date": "2026-01-16"}, "effective_collected_slots": {"service_id": "haircut", "date": "2026-01-16"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut", "date": "2026-01-16"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=[]
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "missing_slots": [],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=[] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=READY (no missing slots, no clarification needed, no pending confirmation)
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [],
+  "status": "READY",
+  "decision_reason": "READY_ALL_SATISFIED"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date', 'time', 'has_datetime']
+[SESSION_CLEAR_DEBUG] intent_name=CREATE_APPOINTMENT, outcome_status=READY, is_durable=True, action=PRESERVED
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date', 'time', 'has_datetime'], status=READY, missing_slots=[]
+
+[SESSION AFTER TURN 1] user_id=test_session_024_e99efb7d - SAVED (status=READY, preserved for modifications)
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [],
+  "slots": {
+    "service_id": "haircut",
+    "date": "2026-01-16",
+    "time": "3pm",
+    "has_datetime": true
+  },
+  "status": "READY"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_024_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [],
+  "slots": {
+    "service_id": "haircut",
+    "date": "2026-01-16",
+    "time": "3pm",
+    "has_datetime": true
+  },
+  "status": "READY"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id', 'date', 'time', 'has_datetime'] = {'service_id': 'haircut', 'date': '2026-01-16', 'time': '3pm', 'has_datetime': True}
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+  effective_slots_for_filtering.keys()=['service_id', 'date', 'time', 'has_datetime']
+  promoted_slots={'service_id': 'haircut', 'date': '2026-01-16', 'time': '4pm', 'has_datetime': True}
+  effective_collected_slots (after filter)={'service_id': 'haircut', 'date': '2026-01-16', 'time': '4pm'}
+  effective_collected_slots.keys()=['service_id', 'date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16",
+      "time": "4pm",
+      "has_datetime": "True"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16",
+      "time": "4pm",
+      "has_datetime": "True"
+    }
+  },
+  "missing_slots": [],
+  "status": "READY"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=[] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=READY (no missing slots, no clarification needed, no pending confirmation)
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [
+      "time"
+    ],
+    "values": {
+      "time": "4pm"
+    }
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16",
+      "time": "4pm",
+      "has_datetime": "True"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16",
+      "time": "4pm",
+      "has_datetime": "True"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date",
+      "time",
+      "has_datetime"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16",
+      "time": "4pm",
+      "has_datetime": "True"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [],
+  "status": "READY",
+  "decision_reason": "READY_ALL_SATISFIED"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date', 'time', 'has_datetime']
+[SESSION_CLEAR_DEBUG] intent_name=CREATE_APPOINTMENT, outcome_status=READY, is_durable=True, action=PRESERVED
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date', 'time', 'has_datetime'], status=READY, missing_slots=[]
+
+[SESSION AFTER TURN 2] user_id=test_session_024_e99efb7d - SAVED (status=READY, preserved for modifications)
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [],
+  "slots": {
+    "service_id": "haircut",
+    "date": "2026-01-16",
+    "time": "4pm",
+    "has_datetime": true
+  },
+  "status": "READY"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'haircut'}
+  effective_collected_slots (after filter)={'service_id': 'haircut'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut"}, "effective_collected_slots": {"service_id": "haircut"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date', 'time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date', 'time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date', 'time']
+
+[SESSION AFTER TURN 1] user_id=test_session_025_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_025_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id'] = {'service_id': 'haircut'}
+[INFORMATIONAL_TURN] Detected informational turn: luma_intent=CREATE_APPOINTMENT, session_intent=CREATE_APPOINTMENT, has_new_slots=False
+[INFORMATIONAL_TURN] Preserved slots: ['service_id']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'dict'>, value={'service_id': 'haircut'}
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] collected_slots keys=['service_id']
+[REQUIRED_SLOTS_COMPUTE] collected_slots values={'service_id': 'haircut'}
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+[INFORMATIONAL_TURN] Preserved missing_slots: ['date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date', 'time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date', 'time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date', 'time']
+
+[SESSION AFTER TURN 2] user_id=test_session_025_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "premium haircut"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'premium haircut'}
+  effective_collected_slots (after filter)={'service_id': 'premium haircut'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "premium haircut"}, "effective_collected_slots": {"service_id": "premium haircut"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "premium haircut"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "premium haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "premium haircut"
+    }
+  },
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date', 'time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "premium haircut"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "premium haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "premium haircut"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date', 'time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date', 'time']
+
+[SESSION AFTER TURN 1] user_id=test_session_026_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "premium haircut"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "presidential haircut"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'presidential haircut'}
+  effective_collected_slots (after filter)={'service_id': 'presidential haircut'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "presidential haircut"}, "effective_collected_slots": {"service_id": "presidential haircut"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "presidential haircut"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "presidential haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "presidential haircut"
+    }
+  },
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date', 'time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "presidential haircut"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "presidential haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "presidential haircut"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date', 'time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date', 'time']
+
+[SESSION AFTER TURN 1] user_id=test_session_027_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "presidential haircut"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'haircut'}
+  effective_collected_slots (after filter)={'service_id': 'haircut'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut"}, "effective_collected_slots": {"service_id": "haircut"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['date', 'time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['date', 'time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['date', 'time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id"
+    ],
+    "values": {
+      "service_id": "haircut"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date', 'time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date', 'time']
+
+[SESSION AFTER TURN 1] user_id=test_session_028_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_028_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['date', 'time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id'], status=NEEDS_CLARIFICATION, missing_slots=['date', 'time']
+
+[SESSION AFTER TURN 2] user_id=test_session_028_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "date",
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut", "date": "tomorrow"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id', 'date']
+  effective_slots_for_filtering.keys()=['service_id', 'date']
+  promoted_slots={'service_id': 'haircut', 'date': 'tomorrow'}
+  effective_collected_slots (after filter)={'service_id': 'haircut', 'date': 'tomorrow'}
+  effective_collected_slots.keys()=['service_id', 'date']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut", "date": "tomorrow"}, "effective_collected_slots": {"service_id": "haircut", "date": "tomorrow"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut", "date": "tomorrow"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow"
+    }
+  },
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date'], status=NEEDS_CLARIFICATION, missing_slots=['time']
+
+[SESSION AFTER TURN 1] user_id=test_session_029_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut",
+    "date": "tomorrow"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+[SESSION BEFORE TURN 2] user_id=test_session_029_e99efb7d
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut",
+    "date": "tomorrow"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+[SLOT_DURABILITY] session.slots before merge: ['service_id', 'date'] = {'service_id': 'haircut', 'date': 'tomorrow'}
+[INFORMATIONAL_TURN] Detected informational turn: luma_intent=CREATE_APPOINTMENT, session_intent=CREATE_APPOINTMENT, has_new_slots=False
+[INFORMATIONAL_TURN] Preserved slots: ['service_id', 'date']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'dict'>, value={'service_id': 'haircut', 'date': 'tomorrow'}
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] collected_slots keys=['service_id', 'date']
+[REQUIRED_SLOTS_COMPUTE] collected_slots values={'service_id': 'haircut', 'date': 'tomorrow'}
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+[INFORMATIONAL_TURN] Preserved missing_slots: ['time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow"
+    }
+  },
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+[BUILD_PLAN] intent=CREATE_APPOINTMENT missing_slots=['time'] needs_clarification=False confirmation_state=None
+[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots=['time']
+[REQUIRED_SLOTS_COMPUTE] ENTRY: intent=CREATE_APPOINTMENT, base_slots=['service_id', 'date', 'time']
+[REQUIRED_SLOTS_COMPUTE] collected_slots type=<class 'NoneType'>, value=None
+[REQUIRED_SLOTS_COMPUTE] modification_context=None
+[REQUIRED_SLOTS_COMPUTE] DEFAULT path: intent=CREATE_APPOINTMENT -> base_planning_slots=['service_id', 'date', 'time']
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "tomorrow"
+    }
+  },
+  "required_slots": [
+    "service_id",
+    "date",
+    "time"
+  ],
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): ['service_id', 'date']
+[MISSING_SLOTS] Persisted missing_slots to session_state (status=NEEDS_CLARIFICATION): ['time']
+[BUILD_SESSION] Built session state: intent=CREATE_APPOINTMENT, slots=['service_id', 'date'], status=NEEDS_CLARIFICATION, missing_slots=['time']
+
+[SESSION AFTER TURN 2] user_id=test_session_029_e99efb7d - SAVED
+  Session state: {
+  "intent_name": "CREATE_APPOINTMENT",
+  "missing_slots": [
+    "time"
+  ],
+  "slots": {
+    "service_id": "haircut",
+    "date": "tomorrow"
+  },
+  "status": "NEEDS_CLARIFICATION"
+}
+
+Total: 29 | Passed: 28 | Failed: 1 | Skipped: 0
+
+TOTAL FAILURES: 1
+Failing scenarios:
+  - Scenario 6: service_to_date_to_time_reverse_order (id: test_session_006_e99efb7d)

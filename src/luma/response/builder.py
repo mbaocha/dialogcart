@@ -206,81 +206,45 @@ class ResponseBuilder:
     def build_response_body(
         self,
         intent_payload: Dict[str, Any],
-        needs_clarification: bool,
-        clarification_reason: Optional[str],
-        issues: Dict[str, Any],
-        booking_payload: Optional[Dict[str, Any]] = None,
-        entities_payload: Optional[Dict[str, Any]] = None,
-        slots: Optional[Dict[str, Any]] = None,
-        context_payload: Optional[Dict[str, Any]] = None,
-        clarification_data: Optional[Dict[str, Any]] = None,
-        debug_data: Optional[Dict[str, Any]] = None,
-        request_id: Optional[str] = None
+        facts: Optional[Dict[str, Any]] = None,
+        debug_data: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Build the final API response body.
+        Build the final API response body from extracted facts and intent only.
+        
+        Response is built ONLY from:
+        - intent (name + confidence)
+        - facts (dates, times, date_time_pairs, service_id, booking_id)
+        
+        Does NOT use:
+        - status
+        - issues
+        - has_booking
+        - has_clarification
+        - decision layer output
 
         Args:
-            intent_payload: Intent payload dict
-            needs_clarification: Whether clarification is needed
-            clarification_reason: Reason for clarification (if needed)
-            issues: Issues dict (missing slots, time issues, etc.)
-            booking_payload: Optional formatted booking payload
-            entities_payload: Optional entities payload (for non-booking intents)
-            slots: Optional slots dict
-            context_payload: Optional context payload (for clarification cases)
+            intent_payload: Intent payload dict with name and confidence
+            facts: Optional facts dict (dates[], times[], date_time_pairs[], service_id, booking_id)
             debug_data: Optional debug data (pipeline results)
-            request_id: Optional request ID for logging
 
         Returns:
-            Complete API response body dict
+            Complete API response body dict with intent and facts only
         """
+        # EXTRACTION-ONLY: Only output intent and facts
+        # Luma is a pure fact extractor - no semantic fields (status, missing_slots, clarification, booking block)
         response_body = {
-            "success": True,
             "intent": intent_payload,
-            "status": STATUS_NEEDS_CLARIFICATION if needs_clarification else STATUS_READY,
-            "issues": issues if issues else {},
-            "clarification_reason": clarification_reason if needs_clarification else None,
-            "needs_clarification": needs_clarification,
         }
 
-        # Include slots if it has any content (for both ready and clarification)
-        if slots:
-            response_body["slots"] = slots
+        # Use pre-aggregated facts if provided
+        # Facts should always be provided from resolve_service.py via aggregate_extraction_facts
+        # If facts is None, just skip adding facts to response (empty facts dict)
+        if facts is None:
+            facts = {}
 
-        # Handle clarification vs ready cases
-        if needs_clarification:
-            # For needs_clarification: include context but NO booking block
-            if context_payload:
-                response_body["context"] = context_payload
-            # Include clarification_data if provided (contains structured data like options for MULTIPLE_MATCHES)
-            if clarification_data:
-                response_body["clarification_data"] = clarification_data
-        else:
-            # For ready status: include booking block (minimal, only confirmation_state)
-            if booking_payload is not None:
-                # Build minimal booking block (temporal and service data is in slots)
-                # Remove all fields that are exposed via slots
-                booking_payload_copy = booking_payload.copy()
-                # Set confirmation_state, default to "pending" if missing (Luma is stateless)
-                booking_payload_copy["confirmation_state"] = (
-                    booking_payload_copy.get("confirmation_state", "pending")
-                )
-                # Exposed via slots.service_id
-                booking_payload_copy.pop("services", None)
-                # Exposed via slots.date_range
-                booking_payload_copy.pop("date_range", None)
-                # Exposed via slots.datetime_range
-                booking_payload_copy.pop("datetime_range", None)
-                booking_payload_copy.pop("duration", None)  # Removed entirely
-                booking_payload_copy.pop("start_date", None)  # Legacy field
-                booking_payload_copy.pop("end_date", None)  # Legacy field
-
-                response_body["booking"] = booking_payload_copy
-
-        # Add entities field for non-booking intents (always include, even if empty)
-        if entities_payload is not None:
-            response_body["entities"] = entities_payload
+        if facts:
+            response_body["facts"] = facts
 
         # Attach full internal pipeline data only in debug mode
         if debug_data:

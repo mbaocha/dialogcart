@@ -1,15 +1,14 @@
 """
-Rendering Layer
+Rendering Module
 
-Converts structured outcome objects into WhatsApp messages.
-
-This layer handles template lookup, variable interpolation, required fields
-validation, and WhatsApp message formatting (text, buttons, etc.).
-
-It consumes outcome objects only and does not call Luma or business APIs.
+Contains rendering modules for converting outcomes to user-facing messages:
+- response_builder: Outcome-to-message rendering
 """
 
-from core.rendering.whatsapp_renderer import render_outcome_to_whatsapp
+from dataclasses import dataclass
 
-__all__ = ["render_outcome_to_whatsapp"]
+# Import RenderSpec from clarification_renderer to avoid duplication
+from .clarification_renderer import RenderSpec, render_clarification
+from .renderer import render
 
+__all__ = ["RenderSpec", "render_clarification", "render"]

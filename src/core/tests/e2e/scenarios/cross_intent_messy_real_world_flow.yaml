@@ -1,0 +1,51 @@
+scenarios:
+  - name: cross_intent_messy_real_world_flow
+    description: |
+      Cross-intent E2E sentinel test to guard YAML-driven behavior.
+      Validates intent durability, switching, and session boundaries under a realistic multi-intent conversation.
+      Acts as a regression sentinel (not logic verification).
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book a haircut tomorrow"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: SEARCH_AVAILABILITY
+          intent: CREATE_APPOINTMENT
+
+      - sentence: "2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent: CREATE_APPOINTMENT
+          intent_preserved: true
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_APPOINTMENT
+          intent: CREATE_APPOINTMENT
+          intent_preserved: true
+
+      - sentence: "actually cancel it"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          intent: CANCEL_BOOKING
+          intent_switched: true
+
+      - sentence: "no"
+        expect:
+          status: READY
+          action: CONFIRM_CANCELLATION
+          intent: CANCEL_BOOKING
+          intent_preserved: true
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_CANCELLATION
+          intent: CANCEL_BOOKING
+          intent_preserved: true
+

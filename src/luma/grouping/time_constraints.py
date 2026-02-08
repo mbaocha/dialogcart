@@ -13,8 +13,12 @@ TimeConstraint dict used across the pipeline:
 Note: This module intentionally avoids any natural language parsing beyond
 the already-extracted tokens. It mirrors Phase 1 behavior: exact → same start/end,
 range → window, window labels → fuzzy (no hour inference).
+
+For fuzzy time expressions (morning, evening, etc.), start and end are populated
+from FUZZY_TIME_WINDOWS mapping.
 """
 from typing import Any, Dict, List, Optional
+from luma.config.temporal import FUZZY_TIME_WINDOWS
 
 TimeConstraint = Dict[str, Any]
 
@@ -78,10 +82,24 @@ def resolve_time_constraint(
                 return None
             return {"mode": "window", "start": start, "end": None, "label": None}
 
-    # Fallback: any time_window → fuzzy (no hour inference)
+    # Fallback: any time_window → fuzzy (preserve raw label, populate start/end from FUZZY_TIME_WINDOWS)
     if time_windows:
-        label = time_windows[0].get("text")
-        return {"mode": "fuzzy", "start": None, "end": None, "label": label}
+        label_raw = time_windows[0].get("text")
+        if label_raw:
+            # Preserve the raw label exactly as spoken by the user
+            label = label_raw
+            
+            # Populate start/end from FUZZY_TIME_WINDOWS mapping
+            label_lower = label.lower().strip()
+            if label_lower in FUZZY_TIME_WINDOWS:
+                start, end = FUZZY_TIME_WINDOWS[label_lower]
+                return {"mode": "fuzzy", "start": start, "end": end, "label": label}
+            else:
+                # Fuzzy label not in mapping - keep start/end as None
+                return {"mode": "fuzzy", "start": None, "end": None, "label": label}
+        
+        # No label text - return None
+        return None
 
     return None
 
@@ -164,6 +182,8 @@ def _parse_range_from_text(value: Optional[str]) -> tuple[Optional[str], Optiona
     if 0 <= h1 <= 23 and 0 <= h2 <= 23:
         return f"{h1:02d}:00", f"{h2:02d}:00"
     return None, None
+
+
 
 
 

@@ -11,7 +11,6 @@ Session schema:
     "intent": str,
     "slots": dict,  # Collected slots only - missing_slots are computed fresh
     "status": "READY" | "NEEDS_CLARIFICATION",
-    "awaiting_slot": str (optional, computed when exactly one missing slot exists)
 }
 
 Note: missing_slots are NEVER persisted in session.
@@ -144,7 +143,7 @@ def validate_redis_connection():
 
         # Success - print to stdout and flush immediately
         print(
-            f"✓ Redis connection validated successfully (REDIS_URL={redis_url})", flush=True)
+            f"[OK] Redis connection validated successfully (REDIS_URL={redis_url})", flush=True)
 
     except ImportError:
         print(
@@ -168,16 +167,36 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
     Returns:
         Session state dictionary or None if not found/expired
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    key = _get_session_key(user_id)
+    logger.error(
+        "[SESSION_LOAD] Attempting to load: user_id=%s key=%s", user_id, key)
+
     redis_client = _get_redis_client()
     if redis_client:
         # Try Redis first
         try:
-            key = _get_session_key(user_id)
             raw = redis_client.get(key)
             if not raw:
+                logger.error(
+                    "[SESSION_LOAD] Not found in Redis: user_id=%s key=%s", user_id, key)
                 return None
-            return json.loads(raw)
-        except Exception:
+            session_state = json.loads(raw)
+            # Debug log: Print session keys to confirm "facts" is present
+            session_keys = list(session_state.keys())
+            facts_keys = list(session_state.get("facts", {}).keys()) if isinstance(
+                session_state.get("facts"), dict) else []
+            logger.error(
+                "[SESSION_LOAD] Found in Redis: user_id=%s key=%s intent_name=%r status=%r keys=%s facts_keys=%s",
+                user_id, key, session_state.get("intent_name"), session_state.get(
+                    "status"), session_keys, facts_keys
+            )
+            return session_state
+        except Exception as e:
+            logger.warning(
+                "[SESSION_LOAD] Redis load failed, falling back to in-memory: user_id=%s error=%s", user_id, e)
             # Fall through to in-memory fallback
             pass
 
@@ -188,12 +207,25 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
         if time.time() - stored_at > SESSION_TTL_SECONDS_FALLBACK:
             # Expired, remove it
             del _in_memory_sessions[user_id]
+            logger.error(
+                "[SESSION_LOAD] Expired in in-memory: user_id=%s", user_id)
             return None
         # Return session state (without internal _stored_at field)
         session_state = {k: v for k, v in session_data.items()
                          if not k.startswith("_")}
+        # Debug log: Print session keys to confirm "facts" is present
+        session_keys = list(session_state.keys())
+        facts_keys = list(session_state.get("facts", {}).keys()) if isinstance(
+            session_state.get("facts"), dict) else []
+        logger.error(
+            "[SESSION_LOAD] Found in in-memory: user_id=%s intent_name=%r status=%r keys=%s facts_keys=%s",
+            user_id, session_state.get("intent_name"), session_state.get(
+                "status"), session_keys, facts_keys
+        )
         return session_state
 
+    logger.error(
+        "[SESSION_LOAD] Not found anywhere: user_id=%s key=%s", user_id, key)
     return None
 
 
@@ -209,10 +241,55 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
             - intent: str
             - slots: dict (collected slots only)
             - status: "READY" | "NEEDS_CLARIFICATION"
-            - awaiting_slot: str (optional, computed)
 
     Note: missing_slots are NOT stored in session - they are computed fresh.
     """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    # HARD GUARD: Ensure session_state["facts"] is always present as a dict before saving
+    # This invariant must hold for all sessions, especially those with active_capability
+    # Session facts are first-class and must never be omitted, even if empty
+    if "facts" not in session_state:
+        logger.warning(
+            f"[SESSION_SAVE] Missing 'facts' key in session_state, adding empty dict. "
+            f"user_id={user_id}, session_state keys: {list(session_state.keys())}"
+        )
+        session_state["facts"] = {}
+    elif session_state["facts"] is None:
+        logger.warning(
+            f"[SESSION_SAVE] session_state['facts'] is None, replacing with empty dict. user_id={user_id}"
+        )
+        session_state["facts"] = {}
+    elif not isinstance(session_state["facts"], dict):
+        logger.warning(
+            f"[SESSION_SAVE] session_state['facts'] is not a dict (type: {type(session_state['facts'])}), "
+            f"replacing with empty dict. user_id={user_id}"
+        )
+        session_state["facts"] = {}
+
+    # Hard assertion: facts must be a dict
+    assert isinstance(session_state["facts"], dict), (
+        f"CRITICAL: session_state['facts'] must be a dict before save_session. "
+        f"user_id={user_id}, Got type: {type(session_state.get('facts'))}, value: {session_state.get('facts')}"
+    )
+
+    # Log session save with key verification
+    intent_name = session_state.get("intent_name")
+    status = session_state.get("status")
+    slots_keys = list(session_state.get("slots", {}).keys())
+    facts_keys = list(session_state.get("facts", {}).keys()) if isinstance(
+        session_state.get("facts"), dict) else []
+    logger.error(
+        "[SESSION_SAVE] user_id=%s key=%s intent_name=%r status=%r slots_keys=%s facts_keys=%s",
+        user_id,
+        _get_session_key(user_id),
+        intent_name,
+        status,
+        slots_keys,
+        facts_keys
+    )
+
     redis_client = _get_redis_client()
     if redis_client:
         # Try Redis first
@@ -220,8 +297,12 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
             key = _get_session_key(user_id)
             serialized = json.dumps(session_state)
             redis_client.setex(key, SESSION_TTL_SECONDS, serialized)
+            logger.error(
+                "[SESSION_SAVE] Saved to Redis: user_id=%s key=%s", user_id, key)
             return
-        except Exception:
+        except Exception as e:
+            logger.warning(
+                "[SESSION_SAVE] Redis save failed, falling back to in-memory: user_id=%s error=%s", user_id, e)
             # Fall through to in-memory fallback
             pass
 
@@ -229,6 +310,7 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
     session_data = session_state.copy()
     session_data["_stored_at"] = time.time()
     _in_memory_sessions[user_id] = session_data
+    logger.error("[SESSION_SAVE] Saved to in-memory: user_id=%s", user_id)
 
 
 def clear_session(user_id: str) -> None:

@@ -1037,23 +1037,30 @@ def _bind_single_date(date_str: str, now: datetime, tz: Any) -> Optional[datetim
         today_weekday = now.weekday()
         target_weekday = weekday_map.get(weekday_str)
         if target_weekday is not None:
-            # Compute nearest future occurrence (base)
-            # This ensures no past dates: if weekday <= today, resolve to next week
-            days_ahead = (target_weekday - today_weekday) % 7
-            if days_ahead == 0:
-                days_ahead = 7  # If today is the target weekday, resolve to next week
-            
             # Apply modifier
             if modifier == "next":
-                # "next" → add 7 days to base (week after nearest future occurrence)
-                days_ahead = days_ahead + 7
-            # else: bare weekday or "this" → use base (nearest future occurrence)
-            # "this" is treated as no-op, same as bare weekday
-            
-            target_date = now + timedelta(days=days_ahead)
-            return target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+                # "next <weekday>" = the <weekday> in the NEXT calendar week (Monday-based)
+                # Deterministic calendar-week semantics
+                start_of_week = now - timedelta(days=now.weekday())  # Monday of current week
+                start_of_next_week = start_of_week + timedelta(days=7)  # Monday of next week
+                target_date = start_of_next_week + timedelta(days=target_weekday)  # Target weekday in next week
+                return target_date.replace(hour=0, minute=0, second=0, microsecond=0)
+            else:
+                # bare weekday or "this" → use nearest future occurrence
+                # Compute nearest future occurrence (base)
+                # This ensures no past dates: if weekday <= today, resolve to next week
+                days_ahead = (target_weekday - today_weekday) % 7
+                if days_ahead == 0:
+                    days_ahead = 7  # If today is the target weekday, resolve to next week
+                
+                target_date = now + timedelta(days=days_ahead)
+                return target_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
     # Check relative dates first
+    # PROTECTED INVARIANT: Relative date normalization is pure syntax-to-ISO conversion.
+    # Input: relative date string (e.g., "tomorrow", "next friday")
+    # Output: ISO date string (YYYY-MM-DD) computed from `now` datetime (from LUMA_TEST_NOW in tests).
+    # This is a stateless, syntactic transformation with no semantic interpretation.
     relative_offsets = _get_relative_date_offsets()
     if date_str_lower in relative_offsets:
         offset_days = relative_offsets[date_str_lower]

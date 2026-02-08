@@ -94,3 +94,7 @@ def is_confirmation_enabled() -> bool:
     return confirmation_cfg.get("enabled", True)
 
 
+
+
+
+

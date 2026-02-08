@@ -184,6 +184,7 @@ class SemanticResolutionResult:
     resolved_booking: Dict[str, Any]
     needs_clarification: bool = False
     clarification: Optional[Clarification] = None
+    time_constraint: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary format."""
@@ -195,6 +196,8 @@ class SemanticResolutionResult:
             result["clarification"] = self.clarification.to_dict()
         else:
             result["clarification"] = None
+        if self.time_constraint is not None:
+            result["time_constraint"] = self.time_constraint
         return result
 
 
@@ -529,14 +532,23 @@ def _validate_temporal_shape_completeness(
                 )
 
     if temporal_shape == APPOINTMENT_TEMPORAL_TYPE:
-        # Require date_mode != None and time_mode in {"exact", "range", "window"}
-        # Also accept fuzzy time_constraint (will be bound via FUZZY_TIME_WINDOWS)
+        # STAGE 3: Use time_constraint as authoritative semantic signal for time readiness
+        # time_constraint.mode == "exact" means exact time is present
+        # time_constraint.mode == "window" or "fuzzy" means fuzzy/window time is present (needs clarification for exact)
         has_valid_date = date_mode is not None and date_mode != DateMode.FLEXIBLE.value and len(
             date_refs) > 0
+        
+        # Authoritative check: use time_constraint if present, fallback to time_mode/time_refs for compatibility
+        time_constraint_mode = None
+        if time_constraint and isinstance(time_constraint, dict):
+            time_constraint_mode = time_constraint.get("mode")
+        
+        # Time is valid if:
+        # 1. time_constraint exists with mode in {exact, window, fuzzy} (authoritative)
+        # 2. OR fallback: time_mode/time_refs exist (legacy compatibility)
         has_valid_time = (
-            time_mode in {TimeMode.EXACT.value,
-                          TimeMode.RANGE.value, TimeMode.WINDOW.value}
-            or (time_constraint and time_constraint.get("mode") in {TimeMode.EXACT.value, TimeMode.WINDOW.value, TimeMode.FUZZY.value})
+            (time_constraint_mode in {TimeMode.EXACT.value, TimeMode.WINDOW.value, "fuzzy"}) or
+            (time_mode in {TimeMode.EXACT.value, TimeMode.RANGE.value, TimeMode.WINDOW.value})
         )
 
         missing_slots = []
@@ -620,8 +632,43 @@ def resolve_semantics(
 
     # Detect time constraints BEFORE time resolution (to exclude them from binding)
     booking_time_constraint = booking.get("time_constraint")
-    time_constraint = booking_time_constraint or _detect_time_constraint(
+    detected_constraint = booking_time_constraint or _detect_time_constraint(
         entities)
+
+    # Normalize detected constraint to canonical format if needed
+    # _detect_time_constraint returns {"type": "by|before|after", "time": "HH:MM"}
+    # Canonical format: {"mode": "exact|window|fuzzy", "start": "...", "end": "...", "label": "..."}
+    # STAGE 2: Deadline constraints like "by 5am" produce mode="window" (not "exact")
+    # This prevents them from setting has_datetime = True
+    time_constraint = None
+    if detected_constraint:
+        if isinstance(detected_constraint, dict):
+            # Check if already in canonical format (has "mode")
+            if "mode" in detected_constraint:
+                time_constraint = detected_constraint
+            else:
+                # Normalize to canonical format
+                constraint_type = detected_constraint.get("type")
+                constraint_time = detected_constraint.get("time")
+                if constraint_time:
+                    # STAGE 2: Deadline constraints (by/before/after) are window constraints, not exact
+                    # This ensures they don't set has_datetime = True
+                    if constraint_type in {"by", "before", "after"}:
+                        # For "by 5am" or "before 5pm": window mode with end=time (constraint boundary)
+                        time_constraint = {
+                            "mode": "window",
+                            "start": None,  # Window constraint: no start bound
+                            "end": constraint_time,  # Constraint boundary (deadline)
+                            "label": None
+                        }
+                    else:
+                        # Fallback: treat as exact if type is unknown
+                        time_constraint = {
+                            "mode": "exact",
+                            "start": constraint_time,
+                            "end": constraint_time,
+                            "label": None
+                        }
 
     # Filter out constraint times from entities for regular time resolution
     filtered_entities = _filter_constraint_times(entities, time_constraint)
@@ -678,6 +725,7 @@ def resolve_semantics(
                 resolved_booking=resolved_booking,
                 needs_clarification=True,
                 clarification=clarification,
+                time_constraint=None,
             )
             trace = {
                 "semantic": {
@@ -778,19 +826,26 @@ def resolve_semantics(
             date_refs = resolved_booking.get("date_refs", [])
             date_mode = resolved_booking.get("date_mode")
             
-            # Check if time is present (time_refs exist or time_mode is valid)
-            has_time = bool(time_refs) or time_mode in {
-                TimeMode.EXACT.value, TimeMode.RANGE.value, TimeMode.WINDOW.value
-            } or resolved_booking.get("time_constraint")
+            # STAGE 2: Gate has_datetime on time_constraint.mode == "exact" AND date present
+            # Check if exact time constraint exists (mode == "exact")
+            time_constraint = resolved_booking.get("time_constraint")
+            has_exact_time_constraint = (
+                time_constraint is not None
+                and isinstance(time_constraint, dict)
+                and time_constraint.get("mode") == "exact"
+            )
             
             # Check if date is present (date_refs exist and date_mode is valid)
             has_date = bool(date_refs) and date_mode is not None and date_mode != DateMode.FLEXIBLE.value
             
-            # For MODIFY_BOOKING appointments: any time OR date change → set has_datetime = true
-            # Time-only modifications are valid (no date required)
-            # Date-only modifications are valid (no time required) - date can anchor time from existing booking
-            if has_time or has_date:
-                # Set has_datetime = true for any time-related or date-related change
+            # For MODIFY_BOOKING appointments: set has_datetime ONLY if:
+            # 1. time_constraint.mode == "exact" (exact time, not fuzzy/window)
+            # 2. AND date is present
+            # This prevents fuzzy times (morning/evening/window constraints) from setting has_datetime
+            # Date-only modifications remain valid - date can anchor time from existing booking
+            # But has_datetime is only set when exact time constraint exists
+            if has_exact_time_constraint and has_date:
+                # Set has_datetime = true for exact time constraint + date change
                 resolved_booking["has_datetime"] = True
                 
                 # Build minimal datetime_range structure only if time_refs exist
@@ -866,7 +921,8 @@ def resolve_semantics(
     result = SemanticResolutionResult(
         resolved_booking=resolved_booking,
         needs_clarification=clarification is not None,
-        clarification=clarification
+        clarification=clarification,
+        time_constraint=time_constraint
     )
 
     # Build trace fragment

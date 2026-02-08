@@ -1,0 +1,37 @@
+# Capability Policy
+#
+# Declarative specification of capability constraints.
+# Defines which capabilities block which execution steps under what conditions.
+#
+# STATUS: Active - Loaded at runtime by capabilities_loader.py
+# This file is the single source of truth for capability blocking rules.
+#
+# Structure:
+# - capabilities: Map of capability name -> capability configuration
+#   - applies_to: Intent(s) this capability applies to
+#   - blocks: List of execution steps that are blocked when condition is not satisfied
+#   - when: Condition that must be satisfied to proceed past blocked steps
+#
+# Notes:
+# - "blocks" means: the listed step cannot be entered unless "when" condition is satisfied.
+# - This file does NOT reference adapters - it only defines constraints.
+# - Capability evaluation runs AFTER slot filling and AFTER booking creation.
+# - Capability evaluation is a planning gate that occurs BEFORE executing blocked steps.
+#
+# Timing:
+# - Capability evaluation occurs:
+#   1. AFTER slots are complete (missing_slots == [])
+#   2. AFTER booking hold exists (booking_id present)
+#   3. BEFORE executing blocked step (e.g., FINALIZE_RESERVATION)
+
+capabilities:
+  payment:
+    applies_to:
+      intent: CREATE_RESERVATION
+    blocks:
+      - FINALIZE_RESERVATION
+    when:
+      all:
+        - org.payment_required == true
+        - facts.payment_satisfied != true
+

@@ -435,7 +435,15 @@ def decide_booking_status(
             if is_modify:
                 # Determine missing deltas based on what the user is trying to change
                 has_date = (date_mode is not None and date_mode != "none" and len(date_refs) > 0) or date_range is not None
-                has_time = ((time_mode is not None and time_mode != "none" and len(time_refs) > 0) or time_constraint is not None)
+                # STAGE 3: Use time_constraint as authoritative semantic signal
+                # Check time_constraint first, fallback to time_mode/time_refs for compatibility
+                has_time = False
+                if time_constraint and isinstance(time_constraint, dict):
+                    time_constraint_mode = time_constraint.get("mode")
+                    has_time = time_constraint_mode in {"exact", "window", "fuzzy"}
+                if not has_time:
+                    # Fallback to legacy time_mode/time_refs check
+                    has_time = (time_mode is not None and time_mode != "none" and len(time_refs) > 0)
                 
                 if booking_mode == "service":
                     # Appointment-style: requires date and time
@@ -485,7 +493,15 @@ def decide_booking_status(
         if is_modify:
             # Check for change deltas in resolved_booking
             has_date = (date_mode is not None and date_mode != "none" and len(date_refs) > 0) or date_range is not None
-            has_time = ((time_mode is not None and time_mode != "none" and len(time_refs) > 0) or time_constraint is not None)
+            # STAGE 3: Use time_constraint as authoritative semantic signal
+            # Check time_constraint first, fallback to time_mode/time_refs for compatibility
+            has_time = False
+            if time_constraint and isinstance(time_constraint, dict):
+                time_constraint_mode = time_constraint.get("mode")
+                has_time = time_constraint_mode in {"exact", "window", "fuzzy"}
+            if not has_time:
+                # Fallback to legacy time_mode/time_refs check
+                has_time = (time_mode is not None and time_mode != "none" and len(time_refs) > 0)
             has_service_id = bool(services and len(services) > 0)
             has_duration = resolved_booking.get("duration") is not None
             

@@ -4,15 +4,6 @@ import random
 import json
 import argparse
 from .scenarios import booking_scenarios, other_scenarios, scenarios
-from .assertions import (
-    assert_no_partial_binding,
-    assert_clarification_has_missing_slots,
-    assert_ready_has_required_bound_fields,
-    assert_status_missing_slots_consistency,
-    assert_booking_block_consistency,
-    assert_invariants
-)
-from luma.config.core import STATUS_READY
 
 API_BASE = "http://localhost:9001/resolve"
 USER_ID_PREFIX = "t_user_"
@@ -29,6 +20,10 @@ TEST_NOW = "2026-01-13T10:00:00Z"
 # NOTE: If running the server separately (python -m luma.api), start it with:
 #   LUMA_TEST_NOW=2026-01-13T10:00:00Z python -m luma.api
 # Or set the env var before starting the server
+#
+# PROTECTED INVARIANT: Relative date expressions MUST be normalized to ISO dates (YYYY-MM-DD)
+# using LUMA_TEST_NOW as the reference point. This is a pure syntactic transformation with
+# no semantic interpretation. See RELATIVE_DATE_NORMALIZATION_AUDIT.md for details.
 os.environ["LUMA_TEST_NOW"] = TEST_NOW
 
 
@@ -80,6 +75,7 @@ def call_luma(sentence, booking_mode, user_id=None, aliases=None, options=None):
         "domain": domain,
         "user_id": user_id,
         "tenant_context": tenant_context,
+        "test_now": TEST_NOW,  # Pass reference date in request payload for deterministic testing
     }
 
     resp = requests.post(API_BASE, json=payload, timeout=30)
@@ -90,329 +86,108 @@ def call_luma(sentence, booking_mode, user_id=None, aliases=None, options=None):
     return data, resp.status_code, resp.text
 
 
-def _first_service_id(svc_list):
-    if not svc_list:
-        return None
-    svc = svc_list[0]
-    return (svc.get("canonical") or svc.get("text") or "").lower()
-
-
-def _normalize_service_id(svc_id: str) -> str:
-    """Normalize service id/text to a stable label for comparison (mirrors canonical vocab in global.v3.json)."""
-    if not svc_id:
-        return ""
-    svc_id = svc_id.lower()
-    alias_map = {
-        "hospitality.room": "room",
-        "room": "room",
-        "deluxe": "room",
-        "delux": "room",
-        "standard": "room",
-        "beauty_and_wellness.massage": "massage",
-        "beauty_and_wellness.facial": "facial",
-        "beauty_and_wellness.haircut": "haircut",
-        "haircut": "haircut",
-        "hair cut": "haircut",
-        "beard grooming": "beard grooming",
-        "beard": "beard grooming",
-        "massage": "massage",
-        "facial": "facial",
-    }
-    return alias_map.get(svc_id, svc_id)
-
-
-# _extract_dates removed - dates are now in slots.date_range or slots.datetime_range
-# This function is no longer needed as we assert directly on slots, not booking fields
-
-
 def assert_response(resp, expected):
-    assert resp["intent"]["name"] == expected["intent"]
-    assert resp["status"] == expected["status"]
+    """
+    Assert that Luma response matches expected facts-only extraction.
 
-    # Assert invariants (additive safety nets - check after basic assertions)
-    intent_name = resp.get("intent", {}).get("name")
-    assert_invariants(resp, intent_name=intent_name)
+    Luma is a pure fact extractor - only checks:
+    - intent.name
+    - intent.confidence (if present)
+    - facts (dates[], times[], date_time_pairs[], service_id, booking_id)
 
-    # For UNKNOWN intents: enforce stateless behavior - no intent promotion, no missing_slots, no clarification
-    # EXCEPTION: Option-constrained resolution (INVALID_OPTION) is allowed to have clarification_reason
-    # because it's a special clarification turn, not intent promotion
-    if intent_name == "UNKNOWN":
-        # UNKNOWN intents must NOT have missing_slots (no intent promotion)
-        actual_issues = resp.get("issues", {})
-        derived_missing_slots = sorted([
-            slot for slot, issue in actual_issues.items()
-            if issue == "missing" or (isinstance(issue, dict) and issue.get("type") == "missing")
-        ])
-        assert len(derived_missing_slots) == 0, (
-            f"UNKNOWN intent must not have missing_slots (no intent promotion). "
-            f"Got missing_slots: {derived_missing_slots}, issues: {actual_issues}"
-        )
-        # UNKNOWN intents must NOT have clarification_reason
-        # EXCEPTION: INVALID_OPTION from option-constrained resolution is allowed
-        clarification_reason = resp.get("clarification_reason")
-        if clarification_reason is not None:
-            assert clarification_reason == "INVALID_OPTION", (
-                f"UNKNOWN intent must not have clarification_reason (except INVALID_OPTION). "
-                f"Got: {clarification_reason}"
+    Does NOT check:
+    - status
+    - missing_slots
+    - issues
+    - clarification*
+    - booking block
+    - date_range (semantic)
+    - has_datetime
+    - start_date/end_date
+    """
+    # Assert intent
+    assert resp["intent"]["name"] == expected["intent"], (
+        f"Intent mismatch: got '{resp['intent']['name']}', expected '{expected['intent']}'"
+    )
+
+    # Enforce invariant: semantic fields must NOT be present
+    assert "status" not in resp, "Luma must not output 'status' (semantic field)"
+    assert "missing_slots" not in resp, "Luma must not output 'missing_slots' (semantic field)"
+    assert "issues" not in resp, "Luma must not output 'issues' (semantic field)"
+    assert "clarification_reason" not in resp, "Luma must not output 'clarification_reason' (semantic field)"
+    assert "clarification" not in resp, "Luma must not output 'clarification' (semantic field)"
+    assert "booking" not in resp or resp.get(
+        "booking") is None, "Luma must not output 'booking' block (semantic field)"
+
+    # Assert facts extraction
+    expected_facts = expected.get("facts", {})
+    actual_facts = resp.get("facts", {})
+
+    # Check each expected fact
+    for fact_key, expected_value in expected_facts.items():
+        assert fact_key in actual_facts, f"Missing fact: {fact_key} in facts"
+        actual_value = actual_facts[fact_key]
+
+        if fact_key == "dates":
+            # dates[] array - order may matter for ranges
+            assert isinstance(
+                actual_value, list), f"facts.dates must be a list, got {type(actual_value)}"
+            assert actual_value == expected_value, (
+                f"facts.dates mismatch: got {actual_value}, expected {expected_value}"
             )
-            # For INVALID_OPTION, ensure clarification object is present
-            assert resp.get("clarification") is not None, (
-                f"UNKNOWN intent with INVALID_OPTION must have clarification object"
+        elif fact_key == "times":
+            # times[] array
+            assert isinstance(
+                actual_value, list), f"facts.times must be a list, got {type(actual_value)}"
+            assert actual_value == expected_value, (
+                f"facts.times mismatch: got {actual_value}, expected {expected_value}"
             )
-        # UNKNOWN intents must NOT have booking block (no booking payload)
-        assert "booking" not in resp or resp.get("booking") is None, (
-            f"UNKNOWN intent must not have booking block (no booking payload). "
-            f"Got: {resp.get('booking')}"
-        )
-
-        # For UNKNOWN intents: check that all expected slots match actual slots (extraction-only)
-        # This ensures Luma only returns extracted slots, not inferred or promoted slots
-        expected_slots = expected.get("slots", {})
-        actual_slots = resp.get("slots", {})
-
-        # Check each expected slot (date, time, date_range, service_id, etc.)
-        for slot_name, expected_value in expected_slots.items():
-            actual_value = actual_slots.get(slot_name)
-            if slot_name == "date_range":
-                # Special handling for date_range (dict comparison)
-                assert actual_value is not None, f"Expected {slot_name} in slots for UNKNOWN intent"
-                assert isinstance(
-                    actual_value, dict), f"{slot_name} must be a dict, got {type(actual_value)}"
-                assert actual_value == expected_value, (
-                    f"{slot_name} mismatch: got {actual_value}, expected {expected_value}"
-                )
-            else:
-                # Direct value comparison for other slots (date, time, service_id, etc.)
-                assert actual_value == expected_value, (
-                    f"Slot '{slot_name}' mismatch: got '{actual_value}', expected '{expected_value}'"
-                )
-
-    if expected["status"] == STATUS_READY:
-        assert resp["intent"][
-            "confidence"] >= 0.7, f"low confidence: {resp['intent'].get('confidence')}"
-
-        # Booking block should be present ONLY for intents that produce_booking_payload
-        # MODIFY_BOOKING and CANCEL_BOOKING do NOT produce booking_payload (intent-specific semantics)
-        intent_name = resp.get("intent", {}).get("name")
-        produces_booking = False
-        if intent_name:
-            from luma.config.intent_meta import get_intent_registry
-            registry = get_intent_registry()
-            intent_meta = registry.get(intent_name)
-            if intent_meta:
-                produces_booking = intent_meta.produces_booking_payload is True
-
-        if produces_booking:
-            # Booking block should be present for ready status (but minimal, only confirmation_state)
-            assert "booking" in resp and resp["booking"], "booking should be present when ready"
-            booking = resp["booking"]
-            # Booking block should be minimal - only confirmation_state (temporal/service data is in slots)
-            assert "confirmation_state" in booking, "booking should contain confirmation_state"
-
-            # Check confirmation_state matches expected value if specified
-            expected_booking = expected.get("booking", {})
-            if isinstance(expected_booking, dict) and "confirmation_state" in expected_booking:
-                expected_confirmation_state = expected_booking["confirmation_state"]
-                actual_confirmation_state = booking.get("confirmation_state")
-                assert actual_confirmation_state == expected_confirmation_state, (
-                    f"confirmation_state mismatch: got '{actual_confirmation_state}', "
-                    f"expected '{expected_confirmation_state}'"
-                )
-
-            # Ensure booking doesn't contain temporal/service fields (they're in slots)
-            assert "services" not in booking, "booking.services should not be present (exposed via slots.service_id)"
-            assert "date_range" not in booking, "booking.date_range should not be present (exposed via slots.date_range)"
-            assert "datetime_range" not in booking, "booking.datetime_range should not be present (exposed via slots.datetime_range)"
-            assert "start_date" not in booking, "booking.start_date should not be present (legacy field removed)"
-            assert "end_date" not in booking, "booking.end_date should not be present (legacy field removed)"
+        elif fact_key == "date_time_pairs":
+            # date_time_pairs[] - only when linguistically explicit
+            assert isinstance(
+                actual_value, list), f"facts.date_time_pairs must be a list, got {type(actual_value)}"
+            assert actual_value == expected_value, (
+                f"facts.date_time_pairs mismatch: got {actual_value}, expected {expected_value}"
+            )
         else:
-            # For intents that don't produce booking_payload (MODIFY_BOOKING, CANCEL_BOOKING),
-            # booking block should NOT be present
-            assert "booking" not in resp or resp.get("booking") is None, (
-                f"booking block should NOT be present for {intent_name} (produces_booking_payload=false)"
+            # Direct value comparison for service_id, booking_id
+            assert actual_value == expected_value, (
+                f"facts.{fact_key} mismatch: got '{actual_value}', expected '{expected_value}'"
             )
 
-        slots = expected.get("slots", {})
-
-        expected_service = slots.get("service_id")
-        if expected_service:
-            # Tenant-authoritative: service_id must be a tenant alias key, not a canonical ID
-            actual_service_id = resp.get("slots", {}).get("service_id")
-            assert actual_service_id == expected_service, (
-                f"service_id mismatch: got '{actual_service_id}', expected '{expected_service}'. "
-                f"Expected service_id must be a tenant alias key from tenant_context.aliases, not a canonical ID."
+    # STAGE 4: Assert time_constraint if present in expected (for fuzzy time cases)
+    if "time_constraint" in expected:
+        assert "time_constraint" in resp, "Missing time_constraint in response"
+        expected_tc = expected["time_constraint"]
+        actual_tc = resp["time_constraint"]
+        
+        # Check mode
+        assert actual_tc.get("mode") == expected_tc.get("mode"), (
+            f"time_constraint.mode mismatch: got '{actual_tc.get('mode')}', expected '{expected_tc.get('mode')}'"
+        )
+        
+        # Check label if present in expected
+        if "label" in expected_tc:
+            assert actual_tc.get("label") == expected_tc.get("label"), (
+                f"time_constraint.label mismatch: got '{actual_tc.get('label')}', expected '{expected_tc.get('label')}'"
+            )
+        
+        # Check start/end if present in expected
+        if "start" in expected_tc:
+            assert actual_tc.get("start") == expected_tc.get("start"), (
+                f"time_constraint.start mismatch: got '{actual_tc.get('start')}', expected '{expected_tc.get('start')}'"
+            )
+        if "end" in expected_tc:
+            assert actual_tc.get("end") == expected_tc.get("end"), (
+                f"time_constraint.end mismatch: got '{actual_tc.get('end')}', expected '{expected_tc.get('end')}'"
             )
 
-        # Check date_range for reservations (intent-specific temporal shape)
-        if "date_range" in slots:
-            actual_date_range = resp.get("slots", {}).get("date_range")
-            assert actual_date_range is not None, "Expected date_range in slots for reservation"
-            expected_date_range = slots["date_range"]
-
-            # Handle placeholder dates (e.g., "<resolved_date>") - just check that date_range exists and has start/end
-            if expected_date_range.get("start") == "<resolved_date>" or expected_date_range.get("end") == "<resolved_date>":
-                # For placeholder dates, just verify date_range structure exists
-                assert "start" in actual_date_range, "Expected date_range.start in slots for reservation"
-                assert "end" in actual_date_range, "Expected date_range.end in slots for reservation"
-                # Verify dates are valid ISO format dates
-                import re
-                date_pattern = r'^\d{4}-\d{2}-\d{2}$'
-                assert re.match(
-                    date_pattern, actual_date_range["start"]), f"date_range.start must be ISO date format, got {actual_date_range['start']}"
-                assert re.match(
-                    date_pattern, actual_date_range["end"]), f"date_range.end must be ISO date format, got {actual_date_range['end']}"
-            else:
-                # Exact match for specific dates
-                assert actual_date_range == expected_date_range, (
-                    f"date_range mismatch: got {actual_date_range}, expected {expected_date_range}"
-                )
-
-        # Check datetime_range or has_datetime for appointments
-        if slots.get("has_datetime"):
-            actual_datetime_range = resp.get("slots", {}).get("datetime_range")
-            assert actual_datetime_range is not None, "Expected datetime_range in slots for appointment with has_datetime"
-
-        # Check booking_id for MODIFY_BOOKING/CANCEL_BOOKING
-        if slots.get("booking_id"):
-            actual_booking_id = resp.get("slots", {}).get("booking_id")
-            expected_booking_id = slots["booking_id"]
-            assert actual_booking_id == expected_booking_id, (
-                f"booking_id mismatch: got '{actual_booking_id}', expected '{expected_booking_id}'"
-            )
-
-        # Check start_date/end_date for MODIFY_BOOKING date-range modifications
-        if slots.get("start_date"):
-            actual_start_date = resp.get("slots", {}).get("start_date")
-            expected_start_date = slots["start_date"]
-            assert actual_start_date == expected_start_date, (
-                f"start_date mismatch: got '{actual_start_date}', expected '{expected_start_date}'"
-            )
-
-        if slots.get("end_date"):
-            actual_end_date = resp.get("slots", {}).get("end_date")
-            expected_end_date = slots["end_date"]
-            assert actual_end_date == expected_end_date, (
-                f"end_date mismatch: got '{actual_end_date}', expected '{expected_end_date}'"
-            )
-
-        # Check has_datetime flag for MODIFY_BOOKING time-only modifications
-        if "has_datetime" in slots:
-            actual_has_datetime = resp.get("slots", {}).get("has_datetime")
-            expected_has_datetime = slots["has_datetime"]
-            assert actual_has_datetime == expected_has_datetime, (
-                f"has_datetime mismatch: got '{actual_has_datetime}', expected '{expected_has_datetime}'"
-            )
-
-        # Note: Legacy start_date/end_date support removed - all reservation tests should use date_range
-        # However, MODIFY_BOOKING uses start_date/end_date as delta slots
-    else:
-        # needs_clarification
-        assert resp.get(
-            "booking") is None, "booking should be omitted when needs_clarification"
-
-        # Check clarification_reason if expected
-        expected_clarification_reason = expected.get("clarification_reason")
-        if expected_clarification_reason:
-            actual_clarification_reason = resp.get("clarification_reason")
-            assert actual_clarification_reason == expected_clarification_reason, (
-                f"clarification_reason mismatch: got '{actual_clarification_reason}', "
-                f"expected '{expected_clarification_reason}'"
-            )
-
-        # Check clarification structure if expected (for option-constrained resolution)
-        expected_clarification = expected.get("clarification")
-        if expected_clarification:
-            actual_clarification = resp.get("clarification")
-            assert actual_clarification is not None, "Expected clarification object in response"
-            assert isinstance(actual_clarification,
-                              dict), "clarification must be a dict"
-
-            # Check each field in expected clarification
-            for field, expected_value in expected_clarification.items():
-                actual_value = actual_clarification.get(field)
-                if field == "options":
-                    # For options, check that it's a list with the same structure
-                    assert isinstance(
-                        actual_value, list), "clarification.options must be a list"
-                    assert len(actual_value) == len(expected_value), (
-                        f"clarification.options length mismatch: got {len(actual_value)}, "
-                        f"expected {len(expected_value)}"
-                    )
-                    # Check that all expected options are present (order may vary)
-                    actual_ids = {
-                        opt.get("id") for opt in actual_value if isinstance(opt, dict)}
-                    expected_ids = {
-                        opt.get("id") for opt in expected_value if isinstance(opt, dict)}
-                    assert actual_ids == expected_ids, (
-                        f"clarification.options mismatch: got IDs {actual_ids}, expected {expected_ids}"
-                    )
-                else:
-                    assert actual_value == expected_value, (
-                        f"clarification.{field} mismatch: got '{actual_value}', expected '{expected_value}'"
-                    )
-
-        # Always derive missing_slots from issues (Fix #1)
-        # Luma emits issues → { slot_name: "missing" }, not missing_slots
-        actual_issues = resp.get("issues", {})
-        derived_missing_slots = sorted([
-            slot for slot, issue in actual_issues.items()
-            if issue == "missing" or (isinstance(issue, dict) and issue.get("type") == "missing")
-        ])
-
-        # Check for issues (new structure) or missing_slots (legacy test format)
-        expected_issues = expected.get("issues")
-        expected_missing_slots = expected.get("missing_slots") or []
-
-        if expected_issues:
-            # New structure: validate issues
-            for slot, expected_issue in expected_issues.items():
-                actual_issue = actual_issues.get(slot)
-                if isinstance(expected_issue, dict):
-                    # Rich issue object (e.g., ambiguous meridiem)
-                    assert actual_issue is not None, f"Missing issue for slot '{slot}'"
-                    assert isinstance(
-                        actual_issue, dict), f"Issue for '{slot}' should be a dict, got {type(actual_issue)}"
-                    # Check all expected fields (e.g., raw, start_hour, end_hour, candidates)
-                    for field, expected_value in expected_issue.items():
-                        actual_value = actual_issue.get(field)
-                        assert actual_value == expected_value, (
-                            f"Issue field '{field}' mismatch for '{slot}': got '{actual_value}', "
-                            f"expected '{expected_value}'"
-                        )
-                else:
-                    # Simple string (e.g., "missing")
-                    assert actual_issue == expected_issue, (
-                        f"Issue mismatch for '{slot}': got '{actual_issue}', expected '{expected_issue}'"
-                    )
-
-        # If expected_missing_slots is provided (legacy test format), validate against derived slots
-        if expected_missing_slots:
-            assert derived_missing_slots == sorted(expected_missing_slots), (
-                f"missing_slots mismatch: got {derived_missing_slots}, expected {sorted(expected_missing_slots)}. "
-                f"Derived from issues structure: {actual_issues}"
-            )
-
-        # Check slots for needs_clarification status (e.g., extracted time/date that should be in slots)
-        # This ensures Luma surfaces extracted temporal values in slots, not just in semantic/context layers
-        expected_slots = expected.get("slots", {})
-        if expected_slots:
-            actual_slots = resp.get("slots", {})
-            # Check each expected slot (date, time, date_range, service_id, booking_id, etc.)
-            for slot_name, expected_value in expected_slots.items():
-                actual_value = actual_slots.get(slot_name)
-                if slot_name == "date_range":
-                    # Special handling for date_range (dict comparison)
-                    assert actual_value is not None, f"Expected {slot_name} in slots for needs_clarification status"
-                    assert isinstance(
-                        actual_value, dict), f"{slot_name} must be a dict, got {type(actual_value)}"
-                    assert actual_value == expected_value, (
-                        f"{slot_name} mismatch: got {actual_value}, expected {expected_value}"
-                    )
-                else:
-                    # Direct value comparison for other slots (date, time, service_id, booking_id, etc.)
-                    assert actual_value == expected_value, (
-                        f"Slot '{slot_name}' mismatch: got '{actual_value}', expected '{expected_value}'"
-                    )
+    # For non-UNKNOWN intents, check confidence is present and reasonable
+    if expected["intent"] != "UNKNOWN":
+        assert "confidence" in resp["intent"], "Intent should have confidence for non-UNKNOWN intents"
+        assert resp["intent"]["confidence"] >= 0.7, (
+            f"Low confidence: {resp['intent'].get('confidence')}"
+        )
 
 
 def test_cases(scenarios_to_run=None):
@@ -437,18 +212,14 @@ def test_cases(scenarios_to_run=None):
             if resp_status != 200 or resp is None:
                 raise AssertionError(f"HTTP {resp_status}, body={resp_raw}")
             assert_response(resp, case["expected"])
-            print(f"✓ Test case {i} passed")
+            print(f"PASS Test case {i} passed")
         except AssertionError as e:
-            print(f"✗ Test case {i} failed")
+            print(f"FAIL Test case {i} failed")
             print(f"  sentence: {case['sentence']}")
             print(f"  expected: {case['expected']}")
             if resp:
-                print(f"  actual.status: {resp.get('status')}")
                 print(f"  actual.intent: {resp.get('intent')}")
-                print(f"  actual.missing_slots: {resp.get('missing_slots')}")
-                if resp.get("needs_clarification"):
-                    print(
-                        f"  actual.clarification_reason: {resp.get('clarification_reason')}")
+                print(f"  actual.facts: {resp.get('facts')}")
             else:
                 print(f"  actual.http_status: {resp_status}")
                 print(f"  actual.raw_body: {resp_raw}")
@@ -498,8 +269,8 @@ def test_no_canonical_service_id_in_response():
         resp, resp_status, resp_raw = call_luma(sentence, booking_mode)
         assert resp_status == 200 and resp is not None, f"HTTP {resp_status}, body={resp_raw}"
 
-        # Check slots.service_id if present
-        service_id = resp.get("slots", {}).get("service_id")
+        # Check facts.service_id if present
+        service_id = resp.get("facts", {}).get("service_id")
         if service_id:
             # Must not be a canonical ID
             assert service_id not in canonical_ids, (
@@ -516,7 +287,7 @@ def test_no_canonical_service_id_in_response():
                     f"Expected a tenant service key from tenant_context.aliases."
                 )
 
-    print("✓ Invariant test passed: No canonical service IDs returned in API responses")
+    print("PASS Invariant test passed: No canonical service IDs returned in API responses")
 
 
 def test_output_independent_of_previous_requests():
@@ -530,7 +301,7 @@ def test_output_independent_of_previous_requests():
     3. Fragmentary inputs like "tomorrow" or "at 3pm" without booking verbs return UNKNOWN
        regardless of any prior requests with the same user_id
 
-    This invariant ensures that Luma never infers intent or slots from previous turns.
+    This invariant ensures that Luma never infers intent or facts from previous turns.
     """
     # Use a fixed user_id to test statelessness
     fixed_user_id = f"{USER_ID_PREFIX}stateless_test"
@@ -599,7 +370,7 @@ def test_output_independent_of_previous_requests():
         f"Response: {json.dumps(resp4, indent=2)}"
     )
 
-    print("✓ Invariant test passed: Luma output is independent of previous requests (stateless)")
+    print("PASS Invariant test passed: Luma output is independent of previous requests (stateless)")
 
 
 if __name__ == "__main__":
@@ -702,7 +473,7 @@ Examples:
                     raise AssertionError(
                         f"HTTP {single_status}, body={single_raw}")
                 assert_response(single_resp, single_case["expected"])
-                print(f"✓ Test case {idx} ({scenario_type}) passed")
+                print(f"PASS Test case {idx} ({scenario_type}) passed")
                 if args.verbose:
                     print(f"  sentence: {single_case['sentence']}")
                     print("  response json:")
@@ -711,7 +482,7 @@ Examples:
                     except (TypeError, ValueError) as dump_err:
                         print(f"  (could not dump actual json: {dump_err})")
             except AssertionError as e:
-                print(f"✗ Test case {idx} ({scenario_type}) failed")
+                print(f"FAIL Test case {idx} ({scenario_type}) failed")
                 print(f"  sentence: {single_case['sentence']}")
                 print(f"  expected: {single_case['expected']}")
                 print("  actual.response json:")
@@ -749,4 +520,4 @@ Examples:
             print(f"✗ Invariant test failed: {e}")
             sys.exit(1)
 
-        print("\n✓ All invariant tests passed")
+        print("\nPASS All invariant tests passed")

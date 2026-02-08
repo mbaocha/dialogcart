@@ -1,0 +1,93 @@
+scenarios:
+  - name: confirm_cancellation_happy_path
+    description: User cancels booking with booking_id provided
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "cancel my booking"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          missing_slots: ["booking_id"]
+          no_availability_search: true
+
+      - sentence: "booking ABC12345"
+        expect:
+          status: READY
+          action: CONFIRM_CANCELLATION
+          intent_preserved: true
+          no_availability_search: true
+
+  - name: confirm_cancellation_all_slots_one_turn
+    description: User provides booking_id in same turn as cancel request
+    domain: service
+    aliases:
+      massage: massage
+    turns:
+      - sentence: "cancel booking XYZ67890"
+        expect:
+          status: READY
+          action: CONFIRM_CANCELLATION
+          no_availability_search: true
+
+  - name: confirm_cancellation_exploratory_first
+    description: User says cancel without booking_id, then provides it
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "i need to cancel"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          missing_slots: ["booking_id"]
+          no_availability_search: true
+
+      - sentence: "the booking with id DEF99999"
+        expect:
+          status: READY
+          action: CONFIRM_CANCELLATION
+          intent_preserved: true
+          no_availability_search: true
+
+  - name: confirm_cancellation_clarification_phase
+    description: User requests cancellation, system asks for booking_id, user provides it
+    domain: service
+    aliases:
+      facial: facial
+    turns:
+      - sentence: "delete my booking"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          missing_slots: ["booking_id"]
+          no_availability_search: true
+
+      - sentence: "GHI11111"
+        expect:
+          status: READY
+          action: CONFIRM_CANCELLATION
+          intent_preserved: true
+          no_availability_search: true
+
+  - name: confirm_cancellation_no_accidental_availability
+    description: Ensure cancellation flow does not trigger availability search
+    domain: service
+    aliases:
+      massage: massage
+    turns:
+      - sentence: "cancel my appointment"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          missing_slots: ["booking_id"]
+          no_availability_search: true
+
+      - sentence: "booking number JKL22222"
+        expect:
+          status: READY
+          action: CONFIRM_CANCELLATION
+          intent_preserved: true
+          no_availability_search: true
+

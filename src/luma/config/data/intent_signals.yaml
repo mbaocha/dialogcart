@@ -129,6 +129,7 @@ MODIFY_BOOKING:
       - ["change", "date"]
       - ["move", "it", "later"]
       - ["move", "it", "earlier"]
+      - ["move", "it", "to"]
 
   intent_defining_slots:
     - booking_id

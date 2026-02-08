@@ -1,0 +1,221 @@
+scenarios:
+  - name: confirm_appointment_happy_path
+    description: User books appointment and confirms with all required slots. Availability must be explicitly checked before confirmation.
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book a haircut tomorrow"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: SEARCH_AVAILABILITY
+          missing_slots: ["time"]
+
+      - sentence: "2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_APPOINTMENT
+          intent_preserved: true
+
+  - name: book_haircut_tomorrow_by_2pm
+    description: User books appointment with all information in a single turn
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book haircut tomorrow by 2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+
+  - name: confirm_appointment_time_first
+    description: User provides time before service/date
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "2pm"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: []
+          # UNKNOWN intent - cannot compute missing slots without known intent
+
+      - sentence: "book a haircut tomorrow"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+          # Slots merged: time from turn 1 + service/date from turn 2
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_APPOINTMENT
+          intent_preserved: true
+
+  - name: confirm_appointment_date_first
+    description: User gives date before service
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "tomorrow"
+        expect:
+          status: NEEDS_CLARIFICATION
+          # Date provided but service and time missing
+
+      - sentence: "book a haircut"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["time"]
+          intent_preserved: true
+          # Date preserved from turn 1, service added, time still missing
+
+      - sentence: "3pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+
+  - name: confirm_appointment_fuzzy_time
+    description: Fuzzy time requires clarification
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book a haircut tomorrow afternoon"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["time"]
+          # Date and service filled, but "afternoon" doesn't resolve to specific time
+
+      - sentence: "around 2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+          # Time now resolved
+
+  - name: confirm_appointment_change_time_before_confirm
+    description: User changes time after availability but before confirmation
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book a haircut tomorrow at 2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+
+      - sentence: "actually make it 3pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+          # Time overwritten, new availability search triggered
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_APPOINTMENT
+          intent_preserved: true
+
+  - name: confirm_appointment_reject_then_accept
+    description: User rejects availability once, then proceeds
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book a haircut tomorrow at 2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+
+      - sentence: "no"
+        expect:
+          status: READY
+          action: CONFIRM_APPOINTMENT
+          # REJECT_OR_CHANGE continues the flow (treated as confirmation)
+
+      - sentence: "book a haircut tomorrow at 3pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          # New booking flow starts fresh
+
+  - name: confirm_appointment_interrupt_with_question
+    description: User asks a question mid-flow
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book a haircut tomorrow"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: ["time"]
+
+      - sentence: "how long does it take?"
+        expect:
+          status: NON_DURABLE_INTENT
+          # Question interrupts the booking flow
+
+      - sentence: "2pm"
+        expect:
+          status: NEEDS_CLARIFICATION
+          missing_slots: []
+          # UNKNOWN intent - cannot compute missing slots without known intent
+
+  - name: confirm_appointment_cancel_mid_flow
+    description: User switches intent before confirmation
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book a haircut tomorrow at 2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+
+      - sentence: "actually cancel it"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          intent_switched: true
+          # Intent switches from CREATE_APPOINTMENT to CANCEL_BOOKING
+          # Session resets, booking_id required for cancellation
+
+  - name: confirm_appointment_repeat_confirmation
+    description: User confirms twice (idempotency)
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book a haircut tomorrow at 2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_APPOINTMENT
+          intent_preserved: true
+
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_APPOINTMENT
+          intent_preserved: true
+          # Idempotent confirmation - no duplicate side effects
+
