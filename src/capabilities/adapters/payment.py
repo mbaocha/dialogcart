@@ -278,14 +278,32 @@ class PaymentAdapter(CapabilityAdapter):
             )
 
         # If payment is complete, return completion
-        if payment_status == "paid" or not payment_required:
+        completed = payment_status == "paid" or not payment_required
+
+        # LOG: Payment completion status (as requested in investigation prompt)
+        import logging
+        adapter_logger = logging.getLogger(__name__)
+        adapter_logger.info(
+            f"[PAYMENT_ADAPTER_DEBUG] payment_status={payment_status}, "
+            f"payment_required={payment_required}, -> completed={completed}"
+        )
+
+        if completed:
+            completion_facts = {
+                "payment_satisfied": True,
+                "payment_reference": payment_intent_id or "unknown",
+            }
+            adapter_logger.error(
+                f"[PAYMENT_ADAPTER_DEBUG] Payment completed for booking_code={booking_code}: "
+                f"payment_status={payment_status}, payment_required={payment_required}, "
+                f"payment_intent_id={payment_intent_id}, "
+                f"returning AdapterResponse(completed=True, facts={completion_facts})"
+            )
+
             return AdapterResponse(
                 completed=True,
                 text=None,
-                facts={
-                    "payment_satisfied": True,
-                    "payment_reference": payment_intent_id or "unknown",
-                }
+                facts=completion_facts
             )
 
         # Payment not complete - re-send payment link
@@ -320,4 +338,3 @@ class PaymentAdapter(CapabilityAdapter):
         # No cleanup needed - adapter is stateless
         # Payment intents remain in client store (tests can reset if needed)
         return
-

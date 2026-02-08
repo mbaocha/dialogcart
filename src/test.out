@@ -7,7 +7,7 @@ collected 157 items / 6 skipped
 
 core/tests/e2e/test_conversation_rendering_e2e.py ..                     [  1%]
 core/tests/e2e/test_core_capability_noop_e2e.py .                        [  1%]
-core/tests/e2e/test_core_capability_payment_e2e.py F                     [  2%]
+core/tests/e2e/test_core_capability_payment_e2e.py .                     [  2%]
 core/tests/e2e/test_core_e2e_followup_availability.py .                  [  3%]
 core/tests/e2e/test_core_e2e_single_turn_availability.py .               [  3%]
 core/tests/e2e/test_rendering_verification.py ...                        [  5%]
@@ -34,137 +34,7 @@ core/tests/workflows/test_workflow_invocation.py ......                  [ 93%]
 core/tests/workflows/test_workflow_manual.py ...                         [ 95%]
 core/tests/workflows/test_workflow_registry.py .......                   [100%]
 
-=================================== FAILURES ===================================
-___________________ test_core_capability_payment_end_to_end ____________________
-core/tests/e2e/test_core_capability_payment_e2e.py:438: in test_core_capability_payment_end_to_end
-    assert reconciliation_result.passthrough is True, \
-E   AssertionError: Capability should complete (passthrough=True) when payment is paid, got: False
-E   assert False is True
-E    +  where False = RunnerResult(passthrough=False, text='Your booking is being held for 30 minutes.\nPlease complete payment using the link below:\n\nhttps://pay.test/booking_123', facts=None, active_capability='payment').passthrough
------------------------------ Captured stdout call -----------------------------
-{"trace_point": "AFTER_INTENT", "intent": "CREATE_RESERVATION", "is_first_turn": true, "raw_luma_slots": {"service_id": "room", "date_range": "2026-01-20 to 2026-01-22"}, "raw_luma_context": {}}
-[_compute_effective_collected_slots] raw_slots keys=['service_id', 'date_range']
-  effective_slots_for_filtering.keys()=['service_id', 'date_range']
-  promoted_slots={'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'}
-  effective_collected_slots (after filter)={'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'}
-  effective_collected_slots.keys()=['service_id', 'date_range']
-{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_RESERVATION", "modification_context": null, "promoted_slots": {"service_id": "room", "date_range": "2026-01-20 to 2026-01-22"}, "effective_collected_slots": {"service_id": "room", "date_range": "2026-01-20 to 2026-01-22"}}
-
-[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_RESERVATION", "slots_used": {"service_id": "room", "date_range": "2026-01-20 to 2026-01-22"}, "session_slots": null, "modification_context": null}
-[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_RESERVATION, missing_slots=[]
-[SLOT_STATE_TRACE] Before finalization: {
-  "intent": "CREATE_RESERVATION",
-  "merged_session_slots": {
-    "keys": [
-      "service_id",
-      "date_range"
-    ],
-    "values": {
-      "service_id": "room",
-      "date_range": "2026-01-20 to 2026-01-22"
-    }
-  },
-  "effective_collected_slots": {
-    "keys": [
-      "service_id",
-      "date_range"
-    ],
-    "values": {
-      "service_id": "room",
-      "date_range": "2026-01-20 to 2026-01-22"
-    }
-  },
-  "missing_slots": [],
-  "status": "READY"
-}
-TURN_STATE: {
-  "intent": "CREATE_RESERVATION",
-  "raw_luma_slots": {
-    "keys": [],
-    "values": {}
-  },
-  "merged_session_slots": {
-    "keys": [
-      "service_id",
-      "date_range"
-    ],
-    "values": {
-      "service_id": "room",
-      "date_range": "2026-01-20 to 2026-01-22"
-    }
-  },
-  "promoted_slots": {
-    "keys": [
-      "service_id",
-      "date_range"
-    ],
-    "values": {
-      "service_id": "room",
-      "date_range": "2026-01-20 to 2026-01-22"
-    }
-  },
-  "effective_collected_slots": {
-    "keys": [
-      "service_id",
-      "date_range"
-    ],
-    "values": {
-      "service_id": "room",
-      "date_range": "2026-01-20 to 2026-01-22"
-    }
-  },
-  "required_slots": [
-    "date_range",
-    "service_id"
-  ],
-  "missing_slots": [],
-  "status": "READY",
-  "decision_reason": "READY_ALL_SATISFIED"
-}
------------------------------- Captured log call -------------------------------
-ERROR    core.orchestration.session.session_manager:session_manager.py:239 [SESSION_SAVE] user_id=test-payment-e2e-user key=session:test-payment-e2e-user intent_name='CREATE_RESERVATION' status='READY' slots_keys=['service_id', 'date_range', 'booking_id', 'booking_code', 'total_amount', 'currency']
-ERROR    core.orchestration.session.session_manager:session_manager.py:266 [SESSION_SAVE] Saved to in-memory: user_id=test-payment-e2e-user
-ERROR    core.orchestration.session.session_manager:session_manager.py:174 [SESSION_LOAD] Attempting to load: user_id=test-payment-e2e-user key=session:test-payment-e2e-user
-ERROR    core.orchestration.session.session_manager:session_manager.py:207 [SESSION_LOAD] Found in in-memory: user_id=test-payment-e2e-user intent_name='CREATE_RESERVATION' status='READY'
-INFO     core.turn_log:orchestrator.py:424 {"turn": "INPUT", "user_id": "test-payment-e2e-user", "text": "hello"}
-INFO     core.turn_log:orchestrator.py:444 {"turn": "SESSION_READ", "session": null}
-INFO     core.turn_log:orchestrator.py:1423 {"turn": "LUMA", "intent": "CREATE_RESERVATION", "slots": {"service_id": "room", "date_range": "2026-01-20 to 2026-01-22"}, "missing_slots": []}
-ERROR    core.planning.orchestration.intent_resolution:intent_resolution.py:128 [SESSION_RESET_WRITER] WRITER=initial_default value=False location=line_122_default reason=initial_assignment luma_intent=CREATE_RESERVATION user_id=test-payment-e2e-user
-ERROR    core.planning.orchestration.intent_resolution:intent_resolution.py:414 [SESSION_RESET_WRITER] FINAL_VALUE=False effective_intent=CREATE_RESERVATION location=line_337_before_return user_id=test-payment-e2e-user
-ERROR    core.planning.orchestration.intent_resolution:intent_resolution.py:420 [INTENT_RESOLVE] RETURNING effective_intent=CREATE_RESERVATION session_reset_occurred=False user_id=test-payment-e2e-user
-ERROR    core.orchestration.orchestrator:orchestrator.py:1886 [SESSION_RESET_WRITER] RECEIVED_FROM_RESOLVER value=False source=resolve_effective_intent effective_intent=CREATE_RESERVATION user_id=test-payment-e2e-user
-ERROR    core.orchestration.orchestrator:orchestrator.py:1894 [ORCHESTRATOR] AFTER resolve_effective_intent: effective_intent=CREATE_RESERVATION session_reset_occurred=False will_null_session_state=False user_id=test-payment-e2e-user
-ERROR    core.orchestration.orchestrator:orchestrator.py:2093 [INTENT_TRACE_ORCHESTRATOR] BEFORE merge_luma_with_session: effective_intent=CREATE_RESERVATION, effective_response['intent']['name']=CREATE_RESERVATION, session.intent_name=None, session.status=None, session_reset_occurred=False, user_id=test-payment-e2e-user
-ERROR    core.orchestration.orchestrator:orchestrator.py:2156 [SESSION_RESET_WRITER] FINAL_CHECK_BEFORE_MERGE: session_reset_occurred=False source=resolve_effective_intent session_for_merge_exists=False session_for_merge_intent=None session_for_merge_slots=[] session_status_for_merge=None will_block_merge=False user_id=test-payment-e2e-user
-ERROR    core.orchestration.orchestrator:orchestrator.py:2168 [ORCHESTRATOR] BEFORE should_merge_session: session_reset_occurred=False session_for_merge_intent=None session_for_merge_slots=[] session_status_for_merge=None is_session_intent_durable=False user_id=test-payment-e2e-user
-ERROR    core.orchestration.orchestrator:orchestrator.py:2185 [ORCHESTRATOR] should_merge_session=None user_id=test-payment-e2e-user
-ERROR    core.orchestration.orchestrator:orchestrator.py:2397 [INTENT_TRACE_ORCHESTRATOR] BEFORE process_luma_response: effective_response['intent']['name']=CREATE_RESERVATION, effective_response['_effective_intent']=CREATE_RESERVATION, session.intent_name=None, session.status=None, user_id=test-payment-e2e-user
-ERROR    core.orchestration.api.turn_state:turn_state.py:173 [MISSING_SLOTS_TRACE] finalize_turn_state: INITIAL computation from planner, intent=CREATE_RESERVATION, required_slots=['date_range', 'service_id'], collected_slots=['date_range', 'service_id'], effective_collected_slots_keys=['date_range', 'service_id'], missing_slots=[], missing_slots_length=0
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1024 [MISSING_SLOTS_TRACE] process_luma_response: AFTER finalize_turn_state, BEFORE time_constraint logic, intent=CREATE_RESERVATION, user_id=test-payment-e2e-user, required_slots=['date_range', 'service_id'], effective_collected_slots_keys=['date_range', 'service_id'], effective_collected_slots={'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'}, session_slots_keys=['date_range', 'service_id'], session_slots={'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'}, slots_for_filtering_keys=['date_range', 'service_id'], missing_slots=[], missing_slots_length=0, has_time_in_effective=False, has_time_in_session=False, has_time_in_slots_for_filtering=False
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1215 [MISSING_SLOTS_TRACE] process_luma_response: BEFORE build_decision_plan, intent=CREATE_RESERVATION, user_id=test-payment-e2e-user, required_slots=['date_range', 'service_id'], effective_collected_slots_keys=['date_range', 'service_id'], has_time_in_effective=False, has_time_in_slots_for_filtering=False, missing_slots=[], missing_slots_length=0, luma_response_for_plan['missing_slots']=[]
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1233 [INTENT_TRACE_PLANNING_ENTRY] BEFORE build_decision_plan: decision.intent_name=CREATE_RESERVATION, facts.intent_name=, luma_response['intent']['name']=CREATE_RESERVATION, luma_response['_effective_intent']=CREATE_RESERVATION, user_id=test-payment-e2e-user
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1314 [PLANNING_DECISION] AFTER planner build_decision_plan: intent=CREATE_RESERVATION, plan.status=READY, plan.stage=AVAILABILITY, plan.action=SEARCH_AVAILABILITY, session.intent_name=None, session.status=None, session.stage=None, session.action=None, availability_fingerprint_stored=None, availability_fingerprint_current=2a90e438b73b29ecb7993c06b90b8885477211ccf0da87fcc7fbf63cf988e178, availability_resolved=False, last_execution_result=None, current_slots service_id=room, date=None, time=None, org_id=None
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1330 [MISSING_SLOTS_TRACE] process_luma_response: AFTER build_decision_plan, intent=CREATE_RESERVATION, user_id=test-payment-e2e-user, missing_slots_variable=[], missing_slots_length=0, luma_response_for_plan['missing_slots']=[], plan.keys()=['status', 'stage', 'action', 'allowed_actions', 'blocked_actions', 'awaiting', 'executable_actions']
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1558 [FLOW_TRACE] process_luma_response building facts:
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1559 [FLOW_TRACE]   facts.slots: {'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'} (keys: ['service_id', 'date_range'])
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1561 [FLOW_TRACE]   facts.missing_slots: [] (len: 0)
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1564 [FLOW_TRACE]   facts.slots.service_id: room
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1633 [FLOW_TRACE] process_luma_response RETURNING:
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1634 [FLOW_TRACE]   decision.keys(): ['intent_name', 'action_name', 'booking', 'plan', 'facts']
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1636 [FLOW_TRACE]   decision.facts: {'org': {'payment_required': True, 'businessCategoryId': 1}, 'slots': {'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'}, 'missing_slots': [], 'context': {}, '_debug': {'recomputed_missing_slots': [], 'effective_collected_slots': ['service_id', 'date_range'], 'slots_keys': ['service_id', 'date_range'], 'booking_has_services': True, 'service_id_in_slots': True, 'service_id_value': 'room'}}
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1638 [FLOW_TRACE]   decision.facts.slots: {'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'}
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1640 [FLOW_TRACE]   decision.facts.missing_slots: []
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1642 [FLOW_TRACE]   decision.plan.stage: AVAILABILITY
-ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1644 [FLOW_TRACE]   decision.plan.action: SEARCH_AVAILABILITY
-ERROR    core.orchestration.orchestrator:orchestrator.py:2888 [FINALIZATION_DECISION] BEFORE PLAN_FINAL (after all overrides): intent=CREATE_RESERVATION, plan.status=AWAITING_CAPABILITY, plan.stage=AVAILABILITY, plan.action=SEARCH_AVAILABILITY, session.intent_name=None, session.status=None, session.stage=None, session.action=None, availability_fingerprint_stored=None, availability_fingerprint_current=2a90e438b73b29ecb7993c06b90b8885477211ccf0da87fcc7fbf63cf988e178, last_execution_result=None, slots service_id=room, date=None, time=None, org_id=None
-ERROR    core.orchestration.orchestrator:orchestrator.py:2906 [PLAN_FINAL] stage=AVAILABILITY action=SEARCH_AVAILABILITY missing=[] slots={'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'}
-ERROR    core.orchestration.session.session_manager:session_manager.py:174 [SESSION_LOAD] Attempting to load: user_id=test-payment-e2e-user key=session:test-payment-e2e-user
-ERROR    core.orchestration.session.session_manager:session_manager.py:207 [SESSION_LOAD] Found in in-memory: user_id=test-payment-e2e-user intent_name='CREATE_RESERVATION' status='READY'
-ERROR    core.orchestration.session.session_manager:session_manager.py:174 [SESSION_LOAD] Attempting to load: user_id=test-payment-e2e-user key=session:test-payment-e2e-user
-ERROR    core.orchestration.session.session_manager:session_manager.py:207 [SESSION_LOAD] Found in in-memory: user_id=test-payment-e2e-user intent_name='CREATE_RESERVATION' status='READY'
-=========================== short test summary info ============================
-FAILED core/tests/e2e/test_core_capability_payment_e2e.py::test_core_capability_payment_end_to_end
-================== 1 failed, 156 passed, 6 skipped in 25.42s ===================
+======================= 157 passed, 6 skipped in 22.06s ========================
 ================================================================================
 Running tests: all
 Path: core/tests

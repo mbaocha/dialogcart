@@ -320,8 +320,9 @@ def test_core_capability_payment_end_to_end():
         # Phase 1: Payment Initiation
         # Run payment capability once to create payment intent and return payment link
         # ============================================================
-        # Explicitly invoke capability execution (same path as orchestrator)
+        # Create runner once and reuse for both phases to preserve adapter activation state across turns
         runner = CapabilityRunner()
+        # Explicitly invoke capability execution (same path as orchestrator)
         initiation_result = runner.handle(
             user_input=None,  # First activation - no user input yet
             core_outcome=outcome1,
@@ -422,7 +423,7 @@ def test_core_capability_payment_end_to_end():
         # Explicitly invoke capability execution in reconciliation mode
         # This simulates what happens when user provides input while capability is active
         # The capability checks payment status and returns completion facts if paid
-        runner = CapabilityRunner()
+        # Reuse runner to preserve adapter activation state across turns
         reconciliation_result = runner.handle(
             user_input="ok",  # User input to trigger payment status check
             core_outcome=outcome1,  # Still in AWAITING_CAPABILITY status

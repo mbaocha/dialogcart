@@ -179,7 +179,7 @@ def merge_luma_with_session(
     # ARCHITECTURAL FIX: Intent is resolved ONCE in orchestrator.py before calling merge_luma_with_session
     # The orchestrator sets effective_response["intent"]["name"] as the SINGLE SOURCE OF TRUTH
     # This function MUST NOT recompute intent - it must preserve the authoritative intent
-    # 
+    #
     # HARD RULE: NEVER overwrite merged["intent"]["name"] if it already exists and is non-empty
     # NEVER write "" or None into merged["intent"]["name"]
     # If orchestrator set an intent, it is authoritative and must be preserved
@@ -196,9 +196,9 @@ def merge_luma_with_session(
     # Ensure intent dict exists
     if not isinstance(merged.get("intent"), dict):
         merged["intent"] = {}
-    
+
     existing_intent_name = merged.get("intent", {}).get("name", "")
-    
+
     # PHASE 1 INSTRUMENTATION: Log BEFORE intent assignment
     logger.error(
         "[INTENT_TRACE_SESSION_MERGE] BEFORE intent assignment: "
@@ -207,7 +207,7 @@ def merge_luma_with_session(
         f"luma_intent_name={luma_intent_name}, "
         f"session_intent_is_durable={is_durable_intent(session_intent_name) if session_intent_name else False}"
     )
-    
+
     # INVARIANT ENFORCEMENT: If session has a durable intent, UNKNOWN/empty/None intents from Luma must be ignored
     if (not existing_intent_name or existing_intent_name == "UNKNOWN") and session_intent_name:
         # Check if session intent is durable
@@ -247,7 +247,7 @@ def merge_luma_with_session(
         logger.debug(
             f"merge_luma_with_session: Preserved authoritative intent from orchestrator: {existing_intent_name}"
         )
-        
+
         # INVARIANT CHECK: Assert if attempting to overwrite a durable intent
         if session_intent_name and is_durable_intent(session_intent_name):
             if existing_intent_name != session_intent_name and (not luma_intent_name or luma_intent_name == "UNKNOWN"):
@@ -271,18 +271,18 @@ def merge_luma_with_session(
     session_facts = session_state.get("facts", {}) if session_state else {}
     if not isinstance(session_facts, dict):
         session_facts = {}
-    
+
     luma_facts = merged.get("facts", {})
     if not isinstance(luma_facts, dict):
         luma_facts = {}
-    
+
     # Merge: new facts from Luma override old facts from session
     # This allows capabilities to update facts (e.g., payment_satisfied: True)
     merged_facts = {**session_facts, **luma_facts}
-    
+
     # Update merged response with merged facts
     merged["facts"] = merged_facts
-    
+
     # STEP 3: Extract slots from Luma response
     # FACT-ONLY: Promote facts to slots BEFORE merging with session
     # This ensures facts.service_id, facts.times, etc. are available for planning
@@ -906,7 +906,8 @@ def merge_luma_with_session(
     # If CREATE_APPOINTMENT intent and Luma provides new booking slots (service_id, date, or time),
     # this indicates a new booking request, not a confirmation of the previous booking
     # Clear booking_id and availability_fingerprint to allow fresh booking flow
-    merged_intent_name = merged.get("intent", {}).get("name", "") if isinstance(merged.get("intent"), dict) else ""
+    merged_intent_name = merged.get("intent", {}).get(
+        "name", "") if isinstance(merged.get("intent"), dict) else ""
     if merged_intent_name == "CREATE_APPOINTMENT" and "booking_id" in merged_slots:
         # Check if Luma provided new booking-related slots (indicating a new booking request)
         has_new_booking_slots = any(
@@ -1074,7 +1075,8 @@ def merge_luma_with_session(
         # This is a defensive check to prevent slot loss during intent transitions
         # (e.g., UNKNOWN -> CREATE_APPOINTMENT where date should be preserved)
         if session_slots:
-            missing_from_merge = set(session_slots.keys()) - set(merged_slots.keys())
+            missing_from_merge = set(
+                session_slots.keys()) - set(merged_slots.keys())
             if missing_from_merge:
                 logger.warning(
                     f"[INTENT_CHANGE] Session slots missing from merged_slots before filtering! "
@@ -2113,7 +2115,7 @@ def build_session_state_from_outcome(
     outcome_facts = outcome.get("facts", {})
     if not isinstance(outcome_facts, dict):
         outcome_facts = {}
-    
+
     # Merge with previous session facts (new facts override old keys)
     # This ensures capability facts (e.g., payment_satisfied) persist across turns
     previous_facts = {}
@@ -2121,11 +2123,11 @@ def build_session_state_from_outcome(
         previous_facts = previous_session_state.get("facts", {})
         if not isinstance(previous_facts, dict):
             previous_facts = {}
-    
+
     # Merge: new facts from outcome override old facts from session
     # This allows capabilities to update facts (e.g., payment_satisfied: True)
     merged_facts = {**previous_facts, **outcome_facts}
-    
+
     # Extract facts for backward compatibility (used for slots extraction below)
     facts = merged_facts
 
@@ -2163,7 +2165,7 @@ def build_session_state_from_outcome(
     # Extract intent - HARD RULE: Explicit precedence order for intent during persistence
     # DURABLE INTENTS RULE: Only durable intents may be persisted
     # INVARIANT: A durable intent MUST NEVER be wiped once established
-    # 
+    #
     # Explicit precedence order:
     # 1. outcome.intent_name (if truthy and durable)
     # 2. plan.intent_name (if available and durable)
@@ -2403,7 +2405,8 @@ def build_session_state_from_outcome(
 
     # CRITICAL: Final intent determination with hard assertion
     # Use the resolved intent_name from the precedence order above
-    final_intent_name = intent_name if intent_name and intent_name not in ("", "UNKNOWN") else None
+    final_intent_name = intent_name if intent_name and intent_name not in (
+        "", "UNKNOWN") else None
 
     # HARD ASSERTION: If a durable intent exists in the session, persistence must never write intent_name=None
     # Check if previous session has a durable intent that should be preserved
@@ -2451,7 +2454,8 @@ def build_session_state_from_outcome(
             list(outcome.keys()) if outcome else None,
             list(outcome.get("plan", {}).keys()) if outcome and isinstance(
                 outcome.get("plan"), dict) else None,
-            previous_session_state.get("intent_name") if previous_session_state else None
+            previous_session_state.get(
+                "intent_name") if previous_session_state else None
         )
         # Last resort: try to preserve any previous intent (even if not explicitly durable-checked)
         previous_intent = previous_session_state.get(
@@ -2469,11 +2473,23 @@ def build_session_state_from_outcome(
     if previous_session_state:
         active_capability = previous_session_state.get("active_capability")
 
+    # CRITICAL: Clear active_capability when payment is satisfied
+    # This prevents "paid" sessions from re-entering payment capability
+    # Check merged_facts for payment_satisfied (capability facts are in merged_facts)
+    if active_capability == "payment" and merged_facts:
+        payment_satisfied = merged_facts.get("payment_satisfied", False)
+        if payment_satisfied:
+            logger.info(
+                f"[SESSION_PERSISTENCE] Clearing active_capability='payment' because payment_satisfied=True"
+            )
+            active_capability = None
+
     # CRITICAL: Ensure facts are JSON-serializable before persistence
     # Facts must be a dict with JSON-serializable values (no objects, no functions)
     # Filter out any non-serializable values to prevent session save failures
+    # INVARIANT: serializable_facts must ALWAYS be a dict (never None, never omitted)
     serializable_facts = {}
-    if merged_facts:
+    if merged_facts and isinstance(merged_facts, dict):
         try:
             # Test JSON serialization
             json.dumps(merged_facts, default=str)
@@ -2492,7 +2508,7 @@ def build_session_state_from_outcome(
                     logger.warning(
                         f"[FACTS_PERSISTENCE] Skipping non-serializable fact key: {key}"
                     )
-    
+
     # DURABLE INTENTS RULE: Gate slot persistence by durable intent
     # Only durable intents may be persisted in session
     if final_intent_name and is_durable_intent(final_intent_name):
@@ -2502,7 +2518,8 @@ def build_session_state_from_outcome(
             "intent_name": final_intent_name,
             "missing_slots": missing_slots_to_persist,
             "slots": filtered_slots,  # Only durable slots for this intent
-            "facts": serializable_facts,  # First-class, durable facts (same status as slots)
+            # First-class, durable facts (same status as slots)
+            "facts": serializable_facts,
             "status": status,
             "active_capability": active_capability  # optional passthrough
         }
@@ -2525,6 +2542,33 @@ def build_session_state_from_outcome(
             f"[build_session_state_from_outcome] Ephemeral intent={final_intent_name} - "
             f"NOT persisting intent or slots, but persisting {len(serializable_facts)} facts"
         )
+
+    # HARD GUARD: Ensure session_state["facts"] is always present as a dict
+    # This invariant must hold for all sessions, especially those with active_capability
+    # Session facts are first-class and must never be omitted, even if empty
+    if "facts" not in session_state:
+        logger.warning(
+            f"[SESSION_PERSISTENCE] Missing 'facts' key in session_state, adding empty dict. "
+            f"session_state keys: {list(session_state.keys())}"
+        )
+        session_state["facts"] = {}
+    elif session_state["facts"] is None:
+        logger.warning(
+            f"[SESSION_PERSISTENCE] session_state['facts'] is None, replacing with empty dict"
+        )
+        session_state["facts"] = {}
+    elif not isinstance(session_state["facts"], dict):
+        logger.warning(
+            f"[SESSION_PERSISTENCE] session_state['facts'] is not a dict (type: {type(session_state['facts'])}), "
+            f"replacing with empty dict"
+        )
+        session_state["facts"] = {}
+
+    # Hard assertion: facts must be a dict
+    assert isinstance(session_state["facts"], dict), (
+        f"CRITICAL: session_state['facts'] must be a dict before persistence. "
+        f"Got type: {type(session_state['facts'])}, value: {session_state.get('facts')}"
+    )
 
     # SESSION_SAVE_DEBUG: Guard logging before session save
     logger.error(
@@ -2573,7 +2617,8 @@ def build_session_state_from_outcome(
             )
         # Preserve last_execution_result from previous session if it exists
         if previous_session_state and previous_session_state.get("last_execution_result"):
-            session_state["last_execution_result"] = previous_session_state.get("last_execution_result")
+            session_state["last_execution_result"] = previous_session_state.get(
+                "last_execution_result")
             logger.debug(
                 f"[AVAILABILITY_EXECUTED] Preserving last_execution_result from previous session"
             )
@@ -2583,7 +2628,7 @@ def build_session_state_from_outcome(
         # 3. From session_store (if available, for same-turn persistence)
         # 4. From session functions (fallback)
         availability_fingerprint_to_preserve = None
-        
+
         # Priority 1: Extract from outcome's result/plan if SEARCH_AVAILABILITY executed this turn
         # When execution happens, the fingerprint can be in:
         # - outcome.result (execution_result with type="availability")
@@ -2592,11 +2637,12 @@ def build_session_state_from_outcome(
         if outcome and isinstance(outcome, dict):
             # Check if outcome.result exists (full result structure)
             result_obj = outcome.get("result")
-            if (isinstance(result_obj, dict) 
+            if (isinstance(result_obj, dict)
                     and result_obj.get("type") == "availability"
                     and result_obj.get("status") == "success"
                     and result_obj.get("availability_fingerprint")):
-                availability_fingerprint_to_preserve = result_obj.get("availability_fingerprint")
+                availability_fingerprint_to_preserve = result_obj.get(
+                    "availability_fingerprint")
                 logger.debug(
                     f"[AVAILABILITY_FINGERPRINT] Extracted from outcome.result: {availability_fingerprint_to_preserve}"
                 )
@@ -2604,7 +2650,8 @@ def build_session_state_from_outcome(
             elif outcome.get("plan") and isinstance(outcome.get("plan"), dict):
                 plan_obj = outcome.get("plan")
                 if plan_obj.get("availability_fingerprint"):
-                    availability_fingerprint_to_preserve = plan_obj.get("availability_fingerprint")
+                    availability_fingerprint_to_preserve = plan_obj.get(
+                        "availability_fingerprint")
                     logger.debug(
                         f"[AVAILABILITY_FINGERPRINT] Extracted from outcome.plan: {availability_fingerprint_to_preserve}"
                     )
@@ -2612,19 +2659,21 @@ def build_session_state_from_outcome(
             elif (outcome.get("type") == "availability"
                     and outcome.get("status") == "success"
                     and outcome.get("availability_fingerprint")):
-                availability_fingerprint_to_preserve = outcome.get("availability_fingerprint")
+                availability_fingerprint_to_preserve = outcome.get(
+                    "availability_fingerprint")
                 logger.debug(
                     f"[AVAILABILITY_FINGERPRINT] Extracted from outcome (direct): {availability_fingerprint_to_preserve}"
                 )
-        
+
         # Priority 2: From previous_session_state (cross-turn preservation)
         if not availability_fingerprint_to_preserve:
             if previous_session_state and previous_session_state.get("availability_fingerprint"):
-                availability_fingerprint_to_preserve = previous_session_state.get("availability_fingerprint")
+                availability_fingerprint_to_preserve = previous_session_state.get(
+                    "availability_fingerprint")
                 logger.debug(
                     f"[AVAILABILITY_FINGERPRINT] Extracted from previous_session_state: {availability_fingerprint_to_preserve}"
                 )
-        
+
         # Priority 3: From session_store (if available, for same-turn persistence)
         if not availability_fingerprint_to_preserve and session_store and user_id:
             try:
@@ -2635,28 +2684,32 @@ def build_session_state_from_outcome(
                 else:
                     latest_session = None
                 if latest_session and isinstance(latest_session, dict):
-                    availability_fingerprint_to_preserve = latest_session.get("availability_fingerprint")
+                    availability_fingerprint_to_preserve = latest_session.get(
+                        "availability_fingerprint")
                     if availability_fingerprint_to_preserve:
                         logger.debug(
                             f"[AVAILABILITY_FINGERPRINT] Extracted from session_store: {availability_fingerprint_to_preserve}"
                         )
             except Exception as e:
-                logger.debug(f"Failed to read session from session_store for fingerprint preservation: {e}")
-        
+                logger.debug(
+                    f"Failed to read session from session_store for fingerprint preservation: {e}")
+
         # Priority 4: Fallback to session functions
         if not availability_fingerprint_to_preserve and user_id:
             try:
                 from core.orchestration.session import get_session
                 latest_session = get_session(user_id)
                 if latest_session and isinstance(latest_session, dict):
-                    availability_fingerprint_to_preserve = latest_session.get("availability_fingerprint")
+                    availability_fingerprint_to_preserve = latest_session.get(
+                        "availability_fingerprint")
                     if availability_fingerprint_to_preserve:
                         logger.debug(
                             f"[AVAILABILITY_FINGERPRINT] Extracted from get_session: {availability_fingerprint_to_preserve}"
                         )
             except Exception as e:
-                logger.debug(f"Failed to read session using get_session for fingerprint preservation: {e}")
-        
+                logger.debug(
+                    f"Failed to read session using get_session for fingerprint preservation: {e}")
+
         # Preserve fingerprint in session_state
         if availability_fingerprint_to_preserve:
             session_state["availability_fingerprint"] = availability_fingerprint_to_preserve
@@ -2666,7 +2719,8 @@ def build_session_state_from_outcome(
 
     # TRACE_MERGE 5: Before persisting session
     # CRITICAL: Use user_id parameter, not from session_state (session_state is being built, not previous session)
-    effective_user_id = user_id if user_id else (session_state.get("user_id") if isinstance(session_state, dict) else None) or "unknown"
+    effective_user_id = user_id if user_id else (session_state.get(
+        "user_id") if isinstance(session_state, dict) else None) or "unknown"
     durable_slots_list = list(slots.keys()) if isinstance(slots, dict) else []
     raw_service_id = slots.get(
         "service_id") if isinstance(slots, dict) else None

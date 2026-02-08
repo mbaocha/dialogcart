@@ -440,6 +440,28 @@ def handle_message(
         except Exception as e:
             logger.warning(f"Failed to get session for user {user_id}: {e}")
 
+    # FALLBACK 1: Use session_state from kwargs if session_store didn't provide one
+    # This allows tests to pass session_state directly (e.g., test_core_capability_payment_end_to_end)
+    if session_state is None and "session_state" in kwargs:
+        session_state = kwargs["session_state"]
+
+    # FALLBACK 2: Load from default session store if both session_store and kwargs.session_state are None
+    # This ensures handle_message() can always pick up persisted sessions, even when test helpers filter them out
+    # This is critical for reconciliation turns where the session exists but was filtered by status checks
+    if session_state is None:
+        try:
+            from core.orchestration.session.session_manager import get_session
+            session_state = get_session(user_id)
+            if session_state:
+                logger.debug(
+                    f"[SESSION_FALLBACK] Loaded session from default store for user_id={user_id} "
+                    f"(session_store was None, kwargs.session_state was None or filtered out)"
+                )
+        except (ImportError, Exception) as e:
+            # Session manager not available or load failed - continue without session
+            logger.debug(
+                f"[SESSION_FALLBACK] Could not load from default session store: {e}")
+
     # LOG 3 — SESSION READ (immediately after session_store.get_session)
     turn_logger.info(
         json.dumps({
@@ -447,6 +469,22 @@ def handle_message(
             "session": session_state
         }, ensure_ascii=True, default=str)
     )
+
+    # INVARIANT GUARD: Payment capability requires persisted facts
+    # This prevents silent regressions where payment_satisfied is lost
+    if session_state and isinstance(session_state, dict):
+        active_capability = session_state.get("active_capability")
+        if active_capability == "payment":
+            assert "facts" in session_state, (
+                f"Payment capability requires persisted facts. "
+                f"session_state keys: {list(session_state.keys())}, "
+                f"user_id={user_id}"
+            )
+            facts = session_state.get("facts", {})
+            assert isinstance(facts, dict), (
+                f"Payment capability requires facts to be a dict. "
+                f"Got type: {type(facts)}, user_id={user_id}"
+            )
 
     # Call plan_message to get planning result
     # plan_message internally calls Luma and handle_message_legacy
@@ -1902,19 +1940,26 @@ def handle_message_legacy(
     # BUT preserve original_session_state for merge decision - merge needs access to original session
     # CRITICAL: UNKNOWN → concrete intent transitions do NOT reset (intent materialization, not destructive switch)
     # Only true intent switches (e.g., CREATE_APPOINTMENT → DETAILS) reset the session
+    # CRITICAL: Do NOT null session_state - capability reconciliation needs session facts even after intent reset
+    # The session must remain visible for the entire turn, regardless of merge eligibility or intent reset
+    # We preserve original_session_state for merge, but session_state must remain available for:
+    # - process_luma_response (needs session for canonical_facts)
+    # - capability gating (needs session.facts.payment_satisfied)
+    # - TurnSnapshot building (needs session facts)
     if session_reset_occurred:
-        # DEBUG: Log why session_state is being nulled
+        # DEBUG: Log why session_state would be nulled (but we're NOT nulling it anymore)
         import traceback
         # Last 2 frames before this one
         call_stack = ''.join(traceback.format_stack()[-3:-1])
         logger.error(
-            f"[ORCHESTRATOR] NULLING session_state: reason=session_reset_occurred=True "
+            f"[ORCHESTRATOR] SESSION_RESET_OCCURRED=True (but preserving session_state for capability reconciliation) "
             f"effective_intent={effective_intent} "
             f"original_session_intent={original_session_state.get('intent_name') if original_session_state else None} "
             f"call_stack={call_stack} "
             f"user_id={user_id}{log_transaction_id}"
         )
-        session_state = None
+        # DO NOT null session_state - preserve it for capability reconciliation
+        # session_state = None  # REMOVED: This breaks capability reconciliation when should_merge_session is False
 
     # SINGLE SOURCE OF TRUTH: Ensure effective_intent is never None/empty when durable session intent exists
     # This is the authoritative intent that will be used throughout planning
@@ -2387,6 +2432,11 @@ def handle_message_legacy(
     # Update final_intent_check for logging
     final_intent_check = effective_response.get("intent", {}).get("name", "")
 
+    # CRITICAL: session_state is now preserved even when session_reset_occurred is True
+    # This ensures capability reconciliation can access session facts (e.g., payment_satisfied)
+    # The session must be visible for the entire turn, regardless of merge eligibility or intent reset
+    # No restoration needed - session_state is never nulled anymore
+
     # PHASE 1 INSTRUMENTATION: Log intent state BEFORE process_luma_response
     session_intent_for_trace = None
     session_status_for_trace = None
@@ -2767,18 +2817,55 @@ def handle_message_legacy(
             payment_required = org_data.get("payment_required", False)
 
         payment_satisfied = False
+        # INSTRUMENTATION: Log all three data sources to identify which one is missing payment_satisfied
+        decision_facts_payment_satisfied = None
+        session_facts_payment_satisfied = None
+        outcome_facts_payment_satisfied = None
+
         # Check decision.facts.payment_satisfied first
         if decision and isinstance(decision.get("facts"), dict):
-            payment_satisfied = decision["facts"].get(
-                "payment_satisfied", False)
-        # Fall back to session_state.facts.payment_satisfied
-        if not payment_satisfied and session_state and isinstance(session_state.get("facts"), dict):
-            payment_satisfied = session_state["facts"].get(
-                "payment_satisfied", False)
-        # Also check effective_response.facts.payment_satisfied (for test scenarios)
-        if not payment_satisfied and effective_response and isinstance(effective_response.get("facts"), dict):
-            payment_satisfied = effective_response["facts"].get(
-                "payment_satisfied", False)
+            decision_facts_payment_satisfied = decision["facts"].get(
+                "payment_satisfied")
+            payment_satisfied = decision_facts_payment_satisfied if decision_facts_payment_satisfied else False
+
+        # Check session_state.facts.payment_satisfied
+        if session_state and isinstance(session_state.get("facts"), dict):
+            session_facts_payment_satisfied = session_state["facts"].get(
+                "payment_satisfied")
+
+        # Check effective_response.facts.payment_satisfied (for test scenarios)
+        if effective_response and isinstance(effective_response.get("facts"), dict):
+            outcome_facts_payment_satisfied = effective_response["facts"].get(
+                "payment_satisfied")
+
+        # CRITICAL FIX: Session facts are authoritative for reconciliation
+        # When session_state exists, use session_state["facts"] as the primary source
+        # This ensures capability completion facts (payment_satisfied) from previous turns are respected
+        if session_state and isinstance(session_state.get("facts"), dict):
+            session_payment_satisfied = session_state["facts"].get(
+                "payment_satisfied")
+            if session_payment_satisfied is not None:
+                payment_satisfied = session_payment_satisfied
+                logger.info(
+                    f"[CAPABILITY_GATING] Using session_state.facts.payment_satisfied={payment_satisfied} "
+                    f"(session facts are authoritative for reconciliation)"
+                )
+        elif not payment_satisfied:
+            # Fall back to decision.facts if session_state doesn't have it
+            if decision_facts_payment_satisfied is not None:
+                payment_satisfied = decision_facts_payment_satisfied
+            # Fall back to effective_response.facts if neither session nor decision have it
+            elif outcome_facts_payment_satisfied is not None:
+                payment_satisfied = outcome_facts_payment_satisfied
+
+        # INSTRUMENTATION: Log all three sources for debugging
+        logger.error(
+            f"[CAPABILITY_GATING_INSTRUMENTATION] payment_satisfied sources: "
+            f"decision.facts={decision_facts_payment_satisfied}, "
+            f"session_state.facts={session_facts_payment_satisfied}, "
+            f"effective_response.facts={outcome_facts_payment_satisfied}, "
+            f"FINAL={payment_satisfied}"
+        )
 
         # Debug logging
         logger.debug(
@@ -2806,6 +2893,23 @@ def handle_message_legacy(
                 decision["plan"]["awaiting"] = "PAYMENT"
                 # Lowercase adapter key
                 decision["plan"]["active_capability"] = "payment"
+        elif payment_required and payment_satisfied:
+            # CRITICAL: When payment is satisfied, clear active_capability to prevent re-entering payment capability
+            # This ensures "paid" sessions do not re-enter AWAITING_CAPABILITY state
+            logger.info(
+                f"Capability gating: payment_required=True, payment_satisfied=True. "
+                f"Clearing active_capability to prevent re-entry into payment capability"
+            )
+            # Clear active_capability from plan
+            populated_plan["active_capability"] = None
+            if "active_capability" in populated_plan:
+                del populated_plan["active_capability"]
+
+            # Update decision.plan to clear active_capability
+            if decision and isinstance(decision.get("plan"), dict):
+                decision["plan"]["active_capability"] = None
+                if "active_capability" in decision["plan"]:
+                    del decision["plan"]["active_capability"]
 
         # CRITICAL: Ensure outcome always uses raw service_id (not canonical)
         # Dialog output, outcome.slots, outcome.facts.slots MUST use raw tenant value
@@ -2848,6 +2952,21 @@ def handle_message_legacy(
         # 1. Flattened fields at outcome level (for test compatibility)
         # 2. Complete plan object (for observability and debugging)
         # 3. Facts object for backward compatibility (snapshot builder reads outcome.facts.*)
+        # CRITICAL: Start from decision.facts to preserve capability facts (e.g., payment_satisfied)
+        # Do NOT create a new facts dict - this would discard capability completion markers
+        decision_facts = decision.get("facts", {}) if decision else {}
+        if not isinstance(decision_facts, dict):
+            decision_facts = {}
+
+        # Build outcome facts: preserve all decision facts, overlay missing_slots and slots
+        outcome_facts = {
+            # Preserve capability facts (payment_satisfied, payment_reference, org, etc.)
+            **decision_facts,
+            "missing_slots": missing_slots,  # Overlay with computed missing_slots
+            # Overlay with computed slots (use raw service_id only)
+            "slots": outcome_slots
+        }
+
         result = {
             "success": True,
             "outcome": {
@@ -2858,10 +2977,8 @@ def handle_message_legacy(
                 "slots": outcome_slots,  # Use raw service_id only
                 "status": plan_status,
                 "plan": populated_plan,  # Always include complete plan object
-                "facts": {
-                    "missing_slots": missing_slots,
-                    "slots": outcome_slots  # Use raw service_id only
-                }
+                # Preserve decision facts (includes capability completion markers)
+                "facts": outcome_facts
             }
         }
 
@@ -3000,6 +3117,23 @@ def handle_message_legacy(
                     else:
                         logger.warning(
                             f"[CAPABILITY_LIFECYCLE] Capability '{active_capability_value}' invoked but no text returned"
+                        )
+
+                    # CRITICAL: Merge capability completion facts into outcome
+                    # This ensures capability facts (e.g., payment_satisfied) are persisted to session
+                    # Capability facts must be merged into outcome.facts so build_session_state_from_outcome can persist them
+                    if runner_result.facts:
+                        # Ensure outcome has a facts dict
+                        if "facts" not in result["outcome"]:
+                            result["outcome"]["facts"] = {}
+                        if not isinstance(result["outcome"]["facts"], dict):
+                            result["outcome"]["facts"] = {}
+
+                        # Merge capability facts into outcome facts
+                        result["outcome"]["facts"].update(runner_result.facts)
+
+                        logger.info(
+                            f"[CAPABILITY_LIFECYCLE] Merged capability facts into outcome: {list(runner_result.facts.keys())}"
                         )
 
                 except ImportError:
@@ -3220,6 +3354,24 @@ def handle_message_legacy(
                     else:
                         logger.warning(
                             f"[CAPABILITY_LIFECYCLE] Capability '{active_capability_for_runner}' invoked but no text returned"
+                        )
+
+                    # CRITICAL: Merge capability completion facts into outcome
+                    # This ensures capability facts (e.g., payment_satisfied) are persisted to session
+                    # Capability facts must be merged into outcome.facts so build_session_state_from_outcome can persist them
+                    if runner_result.facts:
+                        # Ensure outcome has a facts dict
+                        if "facts" not in outcome_dict:
+                            outcome_dict["facts"] = {}
+                        if not isinstance(outcome_dict["facts"], dict):
+                            outcome_dict["facts"] = {}
+
+                        # Merge capability facts into outcome facts
+                        outcome_dict["facts"].update(runner_result.facts)
+                        result["outcome"]["facts"] = outcome_dict["facts"]
+
+                        logger.info(
+                            f"[CAPABILITY_LIFECYCLE] Merged capability facts into outcome: {list(runner_result.facts.keys())}"
                         )
 
                     # GUARD ASSERTION: If capability is payment, payment intent MUST exist before response is returned
