@@ -107,6 +107,9 @@ class ResponseBuilder:
         Applies intent-specific field filtering and normalization:
         - CREATE_APPOINTMENT: only datetime_range, removes date/time/date_range/time_range
         - CREATE_RESERVATION: only date_range, removes datetime_range/date/time/time_range
+        
+        HARD INVARIANT: MODIFY_BOOKING and CANCEL_BOOKING must NEVER produce booking_payload.
+        This function should only be called for CREATE_APPOINTMENT and CREATE_RESERVATION.
 
         Args:
             booking_payload: Raw booking payload to format
@@ -117,6 +120,13 @@ class ResponseBuilder:
         Returns:
             Formatted booking payload with only intent-appropriate fields
         """
+        # HARD INVARIANT: MODIFY_BOOKING and CANCEL_BOOKING never produce booking_payload
+        if intent_name in {"MODIFY_BOOKING", "CANCEL_BOOKING"}:
+            logger.error(
+                f"INVARIANT VIOLATION: format_booking_payload called for {intent_name}",
+                extra={'request_id': request_id, 'intent_name': intent_name}
+            )
+            raise ValueError(f"format_booking_payload must not be called for {intent_name}")
         # Normalize services to public canonical form
         if booking_payload.get("services"):
             booking_payload["services"] = [
@@ -130,7 +140,7 @@ class ResponseBuilder:
         # Appointment responses: only datetime_range
         if intent_name == "CREATE_APPOINTMENT":
             # Always copy datetime_range from calendar_booking if present
-            # This comes from calendar binding and should override any memory values
+            # This comes from calendar binding (authoritative for this request)
             datetime_range_from_binder = calendar_booking.get(
                 "datetime_range") if calendar_booking else None
             if datetime_range_from_binder:
@@ -203,6 +213,7 @@ class ResponseBuilder:
         entities_payload: Optional[Dict[str, Any]] = None,
         slots: Optional[Dict[str, Any]] = None,
         context_payload: Optional[Dict[str, Any]] = None,
+        clarification_data: Optional[Dict[str, Any]] = None,
         debug_data: Optional[Dict[str, Any]] = None,
         request_id: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -242,15 +253,19 @@ class ResponseBuilder:
             # For needs_clarification: include context but NO booking block
             if context_payload:
                 response_body["context"] = context_payload
+            # Include clarification_data if provided (contains structured data like options for MULTIPLE_MATCHES)
+            if clarification_data:
+                response_body["clarification_data"] = clarification_data
         else:
             # For ready status: include booking block (minimal, only confirmation_state)
             if booking_payload is not None:
-                # Attach confirmation_state for ready bookings
-                booking_payload["confirmation_state"] = "pending"
-
                 # Build minimal booking block (temporal and service data is in slots)
                 # Remove all fields that are exposed via slots
                 booking_payload_copy = booking_payload.copy()
+                # Set confirmation_state, default to "pending" if missing (Luma is stateless)
+                booking_payload_copy["confirmation_state"] = (
+                    booking_payload_copy.get("confirmation_state", "pending")
+                )
                 # Exposed via slots.service_id
                 booking_payload_copy.pop("services", None)
                 # Exposed via slots.date_range

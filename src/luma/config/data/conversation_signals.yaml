@@ -1,0 +1,32 @@
+# ================================
+# LUMA CONVERSATION SIGNALS
+# ================================
+#
+# This file defines conversation-level signals for user interactions,
+# such as confirmation responses, negation, etc.
+#
+# confirmation:
+#   enabled: Whether confirmation detection is enabled
+#   match:
+#     exact: Single-word confirmation terms (exact match)
+#     phrases: Multi-word confirmation phrases (substring match)
+# ================================
+
+confirmation:
+  enabled: true
+  match:
+    exact:
+      - yes
+      - yep
+      - yeah
+      - ok
+      - okay
+      - confirm
+    phrases:
+      - go ahead
+      - sounds good
+      - that works
+      - confirm it
+      - yes
+      - yes, confirm
+      - yes, confirm it

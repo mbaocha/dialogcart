@@ -44,6 +44,16 @@ def extract_entities_from_doc(nlp, text: str) -> Dict[str, List]:
     doc = nlp(text)
 
     tokens = [t.text for t in doc]
+    logger.warning(
+        "[EXTRACTION] extract_entities_from_doc: Processing",
+        extra={
+            'text': text,
+            'tokens': tokens,
+            'tokens_count': len(tokens),
+            'entities_count': len(doc.ents),
+            'entities': [{'text': ent.text, 'label': ent.label_} for ent in doc.ents]
+        }
+    )
 
     result = {
         "services": [],  # Kept for compatibility - contains SERVICE_FAMILY entities
@@ -67,6 +77,17 @@ def extract_entities_from_doc(nlp, text: str) -> Dict[str, List]:
             add_entity(result, "dates", ent.text, ent.start, span_len)
         elif label == "DATE_ABSOLUTE":
             # Absolute calendar dates (15th dec, 15/12/2025, etc.)
+            logger.warning(
+                "[EXTRACTION] DATE_ABSOLUTE entity found",
+                extra={
+                    'entity_text': ent.text,
+                    'entity_start': ent.start,
+                    'entity_end': ent.end,
+                    'span_len': span_len,
+                    'tokens': [t.text for t in doc[ent.start:ent.end]] if ent.start < len(doc) and ent.end <= len(doc) else [],
+                    'all_tokens': [t.text for t in doc]
+                }
+            )
             add_entity(result, "dates_absolute", ent.text, ent.start, span_len)
         elif label == "TIME":
             # Precise clock times (9 am, 12:30 pm, etc.)
@@ -80,6 +101,18 @@ def extract_entities_from_doc(nlp, text: str) -> Dict[str, List]:
 
     # Store tokens in result for logging
     result["_tokens"] = tokens
+
+    logger.warning(
+        "[EXTRACTION] extract_entities_from_doc: RESULT",
+        extra={
+            'text': text,
+            'dates_absolute': result.get("dates_absolute", []),
+            'dates_absolute_count': len(result.get("dates_absolute", [])),
+            'dates': result.get("dates", []),
+            'times': result.get("times", []),
+            'all_entities': {k: v for k, v in result.items() if k != "_tokens"}
+        }
+    )
 
     return result, doc
 

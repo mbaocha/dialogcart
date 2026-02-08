@@ -1,0 +1,208 @@
+﻿python : DEBUG_WEEKDAY: Date extraction failed for follow-up. luma_slots=[], merged_keys=['clarification_reason', 
+'entities', 'intent', 'issues', 'needs_clarification', 'status', 'success']
+At C:\Users\user\AppData\Local\Temp\ps-script-e0881511-898a-4c6a-b632-209e62b22fc8.ps1:81 char:93
++ ... EEKDAY="1"; python -m core.tests.session.test_session 2 --v 2>&1 | Ou ...
++                 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (DEBUG_WEEKDAY: ...us', 'success']:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+======================================================================
+CORE SESSION FOLLOW-UP TEST SUITE
+======================================================================
+Total scenarios: 50
+Running: 1 scenario
+
+============================================================
+Scenario 2: service_to_date_to_time_massage
+============================================================
+Domain: service, Turns: 3
+
+--- Turn 1/3: book massage ---
+Expected: {
+  "intent": "CREATE_APPOINTMENT",
+  "status": "NEEDS_CLARIFICATION",
+  "missing_slots": [
+    "date",
+    "time"
+  ]
+}
+
+Result:
+{
+  "success": true,
+  "outcome": {
+    "status": "NEEDS_CLARIFICATION",
+    "clarification_reason": "MISSING_TIME",
+    "template_key": "service.ask_time",
+    "data": {
+      "reason": "MISSING_TIME",
+      "missing": [
+        "date",
+        "time"
+      ],
+      "ambiguous": []
+    },
+    "context": {
+      "services": [
+        {
+          "canonical": "massage",
+          "text": "massage"
+        }
+      ]
+    },
+    "booking": null,
+    "intent_name": "CREATE_APPOINTMENT",
+    "facts": {
+      "slots": {
+        "service_id": "massage"
+      },
+      "missing_slots": [
+        "date",
+        "time"
+      ],
+      "context": {
+        "services": [
+          {
+            "canonical": "massage",
+            "text": "massage"
+          }
+        ]
+      }
+    }
+  },
+  "_merged_luma_response": {
+    "clarification_reason": "MISSING_TIME",
+    "context": {
+      "services": [
+        {
+          "canonical": "massage",
+          "text": "massage"
+        }
+      ]
+    },
+    "intent": {
+      "name": "CREATE_APPOINTMENT"
+    },
+    "issues": {
+      "date": "missing",
+      "time": "missing"
+    },
+    "needs_clarification": true,
+    "slots": {
+      "service_id": "massage"
+    },
+    "status": "needs_clarification",
+    "success": true
+  }
+}
+
+--- Turn 2/3: friday ---
+Expected: {
+  "status": "NEEDS_CLARIFICATION",
+  "missing_slots": [
+    "time"
+  ]
+}
+
+=== DEBUG_LUMA_WEEKDAY RAW LUMA RESPONSE ===
+Input text: friday
+User ID: test_session_002
+Session state exists: True
+Session status: NEEDS_CLARIFICATION
+Session intent: CREATE_APPOINTMENT
+{
+  "clarification_reason": null,
+  "entities": {},
+  "intent": {
+    "confidence": 0.75,
+    "name": "UNKNOWN"
+  },
+  "issues": {},
+  "needs_clarification": false,
+  "status": "ready",
+  "success": true
+}
+=== END DEBUG_LUMA_WEEKDAY ===
+
+
+[DEBUG_WEEKDAY] Luma response for 'friday' - Top-level keys: ['clarification_reason', 'entities', 'intent', 'issues', 'needs_clarification', 'status', 'success']
+  semantic: NOT PRESENT
+  semantic.date_refs: NOT PRESENT
+  semantic.resolved_booking: NOT PRESENT
+  stages.semantic.resolved_booking: NOT PRESENT
+  trace.semantic: NOT PRESENT
+  trace.semantic.date_refs: NOT PRESENT
+  entities: {}
+  slots: NOT PRESENT
+
+[DEBUG_WEEKDAY] Full Luma response structure:
+{
+  "clarification_reason": null,
+  "entities": {},
+  "intent": {
+    "confidence": 0.75,
+    "name": "UNKNOWN"
+  },
+  "issues": {},
+  "needs_clarification": false,
+  "status": "ready",
+  "success": true
+}
+
+Result:
+{
+  "success": true,
+  "outcome": {
+    "status": "NEEDS_CLARIFICATION",
+    "clarification_reason": "MISSING_TIME",
+    "template_key": "service.ask_time",
+    "data": {
+      "reason": "MISSING_TIME",
+      "missing": [
+        "date",
+        "time"
+      ],
+      "ambiguous": []
+    },
+    "booking": null,
+    "facts": {
+      "slots": {
+        "service_id": "massage"
+      },
+      "missing_slots": [
+        "date",
+        "time"
+      ],
+      "context": {}
+    },
+    "intent_name": "CREATE_APPOINTMENT"
+  },
+  "_merged_luma_response": {
+    "clarification_reason": null,
+    "entities": {},
+    "intent": {
+      "name": "CREATE_APPOINTMENT"
+    },
+    "issues": {},
+    "needs_clarification": false,
+    "status": "ready",
+    "success": true,
+    "slots": {
+      "service_id": "massage"
+    },
+    "missing_slots": [
+      "date",
+      "time"
+    ]
+  }
+}
+
+======================================================================
+TEST SUMMARY
+======================================================================
+Total: 1 | Passed: 0 | Failed: 1 | Skipped: 0
+
+Failures:
+  Scenario 2: service_to_date_to_time_massage
+    Error: Turn 2 missing_slots mismatch: expected ['time'], got ['date', 'time']
+======================================================================

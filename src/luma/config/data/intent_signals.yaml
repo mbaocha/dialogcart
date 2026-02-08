@@ -62,19 +62,25 @@ PAYMENT:
 
 CANCEL_BOOKING:
   is_booking: true
+  produces_booking_payload: false
 
   intent_signals:
     any:
       - "cancel booking"
       - "cancel appointment"
+      - "cancel reservation"
       - "delete booking"
       - "delete appointment"
+      - "delete reservation"
+      - "delete my reservation"
       - "call off"
     all:
       - ["cancel"]
+      - ["delete"]
     ordered:
       - ["cancel", "booking"]
       - ["cancel", "appointment"]
+      - ["delete", "reservation"]
 
   intent_defining_slots:
     - booking_id
@@ -84,7 +90,12 @@ CANCEL_BOOKING:
 
 
 MODIFY_BOOKING:
+  # Delta semantics: booking_id is mandatory, all other slots are optional deltas.
+  # Presence means "replace this field", absence means "leave unchanged".
+  # Valid delta slots: start_date, end_date, date_range, time, service_id, duration
+  # READY when: booking_id exists AND at least one delta slot exists
   is_booking: true
+  produces_booking_payload: false
 
   intent_signals:
     any:
@@ -92,17 +103,28 @@ MODIFY_BOOKING:
       - "postpone"
       - "update booking"
       - "modify booking"
+      - "modify reservation"
+      - "modify my reservation"
       - "change reservation"
       - "change my reservation"
+      - "change my appointment"
       - "move my reservation"
       - "move my appointment"
     all:
       - ["reschedule"]
+      - ["modify", "reservation"]
       - ["change", "reservation"]
       - ["change", "booking"]
+      - ["change", "appointment"]
       - ["move", "reservation"]
       - ["move", "appointment"]
     ordered:
+      - ["update", "booking"]
+      - ["modify", "booking"]
+      - ["modify", "reservation"]
+      - ["move", "booking"]
+      - ["move", "reservation"]
+      - ["move", "appointment"]
       - ["change", "time"]
       - ["change", "date"]
       - ["move", "it", "later"]
@@ -262,6 +284,7 @@ RECOMMENDATION:
 CREATE_APPOINTMENT:
   is_booking: true
   temporal_shape: datetime_range
+  produces_booking_payload: true
 
   intent_signals:
     any:
@@ -287,6 +310,7 @@ CREATE_RESERVATION:
   requires_end_date: true
   supports_date_roles: true
   require_end_date: true
+  produces_booking_payload: true
 
   intent_signals:
     any:

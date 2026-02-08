@@ -1,0 +1,75 @@
+# Intent Policy Configuration
+#
+# Defines the irreversible commit action and fallback routing hints for each Luma intent.
+# This configuration maps Luma intents to:
+# - commit: The static, irreversible commit action (final committed state)
+# - fallbacks: Dynamic, slot-driven routing hints for when required slots are missing
+#
+# Format:
+#   intents:
+#     INTENT_NAME:
+#       commit:
+#         action: <ACTION_NAME>
+#       fallbacks:
+#         - action: <ACTION_NAME>
+#           when_missing:
+#             any_of: [<slot_name>, ...]
+#
+# ============================================================================
+# EXTENDING THE SYSTEM WITH NEW WORKFLOWS
+# ============================================================================
+#
+# To add a new workflow:
+#
+# 1. Add a new intent entry in this file:
+#    intents:
+#      YOUR_NEW_INTENT:
+#        commit:
+#          action: YOUR_COMMIT_ACTION
+#        fallbacks:
+#          - action: YOUR_FALLBACK_ACTION
+#            when_missing:
+#              any_of: [slot1, slot2]
+#
+# 2. Register the commit action handler in action_router.py:
+#    In src/core/routing/action_router.py, add to ACTION_HANDLERS:
+#      "YOUR_COMMIT_ACTION": "your.handler.function"
+#
+# 3. Implement the handler function in orchestrator.py:
+#    Add a handler case in the action execution logic (e.g., in handle_message)
+#    that calls your business logic (e.g., booking_client.create_booking)
+#
+# IMPORTANT: Every commit.action defined here MUST have a corresponding entry
+# in ACTION_HANDLERS (action_router.py). The system validates this at startup
+# and will fail fast with a clear error if any commit action is missing a handler.
+#
+# Example:
+#   - intent_execution.yaml: commit.action = "CONFIRM_APPOINTMENT"
+#   - action_router.py: ACTION_HANDLERS["CONFIRM_APPOINTMENT"] = "booking.create"
+#   - orchestrator.py: Handler for "booking.create" executes booking creation
+#
+# ============================================================================
+
+intents:
+  CREATE_APPOINTMENT:
+    commit:
+      action: CONFIRM_APPOINTMENT
+    fallbacks:
+      - action: SEARCH_AVAILABILITY
+        when_missing:
+          any_of: [date, time]
+      - action: SERVICE_CATALOG
+        when_missing:
+          any_of: [service]
+
+  CREATE_RESERVATION:
+    commit:
+      action: CONFIRM_RESERVATION
+    fallbacks:
+      - action: SEARCH_AVAILABILITY
+        when_missing:
+          any_of: [date, time]
+      - action: SERVICE_CATALOG
+        when_missing:
+          any_of: [service]
+
