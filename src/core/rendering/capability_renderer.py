@@ -9,6 +9,7 @@ Currently runs in shadow mode - computes renderer text but adapter text remains 
 
 from typing import Dict, Any, Optional
 import logging
+from .clarification_renderer import RenderSpec
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,7 @@ def render_capability(
     facts: Dict[str, Any],
     slots: Dict[str, Any],
     context: Optional[Dict[str, Any]] = None
-) -> Optional[str]:
+) -> Optional[RenderSpec]:
     """
     Render text for capability states.
     
@@ -41,7 +42,7 @@ def render_capability(
         context: Optional context dictionary with session_slots, session_facts, etc.
     
     Returns:
-        Rendered text string, or None if capability not supported or status invalid
+        RenderSpec with rendered text, or None if capability not supported or status invalid
     """
     # Only render for AWAITING_CAPABILITY status
     if status != "AWAITING_CAPABILITY":
@@ -52,7 +53,10 @@ def render_capability(
     
     # Route to capability-specific renderer
     if active_capability == "payment":
-        return _render_payment_capability(facts, slots, context)
+        text = _render_payment_capability(facts, slots, context)
+        if text is None:
+            return None
+        return RenderSpec(text=text)
     
     # Unknown capability - return None
     logger.debug(f"Unknown capability for rendering: {active_capability}")

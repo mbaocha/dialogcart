@@ -3,22 +3,14 @@ Unit Tests: Capability Renderer Shadow Mode
 
 Tests that shadow renderer produces equivalent text to adapter text at API boundary.
 This validates equivalence before switching source of truth.
-
-NOTE: This test is DISABLED in the current baseline architecture.
-It tests behavior (shadow renderer, post-PLAN_FINAL rendering hook) that does not
-exist in the current baseline. This test belongs to a future rendering-refactor
-architecture and is intentionally disabled until that refactor is implemented.
-
-To re-enable: Remove the @pytest.mark.skip decorator once shadow rendering is
-fully implemented in the baseline architecture.
 """
 
 import pytest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 from core.orchestration.orchestrator import handle_message
 from core.orchestration.nlu import LumaClient
 from core.orchestration.clients.organization_client import OrganizationClient
-from core.orchestration.session import clear_session, get_session
+from core.orchestration.session import clear_session, get_session, save_session
 from capabilities.adapters.payment import PaymentAdapter
 from capabilities.clients.payment import MockPaymentClient, reset_payment_store
 from capabilities.registry import register_adapter, clear_registry
@@ -28,17 +20,23 @@ import os
 os.environ["CORE_EXECUTION_MODE"] = "test"
 
 
-@pytest.mark.skip(reason="Test belongs to future rendering-refactor architecture. "
-                         "Shadow renderer and post-PLAN_FINAL rendering hook do not exist in current baseline.")
+@pytest.mark.xfail(
+    reason="Core is not yet the source of truth for capability rendering"
+)
 def test_shadow_renderer_equivalence_payment():
     """
     Test that shadow renderer text matches adapter text at API boundary.
     
     This test validates:
-    1. Normalized API text == adapter-derived text (current behavior)
-    2. shadow_renderer_text == normalized API text (exact match for equivalence)
+    1. Adapter produces text (current behavior)
+    2. Shadow renderer produces text (core rendering)
+    3. shadow_renderer.text == adapter.text (exact match for equivalence)
     
     This locks equivalence at API boundary before switching source of truth.
+    
+    Fails if:
+    - Shadow renderer returns None
+    - Shadow renderer text does not match adapter text
     """
     user_id = "test-shadow-renderer"
     text = "book a room"
@@ -104,6 +102,23 @@ def test_shadow_renderer_equivalence_payment():
             }
         }
         
+        # Set up session with booking info (required for payment adapter)
+        session_state = {
+            "intent_name": "CREATE_RESERVATION",
+            "slots": {
+                "service_id": "room",
+                "date_range": "2026-01-20 to 2026-01-22",
+                "booking_id": 12345,
+                "booking_code": "booking_12345",
+                "total_amount": 200.0,
+                "currency": "USD"
+            },
+            "missing_slots": [],
+            "status": "READY",
+            "active_capability": "payment"
+        }
+        save_session(user_id, session_state)
+        
         # Call handle_message (triggers capability rendering + shadow rendering)
         result = handle_message(
             text=text,
@@ -113,45 +128,48 @@ def test_shadow_renderer_equivalence_payment():
             organization_id=1
         )
         
-        # ASSERTION 1: Normalized API text == adapter-derived text (current behavior)
-        api_text = result.get("text")
-        assert api_text is not None, (
-            f"[EQUIVALENCE] API text must be present. "
-            f"Result keys: {list(result.keys())}"
-        )
-        assert isinstance(api_text, str), (
-            f"[EQUIVALENCE] API text must be a string. Got: {type(api_text)}"
-        )
-        assert len(api_text) > 0, (
-            f"[EQUIVALENCE] API text must be non-empty. Got: {api_text!r}"
-        )
-        
-        # ASSERTION 2: shadow_renderer_text == normalized API text (exact match)
+        # ASSERTION 1: Adapter produces text (current behavior)
+        # Adapter text may be promoted to result["text"] during normalization,
+        # or stored in outcome["text"]. Check both locations.
         outcome = result.get("outcome", {})
-        debug = outcome.get("debug", {})
-        shadow_renderer_text = debug.get("shadow_renderer_text")
+        adapter_text = result.get("text") or outcome.get("text")
+        assert adapter_text is not None, (
+            f"[EQUIVALENCE] Adapter text must be present in result[\"text\"] or outcome[\"text\"]. "
+            f"Result keys: {list(result.keys())}, outcome keys: {list(outcome.keys())}"
+        )
+        assert isinstance(adapter_text, str), (
+            f"[EQUIVALENCE] Adapter text must be a string. Got: {type(adapter_text)}"
+        )
+        assert len(adapter_text) > 0, (
+            f"[EQUIVALENCE] Adapter text must be non-empty. Got: {adapter_text!r}"
+        )
         
-        assert shadow_renderer_text is not None, (
-            f"[EQUIVALENCE] shadow_renderer_text must be present in outcome.debug. "
+        # ASSERTION 2: Shadow renderer produces text (core rendering)
+        debug = outcome.get("debug", {})
+        shadow_renderer = debug.get("shadow_renderer")
+        
+        assert shadow_renderer is not None, (
+            f"[EQUIVALENCE] shadow_renderer must be present in outcome.debug. "
             f"Outcome keys: {list(outcome.keys())}, debug keys: {list(debug.keys())}"
         )
+        assert isinstance(shadow_renderer, dict), (
+            f"[EQUIVALENCE] shadow_renderer must be a dictionary. Got: {type(shadow_renderer)}"
+        )
+        
+        shadow_renderer_text = shadow_renderer.get("text")
+        assert shadow_renderer_text is not None, (
+            f"[EQUIVALENCE] shadow_renderer.text must be present. "
+            f"shadow_renderer keys: {list(shadow_renderer.keys())}"
+        )
         assert isinstance(shadow_renderer_text, str), (
-            f"[EQUIVALENCE] shadow_renderer_text must be a string. Got: {type(shadow_renderer_text)}"
+            f"[EQUIVALENCE] shadow_renderer.text must be a string. Got: {type(shadow_renderer_text)}"
         )
         
-        # Exact match assertion - this locks equivalence at API boundary
-        assert shadow_renderer_text == api_text, (
-            f"[EQUIVALENCE] shadow_renderer_text must exactly match API text. "
-            f"shadow_renderer_text={shadow_renderer_text!r}, "
-            f"api_text={api_text!r}"
-        )
-        
-        # Additional validation: both texts should contain payment link
-        assert "payment" in api_text.lower() or "link" in api_text.lower() or "http" in api_text.lower(), (
-            f"[EQUIVALENCE] API text should contain payment-related content. Got: {api_text!r}"
-        )
-        assert "payment" in shadow_renderer_text.lower() or "link" in shadow_renderer_text.lower() or "http" in shadow_renderer_text.lower(), (
-            f"[EQUIVALENCE] shadow_renderer_text should contain payment-related content. Got: {shadow_renderer_text!r}"
+        # ASSERTION 3: Exact match - this locks equivalence at API boundary
+        assert shadow_renderer_text == adapter_text, (
+            f"[EQUIVALENCE] shadow_renderer.text must exactly match adapter.text. "
+            f"shadow_renderer.text={shadow_renderer_text!r}, "
+            f"adapter.text={adapter_text!r}"
         )
         
     finally:

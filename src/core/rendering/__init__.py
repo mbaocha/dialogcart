@@ -10,5 +10,6 @@ from dataclasses import dataclass
 # Import RenderSpec from clarification_renderer to avoid duplication
 from .clarification_renderer import RenderSpec, render_clarification
 from .renderer import render
+from .capability_renderer import render_capability
 
-__all__ = ["RenderSpec", "render_clarification", "render"]
+__all__ = ["RenderSpec", "render_clarification", "render", "render_capability"]

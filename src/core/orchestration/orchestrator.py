@@ -44,7 +44,7 @@ from core.orchestration.cache.org_domain_cache import org_domain_cache
 from core.orchestration.persistence.durable_intents import is_durable_intent
 from core.routing.workflows import get_workflow
 from core.rendering.mapper.clarification_mapper import derive_clarification_reason
-from core.rendering import render_clarification, render
+from core.rendering import render_clarification, render, render_capability
 
 logger = logging.getLogger(__name__)
 # Dedicated turn-level logger (clean, minimal logs - ONE log per section)
@@ -3346,21 +3346,68 @@ def handle_message_legacy(
                     # Ensure PaymentAdapter.start() was called and payment intent side-effects are persisted
                     # The runner.handle() above should have invoked adapter.start() which creates the payment intent
                     # Side-effects are persisted to the mock payment store during adapter.start()
+                    booking_code = session_slots.get(
+                        "booking_code") or session_facts.get("booking_code")
+                    logger.info(
+                        f"[CAPABILITY_LIFECYCLE] Capability '{active_capability_for_runner}' invoked, side-effect executed. "
+                        f"booking_code={booking_code}"
+                    )
 
-                    # If adapter returned text, store it in outcome
-                    if runner_result.text:
-                        outcome_dict["text"] = runner_result.text
-                        result["outcome"]["text"] = runner_result.text
-                        booking_code = session_slots.get(
-                            "booking_code") or session_facts.get("booking_code")
-                        logger.info(
-                            f"[CAPABILITY_LIFECYCLE] Capability '{active_capability_for_runner}' invoked, side-effect executed. "
-                            f"booking_code={booking_code}"
+                    # PHASE 2: Core is source of truth for capability presentation text
+                    # Render capability text using core renderer (replaces adapter text)
+                    try:
+                        # Get plan status and active_capability from plan (authoritative source)
+                        plan = decision.get("plan", {})
+                        if isinstance(plan, dict):
+                            plan_status_for_renderer = plan.get("status", plan_status)
+                            plan_active_capability = plan.get("active_capability", active_capability_for_runner)
+                        else:
+                            plan_status_for_renderer = plan_status
+                            plan_active_capability = active_capability_for_runner
+                        
+                        # Call core capability renderer (single source of truth for capability UI)
+                        render_spec = render_capability(
+                            status=plan_status_for_renderer,
+                            active_capability=plan_active_capability,
+                            facts=outcome_dict.get("facts", {}),
+                            slots=outcome_dict.get("slots", {}),
+                            context=context
                         )
-                    else:
-                        logger.warning(
-                            f"[CAPABILITY_LIFECYCLE] Capability '{active_capability_for_runner}' invoked but no text returned"
+                        
+                        # Populate text consistently if renderer returned text
+                        if render_spec is not None and render_spec.text:
+                            # Set in outcome (for backward compatibility)
+                            outcome_dict["text"] = render_spec.text
+                            result["outcome"]["text"] = render_spec.text
+                            # Set in top-level result (matching clarification behavior)
+                            result["text"] = render_spec.text
+                            
+                            logger.info(
+                                f"[CAPABILITY_RENDERER] Core rendered capability text for "
+                                f"status={plan_status_for_renderer}, active_capability={plan_active_capability}"
+                            )
+                        else:
+                            logger.warning(
+                                f"[CAPABILITY_RENDERER] Core renderer returned no text for "
+                                f"status={plan_status_for_renderer}, active_capability={plan_active_capability}"
+                            )
+                        
+                        # Store debug info (stable, not "shadow")
+                        outcome_dict.setdefault("debug", {})
+                        outcome_dict["debug"]["capability_renderer"] = {
+                            "text": render_spec.text if render_spec is not None else None,
+                            "active_capability": plan_active_capability,
+                            "status": plan_status_for_renderer
+                        }
+                        result["outcome"]["debug"] = outcome_dict["debug"]
+                        
+                    except Exception as e:
+                        # Rendering errors should not break the flow, but log as error since this is now source of truth
+                        logger.error(
+                            f"[CAPABILITY_RENDERER] Failed to render capability text: {e}",
+                            exc_info=True
                         )
+                        # Do not set text if rendering failed (adapter text is no longer used as fallback)
 
                     # CRITICAL: Merge capability completion facts into outcome
                     # This ensures capability facts (e.g., payment_satisfied) are persisted to session
@@ -3378,6 +3425,46 @@ def handle_message_legacy(
 
                         logger.info(
                             f"[CAPABILITY_LIFECYCLE] Merged capability facts into outcome: {list(runner_result.facts.keys())}"
+                        )
+
+                    # SHADOW MODE: Invoke core capability renderer to validate equivalence
+                    # This runs in parallel with adapter text generation but does not affect user-facing output
+                    # Called immediately after runner_result is obtained
+                    try:
+                        # Get plan status and active_capability from plan (authoritative source)
+                        plan = decision.get("plan", {})
+                        if isinstance(plan, dict):
+                            plan_status_for_renderer = plan.get("status", plan_status)
+                            plan_active_capability = plan.get("active_capability", active_capability_for_runner)
+                        else:
+                            plan_status_for_renderer = plan_status
+                            plan_active_capability = active_capability_for_runner
+                        
+                        shadow_render_spec = render_capability(
+                            status=plan_status_for_renderer,
+                            active_capability=plan_active_capability,
+                            facts=outcome_dict.get("facts", {}),
+                            slots=outcome_dict.get("slots", {}),
+                            context=context
+                        )
+                        
+                        # Attach shadow renderer result to debug only (not used for user-facing output)
+                        # Store as dict with text field for serialization compatibility
+                        if shadow_render_spec is not None:
+                            outcome_dict.setdefault("debug", {})["shadow_renderer"] = {
+                                "text": shadow_render_spec.text
+                            }
+                            result["outcome"]["debug"] = outcome_dict["debug"]
+                            
+                            logger.debug(
+                                f"[SHADOW_RENDERER] Computed shadow renderer text for "
+                                f"status={plan_status_for_renderer}, active_capability={plan_active_capability}"
+                            )
+                    except Exception as e:
+                        # Shadow rendering errors should not break the flow
+                        logger.warning(
+                            f"[SHADOW_RENDERER] Failed to compute shadow renderer text: {e}",
+                            exc_info=True
                         )
 
                     # GUARD ASSERTION: If capability is payment, payment intent MUST exist before response is returned

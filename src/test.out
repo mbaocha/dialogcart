@@ -27,7 +27,7 @@ core/tests/orchestration/test_time_normalization.py .....                [ 41%]
 core/tests/planning/test_capability_org_condition.py .....               [ 44%]
 core/tests/planning/test_planning.py .............................       [ 62%]
 core/tests/planning/test_policy_invariants.py ...................        [ 74%]
-core/tests/rendering/test_capability_renderer_shadow.py s                [ 75%]
+core/tests/rendering/test_capability_renderer_shadow.py x                [ 75%]
 core/tests/rendering/test_clarification_mapper.py .........              [ 80%]
 core/tests/rendering/test_clarification_rendering.py .                   [ 81%]
 core/tests/rendering/test_missing_template_error.py ..                   [ 82%]
@@ -36,7 +36,7 @@ core/tests/workflows/test_workflow_invocation.py ......                  [ 93%]
 core/tests/workflows/test_workflow_manual.py ...                         [ 95%]
 core/tests/workflows/test_workflow_registry.py .......                   [100%]
 
-======================= 160 passed, 7 skipped in 18.18s ========================
+================== 160 passed, 6 skipped, 1 xfailed in 19.52s ==================
 ================================================================================
 Running tests: all
 Path: core/tests
