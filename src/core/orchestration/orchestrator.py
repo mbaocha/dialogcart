@@ -624,6 +624,7 @@ def handle_message(
         # Preserve rendered text if present in plan (from plan_message)
         if "text" in plan:
             response["text"] = plan["text"]
+        response.setdefault("ui_actions", [])
         return response
 
     logger.debug(
@@ -723,6 +724,7 @@ def handle_message(
             # Preserve rendered text if present in plan (from plan_message)
             if "text" in plan:
                 response["text"] = plan["text"]
+            response.setdefault("ui_actions", [])
             return response
 
         if execution_step and execution_client:
@@ -1211,12 +1213,14 @@ def handle_message(
                     execution_result["plan"]["action"] = plan_obj.get(
                         "action") or plan.get("action")
 
-                return {
+                result = {
                     "success": True,
                     "result": execution_result,
                     "outcome": execution_result,  # Alias for backward compatibility
                     "plan": plan
                 }
+                result.setdefault("ui_actions", [])
+                return result
             except Exception as e:
                 logger.error(f"Execution failed for action {action}: {e}")
                 return {
@@ -1262,11 +1266,13 @@ def handle_message(
     # Add active_capability if present in plan
     if plan.get("active_capability"):
         outcome_dict["active_capability"] = plan.get("active_capability")
-    return {
+    result = {
         "success": True,
         "result": outcome_dict,
         "outcome": outcome_dict  # Alias for backward compatibility
     }
+    result.setdefault("ui_actions", [])
+    return result
 
 
 def handle_message_legacy(

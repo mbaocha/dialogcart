@@ -3,7 +3,7 @@ platform linux -- Python 3.10.13, pytest-9.0.2, pluggy-1.6.0
 rootdir: /mnt/c/Users/user/Documents/projects/my-project/dialogcart/src
 configfile: pytest.ini
 plugins: anyio-4.12.0
-collected 157 items / 6 skipped
+collected 160 items / 6 skipped
 
 core/tests/e2e/test_conversation_rendering_e2e.py ..                     [  1%]
 core/tests/e2e/test_core_capability_noop_e2e.py .                        [  1%]
@@ -11,30 +11,31 @@ core/tests/e2e/test_core_capability_payment_e2e.py .                     [  2%]
 core/tests/e2e/test_core_e2e_followup_availability.py .                  [  3%]
 core/tests/e2e/test_core_e2e_single_turn_availability.py .               [  3%]
 core/tests/e2e/test_rendering_verification.py ...                        [  5%]
-core/tests/execution/test_availability_execution.py ..                   [  7%]
+core/tests/execution/test_availability_execution.py ..                   [  6%]
 core/tests/execution/test_booking_execution.py ..                        [  8%]
 core/tests/execution/test_confirmation_execution.py ..                   [  9%]
-core/tests/execution/test_test_backend.py .......                        [ 14%]
+core/tests/execution/test_test_backend.py .......                        [ 13%]
 core/tests/integration/test_capability_bootstrap_integration.py ..       [ 15%]
-core/tests/integration/test_commit_gated_workflow.py ...                 [ 17%]
+core/tests/integration/test_commit_gated_workflow.py ...                 [ 16%]
 core/tests/integration/test_lifecycle_notification.py .                  [ 17%]
 core/tests/intents/test_base_intents.py .........                        [ 23%]
-core/tests/orchestration/contracts/test_luma_contracts.py ......         [ 27%]
+core/tests/orchestration/contracts/test_luma_contracts.py ......         [ 26%]
 core/tests/orchestration/test_non_core_intent_passthrough.py ..........  [ 33%]
-core/tests/orchestration/test_orchestrator_flow.py ......                [ 37%]
-core/tests/orchestration/test_time_normalization.py .....                [ 40%]
-core/tests/planning/test_capability_org_condition.py .....               [ 43%]
-core/tests/planning/test_planning.py .............................       [ 62%]
-core/tests/planning/test_policy_invariants.py ...................        [ 74%]
+core/tests/orchestration/test_orchestrator_flow.py ......                [ 36%]
+core/tests/orchestration/test_orchestrator_invariants.py ...             [ 38%]
+core/tests/orchestration/test_time_normalization.py .....                [ 41%]
+core/tests/planning/test_capability_org_condition.py .....               [ 45%]
+core/tests/planning/test_planning.py .............................       [ 63%]
+core/tests/planning/test_policy_invariants.py ...................        [ 75%]
 core/tests/rendering/test_clarification_mapper.py .........              [ 80%]
-core/tests/rendering/test_clarification_rendering.py .                   [ 80%]
+core/tests/rendering/test_clarification_rendering.py .                   [ 81%]
 core/tests/rendering/test_missing_template_error.py ..                   [ 82%]
-core/tests/session/test_session_manager.py ............                  [ 89%]
+core/tests/session/test_session_manager.py ............                  [ 90%]
 core/tests/workflows/test_workflow_invocation.py ......                  [ 93%]
 core/tests/workflows/test_workflow_manual.py ...                         [ 95%]
 core/tests/workflows/test_workflow_registry.py .......                   [100%]
 
-======================= 157 passed, 6 skipped in 22.06s ========================
+======================= 160 passed, 6 skipped in 18.88s ========================
 ================================================================================
 Running tests: all
 Path: core/tests
