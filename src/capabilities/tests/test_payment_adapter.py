@@ -81,6 +81,45 @@ def test_start_returns_payment_link():
         reset_payment_store()
 
 
+def test_start_creates_payment_intent():
+    """
+    Test 1b: start() creates payment intent as side-effect.
+
+    Arrange: booking_id, booking_code, amount, currency
+    Call: PaymentAdapter.start(context)
+    Assert: payment intent exists in _PAYMENT_STATE, intent_created=True, paid=False
+    """
+    # Arrange
+    reset_payment_store()
+    payment_client = MockPaymentClient()
+    adapter = PaymentAdapter(payment_client=payment_client)
+    context = _create_test_context(
+        booking_id=123,
+        booking_code="booking_123",
+        amount=100.0,
+        currency="USD"
+    )
+
+    try:
+        # Act
+        response = adapter.start(context)
+
+        # Assert - verify payment intent was created
+        from capabilities.clients.payment.mock_payment import _PAYMENT_STATE
+        assert "booking_123" in _PAYMENT_STATE, \
+            f"Payment intent should exist for booking_code 'booking_123' after start(). " \
+            f"Available booking codes: {list(_PAYMENT_STATE.keys())}"
+        assert _PAYMENT_STATE["booking_123"].get("intent_created"), \
+            "Payment intent should be marked as created for booking_code 'booking_123'"
+        assert _PAYMENT_STATE["booking_123"].get("paid") is not True, \
+            "Payment should not be marked as paid during initiation"
+
+        print("  PASS: start() creates payment intent as side-effect")
+
+    finally:
+        reset_payment_store()
+
+
 def test_handle_input_when_unpaid():
     """
     Test 2: handle_input() when unpaid.

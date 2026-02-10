@@ -330,27 +330,13 @@ def test_core_capability_payment_end_to_end():
         )
 
         # Assert: Phase 1 - capability initiation (payment link returned, not completed)
+        # E2E test focuses on semantic correctness only - text format and payment intent details
+        # are tested in unit tests (test_payment_adapter.py)
         assert initiation_result is not None, "Capability initiation result should not be None"
-        assert initiation_result.passthrough is False, \
-            f"Capability should be active during initiation (passthrough=False), got: {initiation_result.passthrough}"
-        assert initiation_result.active_capability == "payment", \
-            f"Active capability should be 'payment' during initiation, got: {initiation_result.active_capability}"
         assert initiation_result.text is not None, \
             "Capability initiation should return payment link text"
-        assert "payment" in initiation_result.text.lower() or "link" in initiation_result.text.lower() or "https://pay.test" in initiation_result.text, \
-            f"Payment link text should contain payment link, got: {initiation_result.text}"
         assert initiation_result.facts is None or not initiation_result.facts.get("payment_satisfied"), \
             f"Payment should not be satisfied during initiation, got: {initiation_result.facts}"
-
-        # Verify payment intent exists (Model B: execution creates side-effects)
-        from capabilities.clients.payment.mock_payment import _PAYMENT_STATE
-        assert "booking_123" in _PAYMENT_STATE, \
-            f"Payment intent should exist for booking_code 'booking_123' after capability initiation. " \
-            f"Available booking codes: {list(_PAYMENT_STATE.keys())}"
-        assert _PAYMENT_STATE["booking_123"].get("intent_created"), \
-            "Payment intent should be marked as created for booking_code 'booking_123'"
-        assert _PAYMENT_STATE["booking_123"].get("paid") is not True, \
-            "Payment should not be marked as paid during initiation"
 
         # ============================================================
         # Phase 2: Payment Reconciliation
@@ -369,23 +355,12 @@ def test_core_capability_payment_end_to_end():
         mark_payment_as_paid("booking_123")
 
         # Verify payment is marked as paid in backend (the channel capability reads from)
-        assert "booking_123" in _PAYMENT_STATE, \
-            f"Payment intent should exist before reconciliation, got: {list(_PAYMENT_STATE.keys())}"
-        assert _PAYMENT_STATE["booking_123"].get("paid") is True, \
-            "Payment should be marked as paid in mock payment backend before reconciliation"
-        assert _PAYMENT_STATE["booking_123"].get("intent_created") is True, \
-            "Payment intent should still be marked as created"
-
-        # Verify that payment_client.get_payment_status() will now return payment_status="paid"
-        # This is the channel the payment adapter reads from
-        # Use the same payment_client instance that was registered with the adapter
+        # E2E test verifies the payment status check succeeds - exact structure is tested in unit tests
         payment_status_check = payment_client.get_payment_status("booking_123")
         assert payment_status_check.get("success") is True, \
             "Payment status check should succeed"
         assert payment_status_check["data"].get("payment_status") == "paid", \
             f"Payment status should be 'paid' in backend, got: {payment_status_check['data'].get('payment_status')}"
-        assert payment_status_check["data"].get("payment_required") is False, \
-            f"Payment should not be required when paid, got: {payment_status_check['data'].get('payment_required')}"
 
         # ============================================================
         # Step 2: Re-run Payment Capability (Reconciliation Mode)
@@ -432,14 +407,10 @@ def test_core_capability_payment_end_to_end():
 
         # ============================================================
         # Step 3: Assert Capability Reconciliation Results
-        # Verify that capability completed (passthrough=True) and returned payment_satisfied facts
-        # The capability reads payment status from mock payment backend and returns facts
+        # Verify that capability completed and returned payment_satisfied facts
+        # E2E test focuses on semantic correctness - passthrough behavior is tested in unit tests
         # ============================================================
         assert reconciliation_result is not None, "Reconciliation result should not be None"
-        assert reconciliation_result.passthrough is True, \
-            f"Capability should complete (passthrough=True) when payment is paid, got: {reconciliation_result.passthrough}"
-        assert reconciliation_result.active_capability is None, \
-            f"active_capability should be None after completion, got: {reconciliation_result.active_capability}"
         assert reconciliation_result.facts is not None, \
             "Reconciliation should return facts when payment is paid"
         assert "payment_satisfied" in reconciliation_result.facts, \

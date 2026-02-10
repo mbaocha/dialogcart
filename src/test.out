@@ -36,7 +36,7 @@ core/tests/workflows/test_workflow_invocation.py ......                  [ 93%]
 core/tests/workflows/test_workflow_manual.py ...                         [ 95%]
 core/tests/workflows/test_workflow_registry.py .......                   [100%]
 
-======================= 160 passed, 7 skipped in 15.22s ========================
+======================= 160 passed, 7 skipped in 18.18s ========================
 ================================================================================
 Running tests: all
 Path: core/tests
