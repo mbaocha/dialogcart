@@ -2102,6 +2102,17 @@ def build_session_state_from_outcome(
         print(
             f"[ERROR] build_session_state_from_outcome: outcome is None or not a dict: {outcome}")
         return None
+    
+    # DIAGNOSTIC: Log what's in outcome and merged_luma_response at entry
+    logger.debug(
+        f"[SESSION_MERGE] build_session_state_from_outcome entry: "
+        f"outcome_keys={list(outcome.keys())}, "
+        f"outcome.slots_keys={list(outcome.get('slots', {}).keys()) if isinstance(outcome.get('slots'), dict) else 'N/A'}, "
+        f"outcome.facts.slots_keys={list(outcome.get('facts', {}).get('slots', {}).keys()) if isinstance(outcome.get('facts'), dict) and isinstance(outcome.get('facts', {}).get('slots'), dict) else 'N/A'}, "
+        f"merged_luma_response_keys={list(merged_luma_response.keys()) if merged_luma_response and isinstance(merged_luma_response, dict) else 'N/A'}, "
+        f"merged_luma_response.slots_keys={list(merged_luma_response.get('slots', {}).keys()) if merged_luma_response and isinstance(merged_luma_response, dict) and isinstance(merged_luma_response.get('slots'), dict) else 'N/A'}, "
+        f"merged_luma_response._effective_collected_slots_keys={list(merged_luma_response.get('_effective_collected_slots', {}).keys()) if merged_luma_response and isinstance(merged_luma_response, dict) and isinstance(merged_luma_response.get('_effective_collected_slots'), dict) else 'N/A'}"
+    )
 
     # Guard: outcome must have intent_name or intent (required for session state)
     # Check early to prevent building invalid session state
@@ -2146,6 +2157,23 @@ def build_session_state_from_outcome(
             slots = merged_luma_response.get("slots", {})
             if not isinstance(slots, dict):
                 slots = {}
+            
+            # DIAGNOSTIC: Log what's available in merged_luma_response
+            logger.debug(
+                f"[SESSION_MERGE] merged_luma_response keys: {list(merged_luma_response.keys())}, "
+                f"slots keys: {list(slots.keys()) if isinstance(slots, dict) else 'N/A'}, "
+                f"_effective_collected_slots keys: {list(merged_luma_response.get('_effective_collected_slots', {}).keys()) if isinstance(merged_luma_response.get('_effective_collected_slots'), dict) else 'N/A'}"
+            )
+            
+            # FALLBACK: If slots is empty but _effective_collected_slots has data, use it
+            # This handles cases where slots weren't populated but effective_collected_slots exists
+            if not slots and merged_luma_response.get("_effective_collected_slots"):
+                effective_slots = merged_luma_response.get("_effective_collected_slots", {})
+                if isinstance(effective_slots, dict) and effective_slots:
+                    slots = effective_slots
+                    logger.info(
+                        f"[SESSION_MERGE] Using _effective_collected_slots as fallback (slots was empty): {list(slots.keys())}"
+                    )
     except Exception as e:
         print(
             f"[ERROR] build_session_state_from_outcome: Exception accessing merged_luma_response: {e}")
@@ -2400,8 +2428,88 @@ def build_session_state_from_outcome(
                 context_with_roles = {}
             context_with_roles["date_roles"] = prev_context["date_roles"]
 
+    # Handle awaiting_slot persistence (optional, backward compatible)
+    # Read awaiting_slot from previous_session_state if present (before computing missing_slots)
+    awaiting_slot = None
+    if previous_session_state and isinstance(previous_session_state, dict):
+        awaiting_slot = previous_session_state.get("awaiting_slot")
+    
+    # Handle slot_attempts persistence (optional, backward compatible)
+    # session_state["slot_attempts"] is the ONLY source of truth (set by orchestrator)
+    # Read slot_attempts ONLY from previous_session_state (never from outcome.facts)
+    # Always ensure slot_attempts is a dict (defaults to empty dict)
+    slot_attempts = {}
+    if previous_session_state and isinstance(previous_session_state, dict):
+        slot_attempts = previous_session_state.get("slot_attempts", {})
+        if not isinstance(slot_attempts, dict):
+            slot_attempts = {}
+    
+    # Ensure slot_attempts is always a dict (shape safety)
+    if not isinstance(slot_attempts, dict):
+        slot_attempts = {}
+
     # Determine missing_slots to persist (recomputed from effective_collected_slots)
     missing_slots_to_persist = recomputed_missing_slots if recomputed_missing_slots is not None else []
+
+    # Clear awaiting_slot if it is no longer missing or if it appears in outcome slot sources
+    # Check multiple authoritative slot sources used by planning/turn_state
+    if awaiting_slot:
+        slot_filled = False
+        source_used = None
+        
+        # Check 1: outcome.slots (top-level slots)
+        outcome_slots = outcome.get("slots", {}) if outcome and isinstance(outcome, dict) else {}
+        if isinstance(outcome_slots, dict) and awaiting_slot in outcome_slots:
+            slot_filled = True
+            source_used = "outcome.slots"
+        
+        # Check 2: outcome.facts.slots (facts container slots)
+        if not slot_filled and outcome and isinstance(outcome, dict):
+            outcome_facts = outcome.get("facts", {})
+            if isinstance(outcome_facts, dict):
+                facts_slots = outcome_facts.get("slots", {})
+                if isinstance(facts_slots, dict) and awaiting_slot in facts_slots:
+                    slot_filled = True
+                    source_used = "outcome.facts.slots"
+        
+        # Check 3: outcome.facts directly (some facts store top-level slot values)
+        if not slot_filled and outcome and isinstance(outcome, dict):
+            outcome_facts = outcome.get("facts", {})
+            if isinstance(outcome_facts, dict) and awaiting_slot in outcome_facts:
+                slot_filled = True
+                source_used = "outcome.facts"
+        
+        # Check 4: missing_slots_to_persist (slot is no longer missing)
+        if not slot_filled and awaiting_slot not in missing_slots_to_persist:
+            slot_filled = True
+            source_used = "missing_slots_to_persist (no longer missing)"
+        
+        # Clear awaiting_slot if filled from any source
+        if slot_filled:
+            logger.info(
+                f"[AWAITING_SLOT] Clearing awaiting_slot='{awaiting_slot}' "
+                f"because slot is filled (detected in {source_used})"
+            )
+            awaiting_slot = None
+            # Also clear slot_attempts counter for this slot (retry tracking reset)
+            if slot_attempts and isinstance(slot_attempts, dict):
+                slot_attempts.pop(awaiting_slot, None)
+                logger.debug(
+                    f"[SLOT_ATTEMPTS] Cleared retry counter for slot '{awaiting_slot}' (slot filled)"
+                )
+    
+    # Clear slot_attempts for any slots that are no longer missing
+    # This ensures retry counters reset when slots are satisfied
+    if slot_attempts and isinstance(slot_attempts, dict) and isinstance(missing_slots_to_persist, list):
+        slots_to_clear = [
+            slot_name for slot_name in slot_attempts.keys()
+            if slot_name not in missing_slots_to_persist
+        ]
+        for slot_name in slots_to_clear:
+            slot_attempts.pop(slot_name, None)
+            logger.debug(
+                f"[SLOT_ATTEMPTS] Cleared retry counter for slot '{slot_name}' (no longer missing)"
+            )
 
     # CRITICAL: Final intent determination with hard assertion
     # Use the resolved intent_name from the precedence order above
@@ -2514,6 +2622,13 @@ def build_session_state_from_outcome(
     if final_intent_name and is_durable_intent(final_intent_name):
         # Durable intent: persist intent and filter slots
         filtered_slots = filter_slots_for_intent(final_intent_name, slots)
+        
+        # DEBUG: Log slot_attempts before session_state construction
+        logger.debug(
+            f"[SLOT_ATTEMPTS_DEBUG] BEFORE session_state construction (durable): "
+            f"slot_attempts={slot_attempts}, id={id(slot_attempts)}, type={type(slot_attempts)}"
+        )
+        
         session_state = {
             "intent_name": final_intent_name,
             "missing_slots": missing_slots_to_persist,
@@ -2521,8 +2636,18 @@ def build_session_state_from_outcome(
             # First-class, durable facts (same status as slots)
             "facts": serializable_facts,
             "status": status,
-            "active_capability": active_capability  # optional passthrough
+            "active_capability": active_capability,  # optional passthrough
+            "awaiting_slot": awaiting_slot,
+            "slot_attempts": slot_attempts
         }
+        
+        # DEBUG: Log session_state after construction
+        logger.debug(
+            f"[SLOT_ATTEMPTS_DEBUG] AFTER session_state construction (durable): "
+            f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+            f"id={id(session_state.get('slot_attempts'))}, "
+            f"same_as_local={id(session_state.get('slot_attempts')) == id(slot_attempts)}"
+        )
         logger.debug(
             f"[build_session_state_from_outcome] Persisting durable intent={final_intent_name} "
             f"with {len(filtered_slots)} filtered slots and {len(serializable_facts)} facts"
@@ -2530,14 +2655,31 @@ def build_session_state_from_outcome(
     else:
         # Ephemeral intent: do NOT persist intent or slots
         # But still persist facts (capability facts may be set even for ephemeral intents)
+        
+        # DEBUG: Log slot_attempts before session_state construction
+        logger.debug(
+            f"[SLOT_ATTEMPTS_DEBUG] BEFORE session_state construction (ephemeral): "
+            f"slot_attempts={slot_attempts}, id={id(slot_attempts)}, type={type(slot_attempts)}"
+        )
+        
         session_state = {
             "intent_name": None,  # Explicitly None for ephemeral
             "missing_slots": [],
             "slots": {},  # No slot persistence for ephemeral intents
             "facts": serializable_facts,  # Facts persist even for ephemeral intents
             "status": status,
-            "active_capability": active_capability  # optional passthrough
+            "active_capability": active_capability,  # optional passthrough
+            "awaiting_slot": awaiting_slot,
+            "slot_attempts": slot_attempts
         }
+        
+        # DEBUG: Log session_state after construction
+        logger.debug(
+            f"[SLOT_ATTEMPTS_DEBUG] AFTER session_state construction (ephemeral): "
+            f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+            f"id={id(session_state.get('slot_attempts'))}, "
+            f"same_as_local={id(session_state.get('slot_attempts')) == id(slot_attempts)}"
+        )
         logger.debug(
             f"[build_session_state_from_outcome] Ephemeral intent={final_intent_name} - "
             f"NOT persisting intent or slots, but persisting {len(serializable_facts)} facts"
@@ -2568,6 +2710,51 @@ def build_session_state_from_outcome(
     assert isinstance(session_state["facts"], dict), (
         f"CRITICAL: session_state['facts'] must be a dict before persistence. "
         f"Got type: {type(session_state['facts'])}, value: {session_state.get('facts')}"
+    )
+
+    # HARD GUARD: Ensure session_state["slot_attempts"] is always present as a dict
+    # This invariant ensures consistent session shape and safe retry tracking
+    # slot_attempts defaults to empty dict if not present or invalid
+    # Defensive guarantee: always ensure slot_attempts exists before validation
+    
+    # DEBUG: Log state before guard block
+    logger.debug(
+        f"[SLOT_ATTEMPTS_DEBUG] BEFORE guard block: "
+        f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+        f"id={id(session_state.get('slot_attempts'))}, "
+        f"type={type(session_state.get('slot_attempts'))}"
+    )
+    
+    session_state.setdefault("slot_attempts", {})
+    if "slot_attempts" not in session_state:
+        logger.warning(
+            f"[SLOT_ATTEMPTS_DEBUG] OVERWRITE: slot_attempts not in session_state, setting to {{}}"
+        )
+        session_state["slot_attempts"] = {}
+    elif session_state["slot_attempts"] is None:
+        logger.warning(
+            f"[SLOT_ATTEMPTS_DEBUG] OVERWRITE: session_state['slot_attempts'] is None, replacing with empty dict. "
+            f"Previous id was {id(session_state.get('slot_attempts'))}"
+        )
+        session_state["slot_attempts"] = {}
+    elif not isinstance(session_state["slot_attempts"], dict):
+        logger.warning(
+            f"[SLOT_ATTEMPTS_DEBUG] OVERWRITE: session_state['slot_attempts'] is not a dict (type: {type(session_state['slot_attempts'])}), "
+            f"replacing with empty dict. Previous value: {session_state.get('slot_attempts')}, id={id(session_state.get('slot_attempts'))}"
+        )
+        session_state["slot_attempts"] = {}
+    
+    # DEBUG: Log state after guard block
+    logger.debug(
+        f"[SLOT_ATTEMPTS_DEBUG] AFTER guard block: "
+        f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+        f"id={id(session_state.get('slot_attempts'))}"
+    )
+
+    # Hard assertion: slot_attempts must be a dict
+    assert isinstance(session_state["slot_attempts"], dict), (
+        f"CRITICAL: session_state['slot_attempts'] must be a dict before persistence. "
+        f"Got type: {type(session_state.get('slot_attempts'))}, value: {session_state.get('slot_attempts')}"
     )
 
     # SESSION_SAVE_DEBUG: Guard logging before session save
@@ -2942,5 +3129,130 @@ def build_session_state_from_outcome(
                 f"[SESSION_PERSISTENCE_INVARIANT] {len(invariant_violations)} invariant violations detected "
                 f"(not raising in non-test mode)"
             )
+
+    # SLOT RETRY TRACKING: Increment retry counter for first missing slot
+    # This happens AFTER all session_state construction and modifications are complete
+    # and RIGHT BEFORE returning, to ensure the increment is never overwritten
+    # session_state["slot_attempts"] is the ONLY source of truth
+    # Increment based on status (derived from outcome_status) and session_state["missing_slots"] (final persisted value)
+    # CRITICAL: This must run AFTER all session_state modifications to ensure increment persists
+    # CRITICAL: Use status (not outcome_status) to match the condition used for setting missing_slots at line 2894
+    missing_slots_final = session_state.get("missing_slots", [])
+    
+    # DEBUG: Log state before increment block
+    logger.debug(
+        f"[SLOT_ATTEMPTS_DEBUG] BEFORE increment block: "
+        f"status={status}, missing_slots_final={missing_slots_final}, "
+        f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+        f"session_state['slot_attempts'] id={id(session_state.get('slot_attempts'))}"
+    )
+    
+    if (status == "NEEDS_CLARIFICATION" and 
+        isinstance(missing_slots_final, list) and 
+        len(missing_slots_final) > 0):
+        first_missing = missing_slots_final[0]
+        
+        # DEBUG: Log state before setdefault
+        logger.debug(
+            f"[SLOT_ATTEMPTS_DEBUG] BEFORE setdefault: "
+            f"first_missing={first_missing}, "
+            f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+            f"id={id(session_state.get('slot_attempts'))}"
+        )
+        
+        # Ensure slot_attempts exists and is a dict (defensive guarantee)
+        session_state.setdefault("slot_attempts", {})
+        
+        # DEBUG: Log state after setdefault
+        logger.debug(
+            f"[SLOT_ATTEMPTS_DEBUG] AFTER setdefault: "
+            f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+            f"id={id(session_state.get('slot_attempts'))}, "
+            f"isinstance={isinstance(session_state.get('slot_attempts'), dict)}"
+        )
+        
+        if not isinstance(session_state["slot_attempts"], dict):
+            logger.warning(
+                f"[SLOT_ATTEMPTS_DEBUG] OVERWRITING slot_attempts: "
+                f"was={session_state.get('slot_attempts')}, type={type(session_state.get('slot_attempts'))}"
+            )
+            session_state["slot_attempts"] = {}
+        
+        # DEBUG: Log state before increment
+        logger.debug(
+            f"[SLOT_ATTEMPTS_DEBUG] BEFORE increment: "
+            f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+            f"id={id(session_state.get('slot_attempts'))}, "
+            f"current_value={session_state['slot_attempts'].get(first_missing, 0)}"
+        )
+        
+        # Increment session_state["slot_attempts"] directly (authoritative source)
+        # This works on first turn (slot_attempts defaults to {}) and subsequent turns (reads from previous_session_state)
+        session_state["slot_attempts"][first_missing] = session_state["slot_attempts"].get(first_missing, 0) + 1
+        
+        # DEBUG: Log state after increment
+        logger.debug(
+            f"[SLOT_ATTEMPTS_DEBUG] AFTER increment: "
+            f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+            f"id={id(session_state.get('slot_attempts'))}, "
+            f"incremented_value={session_state['slot_attempts'][first_missing]}"
+        )
+        
+        logger.debug(
+            f"[SLOT_ATTEMPTS] Incremented retry counter for slot '{first_missing}': {session_state['slot_attempts'][first_missing]}"
+        )
+        
+        # Mirror session_state["slot_attempts"] into outcome.facts (for renderer access)
+        # This ensures decision.facts has access to slot_attempts via outcome
+        if outcome and isinstance(outcome, dict):
+            outcome_facts = outcome.get("facts", {})
+            if not isinstance(outcome_facts, dict):
+                outcome_facts = {}
+            outcome_facts["slot_attempts"] = session_state["slot_attempts"].copy()
+            outcome["facts"] = outcome_facts
+            
+            # DEBUG: Log outcome.facts copy
+            logger.debug(
+                f"[SLOT_ATTEMPTS_DEBUG] Copied to outcome.facts: "
+                f"outcome.facts['slot_attempts']={outcome_facts.get('slot_attempts')}, "
+                f"session_state['slot_attempts']={session_state.get('slot_attempts')}"
+            )
+        
+        # CRITICAL: Also update session_state["facts"]["slot_attempts"] to match
+        # session_state["facts"] was set earlier from serializable_facts (before increment)
+        # We need to ensure it reflects the incremented value
+        if "facts" in session_state and isinstance(session_state["facts"], dict):
+            session_state["facts"]["slot_attempts"] = session_state["slot_attempts"].copy()
+            logger.debug(
+                f"[SLOT_ATTEMPTS_DEBUG] Updated session_state['facts']['slot_attempts']: "
+                f"{session_state['facts']['slot_attempts']}"
+            )
+    
+    # DEBUG: Log final state before return
+    logger.debug(
+        f"[SLOT_ATTEMPTS_DEBUG] BEFORE return: "
+        f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+        f"id={id(session_state.get('slot_attempts'))}"
+    )
+    
+    # INSTRUMENTATION: Print object IDs for persistence tracking
+    print(
+        f"[PERSISTENCE_TRACE] build_session_state_from_outcome RETURN: "
+        f"session_state id={id(session_state)}, "
+        f"session_state['facts'] id={id(session_state.get('facts'))}, "
+        f"session_state['slot_attempts'] id={id(session_state.get('slot_attempts'))}, "
+        f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+        f"outcome.facts id={id(outcome.get('facts') if outcome and isinstance(outcome, dict) else None)}, "
+        f"outcome.facts['slot_attempts']={outcome.get('facts', {}).get('slot_attempts') if outcome and isinstance(outcome.get('facts'), dict) else None}"
+    )
+    logger.error(
+        f"[PERSISTENCE_TRACE] build_session_state_from_outcome RETURN: "
+        f"session_state id={id(session_state)}, "
+        f"session_state['facts'] id={id(session_state.get('facts'))}, "
+        f"session_state['slot_attempts'] id={id(session_state.get('slot_attempts'))}, "
+        f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+        f"outcome.facts id={id(outcome.get('facts') if outcome and isinstance(outcome, dict) else None)}, "
+        f"outcome.facts['slot_attempts']={outcome.get('facts', {}).get('slot_attempts') if outcome and isinstance(outcome.get('facts'), dict) else None}"
+    )
 
     return session_state

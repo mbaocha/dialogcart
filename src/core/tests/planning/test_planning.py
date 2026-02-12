@@ -146,7 +146,8 @@ def filter_scenarios_by_id(scenarios: List[Dict[str, Any]], scenario_ids: Set[in
 def assert_turn_expectations(
     result: Dict[str, Any],
     expected: Dict[str, Any],
-    turn_index: int
+    turn_index: int,
+    session_state: Optional[Dict[str, Any]] = None
 ) -> Optional[str]:
     """Assert turn result matches expectations.
 
@@ -229,8 +230,22 @@ def assert_turn_expectations(
 
         # INVARIANT: Verify missing_slots is sorted (planner returns sorted list)
         # This ensures deterministic behavior while order doesn't matter for comparison
-        if actual_missing != sorted(actual_missing):
-            return f"Turn {turn_index + 1} missing_slots not sorted: got {actual_missing} (should be sorted for determinism)"
+        # Exception: If awaiting_slot is present and matches actual_missing[0], allow it at index 0
+        # and verify the rest (actual_missing[1:]) is sorted
+        if len(actual_missing) > 0:
+            awaiting_slot = None
+            if session_state and isinstance(session_state, dict):
+                awaiting_slot = session_state.get("awaiting_slot")
+            
+            if awaiting_slot is not None and actual_missing[0] == awaiting_slot:
+                # awaiting_slot is at index 0 - verify the rest is sorted
+                remaining = actual_missing[1:]
+                if remaining != sorted(remaining):
+                    return f"Turn {turn_index + 1} missing_slots not sorted after awaiting_slot: got {actual_missing} (awaiting_slot='{awaiting_slot}' at index 0, rest should be sorted)"
+            else:
+                # No awaiting_slot or it's not at index 0 - verify entire list is sorted
+                if actual_missing != sorted(actual_missing):
+                    return f"Turn {turn_index + 1} missing_slots not sorted: got {actual_missing} (should be sorted for determinism)"
 
     # Assert slots (partial match only)
     # INVARIANT: Slots can be provided in any order - all slots are additive
@@ -490,7 +505,7 @@ def _test_scenario(
                 session_state_after = get_session(user_id)
 
             # Assert expectations
-            error_msg = assert_turn_expectations(result, expected, turn_index)
+            error_msg = assert_turn_expectations(result, expected, turn_index, session_state_before)
             if error_msg:
                 # Print compact FAIL_SNAPSHOT on assertion failure
                 # Use normalized view for snapshot

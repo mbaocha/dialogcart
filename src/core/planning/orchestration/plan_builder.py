@@ -468,6 +468,20 @@ def build_decision_plan(
         f"luma_response.issues={luma_response.get('issues')}"
     )
 
+    # Soft prioritization of awaiting_slot (optional, backward compatible)
+    # Read awaiting_slot from session_state if present
+    if session_state and isinstance(session_state, dict):
+        awaiting_slot = session_state.get("awaiting_slot")
+        # If awaiting_slot exists AND is in missing_slots, move it to index 0
+        if awaiting_slot is not None and awaiting_slot in missing_slots:
+            # Remove awaiting_slot from its current position
+            missing_slots = [s for s in missing_slots if s != awaiting_slot]
+            # Insert at index 0, preserving the rest of the order
+            missing_slots.insert(0, awaiting_slot)
+            logger.debug(
+                f"[AWAITING_SLOT] Prioritized slot '{awaiting_slot}' in missing_slots"
+            )
+
     # Determine status
     needs_clarification = luma_response.get("needs_clarification", False)
     booking = luma_response.get("booking", {})

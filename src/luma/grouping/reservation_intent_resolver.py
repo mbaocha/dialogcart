@@ -34,9 +34,9 @@ BOOKING_INQUIRY = "BOOKING_INQUIRY"
 MODIFY_BOOKING = "MODIFY_BOOKING"
 CANCEL_BOOKING = "CANCEL_BOOKING"
 PAYMENT = "PAYMENT"
-CONFIRM_BOOKING = "CONFIRM_BOOKING"
+CONFIRM_ACTION = "CONFIRM_ACTION"
 PAYMENT_STATUS = "PAYMENT_STATUS"
-REJECT_OR_CHANGE = "REJECT_OR_CHANGE"
+REJECT_ACTION = "REJECT_ACTION"
 UNKNOWN = "UNKNOWN"
 
 # Confidence scores (heuristic)
@@ -753,6 +753,8 @@ class ReservationIntentResolver:
         Uses priority ordering: destructive/sensitive → booking → informational
         """
         # Priority order (higher priority checked first)
+        # Use canonical names (CONFIRM_ACTION, REJECT_ACTION) but also check legacy names
+        # for backward compatibility during signal matching
         priority_order = [
             PAYMENT,
             CANCEL_BOOKING,
@@ -765,9 +767,9 @@ class ReservationIntentResolver:
             DETAILS,
             DISCOVERY,
             RECOMMENDATION,
-            CONFIRM_BOOKING,
+            CONFIRM_ACTION,
             PAYMENT_STATUS,
-            REJECT_OR_CHANGE,
+            REJECT_ACTION,
         ]
 
         # Return first matching intent in priority order

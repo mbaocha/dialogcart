@@ -888,5 +888,104 @@ Examples:
     sys.exit(exit_code)
 
 
+# ============================================================================
+# Isolated Unit Tests for awaiting_slot Behavior
+# ============================================================================
+
+def test_awaiting_slot_cleared_when_slot_filled():
+    """
+    Test that awaiting_slot is cleared when the slot is filled in outcome.
+    
+    Scenario 1: Slot filled
+    - previous_session_state has awaiting_slot="time"
+    - outcome.slots includes "time"
+    - Expected: session_state["awaiting_slot"] is None
+    
+    Scenario 2: Slot still missing
+    - previous_session_state has awaiting_slot="time"
+    - outcome.slots does NOT include "time"
+    - Expected: session_state["awaiting_slot"] is "time" (preserved)
+    """
+    # Scenario 1: Slot filled - awaiting_slot should be cleared
+    previous_session_state = {
+        "intent_name": "CREATE_APPOINTMENT",
+        "status": "NEEDS_CLARIFICATION",
+        "missing_slots": ["time"],
+        "slots": {"service_id": "haircut", "date": "2026-01-16"},
+        "awaiting_slot": "time"
+    }
+    
+    outcome = {
+        "intent_name": "CREATE_APPOINTMENT",
+        "status": "NEEDS_CLARIFICATION",
+        "slots": {
+            "service_id": "haircut",
+            "date": "2026-01-16",
+            "time": "14:00"  # time slot is now filled
+        },
+        "missing_slots": []
+    }
+    
+    outcome_status = "NEEDS_CLARIFICATION"
+    merged_luma_response = {
+        "slots": outcome["slots"],
+        "missing_slots": []
+    }
+    user_id = "test_user_awaiting_slot"
+    
+    # Execute: build session state
+    session_state = build_session_state_from_outcome(
+        outcome=outcome,
+        outcome_status=outcome_status,
+        merged_luma_response=merged_luma_response,
+        previous_session_state=previous_session_state,
+        user_id=user_id
+    )
+    
+    # Assert: awaiting_slot is cleared when slot is filled
+    assert session_state is not None, "Session state should be created"
+    assert session_state.get("awaiting_slot") is None, \
+        f"Expected awaiting_slot to be None when slot is filled, got {session_state.get('awaiting_slot')}"
+    
+    # Scenario 2: Slot still missing - awaiting_slot should be preserved
+    previous_session_state_2 = {
+        "intent_name": "CREATE_APPOINTMENT",
+        "status": "NEEDS_CLARIFICATION",
+        "missing_slots": ["time"],
+        "slots": {"service_id": "haircut", "date": "2026-01-16"},
+        "awaiting_slot": "time"
+    }
+    
+    outcome_2 = {
+        "intent_name": "CREATE_APPOINTMENT",
+        "status": "NEEDS_CLARIFICATION",
+        "slots": {
+            "service_id": "haircut",
+            "date": "2026-01-16"
+            # time slot is still missing
+        },
+        "missing_slots": ["time"]
+    }
+    
+    merged_luma_response_2 = {
+        "slots": outcome_2["slots"],
+        "missing_slots": ["time"]
+    }
+    
+    # Execute: build session state
+    session_state_2 = build_session_state_from_outcome(
+        outcome=outcome_2,
+        outcome_status=outcome_status,
+        merged_luma_response=merged_luma_response_2,
+        previous_session_state=previous_session_state_2,
+        user_id=user_id
+    )
+    
+    # Assert: awaiting_slot is preserved when slot is still missing
+    assert session_state_2 is not None, "Session state should be created"
+    assert session_state_2.get("awaiting_slot") == "time", \
+        f"Expected awaiting_slot to be preserved as 'time', got {session_state_2.get('awaiting_slot')}"
+
+
 if __name__ == "__main__":
     main()

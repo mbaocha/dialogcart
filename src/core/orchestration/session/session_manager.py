@@ -246,6 +246,26 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
     """
     import logging
     logger = logging.getLogger(__name__)
+    
+    # INSTRUMENTATION: Print object IDs at save_session entry
+    print(
+        f"[PERSISTENCE_TRACE] save_session ENTRY: "
+        f"user_id={user_id}, "
+        f"session_state id={id(session_state)}, "
+        f"session_state['facts'] id={id(session_state.get('facts'))}, "
+        f"session_state['slot_attempts'] id={id(session_state.get('slot_attempts'))}, "
+        f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+        f"session_state['facts']['slot_attempts']={session_state.get('facts', {}).get('slot_attempts') if isinstance(session_state.get('facts'), dict) else None}"
+    )
+    logger.error(
+        f"[PERSISTENCE_TRACE] save_session ENTRY: "
+        f"user_id={user_id}, "
+        f"session_state id={id(session_state)}, "
+        f"session_state['facts'] id={id(session_state.get('facts'))}, "
+        f"session_state['slot_attempts'] id={id(session_state.get('slot_attempts'))}, "
+        f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+        f"session_state['facts']['slot_attempts']={session_state.get('facts', {}).get('slot_attempts') if isinstance(session_state.get('facts'), dict) else None}"
+    )
 
     # HARD GUARD: Ensure session_state["facts"] is always present as a dict before saving
     # This invariant must hold for all sessions, especially those with active_capability

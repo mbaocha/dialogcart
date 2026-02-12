@@ -4,7 +4,7 @@ Capability Renderer
 Renders text for capability states (AWAITING_CAPABILITY).
 
 This module provides deterministic rendering from semantic signals (status, active_capability, facts).
-Currently runs in shadow mode - computes renderer text but adapter text remains source of truth.
+Core renderer is the source of truth for capability presentation text.
 """
 
 from typing import Dict, Any, Optional
@@ -31,8 +31,7 @@ def render_capability(
     - slots: Slots dictionary (may contain booking info)
     - context: Optional context dictionary (for accessing external services if needed)
     
-    Currently runs in shadow mode - adapter text is still the source of truth.
-    This function replicates adapter text generation logic to validate equivalence.
+    Core renderer is the source of truth for capability presentation text.
     
     Args:
         status: Planning status (must be "AWAITING_CAPABILITY")
@@ -129,8 +128,8 @@ def _render_payment_capability(
             
             payment_client = payment_adapter.payment_client
         except KeyError:
-            # Adapter not registered - shadow rendering cannot proceed
-            logger.debug("Payment adapter not registered - skipping shadow rendering")
+            # Adapter not registered - rendering cannot proceed
+            logger.debug("Payment adapter not registered - skipping capability rendering")
             return None
         
         # Get payment URL (same as adapter.start())
@@ -151,7 +150,7 @@ def _render_payment_capability(
         )
     
     except ImportError:
-        logger.debug("Payment client not available for shadow rendering")
+        logger.debug("Payment client not available for capability rendering")
         return None
     except Exception as e:
         logger.warning(f"Payment capability rendering error: {e}")

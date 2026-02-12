@@ -188,7 +188,7 @@ def _render_clarification_text(decision: Dict[str, Any], slots: Dict[str, Any]) 
     Render clarification text from decision and slots (best-effort).
 
     Args:
-        decision: Decision/plan dictionary with status and missing_slots
+        decision: Decision/plan dictionary with status and missing_slots (optionally facts)
         slots: Dictionary of slot values for template interpolation
 
     Returns:
@@ -207,8 +207,18 @@ def _render_clarification_text(decision: Dict[str, Any], slots: Dict[str, Any]) 
             # No reason derived (shouldn't happen for NEEDS_CLARIFICATION, but be safe)
             return None
 
-        # Render with slots
-        render_spec = render_clarification(reason, slots)
+        # Extract slot_attempts if available in decision.facts
+        attempt_count = 0
+        facts = decision.get("facts", {})
+        if isinstance(facts, dict):
+            slot_attempts = facts.get("slot_attempts", {})
+            missing_slots = decision.get("missing_slots", [])
+            first_missing = missing_slots[0] if isinstance(missing_slots, list) and missing_slots else None
+            if first_missing and isinstance(slot_attempts, dict):
+                attempt_count = slot_attempts.get(first_missing, 0)
+
+        # Render with slots and attempt_count
+        render_spec = render_clarification(reason, slots, attempt_count)
         return render_spec.text
     except Exception as e:
         # Best-effort: log error and return None
@@ -253,7 +263,7 @@ def _handle_non_core_intent(
     """
     Handle non-core intents by passing them through as non-orchestrated signals.
 
-    Non-core intents (e.g., PAYMENT, CONFIRM_BOOKING, BOOKING_INQUIRY) are not
+    Non-core intents (e.g., PAYMENT, CONFIRM_ACTION, BOOKING_INQUIRY) are not
     orchestrated by core but are passed through to preserve conversational continuity.
     This enables workflow extensions to handle these intents in future steps.
 
@@ -2254,8 +2264,10 @@ def handle_message_legacy(
         # set confirmation_state to "confirmed" in the booking object
         # NOTE: Use original luma_intent_name (from line 1446) BEFORE merge, not after merge
         # because merge_luma_with_session changes effective_response['intent']['name'] to session intent
+        # HARDENED: Only set confirmation_state when session.status == "AWAITING_CONFIRMATION"
         if (luma_intent_name and luma_intent_name.startswith("CONFIRM_") and
-                effective_intent != luma_intent_name and is_session_intent_durable):
+                effective_intent != luma_intent_name and is_session_intent_durable and
+                session_status_for_merge == "AWAITING_CONFIRMATION"):
             # CONFIRM_* was treated as continuation - set confirmation_state
             if "booking" not in effective_response:
                 effective_response["booking"] = {}
@@ -2264,7 +2276,7 @@ def handle_message_legacy(
             effective_response["booking"]["confirmation_state"] = "confirmed"
             logger.info(
                 f"[CONFIRM_CONTINUATION] Set confirmation_state=confirmed for CONFIRM_* continuation "
-                f"of durable intent {effective_intent}, user_id={user_id}"
+                f"of durable intent {effective_intent}, session.status={session_status_for_merge}, user_id={user_id}"
             )
 
         # AFTER_MERGE: Log right after session merge
@@ -3392,7 +3404,7 @@ def handle_message_legacy(
                                 f"status={plan_status_for_renderer}, active_capability={plan_active_capability}"
                             )
                         
-                        # Store debug info (stable, not "shadow")
+                        # Store debug info
                         outcome_dict.setdefault("debug", {})
                         outcome_dict["debug"]["capability_renderer"] = {
                             "text": render_spec.text if render_spec is not None else None,
@@ -3425,46 +3437,6 @@ def handle_message_legacy(
 
                         logger.info(
                             f"[CAPABILITY_LIFECYCLE] Merged capability facts into outcome: {list(runner_result.facts.keys())}"
-                        )
-
-                    # SHADOW MODE: Invoke core capability renderer to validate equivalence
-                    # This runs in parallel with adapter text generation but does not affect user-facing output
-                    # Called immediately after runner_result is obtained
-                    try:
-                        # Get plan status and active_capability from plan (authoritative source)
-                        plan = decision.get("plan", {})
-                        if isinstance(plan, dict):
-                            plan_status_for_renderer = plan.get("status", plan_status)
-                            plan_active_capability = plan.get("active_capability", active_capability_for_runner)
-                        else:
-                            plan_status_for_renderer = plan_status
-                            plan_active_capability = active_capability_for_runner
-                        
-                        shadow_render_spec = render_capability(
-                            status=plan_status_for_renderer,
-                            active_capability=plan_active_capability,
-                            facts=outcome_dict.get("facts", {}),
-                            slots=outcome_dict.get("slots", {}),
-                            context=context
-                        )
-                        
-                        # Attach shadow renderer result to debug only (not used for user-facing output)
-                        # Store as dict with text field for serialization compatibility
-                        if shadow_render_spec is not None:
-                            outcome_dict.setdefault("debug", {})["shadow_renderer"] = {
-                                "text": shadow_render_spec.text
-                            }
-                            result["outcome"]["debug"] = outcome_dict["debug"]
-                            
-                            logger.debug(
-                                f"[SHADOW_RENDERER] Computed shadow renderer text for "
-                                f"status={plan_status_for_renderer}, active_capability={plan_active_capability}"
-                            )
-                    except Exception as e:
-                        # Shadow rendering errors should not break the flow
-                        logger.warning(
-                            f"[SHADOW_RENDERER] Failed to compute shadow renderer text: {e}",
-                            exc_info=True
                         )
 
                     # GUARD ASSERTION: If capability is payment, payment intent MUST exist before response is returned
@@ -3592,7 +3564,8 @@ def handle_message_legacy(
                 # Build decision dict for rendering
                 rendering_decision = {
                     "status": "NEEDS_CLARIFICATION",
-                    "missing_slots": facts_obj.get("missing_slots", outcome_obj.get("missing_slots", []))
+                    "missing_slots": facts_obj.get("missing_slots", outcome_obj.get("missing_slots", [])),
+                    "facts": facts_obj  # Include facts for adaptive rendering
                 }
 
                 rendered_text = _render_clarification_text(
@@ -3790,7 +3763,8 @@ def handle_message_legacy(
             # Build decision dict for rendering
             rendering_decision = {
                 "status": "NEEDS_CLARIFICATION",
-                "missing_slots": missing_slots
+                "missing_slots": missing_slots,
+                "facts": facts_obj  # Include facts for adaptive rendering
             }
 
             rendered_text = _render_clarification_text(

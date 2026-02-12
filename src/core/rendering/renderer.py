@@ -34,7 +34,12 @@ def render(decision: Dict[str, Any]) -> Optional[str]:
     facts = decision.get("facts", {})
     
     plan_status = plan.get("status")
+    # Try facts first, then plan, then decision level (defensive fallback)
     missing_slots = facts.get("missing_slots", [])
+    if not missing_slots:
+        missing_slots = plan.get("missing_slots", [])
+    if not missing_slots:
+        missing_slots = decision.get("missing_slots", [])
     
     # Check if clarification is needed
     is_clarification = (
@@ -52,22 +57,35 @@ def render(decision: Dict[str, Any]) -> Optional[str]:
     }
     
     # Derive clarification reason
+    print(f"[RENDER_DEBUG] rendering_decision: {rendering_decision}")
+    print(f"[RENDER_DEBUG] missing_slots: {missing_slots}")
     reason = derive_clarification_reason(rendering_decision)
+    print(f"[RENDER_DEBUG] reason from mapper: {reason!r}")
     if not reason:
         # Fallback to generic template
         reason = "NEEDS_CLARIFICATION"
+        print(f"[RENDER_DEBUG] reason after fallback: {reason!r}")
     
     # Get slots for template interpolation
     slots = facts.get("slots", {})
     
+    # Extract slot_attempts and get attempt count for first missing slot
+    # Prefer decision.get("slot_attempts") (top-level) if present, otherwise fallback to facts.slot_attempts
+    slot_attempts = decision.get("slot_attempts")
+    if not isinstance(slot_attempts, dict):
+        slot_attempts = facts.get("slot_attempts", {})
+    first_missing = missing_slots[0] if isinstance(missing_slots, list) and missing_slots else None
+    attempt_count = slot_attempts.get(first_missing, 0) if first_missing else 0
+    
+    print(f"[RENDER_DEBUG] Calling render_clarification with reason={reason!r}, attempt_count={attempt_count}")
     try:
-        # Render with slots
-        render_spec = render_clarification(reason, slots)
+        # Render with slots and attempt_count
+        render_spec = render_clarification(reason, slots, attempt_count)
         return render_spec.text
     except Exception:
         # Fallback to generic template
         try:
-            render_spec = render_clarification("NEEDS_CLARIFICATION", {})
+            render_spec = render_clarification("NEEDS_CLARIFICATION", {}, 0)
             return render_spec.text
         except Exception:
             # Last resort: return None (shouldn't happen if templates are valid)

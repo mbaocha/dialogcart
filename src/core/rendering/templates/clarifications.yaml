@@ -3,8 +3,18 @@ MISSING_TIME:
   required_fields:
     - service
 
+MISSING_TIME_ATTEMPT_2:
+  template: "I still need to know what time you'd like for the {{service}} appointment."
+  required_fields:
+    - service
+
 MISSING_DATE:
-  template: "What day should I book the {{service}} for?"
+  template: "What date would you like for the {{service}}?"
+  required_fields:
+    - service
+
+MISSING_DATE_ATTEMPT_2:
+  template: "I still need to know what date you'd like for the {{service}}."
   required_fields:
     - service
 

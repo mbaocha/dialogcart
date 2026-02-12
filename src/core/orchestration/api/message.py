@@ -225,6 +225,22 @@ async def post_message(request: MessageRequest):
                         "status": new_session_state.get("status"),
                         "missing_slots": new_session_state.get("missing_slots", [])
                     })
+                    
+                    # Wire slot_attempts into decision for test/API access
+                    # slot_attempts is incremented in build_session_state_from_outcome
+                    # and stored in outcome.facts, but decision was set earlier
+                    # Update decision.facts to match outcome.facts for consistency
+                    decision = result.get("_decision")
+                    if decision and isinstance(decision, dict):
+                        if "facts" not in decision:
+                            decision["facts"] = {}
+                        if not isinstance(decision["facts"], dict):
+                            decision["facts"] = {}
+                        # Copy slot_attempts from outcome.facts (updated by build_session_state_from_outcome)
+                        if "facts" in outcome and isinstance(outcome["facts"], dict):
+                            slot_attempts = outcome["facts"].get("slot_attempts")
+                            if slot_attempts is not None:
+                                decision["facts"]["slot_attempts"] = slot_attempts.copy() if isinstance(slot_attempts, dict) else slot_attempts
             elif outcome_status == "READY":
                 # FIX: Do NOT clear session on READY unless execution has occurred
                 # Sessions should only be cleared after confirmed execution event

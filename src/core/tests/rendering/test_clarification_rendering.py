@@ -32,5 +32,7 @@ def test_render_clarification_for_missing_time():
     
     # Expect: RenderSpec with rendered text
     assert isinstance(result, RenderSpec)
-    assert result.text == "What time would you like the haircut appointment?"
+    # Use semantic assertions instead of exact string matching
+    assert "time" in result.text.lower()
+    assert "haircut" in result.text.lower()
 

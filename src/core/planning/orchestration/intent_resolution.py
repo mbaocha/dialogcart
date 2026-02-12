@@ -131,35 +131,51 @@ def resolve_effective_intent(
         f"luma_intent={luma_intent_name} user_id={user_id}{log_transaction_id}"
     )
     
-    # CRITICAL: CONFIRM_* intents are continuations, not intent switches, when session has durable intent
+    # CRITICAL: CONFIRM_* intents are continuations, not intent switches, when:
+    # 1) session has a durable booking intent
+    # 2) AND session.status == "AWAITING_CONFIRMATION"
     # This prevents MODIFY_BOOKING flow from breaking when user confirms with "yes"
+    # but also prevents CONFIRM_* from auto-confirming when status != AWAITING_CONFIRMATION
     if (luma_intent_name and luma_intent_name.startswith("CONFIRM_") and session_state):
-        session_intent = session_state.get("intent_name") or session_state.get("intent")
-        session_intent_str = session_intent if isinstance(session_intent, str) else (
-            session_intent.get("name", "") if isinstance(session_intent, dict) else "")
-        if session_intent_str:
-            session_intent_str = session_intent_str.strip()
-        else:
-            session_intent_str = ""
+        # Defensive null check for session_state.get("status")
+        session_status = session_state.get("status") if session_state else None
         
-        if session_intent_str:
-            # Check if session intent is durable
-            try:
-                from core.policy.intent_policy import get_intent_durable
-                if get_intent_durable(session_intent_str):
-                    # CONFIRM_* is a continuation of durable session intent, not a switch
-                    effective_intent = session_intent_str
-                    session_reset_occurred = False
-                    logger.info(
-                        f"[session] confirm_intent_continuation user_id={user_id}{log_transaction_id} "
-                        f"session.intent={session_intent_str} luma.intent={luma_intent_name} "
-                        f"(CONFIRM_* treated as continuation of durable intent)"
+        # Only treat CONFIRM_* as continuation when status == AWAITING_CONFIRMATION
+        if session_status == "AWAITING_CONFIRMATION":
+            session_intent = session_state.get("intent_name") or session_state.get("intent")
+            session_intent_str = session_intent if isinstance(session_intent, str) else (
+                session_intent.get("name", "") if isinstance(session_intent, dict) else "")
+            if session_intent_str:
+                session_intent_str = session_intent_str.strip()
+            else:
+                session_intent_str = ""
+            
+            if session_intent_str:
+                # Check if session intent is durable
+                try:
+                    from core.policy.intent_policy import get_intent_durable
+                    if get_intent_durable(session_intent_str):
+                        # CONFIRM_* is a continuation of durable session intent, not a switch
+                        effective_intent = session_intent_str
+                        session_reset_occurred = False
+                        logger.info(
+                            f"[session] confirm_intent_continuation user_id={user_id}{log_transaction_id} "
+                            f"session.intent={session_intent_str} luma.intent={luma_intent_name} "
+                            f"session.status={session_status} "
+                            f"(CONFIRM_* treated as continuation of durable intent with AWAITING_CONFIRMATION status)"
+                        )
+                except (ImportError, Exception) as e:
+                    logger.warning(
+                        f"Failed to check durable status for '{session_intent_str}': {e}. "
+                        f"Continuing with normal intent resolution."
                     )
-            except (ImportError, Exception) as e:
-                logger.warning(
-                    f"Failed to check durable status for '{session_intent_str}': {e}. "
-                    f"Continuing with normal intent resolution."
-                )
+        else:
+            # Status != AWAITING_CONFIRMATION - treat CONFIRM_* as normal non-core intent
+            logger.info(
+                f"[session] confirm_intent_not_continuation user_id={user_id}{log_transaction_id} "
+                f"luma.intent={luma_intent_name} session.status={session_status} "
+                f"(CONFIRM_* NOT treated as continuation - status != AWAITING_CONFIRMATION)"
+            )
 
     # SESSION LIFECYCLE RULE: Handle session intent override for:
     # 1. NEEDS_CLARIFICATION sessions (existing behavior)
@@ -267,36 +283,53 @@ def resolve_effective_intent(
                     )
             elif luma_intent_name == "UNKNOWN" or not luma_intent_name:
                 # DURABLE INTENT RECOVERY: If luma.intent is UNKNOWN/empty, recover durable session intent
-                # Check if session intent is durable using intent_policy.yaml
-                try:
-                    from core.policy.intent_policy import get_intent_durable
-                    if get_intent_durable(session_intent_str):
-                        # Recover durable intent from session
+                # GUARD: Do NOT recover for CONFIRM_* intents unless continuation conditions are met
+                # (CONFIRM_* intents should never be UNKNOWN, but defensive check prevents recovery)
+                is_confirm_intent = luma_intent_name and luma_intent_name.startswith("CONFIRM_")
+                session_status_for_recovery = session_state.get("status") if session_state else None
+                should_block_recovery = (
+                    is_confirm_intent and session_status_for_recovery != "AWAITING_CONFIRMATION"
+                )
+                
+                if should_block_recovery:
+                    # CONFIRM_* intent without continuation conditions - do NOT recover session intent
+                    effective_intent = luma_intent_name if luma_intent_name else "UNKNOWN"
+                    logger.info(
+                        f"[durable_intent_recovery] Blocked recovery for CONFIRM_* intent "
+                        f"luma_intent={luma_intent_name} session.status={session_status_for_recovery} "
+                        f"(status != AWAITING_CONFIRMATION, user_id={user_id}{log_transaction_id})"
+                    )
+                else:
+                    # Check if session intent is durable using intent_policy.yaml
+                    try:
+                        from core.policy.intent_policy import get_intent_durable
+                        if get_intent_durable(session_intent_str):
+                            # Recover durable intent from session
+                            effective_intent = session_intent_str
+                            logger.info(
+                                f"[durable_intent_recovery] Recovered durable intent: {effective_intent} "
+                                f"(luma_intent={luma_intent_name}, user_id={user_id}{log_transaction_id})"
+                            )
+                        else:
+                            # Session intent is not durable - use UNKNOWN
+                            effective_intent = "UNKNOWN"
+                            logger.info(
+                                f"[session] ephemeral_intent_dropped user_id={user_id}{log_transaction_id} "
+                                f"session.intent={session_intent_str} is not durable, using UNKNOWN"
+                            )
+                    except (ImportError, Exception) as e:
+                        # Fallback: use session intent if durability check fails
+                        logger.warning(
+                            f"Failed to check durable status for '{session_intent_str}': {e}. "
+                            f"Using session intent as fallback."
+                        )
                         effective_intent = session_intent_str
                         logger.info(
-                            f"[durable_intent_recovery] Recovered durable intent: {effective_intent} "
-                            f"(luma_intent={luma_intent_name}, user_id={user_id}{log_transaction_id})"
+                            f"[session] intent_override user_id={user_id}{log_transaction_id} "
+                            f"UNKNOWN -> session.intent={effective_intent} (fallback)"
                         )
-                    else:
-                        # Session intent is not durable - use UNKNOWN
-                        effective_intent = "UNKNOWN"
-                        logger.info(
-                            f"[session] ephemeral_intent_dropped user_id={user_id}{log_transaction_id} "
-                            f"session.intent={session_intent_str} is not durable, using UNKNOWN"
-                        )
-                except (ImportError, Exception) as e:
-                    # Fallback: use session intent if durability check fails
-                    logger.warning(
-                        f"Failed to check durable status for '{session_intent_str}': {e}. "
-                        f"Using session intent as fallback."
-                    )
-                    effective_intent = session_intent_str
-                    logger.info(
-                        f"[session] intent_override user_id={user_id}{log_transaction_id} "
-                        f"UNKNOWN -> session.intent={effective_intent} (fallback)"
-                    )
             else:
-                # Check if new intent is non-core (DISCOVERY, CONFIRM_BOOKING, etc.)
+                # Check if new intent is non-core (DISCOVERY, CONFIRM_ACTION, etc.)
                 from core.routing.intents.base_intents import is_core_intent
                 is_new_intent_core = is_core_intent(luma_intent_name)
                 is_session_intent_core = is_core_intent(
@@ -308,16 +341,33 @@ def resolve_effective_intent(
                 informational_intents = {"DETAILS", "FAQ", "HELP", "AVAILABILITY", "QUOTE", "RECOMMENDATION", "DISCOVERY"}
                 is_informational_intent = luma_intent_name in informational_intents
 
-                # Rule: Non-core intents (DISCOVERY, CONFIRM_BOOKING) should NOT overwrite active booking session
+                # Rule: Non-core intents (DISCOVERY, CONFIRM_ACTION) should NOT overwrite active booking session
                 # EXCEPTION: Informational/question intents break the booking flow and switch intent
+                # EXCEPTION: CONFIRM_* intents should NOT preserve session intent unless continuation conditions are met
+                is_confirm_intent = luma_intent_name and luma_intent_name.startswith("CONFIRM_")
+                session_status_for_noncore = session_state.get("status") if session_state else None
+                should_block_noncore_preservation = (
+                    is_confirm_intent and session_status_for_noncore != "AWAITING_CONFIRMATION"
+                )
+                
                 if is_session_intent_core and not is_new_intent_core and not is_informational_intent:
-                    # Keep session intent - non-core intents are side-intents that don't interrupt booking flow
-                    # (but informational intents are excluded from this rule)
-                    effective_intent = session_intent_str
-                    logger.info(
-                        f"[session] non_core_intent_ignored user_id={user_id}{log_transaction_id} "
-                        f"session.intent={session_intent_str} luma.intent={luma_intent_name} (non-core, preserving session)"
-                    )
+                    if should_block_noncore_preservation:
+                        # CONFIRM_* intent without continuation conditions - do NOT preserve session intent
+                        effective_intent = luma_intent_name
+                        logger.info(
+                            f"[session] confirm_intent_not_preserved user_id={user_id}{log_transaction_id} "
+                            f"luma.intent={luma_intent_name} session.intent={session_intent_str} "
+                            f"session.status={session_status_for_noncore} "
+                            f"(CONFIRM_* NOT preserving session - status != AWAITING_CONFIRMATION)"
+                        )
+                    else:
+                        # Keep session intent - non-core intents are side-intents that don't interrupt booking flow
+                        # (but informational intents are excluded from this rule)
+                        effective_intent = session_intent_str
+                        logger.info(
+                            f"[session] non_core_intent_ignored user_id={user_id}{log_transaction_id} "
+                            f"session.intent={session_intent_str} luma.intent={luma_intent_name} (non-core, preserving session)"
+                        )
                 elif is_informational_intent and session_intent_str and session_intent_str != "UNKNOWN":
                     # Informational intent breaks booking flow - switch to informational intent
                     # Do NOT clear session (just switch intent) unless explicitly required
@@ -383,7 +433,25 @@ def resolve_effective_intent(
                     )
                 else:
                     # Same core intent or no switch - keep session
-                    effective_intent = session_intent_str
+                    # GUARD: Do NOT preserve session intent for CONFIRM_* unless continuation conditions are met
+                    is_confirm_intent = luma_intent_name and luma_intent_name.startswith("CONFIRM_")
+                    session_status_for_same = session_state.get("status") if session_state else None
+                    should_block_same_preservation = (
+                        is_confirm_intent and session_status_for_same != "AWAITING_CONFIRMATION"
+                    )
+                    
+                    if should_block_same_preservation:
+                        # CONFIRM_* intent without continuation conditions - use CONFIRM_* intent, not session
+                        effective_intent = luma_intent_name
+                        logger.info(
+                            f"[session] confirm_intent_not_preserved_same user_id={user_id}{log_transaction_id} "
+                            f"luma.intent={luma_intent_name} session.intent={session_intent_str} "
+                            f"session.status={session_status_for_same} "
+                            f"(CONFIRM_* NOT preserving session - status != AWAITING_CONFIRMATION)"
+                        )
+                    else:
+                        # Same core intent or no switch - keep session
+                        effective_intent = session_intent_str
 
     # Hard assertion: effective_intent must NOT be UNKNOWN when session exists with durable intent (and not reset)
     # Durable intents should always be recovered from session when Luma returns UNKNOWN/empty

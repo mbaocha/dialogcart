@@ -356,3 +356,5 @@ def _assert_response_contract(result: Dict[str, Any]) -> None:
 - **Guaranteed Fields**: `success`, `outcome` (with `status`, `intent_name`, `slots`, `missing_slots`, `facts`)
 - **Conditional Fields**: `text`, `ui_actions`, `ui_hint` (promoted from `outcome` when present)
 
+
+

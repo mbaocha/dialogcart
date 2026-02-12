@@ -3,7 +3,7 @@ End-to-End Integration Test for Lifecycle Notification
 
 Tests the full lifecycle synchronization flow:
 1. CREATE_APPOINTMENT → execute → notify_execution → lifecycle=EXECUTED
-2. "yes" → CONFIRM_BOOKING (this is a non-core intent, handled separately)
+2. "yes" → CONFIRM_ACTION (this is a non-core intent, handled separately)
 3. "reschedule" → MODIFY_BOOKING (allowed because lifecycle=EXECUTED)
 
 This test proves that:

@@ -78,21 +78,50 @@ def test_derive_clarification_reason_handles_non_list_missing_slots():
 
 
 def test_derive_clarification_reason_handles_multiple_missing_slots():
-    """Test that function returns generic reason for multiple missing slots."""
+    """Test that function uses first missing slot for multiple missing slots."""
     decision = {
         "status": "NEEDS_CLARIFICATION",
         "missing_slots": ["time", "date"]
     }
     result = derive_clarification_reason(decision)
-    assert result == "NEEDS_CLARIFICATION"
+    assert result == "MISSING_TIME"  # Uses first slot
 
 
 def test_derive_clarification_reason_handles_other_missing_slots():
-    """Test that function returns generic reason for other missing slots."""
+    """Test that function generates MISSING_<SLOT> for single missing slot."""
     decision = {
         "status": "NEEDS_CLARIFICATION",
         "missing_slots": ["service"]
     }
     result = derive_clarification_reason(decision)
-    assert result == "NEEDS_CLARIFICATION"
+    assert result == "MISSING_SERVICE"
 
+
+def test_derive_clarification_reason_smart_mapping_single_slot():
+    """Test that function generates MISSING_<SLOT_NAME_UPPER> for any single missing slot."""
+    # Test with various slot names
+    test_cases = [
+        ("location", "MISSING_LOCATION"),
+        ("service_id", "MISSING_SERVICE_ID"),
+        ("customer_name", "MISSING_CUSTOMER_NAME"),
+        ("phone", "MISSING_PHONE"),
+    ]
+    
+    for slot_name, expected_reason in test_cases:
+        decision = {
+            "status": "NEEDS_CLARIFICATION",
+            "missing_slots": [slot_name]
+        }
+        result = derive_clarification_reason(decision)
+        assert result == expected_reason, \
+            f"Expected {expected_reason} for slot '{slot_name}', got {result}"
+
+
+def test_derive_clarification_reason_uses_first_slot_for_multiple():
+    """Test that function uses first missing slot when multiple slots are missing."""
+    decision = {
+        "status": "NEEDS_CLARIFICATION",
+        "missing_slots": ["date", "time"]
+    }
+    result = derive_clarification_reason(decision)
+    assert result == "MISSING_DATE"  # Uses first slot
