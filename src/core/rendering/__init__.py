@@ -12,5 +12,6 @@ from .clarification_renderer import RenderSpec, render_clarification
 from .renderer import render
 from .capability_renderer import render_capability
 from .outcome_renderer import render_outcome
+from .system_renderer import render_system
 
-__all__ = ["RenderSpec", "render_clarification", "render", "render_capability", "render_outcome"]
+__all__ = ["RenderSpec", "render_clarification", "render", "render_capability", "render_outcome", "render_system"]

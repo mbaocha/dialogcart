@@ -1,0 +1,10 @@
+SYSTEM__WELCOME:
+  template: |
+    Welcome! How can I help you today?
+  required_fields: []
+
+SYSTEM:
+  template: |
+    Welcome!
+  required_fields: []
+

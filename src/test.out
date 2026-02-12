@@ -3,7 +3,7 @@ platform linux -- Python 3.10.13, pytest-9.0.2, pluggy-1.6.0
 rootdir: /mnt/c/Users/user/Documents/projects/my-project/dialogcart/src
 configfile: pytest.ini
 plugins: anyio-4.12.0
-collected 193 items / 6 skipped
+collected 200 items / 6 skipped
 
 core/tests/e2e/test_acknowledgement_rendering_e2e.py ..                  [  1%]
 core/tests/e2e/test_adaptive_clarification_rendering_e2e.py .            [  1%]
@@ -19,31 +19,32 @@ core/tests/execution/test_availability_execution.py ..                   [  8%]
 core/tests/execution/test_booking_execution.py ..                        [  9%]
 core/tests/execution/test_confirmation_execution.py ..                   [ 10%]
 core/tests/execution/test_test_backend.py .......                        [ 13%]
-core/tests/integration/test_capability_bootstrap_integration.py ..       [ 15%]
+core/tests/integration/test_capability_bootstrap_integration.py ..       [ 14%]
 core/tests/integration/test_commit_gated_workflow.py ...                 [ 16%]
-core/tests/integration/test_lifecycle_notification.py .                  [ 17%]
+core/tests/integration/test_lifecycle_notification.py .                  [ 16%]
 core/tests/intents/test_base_intents.py .........                        [ 21%]
 core/tests/orchestration/contracts/test_luma_contracts.py ......         [ 24%]
-core/tests/orchestration/test_non_core_intent_passthrough.py ..........  [ 30%]
-core/tests/orchestration/test_orchestrator_flow.py ......                [ 33%]
-core/tests/orchestration/test_orchestrator_invariants.py ...             [ 34%]
-core/tests/orchestration/test_time_normalization.py .....                [ 37%]
-core/tests/planning/test_awaiting_slot_planning.py .....                 [ 39%]
-core/tests/planning/test_capability_org_condition.py .....               [ 42%]
-core/tests/planning/test_confirm_continuation_hardening.py .......       [ 46%]
-core/tests/planning/test_planning.py .............................       [ 61%]
-core/tests/planning/test_policy_invariants.py ...................        [ 70%]
-core/tests/rendering/test_clarification_mapper.py ...........            [ 76%]
-core/tests/rendering/test_clarification_rendering.py .                   [ 77%]
-core/tests/rendering/test_missing_template_error.py ..                   [ 78%]
-core/tests/rendering/test_outcome_rendering.py .............             [ 84%]
-core/tests/session/test_session.py .                                     [ 85%]
-core/tests/session/test_session_manager.py ............                  [ 91%]
-core/tests/workflows/test_workflow_invocation.py ......                  [ 94%]
+core/tests/orchestration/test_non_core_intent_passthrough.py ..........  [ 29%]
+core/tests/orchestration/test_orchestrator_flow.py ......                [ 32%]
+core/tests/orchestration/test_orchestrator_invariants.py ...             [ 33%]
+core/tests/orchestration/test_time_normalization.py .....                [ 36%]
+core/tests/planning/test_awaiting_slot_planning.py .....                 [ 38%]
+core/tests/planning/test_capability_org_condition.py .....               [ 41%]
+core/tests/planning/test_confirm_continuation_hardening.py .......       [ 44%]
+core/tests/planning/test_planning.py .............................       [ 59%]
+core/tests/planning/test_policy_invariants.py ...................        [ 68%]
+core/tests/rendering/test_clarification_mapper.py ...........            [ 74%]
+core/tests/rendering/test_clarification_rendering.py .                   [ 74%]
+core/tests/rendering/test_missing_template_error.py ..                   [ 75%]
+core/tests/rendering/test_outcome_rendering.py .............             [ 82%]
+core/tests/rendering/test_system_rendering.py .......                    [ 85%]
+core/tests/session/test_session.py .                                     [ 86%]
+core/tests/session/test_session_manager.py ............                  [ 92%]
+core/tests/workflows/test_workflow_invocation.py ......                  [ 95%]
 core/tests/workflows/test_workflow_manual.py ...                         [ 96%]
 core/tests/workflows/test_workflow_registry.py .......                   [100%]
 
-======================= 193 passed, 6 skipped in 17.24s ========================
+======================= 200 passed, 6 skipped in 17.65s ========================
 ================================================================================
 Running tests: all
 Path: core/tests

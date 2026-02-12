@@ -44,7 +44,7 @@ from core.orchestration.cache.org_domain_cache import org_domain_cache
 from core.orchestration.persistence.durable_intents import is_durable_intent
 from core.routing.workflows import get_workflow
 from core.rendering.mapper.clarification_mapper import derive_clarification_reason
-from core.rendering import render_clarification, render, render_capability, render_outcome
+from core.rendering import render_clarification, render, render_capability, render_outcome, render_system
 
 logger = logging.getLogger(__name__)
 # Dedicated turn-level logger (clean, minimal logs - ONE log per section)
@@ -306,6 +306,34 @@ def _inject_outcome_text(
             f"Failed to render outcome text: {e}. "
             f"Rendering is best-effort and will be omitted."
         )
+
+
+def _inject_system_text(result: Dict[str, Any], decision: Dict[str, Any]) -> None:
+    """
+    Inject rendered system text into result for greeting/welcome intents.
+    
+    This is a pure post-processing step that:
+    - Only triggers for GREETING or WELCOME intents
+    - Renders text using system templates
+    - Injects result["text"] = rendered_text
+    
+    Must NOT override:
+    - Clarification rendering
+    - Capability rendering
+    - Outcome rendering
+    
+    Args:
+        result: Response dictionary to modify (mutated in place)
+        decision: Decision dictionary with intent_name
+    """
+    try:
+        intent_name = decision.get("intent_name")
+        render_spec = render_system(intent_name)
+        if render_spec and render_spec.text:
+            result["text"] = render_spec.text
+    except Exception:
+        # Best-effort: silently fail (don't break flow)
+        pass
 
 
 def _handle_non_core_intent(
@@ -3273,6 +3301,11 @@ def handle_message_legacy(
                     user_id, intent_name, outcome.get(
                         "stage"), outcome.get("action"),
                     outcome_missing_slots, json.dumps(outcome_slots, default=str, ensure_ascii=True))
+
+        # Inject system rendering text (greeting/welcome) BEFORE clarification injection
+        # Only if NOT NEEDS_CLARIFICATION, NOT AWAITING_CAPABILITY, NOT EXECUTED
+        if plan_status not in ("NEEDS_CLARIFICATION", "AWAITING_CAPABILITY", "EXECUTED"):
+            _inject_system_text(result, decision)
 
         # Inject rendering text for clarification states
         _inject_rendering_text(result, decision, session_state)
