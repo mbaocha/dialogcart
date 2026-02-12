@@ -2451,6 +2451,24 @@ def build_session_state_from_outcome(
     # Determine missing_slots to persist (recomputed from effective_collected_slots)
     missing_slots_to_persist = recomputed_missing_slots if recomputed_missing_slots is not None else []
 
+    # --- Detect last_filled_slot (pure metadata, no behavioral impact) ---
+    last_filled_slot = None
+
+    if merged_luma_response and isinstance(merged_luma_response, dict):
+        raw_luma_slots = merged_luma_response.get("_raw_luma_slots", {})
+        if isinstance(raw_luma_slots, dict) and raw_luma_slots:
+            previous_slots = previous_session_state.get("slots", {}) if previous_session_state else {}
+            if isinstance(previous_slots, dict):
+                new_or_changed = [
+                    slot_name
+                    for slot_name, slot_value in raw_luma_slots.items()
+                    if slot_name not in previous_slots
+                    or previous_slots.get(slot_name) != slot_value
+                ]
+                if new_or_changed:
+                    # Python 3.7+ preserves insertion order
+                    last_filled_slot = new_or_changed[-1]
+
     # Clear awaiting_slot if it is no longer missing or if it appears in outcome slot sources
     # Check multiple authoritative slot sources used by planning/turn_state
     if awaiting_slot:
@@ -2638,7 +2656,8 @@ def build_session_state_from_outcome(
             "status": status,
             "active_capability": active_capability,  # optional passthrough
             "awaiting_slot": awaiting_slot,
-            "slot_attempts": slot_attempts
+            "slot_attempts": slot_attempts,
+            "last_filled_slot": last_filled_slot,
         }
         
         # DEBUG: Log session_state after construction
@@ -2670,7 +2689,8 @@ def build_session_state_from_outcome(
             "status": status,
             "active_capability": active_capability,  # optional passthrough
             "awaiting_slot": awaiting_slot,
-            "slot_attempts": slot_attempts
+            "slot_attempts": slot_attempts,
+            "last_filled_slot": last_filled_slot,
         }
         
         # DEBUG: Log session_state after construction

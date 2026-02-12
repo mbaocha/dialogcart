@@ -28,7 +28,8 @@ class TestSaveLoad:
             "slots": {"service": "haircut", "date": "2024-01-01"},
             "missing_slots": ["time"],
             "status": "NEEDS_CLARIFICATION",
-            "facts": {}
+            "facts": {},
+            "last_filled_slot": None
         }
 
         mock_redis = Mock()
@@ -74,7 +75,8 @@ class TestSaveLoad:
             "slots": {"room_type": "suite"},
             "missing_slots": ["check_in_date", "check_out_date"],
             "status": "NEEDS_CLARIFICATION",
-            "facts": {}
+            "facts": {},
+            "last_filled_slot": None
         }
 
         mock_redis = Mock()
@@ -95,7 +97,8 @@ class TestSaveLoad:
             "slots": {},
             "missing_slots": ["service"],
             "status": "NEEDS_CLARIFICATION",
-            "facts": {}
+            "facts": {},
+            "last_filled_slot": None
         }
 
         mock_redis = Mock()
@@ -137,7 +140,8 @@ class TestTTLExpiry:
             "slots": {"booking_id": "ABC123"},
             "missing_slots": ["new_date"],
             "status": "NEEDS_CLARIFICATION",
-            "facts": {}
+            "facts": {},
+            "last_filled_slot": None
         }
 
         mock_redis = Mock()
@@ -175,7 +179,8 @@ class TestClear:
             "slots": {"booking_id": "XYZ789"},
             "missing_slots": [],
             "status": "READY",
-            "facts": {}
+            "facts": {},
+            "last_filled_slot": None
         }
 
         mock_redis = Mock()
@@ -210,7 +215,8 @@ class TestRedisUnavailable:
             "slots": {},
             "missing_slots": [],
             "status": "READY",
-            "facts": {}
+            "facts": {},
+            "last_filled_slot": None
         }
 
         with patch('core.orchestration.session.session_manager._get_redis_client', return_value=None):
@@ -243,7 +249,8 @@ class TestSerialization:
             },
             "missing_slots": ["date", "time"],
             "status": "NEEDS_CLARIFICATION",
-            "facts": {}
+            "facts": {},
+            "last_filled_slot": None
         }
 
         mock_redis = Mock()

@@ -81,7 +81,29 @@ def render(decision: Dict[str, Any]) -> Optional[str]:
     try:
         # Render with slots and attempt_count
         render_spec = render_clarification(reason, slots, attempt_count)
-        return render_spec.text
+        clarification_text = render_spec.text
+        
+        # Phase 2: Optionally prefix acknowledgement if last_filled_slot is set
+        # Only add ack if: last_filled_slot is set, differs from current missing slot, and attempt_count < 1
+        session = decision.get("_session", {})
+        last_filled_slot = session.get("last_filled_slot") if isinstance(session, dict) else None
+        
+        if last_filled_slot and attempt_count < 1:
+            # Get current missing slot from decision["plan"]["missing_slots"][0] if present
+            current_missing_slot = None
+            plan_obj = decision.get("plan", {})
+            if isinstance(plan_obj, dict):
+                plan_missing_slots = plan_obj.get("missing_slots", [])
+                if isinstance(plan_missing_slots, list) and plan_missing_slots:
+                    current_missing_slot = plan_missing_slots[0]
+            
+            # Only add acknowledgement if last_filled_slot differs from current missing slot
+            if last_filled_slot != current_missing_slot:
+                # Prefix short acknowledgement (e.g., "Got it. " or "Okay. ")
+                acknowledgement = f"Got it. "
+                return acknowledgement + clarification_text
+        
+        return clarification_text
     except Exception:
         # Fallback to generic template
         try:

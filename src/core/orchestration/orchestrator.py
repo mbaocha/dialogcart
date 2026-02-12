@@ -44,7 +44,7 @@ from core.orchestration.cache.org_domain_cache import org_domain_cache
 from core.orchestration.persistence.durable_intents import is_durable_intent
 from core.routing.workflows import get_workflow
 from core.rendering.mapper.clarification_mapper import derive_clarification_reason
-from core.rendering import render_clarification, render, render_capability
+from core.rendering import render_clarification, render, render_capability, render_outcome
 
 logger = logging.getLogger(__name__)
 # Dedicated turn-level logger (clean, minimal logs - ONE log per section)
@@ -229,12 +229,13 @@ def _render_clarification_text(decision: Dict[str, Any], slots: Dict[str, Any]) 
         return None
 
 
-def _inject_rendering_text(result: Dict[str, Any], decision: Dict[str, Any]) -> None:
+def _inject_rendering_text(result: Dict[str, Any], decision: Dict[str, Any], session_state: Optional[Dict[str, Any]] = None) -> None:
     """
     Inject rendered text into top-level response for clarification states.
 
     This is a pure post-processing step that:
     - Detects clarification state from decision
+    - Attaches session_state to decision for rendering
     - Calls rendering.render(decision)
     - Injects returned text into top-level response as 'text'
     - Falls back to generic template if rendering returns None
@@ -242,8 +243,23 @@ def _inject_rendering_text(result: Dict[str, Any], decision: Dict[str, Any]) -> 
     Args:
         result: Response dictionary to modify (mutated in place)
         decision: Decision dictionary with plan and facts
+        session_state: Optional session state dictionary to attach to decision
     """
     try:
+        # Attach session_state to decision for rendering (Phase 2: acknowledgement rendering)
+        decision["_session"] = session_state or {}
+        
+        # Merge slot_attempts from session_state into decision for rendering
+        if session_state and isinstance(session_state, dict):
+            slot_attempts = session_state.get("slot_attempts")
+            if isinstance(slot_attempts, dict):
+                # Prefer top-level slot_attempts in decision (renderer checks this first)
+                decision["slot_attempts"] = slot_attempts
+                # Also ensure it's in facts as fallback
+                facts = decision.get("facts", {})
+                if isinstance(facts, dict):
+                    facts["slot_attempts"] = slot_attempts
+        
         rendered_text = render(decision)
         if rendered_text:
             result["text"] = rendered_text
@@ -251,6 +267,43 @@ def _inject_rendering_text(result: Dict[str, Any], decision: Dict[str, Any]) -> 
         # Best-effort: log error and continue without text
         logger.warning(
             f"Failed to render clarification text: {e}. "
+            f"Rendering is best-effort and will be omitted."
+        )
+
+
+def _inject_outcome_text(
+    result: Dict[str, Any],
+    decision: Optional[Dict[str, Any]],
+    outcome: Dict[str, Any]
+) -> None:
+    """
+    Inject rendered outcome text into result for EXECUTED outcomes.
+    
+    This is a pure post-processing step that:
+    - Only triggers for outcome.status == "EXECUTED"
+    - Derives template key from decision + outcome
+    - Renders text using outcome templates
+    - Injects result["text"] = rendered_text
+    
+    Args:
+        result: Response dictionary to modify (mutated in place)
+        decision: Decision dictionary (optional, for intent extraction)
+        outcome: Outcome dictionary with status, intent_name, etc.
+    """
+    # Only render for EXECUTED status
+    outcome_status = outcome.get("status")
+    if outcome_status != "EXECUTED":
+        return
+    
+    try:
+        # Render outcome text
+        render_spec = render_outcome(decision, outcome)
+        if render_spec and render_spec.text:
+            result["text"] = render_spec.text
+    except Exception as e:
+        # Best-effort: log error and continue without text
+        logger.debug(
+            f"Failed to render outcome text: {e}. "
             f"Rendering is best-effort and will be omitted."
         )
 
@@ -1230,6 +1283,12 @@ def handle_message(
                     "plan": plan
                 }
                 result.setdefault("ui_actions", [])
+                
+                # Inject outcome rendering text (if EXECUTED)
+                decision = plan.get("_decision")
+                if decision:
+                    _inject_outcome_text(result, decision, execution_result)
+                
                 return result
             except Exception as e:
                 logger.error(f"Execution failed for action {action}: {e}")
@@ -3216,7 +3275,7 @@ def handle_message_legacy(
                     outcome_missing_slots, json.dumps(outcome_slots, default=str, ensure_ascii=True))
 
         # Inject rendering text for clarification states
-        _inject_rendering_text(result, decision)
+        _inject_rendering_text(result, decision, session_state)
 
         return result
 

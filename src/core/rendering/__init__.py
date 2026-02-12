@@ -11,5 +11,6 @@ from dataclasses import dataclass
 from .clarification_renderer import RenderSpec, render_clarification
 from .renderer import render
 from .capability_renderer import render_capability
+from .outcome_renderer import render_outcome
 
-__all__ = ["RenderSpec", "render_clarification", "render", "render_capability"]
+__all__ = ["RenderSpec", "render_clarification", "render", "render_capability", "render_outcome"]
