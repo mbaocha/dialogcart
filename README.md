@@ -563,12 +563,6 @@ CAPABILITY_REGISTRY_ENABLED=true
 
 ---
 
-## 📝 License
-
-[Add license information]
-
----
-
 ## 🎉 Summary
 
 **DialogCart** is a conversational AI platform with a production-oriented architecture designed for handling service bookings, reservations, and payments through natural language interactions. The system:
@@ -579,4 +573,5 @@ CAPABILITY_REGISTRY_ENABLED=true
 - Integrates with external capabilities
 - Renders responses in appropriate formats
 - Includes comprehensive test coverage and documentation
+
 
