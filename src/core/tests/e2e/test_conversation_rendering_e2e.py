@@ -5,17 +5,18 @@ Tests multi-turn conversation flows with rendering validation.
 Validates that rendering is correctly attached at each turn based on conversation state.
 """
 
-import yaml
-import pytest
 import sys
-from pathlib import Path
-from unittest.mock import Mock
 from datetime import datetime, timezone
-from typing import Dict, Any, List
+from pathlib import Path
+from typing import Any, Dict, List
+from unittest.mock import Mock
 
-from core.orchestration.orchestrator import handle_message
-from core.orchestration.nlu import LumaClient
+import pytest
+import yaml
+
 from core.orchestration.clients.organization_client import OrganizationClient
+from core.orchestration.nlu import LumaClient
+from core.orchestration.orchestrator import handle_message
 
 # Add src to path BEFORE importing core modules
 src_path = Path(__file__).parent.parent.parent.parent
@@ -36,34 +37,30 @@ def _build_mock_luma_response(
     status: str,
     missing_slots: List[str],
     slots: Dict[str, Any],
-    action: str = None
+    action: str = None,
 ) -> Dict[str, Any]:
     """Build a mock Luma response based on expected state."""
     service_id = slots.get("service_id", "haircut")
-    
+
     response = {
         "success": True,
-        "intent": {
-            "name": "CREATE_APPOINTMENT",
-            "confidence": 0.95
-        },
+        "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
         "needs_clarification": status == "NEEDS_CLARIFICATION",
         "booking": {
             "booking_type": "service",
             "services": [
-                {
-                    "text": service_id,
-                    "canonical": f"beauty_and_wellness.{service_id}"
-                }
+                {"text": service_id, "canonical": f"beauty_and_wellness.{service_id}"}
             ],
-            "booking_state": "RESOLVED" if status in ("READY", "AWAITING_CONFIRMATION") else "NEEDS_CLARIFICATION"
+            "booking_state": (
+                "RESOLVED"
+                if status in ("READY", "AWAITING_CONFIRMATION")
+                else "NEEDS_CLARIFICATION"
+            ),
         },
-        "facts": {
-            "service_id": service_id
-        },
+        "facts": {"service_id": service_id},
         "slots": slots.copy(),
         "missing_slots": missing_slots,
-        "context": {}
+        "context": {},
     }
 
     # Add datetime_range if date and time are present
@@ -73,12 +70,12 @@ def _build_mock_luma_response(
         # Create datetime_range for complete booking
         response["booking"]["datetime_range"] = {
             "start": f"{date_str}T14:00:00Z",
-            "end": f"{date_str}T14:30:00Z"
+            "end": f"{date_str}T14:30:00Z",
         }
         response["time_constraint"] = {
             "mode": "exact",
             "start": "14:00",
-            "end": "14:00"
+            "end": "14:00",
         }
         response["facts"]["times"] = [time_str]
     elif "date" in slots:
@@ -86,7 +83,7 @@ def _build_mock_luma_response(
         date_str = slots["date"]
         response["booking"]["datetime_range"] = {
             "start": f"{date_str}T00:00:00Z",
-            "end": f"{date_str}T23:59:59Z"
+            "end": f"{date_str}T23:59:59Z",
         }
 
     # Add confirmation state based on status or action
@@ -102,49 +99,62 @@ def _build_mock_luma_response(
     return response
 
 
-def _assert_rendering_clarification(result: Dict[str, Any], expected_missing_slots: List[str]) -> None:
+def _assert_rendering_clarification(
+    result: Dict[str, Any], expected_missing_slots: List[str]
+) -> None:
     """Assert that clarification rendering is present and semantically correct."""
-    assert "text" in result, \
-        f"Expected clarification text to be present, but 'text' not in result. Keys: {list(result.keys())}"
-    
-    assert result["text"], \
-        f"Expected clarification text to be non-empty, got: {result.get('text')}"
-    
+    assert (
+        "text" in result
+    ), f"Expected clarification text to be present, but 'text' not in result. Keys: {list(result.keys())}"
+
+    assert result[
+        "text"
+    ], f"Expected clarification text to be non-empty, got: {result.get('text')}"
+
     text_lower = result["text"].lower()
-    
+
     # Check that text mentions at least one missing slot OR is a generic clarification
     # Generic clarifications (e.g., "I need a bit more information to help you.") are valid
     # and don't need to mention specific slots - they're used as fallbacks
     slot_mentioned = any(slot.lower() in text_lower for slot in expected_missing_slots)
-    
+
     # Generic clarification phrases (semantic check, not exact match)
     generic_phrases = [
-        "need", "information", "help", "clarification", "more", 
-        "bit more", "additional", "details"
+        "need",
+        "information",
+        "help",
+        "clarification",
+        "more",
+        "bit more",
+        "additional",
+        "details",
     ]
     is_generic_clarification = any(phrase in text_lower for phrase in generic_phrases)
-    
+
     # Either the text mentions a slot OR it's a valid generic clarification
     # This allows for both specific templates (MISSING_TIME, MISSING_DATE) and generic fallback
-    assert slot_mentioned or is_generic_clarification, \
-        f"Expected clarification text to mention at least one missing slot ({expected_missing_slots}) " \
+    assert slot_mentioned or is_generic_clarification, (
+        f"Expected clarification text to mention at least one missing slot ({expected_missing_slots}) "
         f"or be a generic clarification, but text was: {result['text']}"
+    )
 
 
 def _assert_rendering_terminal(result: Dict[str, Any]) -> None:
     """Assert that terminal/confirmation rendering is present and semantically correct."""
-    assert "text" in result, \
-        f"Expected terminal/confirmation text to be present, but 'text' not in result. Keys: {list(result.keys())}"
-    
-    assert result["text"], \
-        f"Expected terminal/confirmation text to be non-empty, got: {result.get('text')}"
-    
+    assert (
+        "text" in result
+    ), f"Expected terminal/confirmation text to be present, but 'text' not in result. Keys: {list(result.keys())}"
+
+    assert result[
+        "text"
+    ], f"Expected terminal/confirmation text to be non-empty, got: {result.get('text')}"
+
     text_lower = result["text"].lower()
-    
+
     # Check for confirmation-related words (semantic check, not exact match)
     confirmation_words = ["confirmed", "booked", "scheduled", "appointment", "reserved"]
     has_confirmation_word = any(word in text_lower for word in confirmation_words)
-    
+
     # Note: Terminal rendering may not be implemented yet, so this is a soft check
     # If text is present but doesn't have confirmation words, that's okay for now
     # The important thing is that text exists when it should
@@ -156,43 +166,56 @@ def _assert_rendering_absent(result: Dict[str, Any]) -> None:
     # Note: AWAITING_CONFIRMATION may have confirmation text, but if test expects absent, validate that
     if "text" in result:
         # If text is present, it should be empty or falsy
-        assert not result["text"], \
-            f"Expected no rendering text, but got: {result.get('text')}"
+        assert not result[
+            "text"
+        ], f"Expected no rendering text, but got: {result.get('text')}"
 
 
 def _assert_turn_expectations(
-    result: Dict[str, Any],
-    expect: Dict[str, Any],
-    turn_num: int
+    result: Dict[str, Any], expect: Dict[str, Any], turn_num: int
 ) -> None:
     """Assert all expectations for a single turn with semantic validation."""
     # Extract actual values from result (handle both flattened and nested structures)
     result_obj = result.get("result", {}) if "result" in result else result
     outcome_obj = result.get("outcome", {}) if "outcome" in result else {}
-    
+
     # Status can be at top level, in result, or in outcome
-    actual_status = result.get("status") or result_obj.get("status") or outcome_obj.get("status")
-    
+    actual_status = (
+        result.get("status") or result_obj.get("status") or outcome_obj.get("status")
+    )
+
     # Missing slots can be at top level, in result, or in outcome
-    actual_missing = result.get("missing_slots") or result_obj.get("missing_slots", []) or outcome_obj.get("missing_slots", [])
-    
+    actual_missing = (
+        result.get("missing_slots")
+        or result_obj.get("missing_slots", [])
+        or outcome_obj.get("missing_slots", [])
+    )
+
     # Action can be at top level, in result, or in outcome
-    actual_action = result.get("action") or result_obj.get("action") or outcome_obj.get("action")
-    
+    actual_action = (
+        result.get("action") or result_obj.get("action") or outcome_obj.get("action")
+    )
+
     # Awaiting is typically in outcome for AWAITING_CONFIRMATION responses
-    actual_awaiting = result.get("awaiting") or result_obj.get("awaiting") or outcome_obj.get("awaiting")
-    
+    actual_awaiting = (
+        result.get("awaiting")
+        or result_obj.get("awaiting")
+        or outcome_obj.get("awaiting")
+    )
+
     # Assert status if specified (exact match)
     if "status" in expect:
-        assert actual_status == expect["status"], \
-            f"Turn {turn_num}: Expected status {expect['status']}, got {actual_status}. " \
+        assert actual_status == expect["status"], (
+            f"Turn {turn_num}: Expected status {expect['status']}, got {actual_status}. "
             f"Result keys: {list(result.keys())}"
+        )
 
     # Assert missing_slots if specified (semantic completeness)
     if "missing_slots" in expect:
         expected_missing = expect["missing_slots"]
-        assert set(actual_missing) == set(expected_missing), \
-            f"Turn {turn_num}: Expected missing_slots {expected_missing}, got {actual_missing}"
+        assert set(actual_missing) == set(
+            expected_missing
+        ), f"Turn {turn_num}: Expected missing_slots {expected_missing}, got {actual_missing}"
 
     # Assert awaiting if specified (optional, defensive check)
     # Note: awaiting is an internal plan field, not part of public API contract
@@ -202,14 +225,16 @@ def _assert_turn_expectations(
         # Defensive: only assert if awaiting is actually present in response
         # Never fail if awaiting is missing (it's an internal detail)
         if actual_awaiting is not None:
-            assert actual_awaiting == expected_awaiting, \
-                f"Turn {turn_num}: Expected awaiting {expected_awaiting}, got {actual_awaiting}"
+            assert (
+                actual_awaiting == expected_awaiting
+            ), f"Turn {turn_num}: Expected awaiting {expected_awaiting}, got {actual_awaiting}"
         # If awaiting is None/missing, that's acceptable - it's not part of public contract
 
     # Assert action if specified (when stable for the turn)
     if "action" in expect:
-        assert actual_action == expect["action"], \
-            f"Turn {turn_num}: Expected action {expect['action']}, got {actual_action}"
+        assert (
+            actual_action == expect["action"]
+        ), f"Turn {turn_num}: Expected action {expect['action']}, got {actual_action}"
 
     # Assert rendering expectations
     if "text" in expect:
@@ -223,25 +248,30 @@ def _assert_turn_expectations(
                 _assert_rendering_terminal(result)
             elif intent == "confirmation":
                 # AWAITING_CONFIRMATION may have confirmation text (or may be silent)
-                assert "text" in result, \
-                    f"Turn {turn_num}: Expected text to be present for confirmation. Result keys: {list(result.keys())}"
+                assert (
+                    "text" in result
+                ), f"Turn {turn_num}: Expected text to be present for confirmation. Result keys: {list(result.keys())}"
                 # If text is present, it should be non-empty
                 if result.get("text"):
-                    assert result["text"], \
-                        f"Turn {turn_num}: Expected text to be non-empty, got: {result.get('text')}"
+                    assert result[
+                        "text"
+                    ], f"Turn {turn_num}: Expected text to be non-empty, got: {result.get('text')}"
             else:
                 # Generic presence check
-                assert "text" in result, \
-                    f"Turn {turn_num}: Expected text to be present. Result keys: {list(result.keys())}"
-                assert result["text"], \
-                    f"Turn {turn_num}: Expected text to be non-empty, got: {result.get('text')}"
-            
+                assert (
+                    "text" in result
+                ), f"Turn {turn_num}: Expected text to be present. Result keys: {list(result.keys())}"
+                assert result[
+                    "text"
+                ], f"Turn {turn_num}: Expected text to be non-empty, got: {result.get('text')}"
+
             # Optional: assert text contains specific content
             if "contains" in text_expect:
                 expected_contains = text_expect["contains"]
                 text_lower = result.get("text", "").lower()
-                assert expected_contains.lower() in text_lower, \
-                    f"Turn {turn_num}: Expected text to contain '{expected_contains}', got: {result.get('text')}"
+                assert (
+                    expected_contains.lower() in text_lower
+                ), f"Turn {turn_num}: Expected text to contain '{expected_contains}', got: {result.get('text')}"
         else:
             _assert_rendering_absent(result)
 
@@ -251,67 +281,73 @@ def _replay_scenario(scenario: Dict[str, Any]) -> None:
     scenario_name = scenario["name"]
     user_id = f"test_conversation_{scenario_name}"
     frozen_time = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
-    
+
     # Track state across turns
     accumulated_slots = {}
     session_state = None
-    
+
     # Mock clients
     mock_luma_client = Mock(spec=LumaClient)
     mock_org_client = Mock(spec=OrganizationClient)
     mock_org_client.get_details.return_value = {
-        "organization": {
-            "businessCategoryId": 1
-        }
+        "organization": {"businessCategoryId": 1}
     }
-    
+
     turns = scenario.get("turns", [])
-    
+
     for turn_num, turn in enumerate(turns, start=1):
         sentence = turn["sentence"]
         expect = turn.get("expect", {})
-        
+
         # Build expected state for this turn
         expected_status = expect.get("status", "READY")
         expected_missing_slots = expect.get("missing_slots", [])
         expected_action = expect.get("action")
-        
+
         # Update accumulated slots based on input (simplified slot extraction)
         # In a real scenario, this would be handled by the NLU/Luma service
         sentence_lower = sentence.lower()
-        
+
         # Extract time
         if "2pm" in sentence_lower or "14:00" in sentence_lower:
             accumulated_slots["time"] = "2pm"
-        elif any(x in sentence_lower for x in ["pm", "am"]) and "time" not in accumulated_slots:
+        elif (
+            any(x in sentence_lower for x in ["pm", "am"])
+            and "time" not in accumulated_slots
+        ):
             # Generic time pattern
             accumulated_slots["time"] = "2pm"
-        
+
         # Extract date
         if "tomorrow" in sentence_lower:
             accumulated_slots["date"] = "2026-01-16"
-        elif "date" not in accumulated_slots and expected_status in ("READY", "AWAITING_CONFIRMATION"):
+        elif "date" not in accumulated_slots and expected_status in (
+            "READY",
+            "AWAITING_CONFIRMATION",
+        ):
             # If we're in READY or AWAITING_CONFIRMATION state, assume date was provided
             accumulated_slots["date"] = "2026-01-16"
-        
+
         # Extract service
-        if "haircut" in sentence_lower or ("book" in sentence_lower and "service" in sentence_lower):
+        if "haircut" in sentence_lower or (
+            "book" in sentence_lower and "service" in sentence_lower
+        ):
             accumulated_slots["service_id"] = "haircut"
-        
+
         # Build slots for mock response
         slots = accumulated_slots.copy()
-        
+
         # Build mock Luma response
         mock_luma_response = _build_mock_luma_response(
             text=sentence,
             status=expected_status,
             missing_slots=expected_missing_slots,
             slots=slots,
-            action=expected_action
+            action=expected_action,
         )
-        
+
         mock_luma_client.resolve.return_value = mock_luma_response
-        
+
         # Call handle_message
         result = handle_message(
             text=sentence,
@@ -319,12 +355,12 @@ def _replay_scenario(scenario: Dict[str, Any]) -> None:
             luma_client=mock_luma_client,
             organization_client=mock_org_client,
             frozen_time=frozen_time,
-            organization_id=1
+            organization_id=1,
         )
-        
+
         # Assert expectations
         _assert_turn_expectations(result, expect, turn_num)
-        
+
         # Update session state for next turn (simplified - in real flow this would come from session_store)
         # For multi-turn tests, we'd need to properly track session state
         # This is a simplified version that works for the test structure
@@ -334,7 +370,7 @@ def _replay_scenario(scenario: Dict[str, Any]) -> None:
 def test_conversation_rendering_scenario(scenario: Dict[str, Any]):
     """
     Test conversation flow with rendering validation.
-    
+
     Each scenario is replayed as a multi-turn conversation with the same user_id.
     Rendering is validated semantically (not exact text matching).
     """
@@ -343,4 +379,3 @@ def test_conversation_rendering_scenario(scenario: Dict[str, Any]):
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
-

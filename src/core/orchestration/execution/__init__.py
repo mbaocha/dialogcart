@@ -6,8 +6,3 @@ Contains execution modules for business actions:
 - booking: Booking creation execution
 - confirmation: Confirmation handling
 """
-
-
-
-
-

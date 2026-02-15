@@ -5,9 +5,10 @@ Pure, deterministic, stateless planning function for intent execution.
 No dialog logic, no execution - only planning.
 """
 
-import yaml
 from pathlib import Path
-from typing import Dict, Any, List, Set, Optional
+from typing import Any, Dict, List, Optional, Set
+
+import yaml
 
 
 def _get_required_slots_from_unified_policy(intent_name: str) -> List[str]:
@@ -25,6 +26,7 @@ def _get_required_slots_from_unified_policy(intent_name: str) -> List[str]:
     """
     try:
         from core.policy.intent_policy import get_planning_required_slots
+
         return get_planning_required_slots(intent_name)
     except (ImportError, Exception):
         # If unified policy module doesn't exist or fails, return empty list
@@ -63,16 +65,14 @@ def load_planning_policy(config_path: Optional[str] = None) -> Dict[str, Any]:
                 legacy_format[intent_name] = {
                     "required_slots": planning_config.get("required_slots", []),
                     "optional_slots": planning_config.get("optional_slots", []),
-                    "executable_with": planning_config.get("executable_with", [])
+                    "executable_with": planning_config.get("executable_with", []),
                 }
 
     return legacy_format
 
 
 def plan_intent(
-    intent: str,
-    slots: Dict[str, Any],
-    policy: Dict[str, Any]
+    intent: str, slots: Dict[str, Any], policy: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
     Plan intent execution based on collected slots and policy.
@@ -113,7 +113,7 @@ def plan_intent(
             "intent": intent,
             "collected_slots": [],
             "missing_slots": [],
-            "executable_actions": []
+            "executable_actions": [],
         }
 
     # Extract policy fields from unified policy (intent_policy.yaml)
@@ -126,15 +126,17 @@ def plan_intent(
             "intent": intent,
             "collected_slots": [],
             "missing_slots": [],
-            "executable_actions": []
+            "executable_actions": [],
         }
 
     # Get optional_slots from unified policy
     from core.policy.intent_policy import get_planning_optional_slots
+
     optional_slots = get_planning_optional_slots(intent_upper)
 
     # Get executable_with from unified policy
     from core.policy.intent_policy import get_planning_executable_with
+
     executable_with = get_planning_executable_with(intent_upper)
 
     # Normalize to sets for efficient operations
@@ -143,8 +145,7 @@ def plan_intent(
 
     # Determine collected slots (slots that are present and non-None)
     collected_slots = [
-        slot_name for slot_name, slot_value in slots.items()
-        if slot_value is not None
+        slot_name for slot_name, slot_value in slots.items() if slot_value is not None
     ]
     collected_set = set(collected_slots)
 
@@ -165,8 +166,7 @@ def plan_intent(
         # Check if all slots in this subset are collected
         if subset_slots.issubset(collected_set):
             # Map executable subset to action name based on intent
-            action = _map_executable_subset_to_action(
-                intent_upper, subset_slots)
+            action = _map_executable_subset_to_action(intent_upper, subset_slots)
             if action:
                 executable_actions.append(action)
 
@@ -182,13 +182,12 @@ def plan_intent(
         "intent": intent,
         "collected_slots": sorted(collected_slots),
         "missing_slots": missing_slots,
-        "executable_actions": unique_executable_actions
+        "executable_actions": unique_executable_actions,
     }
 
 
 def _map_executable_subset_to_action(
-    intent: str,
-    subset_slots: Set[str]
+    intent: str, subset_slots: Set[str]
 ) -> Optional[str]:
     """
     Map an executable slot subset to an action name.

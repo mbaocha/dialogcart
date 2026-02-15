@@ -29,14 +29,13 @@ IMPORTANT: Every commit action (mode=committing) in intent_policy.yaml MUST have
 registered here. Use validate_commit_action_handlers() to check this at startup.
 """
 
-from typing import Dict, Optional, List
+from typing import Dict, List, Optional
 
 # Action name (from intent_policy.yaml) → handler action name mapping
 ACTION_HANDLERS: Dict[str, str] = {
     # Commit actions
     "CONFIRM_APPOINTMENT": "booking.create",
     "FINALIZE_RESERVATION": "booking.create",
-
     # Fallback actions (non-destructive)
     # Placeholder - may need dedicated handler
     "SEARCH_AVAILABILITY": "booking.inquiry",
@@ -76,10 +75,9 @@ def validate_commit_action_handlers() -> List[str]:
     Raises:
         RuntimeError: If any commit actions are missing handlers (fail fast)
     """
-    from core.policy.intent_policy import get_execution_steps
-
     # Get all intents from unified policy
-    from core.policy.intent_policy import _load_unified_policy
+    from core.policy.intent_policy import _load_unified_policy, get_execution_steps
+
     unified_policy = _load_unified_policy()
 
     missing_handlers = []
@@ -87,6 +85,7 @@ def validate_commit_action_handlers() -> List[str]:
     # Check all intents in unified policy
     for intent_name in unified_policy.keys():
         from core.policy.intent_policy import get_commit_action
+
         commit_action = get_commit_action(intent_name)
 
         if commit_action and commit_action not in ACTION_HANDLERS:
@@ -100,7 +99,7 @@ def validate_commit_action_handlers() -> List[str]:
             f"To fix: Add these actions to ACTION_HANDLERS in action_router.py:\n"
         )
         for action in missing_handlers:
-            error_msg += f"  \"{action}\": \"your.handler.function\",\n"
+            error_msg += f'  "{action}": "your.handler.function",\n'
         error_msg += (
             f"\nSee intent_policy.yaml and action_router.py for extension instructions."
         )

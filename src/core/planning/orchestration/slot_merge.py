@@ -11,12 +11,11 @@ changing core logic.
 # The actual implementation remains in orchestration/api/session_merge.py
 # This allows gradual migration while maintaining existing functionality
 from core.orchestration.api.session_merge import (
-    merge_luma_with_session,
     _compute_effective_collected_slots,
+    merge_luma_with_session,
 )
 
 __all__ = [
     "merge_luma_with_session",
     "_compute_effective_collected_slots",
 ]
-

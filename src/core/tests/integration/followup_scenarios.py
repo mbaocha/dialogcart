@@ -16,9 +16,9 @@ Domain mapping:
 """
 
 from core.tests.integration.booking_scenarios import (
-    STATUS_EXECUTED,
     STATUS_AWAITING_CONFIRMATION,
-    STATUS_NEEDS_CLARIFICATION
+    STATUS_EXECUTED,
+    STATUS_NEEDS_CLARIFICATION,
 )
 
 core_followup_scenarios = [
@@ -34,25 +34,25 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_TIME"
-                }
+                    "clarification_reason": "MISSING_TIME",
+                },
             },
             {
                 "sentence": "tomorrow",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_TIME"
-                }
+                    "clarification_reason": "MISSING_TIME",
+                },
             },
             {
                 "sentence": "at 3pm",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
     {
         "name": "reservation_service_to_dates",
@@ -66,25 +66,25 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_DATE_RANGE"
-                }
+                    "clarification_reason": "MISSING_DATE_RANGE",
+                },
             },
             {
                 "sentence": "from october 5th",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_END_DATE"
-                }
+                    "clarification_reason": "MISSING_END_DATE",
+                },
             },
             {
                 "sentence": "to october 9th",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
     {
         "name": "time_to_date_appointment",
@@ -98,17 +98,17 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_DATE"
-                }
+                    "clarification_reason": "MISSING_DATE",
+                },
             },
             {
                 "sentence": "tomorrow",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
     {
         "name": "service_to_time_appointment",
@@ -122,17 +122,17 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_TIME"
-                }
+                    "clarification_reason": "MISSING_TIME",
+                },
             },
             {
                 "sentence": "friday at 11am",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
     {
         "name": "reservation_date_range_followup",
@@ -147,17 +147,17 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_DATE_RANGE"
-                }
+                    "clarification_reason": "MISSING_DATE_RANGE",
+                },
             },
             {
                 "sentence": "november 1st to 3rd",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
     {
         "name": "standard_room_reservation_followup",
@@ -171,25 +171,25 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_DATE_RANGE"
-                }
+                    "clarification_reason": "MISSING_DATE_RANGE",
+                },
             },
             {
                 "sentence": "from november 1st",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_END_DATE"
-                }
+                    "clarification_reason": "MISSING_END_DATE",
+                },
             },
             {
                 "sentence": "through november 5th",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
     {
         "name": "haircut_date_to_time_followup",
@@ -203,27 +203,26 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_TIME"
-                }
+                    "clarification_reason": "MISSING_TIME",
+                },
             },
             {
                 "sentence": "december 15th",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_TIME"
-                }
+                    "clarification_reason": "MISSING_TIME",
+                },
             },
             {
                 "sentence": "at 4pm",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
-
     {
         "name": "fuzzy_match_massage_followup",
         "domain": "service",
@@ -236,25 +235,25 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_TIME"
-                }
+                    "clarification_reason": "MISSING_TIME",
+                },
             },
             {
                 "sentence": "tomorrow",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_TIME"
-                }
+                    "clarification_reason": "MISSING_TIME",
+                },
             },
             {
                 "sentence": "at 3pm",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
     {
         "name": "deluxe_room_fuzzy_followup",
@@ -268,25 +267,25 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_DATE_RANGE"
-                }
+                    "clarification_reason": "MISSING_DATE_RANGE",
+                },
             },
             {
                 "sentence": "december 1st",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_END_DATE"
-                }
+                    "clarification_reason": "MISSING_END_DATE",
+                },
             },
             {
                 "sentence": "to december 5th",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
     {
         "name": "hair_cut_multiword_followup",
@@ -300,25 +299,25 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_TIME"
-                }
+                    "clarification_reason": "MISSING_TIME",
+                },
             },
             {
                 "sentence": "friday",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_TIME"
-                }
+                    "clarification_reason": "MISSING_TIME",
+                },
             },
             {
                 "sentence": "morning",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
     {
         "name": "suite_reservation_followup",
@@ -332,25 +331,25 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_DATE_RANGE"
-                }
+                    "clarification_reason": "MISSING_DATE_RANGE",
+                },
             },
             {
                 "sentence": "from february 10th",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_END_DATE"
-                }
+                    "clarification_reason": "MISSING_END_DATE",
+                },
             },
             {
                 "sentence": "to february 14th",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
     {
         "name": "beard_grooming_followup",
@@ -364,25 +363,25 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_TIME"
-                }
+                    "clarification_reason": "MISSING_TIME",
+                },
             },
             {
                 "sentence": "tomorrow",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_TIME"
-                }
+                    "clarification_reason": "MISSING_TIME",
+                },
             },
             {
                 "sentence": "at 2pm",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
     {
         "name": "presidential_room_reservation_followup",
@@ -396,25 +395,25 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_DATE_RANGE"
-                }
+                    "clarification_reason": "MISSING_DATE_RANGE",
+                },
             },
             {
                 "sentence": "january 1st",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_END_DATE"
-                }
+                    "clarification_reason": "MISSING_END_DATE",
+                },
             },
             {
                 "sentence": "through january 7th",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
     {
         "name": "massage_time_to_date_followup",
@@ -428,25 +427,25 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_TIME"
-                }
+                    "clarification_reason": "MISSING_TIME",
+                },
             },
             {
                 "sentence": "next friday",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_TIME"
-                }
+                    "clarification_reason": "MISSING_TIME",
+                },
             },
             {
                 "sentence": "at 10am",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
     {
         "name": "premium_suite_fuzzy_followup",
@@ -460,25 +459,25 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_DATE_RANGE"
-                }
+                    "clarification_reason": "MISSING_DATE_RANGE",
+                },
             },
             {
                 "sentence": "march 1st",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_END_DATE"
-                }
+                    "clarification_reason": "MISSING_END_DATE",
+                },
             },
             {
                 "sentence": "to march 5th",
                 "expected": {
                     "intent": "CREATE_RESERVATION",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
     {
         "name": "beerd_typo_followup",
@@ -492,24 +491,24 @@ core_followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_TIME"
-                }
+                    "clarification_reason": "MISSING_TIME",
+                },
             },
             {
                 "sentence": "saturday",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": STATUS_NEEDS_CLARIFICATION,
-                    "clarification_reason": "MISSING_TIME"
-                }
+                    "clarification_reason": "MISSING_TIME",
+                },
             },
             {
                 "sentence": "afternoon",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": STATUS_EXECUTED  # Or AWAITING_CONFIRMATION
-                }
-            }
-        ]
+                    "status": STATUS_EXECUTED,  # Or AWAITING_CONFIRMATION
+                },
+            },
+        ],
     },
 ]

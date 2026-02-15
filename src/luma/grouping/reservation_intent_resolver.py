@@ -10,16 +10,16 @@ Determines user intent from:
 
 NO ML. NO embeddings. NO NER dependency.
 """
+
+import json
 import re
 import threading
-import json
 from pathlib import Path
-from typing import Tuple, Dict, Any, List, Set, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import yaml
 
-from ..config.core import STATUS_READY, STATUS_NEEDS_CLARIFICATION
-
+from ..config.core import STATUS_NEEDS_CLARIFICATION, STATUS_READY
 
 # Canonical intents
 DISCOVERY = "DISCOVERY"
@@ -54,10 +54,9 @@ _booking_verb_expansions_cache: Optional[Dict[str, Set[str]]] = None
 _booking_verb_cache_lock = threading.Lock()
 
 
-def _load_intent_signals_cached() -> Tuple[
-    Dict[str, Dict[str, List[List[str]]]],
-    Dict[str, Dict[str, Any]]
-]:
+def _load_intent_signals_cached() -> (
+    Tuple[Dict[str, Dict[str, List[List[str]]]], Dict[str, Dict[str, Any]]]
+):
     """
     Load intent signals from YAML file (cached at module level).
 
@@ -80,8 +79,9 @@ def _load_intent_signals_cached() -> Tuple[
         # Try config/data first, fallback to store/normalization for backward compatibility
         config_dir = Path(__file__).resolve().parent.parent / "config"
         config_data_path = config_dir / "data" / "intent_signals.yaml"
-        store_path = config_dir.parent / "store" / \
-            "normalization" / "intent_signals.yaml"
+        store_path = (
+            config_dir.parent / "store" / "normalization" / "intent_signals.yaml"
+        )
 
         path = config_data_path if config_data_path.exists() else store_path
 
@@ -106,8 +106,7 @@ def _load_intent_signals_cached() -> Tuple[
             if not isinstance(cfg, dict):
                 continue
 
-            signals_cfg = cfg.get("signals") or cfg.get(
-                "intent_signals") or cfg
+            signals_cfg = cfg.get("signals") or cfg.get("intent_signals") or cfg
 
             # Normalize "any" phrases
             any_phrases = []
@@ -138,7 +137,9 @@ def _load_intent_signals_cached() -> Tuple[
             }
 
             meta[intent] = {
-                "intent_defining_slots": cfg.get("intent_defining_slots") or cfg.get("intent_defining_slot") or [],
+                "intent_defining_slots": cfg.get("intent_defining_slots")
+                or cfg.get("intent_defining_slot")
+                or [],
                 "required_slots": cfg.get("required_slots") or [],
                 "is_booking": cfg.get("is_booking", False),
             }
@@ -176,14 +177,18 @@ def _load_booking_verb_expansions() -> Dict[str, Set[str]]:
 
         # Get global JSON path
         from ..extraction.entity_loading import get_global_json_path
+
         global_json_path = get_global_json_path()
 
         # Load vocabularies
         with open(global_json_path, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        vocabularies = data.get("normalization", {}).get(
-            "normalization", {}).get("vocabularies", {})
+        vocabularies = (
+            data.get("normalization", {})
+            .get("normalization", {})
+            .get("vocabularies", {})
+        )
 
         booking_verbs = vocabularies.get("booking_verbs", {})
 
@@ -260,20 +265,30 @@ class ReservationIntentResolver:
 
         # Booking verbs (for CREATE_BOOKING)
         self.booking_verbs = {
-            "book", "schedule", "reserve", "appointment", "appoint",
-            "set", "arrange", "plan", "make",
-            "need", "want", "look", "looking", "get",
-            "recommend", "suggest", "like"  # "like" handles "i'd like to" phrases
+            "book",
+            "schedule",
+            "reserve",
+            "appointment",
+            "appoint",
+            "set",
+            "arrange",
+            "plan",
+            "make",
+            "need",
+            "want",
+            "look",
+            "looking",
+            "get",
+            "recommend",
+            "suggest",
+            "like",  # "like" handles "i'd like to" phrases
         }
 
         # Load booking verb expansions (canonical -> set of variants including typos)
         self.booking_verb_expansions = _load_booking_verb_expansions()
 
     def resolve_intent(
-        self,
-        osentence: str,
-        entities: Dict[str, Any],
-        booking_mode: str = "service"
+        self, osentence: str, entities: Dict[str, Any], booking_mode: str = "service"
     ) -> Tuple[str, float]:
         """
         Resolve intent from original user sentence and extracted entities.
@@ -308,14 +323,14 @@ class ReservationIntentResolver:
         # Tokenize osentence directly for booking verb detection (preserves typo corrections)
         # For signal matching, we still normalize to handle punctuation consistently
         normalized_sentence = self._normalize_sentence(osentence)
-        sentence_tokens_list, sentence_tokens_set = self._tokenize(
-            normalized_sentence)
+        sentence_tokens_list, sentence_tokens_set = self._tokenize(normalized_sentence)
 
         # Tokenize osentence directly for booking verb detection (uses typo-corrected text)
         # osentence is already normalized enough for tokenization (lowercase, whitespace normalized)
         _, osentence_tokens_set = self._tokenize(osentence)
 
         import logging
+
         logger = logging.getLogger(__name__)
 
         # ============================================================
@@ -329,10 +344,16 @@ class ReservationIntentResolver:
         # - Terminal intent classes: if signal detected, intent is determined immediately
 
         modify_signal_present = self._matches_signals(
-            normalized_sentence, sentence_tokens_list, sentence_tokens_set, MODIFY_BOOKING
+            normalized_sentence,
+            sentence_tokens_list,
+            sentence_tokens_set,
+            MODIFY_BOOKING,
         )
         cancel_signal_present = self._matches_signals(
-            normalized_sentence, sentence_tokens_list, sentence_tokens_set, CANCEL_BOOKING
+            normalized_sentence,
+            sentence_tokens_list,
+            sentence_tokens_set,
+            CANCEL_BOOKING,
         )
 
         # Enhanced MODIFY detection: check for MODIFY verbs with booking nouns (even without booking_id)
@@ -342,15 +363,19 @@ class ReservationIntentResolver:
         if not modify_signal_present:
             booking_id_present = bool(entities.get("booking_id"))
             # Check for MODIFY verbs
-            has_modify_verb = ("modify" in sentence_tokens_set or
-                               "update" in sentence_tokens_set or
-                               "change" in sentence_tokens_set or
-                               "move" in sentence_tokens_set or
-                               "reschedule" in sentence_tokens_set)
+            has_modify_verb = (
+                "modify" in sentence_tokens_set
+                or "update" in sentence_tokens_set
+                or "change" in sentence_tokens_set
+                or "move" in sentence_tokens_set
+                or "reschedule" in sentence_tokens_set
+            )
             # Check for booking nouns
-            has_booking_noun = ("booking" in sentence_tokens_set or
-                                "reservation" in sentence_tokens_set or
-                                "appointment" in sentence_tokens_set)
+            has_booking_noun = (
+                "booking" in sentence_tokens_set
+                or "reservation" in sentence_tokens_set
+                or "appointment" in sentence_tokens_set
+            )
 
             # If MODIFY verb + booking noun present, treat as MODIFY signal (NOT dependent on booking_id)
             # This ensures "move booking" matches even when booking_id is missing
@@ -374,8 +399,7 @@ class ReservationIntentResolver:
                 f"[INTENT_RESOLVER] MODIFY signal detected - absolute override to MODIFY_BOOKING "
                 f"(bypassing all CREATE logic, service checks, and slot validation)"
             )
-            resp = self._build_response(
-                MODIFY_BOOKING, HIGH_CONFIDENCE, entities)
+            resp = self._build_response(MODIFY_BOOKING, HIGH_CONFIDENCE, entities)
             return resp["intent"], resp["confidence"]
 
         # If CANCEL signal is detected, intent MUST be CANCEL_BOOKING (absolute override)
@@ -384,16 +408,21 @@ class ReservationIntentResolver:
                 f"[INTENT_RESOLVER] CANCEL signal detected - absolute override to CANCEL_BOOKING "
                 f"(bypassing all CREATE logic, service checks, and slot validation)"
             )
-            resp = self._build_response(
-                CANCEL_BOOKING, HIGH_CONFIDENCE, entities)
+            resp = self._build_response(CANCEL_BOOKING, HIGH_CONFIDENCE, entities)
             return resp["intent"], resp["confidence"]
 
         # ============================================================
         # STEP 1: DETERMINE LOCKED BOOKING INTENT (from booking_mode)
         # ============================================================
         # booking_mode is the sole determinant - locks the booking intent
-        booking_mode_normalized = "reservation" if booking_mode == "reservation" else "service"
-        locked_booking_intent = CREATE_APPOINTMENT if booking_mode_normalized == "service" else CREATE_RESERVATION
+        booking_mode_normalized = (
+            "reservation" if booking_mode == "reservation" else "service"
+        )
+        locked_booking_intent = (
+            CREATE_APPOINTMENT
+            if booking_mode_normalized == "service"
+            else CREATE_RESERVATION
+        )
 
         logger.info(
             f"[INTENT_RESOLVER] resolve_intent called: booking_mode={booking_mode}, "
@@ -416,19 +445,28 @@ class ReservationIntentResolver:
             if intent_key in [MODIFY_BOOKING, CANCEL_BOOKING]:
                 continue
 
-            if self._matches_signals(normalized_sentence, sentence_tokens_list, sentence_tokens_set, intent_key):
+            if self._matches_signals(
+                normalized_sentence,
+                sentence_tokens_list,
+                sentence_tokens_set,
+                intent_key,
+            ):
                 signal_matching_intents.append(intent_key)
 
         # Luma is stateless - no lifecycle gating
 
         # If signals matched, select best matching intent (with priority ordering)
         if signal_matching_intents:
-            selected_intent = self._select_best_signal_match(
-                signal_matching_intents)
+            selected_intent = self._select_best_signal_match(signal_matching_intents)
             if selected_intent:
                 resp = self._build_response(
-                    selected_intent, HIGH_CONFIDENCE if len(
-                        signal_matching_intents) == 1 else MEDIUM_CONFIDENCE, entities
+                    selected_intent,
+                    (
+                        HIGH_CONFIDENCE
+                        if len(signal_matching_intents) == 1
+                        else MEDIUM_CONFIDENCE
+                    ),
+                    entities,
                 )
                 return resp["intent"], resp["confidence"]
 
@@ -446,14 +484,18 @@ class ReservationIntentResolver:
         # Check if explicit booking intent signals are present for the locked booking intent
         # CREATE_* intents require explicit language cues, not slot-based inference
         has_explicit_booking_signal = self._matches_signals(
-            normalized_sentence, sentence_tokens_list, sentence_tokens_set, locked_booking_intent
+            normalized_sentence,
+            sentence_tokens_list,
+            sentence_tokens_set,
+            locked_booking_intent,
         )
 
         # Also require explicit booking verb (book, reserve, schedule, etc.)
         # This prevents service-only inputs from being promoted
         # Use osentence_tokens_set (typo-corrected) for verb detection
         has_booking_verb = any(
-            verb in osentence_tokens_set for verb in self.booking_verbs)
+            verb in osentence_tokens_set for verb in self.booking_verbs
+        )
 
         # Check for service presence (required for promotion)
         has_service = self._slot_present("service_id", entities)
@@ -465,13 +507,16 @@ class ReservationIntentResolver:
         if has_booking_verb and has_service:
             logger.info(
                 f"[INTENT_RESOLVER] Explicit booking signal/verb + service present. Promoting to {locked_booking_intent}",
-                extra={'entities': entities,
-                       'locked_booking_intent': locked_booking_intent,
-                       'has_explicit_booking_signal': has_explicit_booking_signal,
-                       'has_booking_verb': has_booking_verb}
+                extra={
+                    "entities": entities,
+                    "locked_booking_intent": locked_booking_intent,
+                    "has_explicit_booking_signal": has_explicit_booking_signal,
+                    "has_booking_verb": has_booking_verb,
+                },
             )
             resp = self._build_response(
-                locked_booking_intent, MEDIUM_CONFIDENCE, entities)
+                locked_booking_intent, MEDIUM_CONFIDENCE, entities
+            )
             return resp["intent"], resp["confidence"]
 
         # ============================================================
@@ -491,7 +536,8 @@ class ReservationIntentResolver:
         # Check for explicit booking verb in sentence
         # Use osentence_tokens_set (typo-corrected) for verb detection
         has_booking_verb = any(
-            verb in osentence_tokens_set for verb in self.booking_verbs)
+            verb in osentence_tokens_set for verb in self.booking_verbs
+        )
 
         has_service = self._slot_present("service_id", entities)
 
@@ -501,12 +547,15 @@ class ReservationIntentResolver:
             logger.info(
                 f"[INTENT_RESOLVER] Stateless Intent Promotion: "
                 f"booking verb + service present. Promoting to {locked_booking_intent}",
-                extra={'entities': entities,
-                       'locked_booking_intent': locked_booking_intent,
-                       'booking_verb_present': True}
+                extra={
+                    "entities": entities,
+                    "locked_booking_intent": locked_booking_intent,
+                    "booking_verb_present": True,
+                },
             )
             resp = self._build_response(
-                locked_booking_intent, MEDIUM_CONFIDENCE, entities)
+                locked_booking_intent, MEDIUM_CONFIDENCE, entities
+            )
             return resp["intent"], resp["confidence"]
 
         # No explicit booking signals and no promotion rule matched - return UNKNOWN
@@ -555,7 +604,7 @@ class ReservationIntentResolver:
         normalized_sentence: str,
         sentence_tokens_list: List[str],
         sentence_tokens_set: Set[str],
-        intent_key: str
+        intent_key: str,
     ) -> bool:
         """
         Check if the sentence matches configured signals for a given intent.
@@ -579,7 +628,9 @@ class ReservationIntentResolver:
                 all_match = True
                 for token in token_group:
                     token_variants = self._expand_booking_verb_token(token)
-                    if not any(variant in sentence_tokens_set for variant in token_variants):
+                    if not any(
+                        variant in sentence_tokens_set for variant in token_variants
+                    ):
                         all_match = False
                         break
 
@@ -601,7 +652,7 @@ class ReservationIntentResolver:
                     for variant in token_variants:
                         # Use word boundaries to ensure whole-word matching
                         escaped_variant = re.escape(variant)
-                        pattern = r'\b' + escaped_variant + r'\b'
+                        pattern = r"\b" + escaped_variant + r"\b"
                         if re.search(pattern, normalized_sentence, re.IGNORECASE):
                             return True
                 else:
@@ -610,7 +661,7 @@ class ReservationIntentResolver:
                     # Escape special regex characters in the phrase
                     escaped_phrase = re.escape(phrase)
                     # Match as whole word(s) - word boundaries on both sides
-                    pattern = r'\b' + escaped_phrase + r'\b'
+                    pattern = r"\b" + escaped_phrase + r"\b"
                     if re.search(pattern, normalized_sentence, re.IGNORECASE):
                         return True
 
@@ -646,7 +697,9 @@ class ReservationIntentResolver:
         # Not a booking verb, return as-is
         return {token_lower}
 
-    def _tokens_in_order(self, sentence_tokens_list: List[str], token_group: List[str]) -> bool:
+    def _tokens_in_order(
+        self, sentence_tokens_list: List[str], token_group: List[str]
+    ) -> bool:
         """
         Check if all tokens in token_group appear in order within sentence_tokens_list.
         Tokens do not need to be adjacent.
@@ -687,9 +740,13 @@ class ReservationIntentResolver:
         - booking_id: extracted booking_id (if present in entities)
         """
         if slot_name == "services":
-            return bool(entities.get("business_categories") or entities.get("service_families"))
+            return bool(
+                entities.get("business_categories") or entities.get("service_families")
+            )
         if slot_name == "service_id":
-            return bool(entities.get("business_categories") or entities.get("service_families"))
+            return bool(
+                entities.get("business_categories") or entities.get("service_families")
+            )
         if slot_name == "date":
             return self._has_date_anchor(entities)
         if slot_name == "start_date":
@@ -697,7 +754,11 @@ class ReservationIntentResolver:
         if slot_name == "end_date":
             return self._has_second_date_anchor(entities)
         if slot_name == "time":
-            return bool(entities.get("times") or entities.get("time_windows") or entities.get("durations"))
+            return bool(
+                entities.get("times")
+                or entities.get("time_windows")
+                or entities.get("durations")
+            )
         if slot_name == "booking_id":
             return bool(entities.get("booking_id"))
         return False
@@ -743,10 +804,7 @@ class ReservationIntentResolver:
             return True
         return False
 
-    def _select_best_signal_match(
-        self,
-        matching_intents: List[str]
-    ) -> Optional[str]:
+    def _select_best_signal_match(self, matching_intents: List[str]) -> Optional[str]:
         """
         Select the best matching intent from signal-matching intents.
 
@@ -804,15 +862,16 @@ class ReservationIntentResolver:
             return True
 
         # Check date-related deltas (date, start_date, end_date)
-        if (self._has_date_anchor(entities) or
-            self._has_second_date_anchor(entities) or
-            bool(entities.get("dates_absolute")) or
-                bool(entities.get("dates"))):
+        if (
+            self._has_date_anchor(entities)
+            or self._has_second_date_anchor(entities)
+            or bool(entities.get("dates_absolute"))
+            or bool(entities.get("dates"))
+        ):
             return True
 
         # Check time-related deltas (time)
-        if (bool(entities.get("times")) or
-                bool(entities.get("time_windows"))):
+        if bool(entities.get("times")) or bool(entities.get("time_windows")):
             return True
 
         # Check duration delta
@@ -820,14 +879,18 @@ class ReservationIntentResolver:
             return True
 
         # Check service_id delta
-        if (bool(entities.get("business_categories")) or
-            bool(entities.get("service_families")) or
-                bool(entities.get("service_id"))):
+        if (
+            bool(entities.get("business_categories"))
+            or bool(entities.get("service_families"))
+            or bool(entities.get("service_id"))
+        ):
             return True
 
         return False
 
-    def _build_response(self, intent: str, confidence: float, entities: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_response(
+        self, intent: str, confidence: float, entities: Dict[str, Any]
+    ) -> Dict[str, Any]:
         """
         Build structured response with clarification metadata.
 
@@ -872,14 +935,11 @@ class ReservationIntentResolver:
             "intent": intent,
             "confidence": confidence,
             "status": status,
-            "missing_slots": missing_slots
+            "missing_slots": missing_slots,
         }
 
 
-def resolve_intent(
-    osentence: str,
-    entities: Dict[str, Any]
-) -> Tuple[str, float]:
+def resolve_intent(osentence: str, entities: Dict[str, Any]) -> Tuple[str, float]:
     """
     Convenience function for resolving intent.
 

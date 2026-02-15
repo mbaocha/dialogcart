@@ -12,4 +12,3 @@ __all__ = [
     "decide_booking_status",
     "resolve_tenant_service_id",
 ]
-

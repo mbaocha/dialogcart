@@ -12,13 +12,14 @@ Usage:
     python3 -m core.tests.orchestration.test_orchestrator_e2e 4
 """
 
-from core.orchestration.orchestrator import handle_message
-from core.orchestration.nlu import LumaClient
 import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
+from core.orchestration.nlu import LumaClient
+from core.orchestration.orchestrator import handle_message
 
 # Set execution mode to test for deterministic E2E tests
 os.environ["CORE_EXECUTION_MODE"] = "test"
@@ -34,6 +35,7 @@ if str(src_path) not in sys.path:
 # Load environment variables
 try:
     from dotenv import load_dotenv
+
     # Project root is two levels up from tests/orchestration/ (where this script now runs from)
     project_root = Path(__file__).parent.parent.parent.parent
     # Also check for .env in src/core/
@@ -44,8 +46,7 @@ try:
     # Debug: Print paths
     print(f"DEBUG ENV: __file__={__file__}")
     print(f"DEBUG ENV: project_root={project_root}")
-    print(
-        f"DEBUG ENV: core_env_file={core_env_file} (exists={core_env_file.exists()})")
+    print(f"DEBUG ENV: core_env_file={core_env_file} (exists={core_env_file.exists()})")
     print(f"DEBUG ENV: env_file={env_file} (exists={env_file.exists()})")
 
     # Load core/.env last so it takes precedence over project root .env
@@ -66,15 +67,15 @@ except ImportError:
         if not env_path.exists():
             return
         try:
-            with open(env_path, 'r', encoding='utf-8') as f:
+            with open(env_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     # Skip empty lines and comments
-                    if not line or line.startswith('#'):
+                    if not line or line.startswith("#"):
                         continue
                     # Parse KEY=VALUE
-                    if '=' in line:
-                        key, value = line.split('=', 1)
+                    if "=" in line:
+                        key, value = line.split("=", 1)
                         key = key.strip()
                         value = value.strip()
                         # Remove quotes if present
@@ -115,8 +116,8 @@ TEST_EXAMPLES = [
         "user_id": "test_user_001",
         "aliases": {
             "premium haircut": "beauty_and_wellness.haircut",
-            "flexi haircut + prunning": "beauty_and_wellness.haircut"
-        }
+            "flexi haircut + prunning": "beauty_and_wellness.haircut",
+        },
     },
     {
         "name": "Partial Booking - Missing Time",
@@ -125,8 +126,8 @@ TEST_EXAMPLES = [
         "user_id": "test_user_002",
         "aliases": {
             "premium haircut": "beauty_and_wellness.haircut",
-            "flexi haircut + prunning": "beauty_and_wellness.haircut"
-        }
+            "flexi haircut + prunning": "beauty_and_wellness.haircut",
+        },
     },
     {
         "name": "Partial Booking - Missing Date",
@@ -135,8 +136,8 @@ TEST_EXAMPLES = [
         "user_id": "test_user_003",
         "aliases": {
             "premium haircut": "beauty_and_wellness.haircut",
-            "flexi haircut + prunning": "beauty_and_wellness.haircut"
-        }
+            "flexi haircut + prunning": "beauty_and_wellness.haircut",
+        },
     },
     {
         "name": "Ambiguous Service - Multiple Matches",
@@ -145,8 +146,8 @@ TEST_EXAMPLES = [
         "user_id": "test_user_004",
         "aliases": {
             "premium haircut": "beauty_and_wellness.haircut",
-            "flexi haircut + prunning": "beauty_and_wellness.haircut"
-        }
+            "flexi haircut + prunning": "beauty_and_wellness.haircut",
+        },
     },
     {
         "name": "Missing Service",
@@ -155,8 +156,8 @@ TEST_EXAMPLES = [
         "user_id": "test_user_005",
         "aliases": {
             "premium haircut": "beauty_and_wellness.haircut",
-            "flexi haircut + prunning": "beauty_and_wellness.haircut"
-        }
+            "flexi haircut + prunning": "beauty_and_wellness.haircut",
+        },
     },
     {
         "name": "Vague Time Reference",
@@ -165,8 +166,8 @@ TEST_EXAMPLES = [
         "user_id": "test_user_006",
         "aliases": {
             "premium haircut": "beauty_and_wellness.haircut",
-            "flexi haircut + prunning": "beauty_and_wellness.haircut"
-        }
+            "flexi haircut + prunning": "beauty_and_wellness.haircut",
+        },
     },
     {
         "name": "Complex Booking Request",
@@ -175,8 +176,8 @@ TEST_EXAMPLES = [
         "user_id": "test_user_007",
         "aliases": {
             "premium haircut": "beauty_and_wellness.haircut",
-            "flexi haircut + prunning": "beauty_and_wellness.haircut"
-        }
+            "flexi haircut + prunning": "beauty_and_wellness.haircut",
+        },
     },
     {
         "name": "Minimal Request",
@@ -185,8 +186,8 @@ TEST_EXAMPLES = [
         "user_id": "test_user_008",
         "aliases": {
             "premium haircut": "beauty_and_wellness.haircut",
-            "flexi haircut + prunning": "beauty_and_wellness.haircut"
-        }
+            "flexi haircut + prunning": "beauty_and_wellness.haircut",
+        },
     },
     {
         "name": "Weekday Reference",
@@ -195,8 +196,8 @@ TEST_EXAMPLES = [
         "user_id": "test_user_009",
         "aliases": {
             "premium haircut": "beauty_and_wellness.haircut",
-            "flexi haircut + prunning": "beauty_and_wellness.haircut"
-        }
+            "flexi haircut + prunning": "beauty_and_wellness.haircut",
+        },
     },
     {
         "name": "Time Range Request",
@@ -205,9 +206,9 @@ TEST_EXAMPLES = [
         "user_id": "test_user_010",
         "aliases": {
             "premium haircut": "beauty_and_wellness.haircut",
-            "flexi haircut + prunning": "beauty_and_wellness.haircut"
-        }
-    }
+            "flexi haircut + prunning": "beauty_and_wellness.haircut",
+        },
+    },
 ]
 
 
@@ -218,16 +219,12 @@ def get_customer_details() -> Dict[str, Optional[Any]]:
     customer_id_str = os.getenv("TEST_CUSTOMER_ID")
     customer_id = int(customer_id_str) if customer_id_str else None
 
-    return {
-        "phone_number": phone_number,
-        "email": email,
-        "customer_id": customer_id
-    }
+    return {"phone_number": phone_number, "email": email, "customer_id": customer_id}
 
 
 class MockLumaClientForTests(LumaClient):
     """Custom LumaClient that injects tenant_context from test example aliases.
-    
+
     Note: Renamed from TestLumaClient to avoid pytest collection (pytest doesn't
     collect classes with __init__ that start with 'Test').
     """
@@ -243,7 +240,7 @@ class MockLumaClientForTests(LumaClient):
         text: str,
         domain: str = "service",
         timezone: str = "UTC",
-        tenant_context: Optional[Dict[str, Any]] = None
+        tenant_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Override resolve to inject test aliases into tenant_context.
@@ -257,7 +254,9 @@ class MockLumaClientForTests(LumaClient):
         return super().resolve(user_id, text, domain, timezone, tenant_context)
 
 
-def run_example(example_num: int, example: Dict[str, Any], verbose: bool = True) -> Dict[str, Any]:
+def run_example(
+    example_num: int, example: Dict[str, Any], verbose: bool = True
+) -> Dict[str, Any]:
     """
     Run a single test example.
 
@@ -270,23 +269,24 @@ def run_example(example_num: int, example: Dict[str, Any], verbose: bool = True)
         Result dictionary from handle_message
     """
     if verbose:
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print(f"EXAMPLE {example_num}: {example['name']}")
-        print("="*60)
+        print("=" * 60)
         print(f"Description: {example['description']}")
         print(f"User ID: {example['user_id']}")
         print(f"Text: {example['text']}")
-        print("-"*60)
+        print("-" * 60)
 
     customer_details = get_customer_details()
 
     if verbose and example_num == 1:
         # Print customer details only for first example
-        if customer_details['customer_id']:
+        if customer_details["customer_id"]:
             print(f"Using test customer ID: {customer_details['customer_id']}")
-        elif customer_details['phone_number'] or customer_details['email']:
+        elif customer_details["phone_number"] or customer_details["email"]:
             print(
-                f"Using test customer: phone={customer_details['phone_number']}, email={customer_details['email']}")
+                f"Using test customer: phone={customer_details['phone_number']}, email={customer_details['email']}"
+            )
         else:
             print("WARNING: No customer_id, phone, or email found in environment")
 
@@ -299,14 +299,14 @@ def run_example(example_num: int, example: Dict[str, Any], verbose: bool = True)
             print(f"Using test aliases: {test_aliases}")
 
     result = handle_message(
-        user_id=example['user_id'],
-        text=example['text'],
+        user_id=example["user_id"],
+        text=example["text"],
         domain="service",
         timezone="UTC",
-        phone_number=customer_details['phone_number'],
-        email=customer_details['email'],
-        customer_id=customer_details['customer_id'],
-        luma_client=luma_client
+        phone_number=customer_details["phone_number"],
+        email=customer_details["email"],
+        customer_id=customer_details["customer_id"],
+        luma_client=luma_client,
     )
 
     if verbose:
@@ -322,12 +322,12 @@ def run_example(example_num: int, example: Dict[str, Any], verbose: bool = True)
             elif outcome.get("type") == "CLARIFY":
                 print("\n[CLARIFICATION] More info needed")
                 print(f"   Template: {outcome.get('template_key')}")
-                data = outcome.get('data', {})
-                if data.get('missing'):
+                data = outcome.get("data", {})
+                if data.get("missing"):
                     print(f"   Missing: {data.get('missing')}")
-                if data.get('ambiguous'):
+                if data.get("ambiguous"):
                     print(f"   Ambiguous: {data.get('ambiguous')}")
-                if data.get('reason'):
+                if data.get("reason"):
                     print(f"   Reason: {data.get('reason')}")
         else:
             print(f"\n[ERROR] {result.get('error')}")
@@ -338,41 +338,46 @@ def run_example(example_num: int, example: Dict[str, Any], verbose: bool = True)
 
 def run_all_examples(verbose: bool = True) -> None:
     """Run all test examples."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("RUNNING ALL TEST EXAMPLES")
-    print("="*60)
+    print("=" * 60)
     print(f"Total examples: {len(TEST_EXAMPLES)}")
 
     results = []
     for i, example in enumerate(TEST_EXAMPLES, start=1):
         try:
             result = run_example(i, example, verbose=verbose)
-            results.append({
-                "example_num": i,
-                "name": example['name'],
-                "success": result.get("success", False),
-                "outcome_type": result.get("outcome", {}).get("type", "UNKNOWN")
-            })
+            results.append(
+                {
+                    "example_num": i,
+                    "name": example["name"],
+                    "success": result.get("success", False),
+                    "outcome_type": result.get("outcome", {}).get("type", "UNKNOWN"),
+                }
+            )
         except Exception as e:
             print(f"\n[ERROR] Example {i} failed with exception: {e}")
-            results.append({
-                "example_num": i,
-                "name": example['name'],
-                "success": False,
-                "error": str(e)
-            })
+            results.append(
+                {
+                    "example_num": i,
+                    "name": example["name"],
+                    "success": False,
+                    "error": str(e),
+                }
+            )
 
     # Print summary
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("SUMMARY")
-    print("="*60)
+    print("=" * 60)
     for result in results:
-        status = "[OK]" if result['success'] else "[FAIL]"
-        outcome = result.get('outcome_type', result.get('error', 'UNKNOWN'))
+        status = "[OK]" if result["success"] else "[FAIL]"
+        outcome = result.get("outcome_type", result.get("error", "UNKNOWN"))
         print(
-            f"{status} Example {result['example_num']:2d}: {result['name']:<40} -> {outcome}")
+            f"{status} Example {result['example_num']:2d}: {result['name']:<40} -> {outcome}"
+        )
 
-    successful = sum(1 for r in results if r['success'])
+    successful = sum(1 for r in results if r["success"])
     print(f"\nTotal: {successful}/{len(results)} successful")
 
 
@@ -392,24 +397,22 @@ Examples:
 
   # Run with minimal output
   python3 -m core.tests.orchestration.test_orchestrator_e2e --quiet
-        """
+        """,
     )
     parser.add_argument(
         "example_num",
         nargs="?",
         type=int,
-        help="Example number to run (1-10). If not provided, runs all examples."
+        help="Example number to run (1-10). If not provided, runs all examples.",
     )
     parser.add_argument(
-        "--quiet", "-q",
-        action="store_true",
-        help="Minimal output (only summary)"
+        "--quiet", "-q", action="store_true", help="Minimal output (only summary)"
     )
     # Keep backward compatibility
     parser.add_argument(
         "--test",
         choices=["resolved", "partial", "custom"],
-        help="Legacy: Which test to run (deprecated, use example_num instead)"
+        help="Legacy: Which test to run (deprecated, use example_num instead)",
     )
     parser.add_argument("--user-id", help="User ID for custom test (legacy)")
     parser.add_argument("--text", help="Message text for custom test (legacy)")
@@ -421,8 +424,7 @@ Examples:
     # Handle positional argument (example number)
     if args.example_num is not None:
         if args.example_num < 1 or args.example_num > len(TEST_EXAMPLES):
-            print(
-                f"Error: Example number must be between 1 and {len(TEST_EXAMPLES)}")
+            print(f"Error: Example number must be between 1 and {len(TEST_EXAMPLES)}")
             sys.exit(1)
         example = TEST_EXAMPLES[args.example_num - 1]
         run_example(args.example_num, example, verbose=verbose)
@@ -438,18 +440,18 @@ Examples:
             if not args.text:
                 print("Error: --text is required for custom test")
                 sys.exit(1)
-            print("\n" + "="*60)
+            print("\n" + "=" * 60)
             print("TEST: Custom Message")
-            print("="*60)
+            print("=" * 60)
             customer_details = get_customer_details()
             result = handle_message(
                 user_id=args.user_id or "test_user_custom",
                 text=args.text,
                 domain="service",
                 timezone="UTC",
-                phone_number=customer_details['phone_number'],
-                email=customer_details['email'],
-                customer_id=customer_details['customer_id']
+                phone_number=customer_details["phone_number"],
+                email=customer_details["email"],
+                customer_id=customer_details["customer_id"],
             )
             print("\nResult:")
             print(json.dumps(result, indent=2))
@@ -457,6 +459,6 @@ Examples:
     else:
         run_all_examples(verbose=verbose)
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Test completed!")
-    print("="*60)
+    print("=" * 60)

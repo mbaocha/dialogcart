@@ -31,19 +31,20 @@ Features:
 """
 
 import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List
+from unittest.mock import Mock
+
 import pytest
 import yaml
-import sys
-from pathlib import Path
-from unittest.mock import Mock
-from datetime import datetime, timezone
-from typing import Dict, Any, List
 
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.execution.clients.availability_client import AvailabilityClient
 from core.orchestration.orchestrator import handle_message
-from core.tests.mocks import mock_get_service_availability
 from core.tests.integration.test_appointment_e2e import TestLumaClient
+from core.tests.mocks import mock_get_service_availability
 from core.tests.planning.adapter import normalize_planning_outcome
 
 # Add src to path BEFORE importing core modules
@@ -54,14 +55,17 @@ if str(src_path) not in sys.path:
 
 # Skip entire test module if RUN_REAL_LUMA_E2E is not set
 if not os.getenv("RUN_REAL_LUMA_E2E"):
-    pytest.skip("Real Luma E2E tests disabled. Set RUN_REAL_LUMA_E2E=true to enable.",
-                allow_module_level=True)
+    pytest.skip(
+        "Real Luma E2E tests disabled. Set RUN_REAL_LUMA_E2E=true to enable.",
+        allow_module_level=True,
+    )
 
 
 def load_scenarios() -> List[Dict[str, Any]]:
     """Load test scenarios from YAML file."""
-    scenarios_file = Path(__file__).parent / "scenarios" / \
-        "followup_availability_real_luma.yaml"
+    scenarios_file = (
+        Path(__file__).parent / "scenarios" / "followup_availability_real_luma.yaml"
+    )
     if not scenarios_file.exists():
         pytest.skip(f"Scenarios file not found: {scenarios_file}")
 
@@ -69,9 +73,9 @@ def load_scenarios() -> List[Dict[str, Any]]:
         data = yaml.safe_load(f)
 
     scenarios = data.get("scenarios", [])
-    
+
     # Support selecting specific tests by index via environment variable
-    # Usage: 
+    # Usage:
     #   E2E_TEST_INDEX=2 pytest ... to run only test at index 2 (0-based)
     #   E2E_TEST_INDEX=2,4,9 pytest ... to run tests at indices 2, 4, and 9
     test_index_env = os.getenv("E2E_TEST_INDEX")
@@ -86,29 +90,46 @@ def load_scenarios() -> List[Dict[str, Any]]:
                     if 0 <= index < len(scenarios):
                         selected_indices.append(index)
                     else:
-                        print(f"\n[E2E_TEST] WARNING: Test index {index} is out of range (0-{len(scenarios)-1}). Skipping.\n")
-            
+                        print(
+                            f"\n[E2E_TEST] WARNING: Test index {index} is out of range (0-{len(scenarios)-1}). Skipping.\n"
+                        )
+
             if selected_indices:
                 # Return only the selected scenarios (preserve order)
-                selected = [scenarios[i] for i in sorted(set(selected_indices))]  # Remove duplicates and sort
-                names = [s.get('name', 'unnamed') for s in selected]
-                print(f"\n[E2E_TEST] Running {len(selected)} test(s) at indices {sorted(set(selected_indices))}: {', '.join(names)}\n")
+                selected = [
+                    scenarios[i] for i in sorted(set(selected_indices))
+                ]  # Remove duplicates and sort
+                names = [s.get("name", "unnamed") for s in selected]
+                print(
+                    f"\n[E2E_TEST] Running {len(selected)} test(s) at indices {sorted(set(selected_indices))}: {', '.join(names)}\n"
+                )
                 return selected
             else:
-                print(f"\n[E2E_TEST] WARNING: No valid test indices found. Running all tests.\n")
+                print(
+                    f"\n[E2E_TEST] WARNING: No valid test indices found. Running all tests.\n"
+                )
         except ValueError as e:
-            print(f"\n[E2E_TEST] WARNING: Invalid E2E_TEST_INDEX value '{test_index_env}'. Must be comma-separated numbers. Running all tests.\n")
-    
+            print(
+                f"\n[E2E_TEST] WARNING: Invalid E2E_TEST_INDEX value '{test_index_env}'. Must be comma-separated numbers. Running all tests.\n"
+            )
+
     return scenarios
 
 
 def create_mock_availability_client() -> Mock:
     """Create a mocked availability client using tests.mocks."""
     mock_availability_client = Mock(spec=AvailabilityClient)
+
     # Use mock_get_service_availability from tests.mocks to generate response
     # Wrap it to handle service_id type (mock expects int, but we may pass strings)
-    def mock_get_availability(organization_id=None, service_id=None, date=None,
-                              time_constraint=None, extra_params=None, **kwargs):
+    def mock_get_availability(
+        organization_id=None,
+        service_id=None,
+        date=None,
+        time_constraint=None,
+        extra_params=None,
+        **kwargs,
+    ):
         # Convert service_id to int if needed (mock expects int but doesn't use the value)
         service_id_int = 1  # Default
         if service_id is not None:
@@ -123,9 +144,12 @@ def create_mock_availability_client() -> Mock:
             date=date or "2026-01-16",
             time_constraint=time_constraint,
             extra_params=extra_params,
-            **kwargs
+            **kwargs,
         )
-    mock_availability_client.get_service_availability.side_effect = mock_get_availability
+
+    mock_availability_client.get_service_availability.side_effect = (
+        mock_get_availability
+    )
     return mock_availability_client
 
 
@@ -133,9 +157,7 @@ def create_mock_organization_client() -> Mock:
     """Create a mocked organization client."""
     mock_org_client = Mock(spec=OrganizationClient)
     mock_org_client.get_details.return_value = {
-        "organization": {
-            "businessCategoryId": 1  # Maps to "service" domain
-        }
+        "organization": {"businessCategoryId": 1}  # Maps to "service" domain
     }
     return mock_org_client
 
@@ -177,7 +199,7 @@ def assert_turn_expectations(
     result: Dict[str, Any],
     expectations: Dict[str, Any],
     turn_number: int,
-    scenario_name: str
+    scenario_name: str,
 ) -> None:
     """
     Assert turn expectations against Core result.
@@ -185,8 +207,9 @@ def assert_turn_expectations(
     Only asserts Core behavior, not Luma internals.
     """
     # Assert success
-    assert result.get("success") is True, \
-        f"[{scenario_name}] Turn {turn_number}: Expected success=True, got {result.get('success')} with error: {result.get('error')}"
+    assert (
+        result.get("success") is True
+    ), f"[{scenario_name}] Turn {turn_number}: Expected success=True, got {result.get('success')} with error: {result.get('error')}"
 
     # Normalize result using planning test adapter (same as planning tests)
     # This ensures we assert against the same contract as planning tests
@@ -200,32 +223,37 @@ def assert_turn_expectations(
 
     # Assert intent_name is non-empty (critical invariant)
     # Skip this assertion if allow_empty_intent=true (for pre-intent slot collection)
-    intent_name = normalized.get("intent") or plan.get(
-        "intent_name") or plan.get("intent")
+    intent_name = (
+        normalized.get("intent") or plan.get("intent_name") or plan.get("intent")
+    )
     if not expectations.get("allow_empty_intent", False):
-        assert intent_name and intent_name != "", \
-            f"[{scenario_name}] Turn {turn_number}: Expected non-empty intent_name, got {intent_name}"
+        assert (
+            intent_name and intent_name != ""
+        ), f"[{scenario_name}] Turn {turn_number}: Expected non-empty intent_name, got {intent_name}"
 
     # Assert expected status
     if "status" in expectations:
         expected_status = expectations["status"]
         actual_status = normalized.get("status")
-        assert actual_status == expected_status, \
-            f"[{scenario_name}] Turn {turn_number}: Expected status {expected_status}, got {actual_status}"
+        assert (
+            actual_status == expected_status
+        ), f"[{scenario_name}] Turn {turn_number}: Expected status {expected_status}, got {actual_status}"
 
     # Assert expected action (from plan.action, same as planning tests)
     if "action" in expectations:
         expected_action = expectations["action"]
         actual_action = plan.get("action")
-        assert actual_action == expected_action, \
-            f"[{scenario_name}] Turn {turn_number}: Expected action {expected_action}, got {actual_action}"
+        assert (
+            actual_action == expected_action
+        ), f"[{scenario_name}] Turn {turn_number}: Expected action {expected_action}, got {actual_action}"
 
     # Assert missing_slots
     if "missing_slots" in expectations:
         expected_missing = set(expectations["missing_slots"])
         actual_missing = set(normalized.get("missing_slots", []))
-        assert actual_missing == expected_missing, \
-            f"[{scenario_name}] Turn {turn_number}: Expected missing_slots {expected_missing}, got {actual_missing}"
+        assert (
+            actual_missing == expected_missing
+        ), f"[{scenario_name}] Turn {turn_number}: Expected missing_slots {expected_missing}, got {actual_missing}"
 
     # Assert intent preservation (if expected)
     if expectations.get("intent_preserved"):
@@ -245,11 +273,13 @@ def assert_turn_expectations(
 # Load scenarios once for parametrization
 _scenarios_for_parametrize = load_scenarios()
 
+
 def _scenario_id(scenario: Dict[str, Any]) -> str:
     """Generate test ID with index and name."""
     # Load all scenarios to get index
-    scenarios_file = Path(__file__).parent / "scenarios" / \
-        "followup_availability_real_luma.yaml"
+    scenarios_file = (
+        Path(__file__).parent / "scenarios" / "followup_availability_real_luma.yaml"
+    )
     if scenarios_file.exists():
         with open(scenarios_file, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
@@ -258,8 +288,8 @@ def _scenario_id(scenario: Dict[str, Any]) -> str:
             idx = all_scenarios.index(scenario)
             return f"{idx}-{scenario.get('name', 'unnamed')}"
         except ValueError:
-            return scenario.get('name', 'unnamed')
-    return scenario.get('name', 'unnamed')
+            return scenario.get("name", "unnamed")
+    return scenario.get("name", "unnamed")
 
 
 @pytest.mark.parametrize("scenario", _scenarios_for_parametrize, ids=_scenario_id)
@@ -275,8 +305,7 @@ def test_real_luma_followup_scenario(scenario: Dict[str, Any]):
 
     # Extract aliases from scenario (same pattern as planning tests)
     # Default to common service aliases if not specified
-    aliases = scenario.get(
-        "aliases", {"haircut": "haircut", "massage": "massage"})
+    aliases = scenario.get("aliases", {"haircut": "haircut", "massage": "massage"})
 
     # Frozen time: 2026-01-15 10:00:00 UTC
     # "tomorrow" should resolve to 2026-01-16
@@ -312,7 +341,7 @@ def test_real_luma_followup_scenario(scenario: Dict[str, Any]):
             # Only use session store after first turn
             session_store=session_store if turn_idx > 1 else None,
             frozen_time=frozen_time,
-            organization_id=1
+            organization_id=1,
         )
 
         # Assert turn expectations
@@ -320,7 +349,9 @@ def test_real_luma_followup_scenario(scenario: Dict[str, Any]):
 
         # Extract intent from normalized result (same as assertion function)
         normalized = normalize_planning_outcome(result)
-        current_intent = normalized.get("intent") or normalized.get("plan", {}).get("intent_name")
+        current_intent = normalized.get("intent") or normalized.get("plan", {}).get(
+            "intent_name"
+        )
 
         # Skip intent tracking for turns with allow_empty_intent (pre-intent slot collection)
         if not expectations.get("allow_empty_intent", False):
@@ -328,14 +359,16 @@ def test_real_luma_followup_scenario(scenario: Dict[str, Any]):
             if turn_idx > 1 and previous_intent:
                 if expectations.get("intent_switched"):
                     # Intent should have changed from previous turn
-                    assert current_intent != previous_intent, \
-                        f"[{scenario_name}] Turn {turn_idx}: Intent should have switched from turn {turn_idx - 1}. " \
+                    assert current_intent != previous_intent, (
+                        f"[{scenario_name}] Turn {turn_idx}: Intent should have switched from turn {turn_idx - 1}. "
                         f"Previous: {previous_intent}, Current: {current_intent} (expected different)"
+                    )
                 elif expectations.get("intent_preserved", False):
                     # Intent should be preserved from previous turn
-                    assert current_intent == previous_intent or current_intent != "", \
-                        f"[{scenario_name}] Turn {turn_idx}: Intent should be preserved from turn {turn_idx - 1}. " \
+                    assert current_intent == previous_intent or current_intent != "", (
+                        f"[{scenario_name}] Turn {turn_idx}: Intent should be preserved from turn {turn_idx - 1}. "
                         f"Previous: {previous_intent}, Current: {current_intent}"
+                    )
 
             # Update previous intent for next turn
             if current_intent and current_intent != "":

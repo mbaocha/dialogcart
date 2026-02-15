@@ -10,24 +10,19 @@ Note: Noise is NOT extracted as an entity.
 """
 
 import logging
-from typing import Dict, List, Any
+from typing import Any, Dict, List
+
 from .normalization import post_normalize_parameterized_text
 
 logger = logging.getLogger(__name__)
 
 
 def add_entity(
-    result: Dict[str, List],
-    entity_type: str,
-    text: str,
-    position: int,
-    length: int = 1
+    result: Dict[str, List], entity_type: str, text: str, position: int, length: int = 1
 ):
-    result.setdefault(entity_type, []).append({
-        "text": text,
-        "position": position,
-        "length": length
-    })
+    result.setdefault(entity_type, []).append(
+        {"text": text, "position": position, "length": length}
+    )
 
 
 def extract_entities_from_doc(nlp, text: str) -> Dict[str, List]:
@@ -47,12 +42,12 @@ def extract_entities_from_doc(nlp, text: str) -> Dict[str, List]:
     logger.warning(
         "[EXTRACTION] extract_entities_from_doc: Processing",
         extra={
-            'text': text,
-            'tokens': tokens,
-            'tokens_count': len(tokens),
-            'entities_count': len(doc.ents),
-            'entities': [{'text': ent.text, 'label': ent.label_} for ent in doc.ents]
-        }
+            "text": text,
+            "tokens": tokens,
+            "tokens_count": len(tokens),
+            "entities_count": len(doc.ents),
+            "entities": [{"text": ent.text, "label": ent.label_} for ent in doc.ents],
+        },
     )
 
     result = {
@@ -62,7 +57,7 @@ def extract_entities_from_doc(nlp, text: str) -> Dict[str, List]:
         "dates_absolute": [],
         "times": [],  # Precise clock times
         "time_windows": [],  # Coarse time ranges (morning, afternoon, etc.)
-        "durations": []
+        "durations": [],
     }
 
     for ent in doc.ents:
@@ -80,13 +75,17 @@ def extract_entities_from_doc(nlp, text: str) -> Dict[str, List]:
             logger.warning(
                 "[EXTRACTION] DATE_ABSOLUTE entity found",
                 extra={
-                    'entity_text': ent.text,
-                    'entity_start': ent.start,
-                    'entity_end': ent.end,
-                    'span_len': span_len,
-                    'tokens': [t.text for t in doc[ent.start:ent.end]] if ent.start < len(doc) and ent.end <= len(doc) else [],
-                    'all_tokens': [t.text for t in doc]
-                }
+                    "entity_text": ent.text,
+                    "entity_start": ent.start,
+                    "entity_end": ent.end,
+                    "span_len": span_len,
+                    "tokens": (
+                        [t.text for t in doc[ent.start : ent.end]]
+                        if ent.start < len(doc) and ent.end <= len(doc)
+                        else []
+                    ),
+                    "all_tokens": [t.text for t in doc],
+                },
             )
             add_entity(result, "dates_absolute", ent.text, ent.start, span_len)
         elif label == "TIME":
@@ -105,19 +104,21 @@ def extract_entities_from_doc(nlp, text: str) -> Dict[str, List]:
     logger.warning(
         "[EXTRACTION] extract_entities_from_doc: RESULT",
         extra={
-            'text': text,
-            'dates_absolute': result.get("dates_absolute", []),
-            'dates_absolute_count': len(result.get("dates_absolute", [])),
-            'dates': result.get("dates", []),
-            'times': result.get("times", []),
-            'all_entities': {k: v for k, v in result.items() if k != "_tokens"}
-        }
+            "text": text,
+            "dates_absolute": result.get("dates_absolute", []),
+            "dates_absolute_count": len(result.get("dates_absolute", [])),
+            "dates": result.get("dates", []),
+            "times": result.get("times", []),
+            "all_entities": {k: v for k, v in result.items() if k != "_tokens"},
+        },
     )
 
     return result, doc
 
 
-def build_parameterized_sentence(doc, entities: Dict[str, List]) -> tuple[str, List[Dict[str, Any]]]:
+def build_parameterized_sentence(
+    doc, entities: Dict[str, List]
+) -> tuple[str, List[Dict[str, Any]]]:
     """
     Build parameterized sentence by replacing entities with tokens.
 
@@ -144,7 +145,7 @@ def build_parameterized_sentence(doc, entities: Dict[str, List]) -> tuple[str, L
         "times": "timetoken",  # Precise clock times (9 am, 12:30 pm, etc.)
         # Coarse time ranges (morning, afternoon, etc.)
         "time_windows": "timewindowtoken",
-        "durations": "durationtoken"
+        "durations": "durationtoken",
     }
 
     # Collect all entity replacements with their exact token spans
@@ -159,17 +160,13 @@ def build_parameterized_sentence(doc, entities: Dict[str, List]) -> tuple[str, L
             replacements.append((start, end, placeholder))
             # Track for logging
             if entity_type in ("dates", "dates_absolute"):
-                phase2_replacements.append({
-                    "type": "date",
-                    "span": entity_text,
-                    "replaced_with": placeholder
-                })
+                phase2_replacements.append(
+                    {"type": "date", "span": entity_text, "replaced_with": placeholder}
+                )
             elif entity_type in ("times", "time_windows"):
-                phase2_replacements.append({
-                    "type": "time",
-                    "span": entity_text,
-                    "replaced_with": placeholder
-                })
+                phase2_replacements.append(
+                    {"type": "time", "span": entity_text, "replaced_with": placeholder}
+                )
 
     # Sort by END position descending, then by START descending
     # This ensures we replace from right-to-left, preventing index shifts
@@ -187,7 +184,11 @@ def build_parameterized_sentence(doc, entities: Dict[str, List]) -> tuple[str, L
     merged = []
     i = 0
     while i < len(parts):
-        if i < len(parts) - 1 and parts[i] == "timetoken" and parts[i+1] in {"am", "pm"}:
+        if (
+            i < len(parts) - 1
+            and parts[i] == "timetoken"
+            and parts[i + 1] in {"am", "pm"}
+        ):
             # Merge am/pm into previous timetoken (just keep as one timetoken)
             merged.append("timetoken")
             i += 2  # skip the am/pm
@@ -201,8 +202,7 @@ def build_parameterized_sentence(doc, entities: Dict[str, List]) -> tuple[str, L
 
 
 def canonicalize_services(
-    services: List[Dict[str, Any]],
-    service_map: Dict[str, str]
+    services: List[Dict[str, Any]], service_map: Dict[str, str]
 ) -> List[str]:
     """
     Map natural language service text to canonical IDs.

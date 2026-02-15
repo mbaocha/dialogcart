@@ -21,10 +21,10 @@ Usage:
     RUN_REAL_LUMA_E2E=true python core/tests/test.py --category e2e
 """
 
-import os
-import sys
-import subprocess
 import argparse
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 
@@ -116,11 +116,14 @@ def run_tests(category: str = "all", pytest_args: list = None) -> int:
     print()
 
     # Check for E2E tests requiring real Luma
-    if category == "e2e" and "test_core_e2e_followup_availability_real_luma.py" in str(test_path):
+    if category == "e2e" and "test_core_e2e_followup_availability_real_luma.py" in str(
+        test_path
+    ):
         if not os.getenv("RUN_REAL_LUMA_E2E"):
             print("⚠️  WARNING: E2E tests with real Luma require RUN_REAL_LUMA_E2E=true")
             print(
-                "   Some tests may be skipped. Set environment variable to run all E2E tests.")
+                "   Some tests may be skipped. Set environment variable to run all E2E tests."
+            )
             print()
 
     # Run pytest from src/ directory (where pytest.ini is located)

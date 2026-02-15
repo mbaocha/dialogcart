@@ -5,16 +5,16 @@ Rule-based analysis of entity relationships and structure.
 Replaces NER for structure modeling in service/appointment/reservation use cases.
 """
 
-from luma.structure.structure_types import StructureResult
 from luma.structure.interpreter import interpret_structure
 from luma.structure.rules import (
+    check_has_duration,
+    check_needs_clarification,
     count_bookings,
     determine_service_scope,
-    determine_time_type,
     determine_time_scope,
-    check_has_duration,
-    check_needs_clarification
+    determine_time_type,
 )
+from luma.structure.structure_types import StructureResult
 
 __all__ = [
     "StructureResult",
@@ -26,4 +26,3 @@ __all__ = [
     "check_has_duration",
     "check_needs_clarification",
 ]
-

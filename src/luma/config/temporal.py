@@ -89,7 +89,7 @@ ALLOW_BARE_WEEKDAY_BINDING = False
 
 # Bare weekday range (e.g. "friday to sunday") without modifier/anchor
 # must never be resolved silently.
-# 
+#
 # Weekday-only ranges are ambiguous without an anchor (explicit date, modifier,
 # or prior anchored date in memory). Luma will request clarification instead
 # of guessing dates. Examples:

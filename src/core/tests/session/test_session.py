@@ -11,25 +11,26 @@ Usage:
     python -m core.tests.session.test_session 30-33        # Run scenarios 30-33
 """
 
+import json
+import os
+import sys
+import time
+import uuid
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
+
+from core.orchestration.api.session_merge import build_session_state_from_outcome
 from core.orchestration.cache.catalog_cache import catalog_cache
+from core.orchestration.orchestrator import handle_message
+from core.orchestration.session import clear_session, get_session, save_session
 from core.tests.integration.test_appointment_e2e import (
-    TestLumaClient,
     TestCatalogClient,
+    TestLumaClient,
     _setup_test_org_domain,
-    get_customer_details
+    get_customer_details,
 )
 from core.tests.planning.followup import followup_scenarios
 from core.tests.planning.test_planning_edges import planning_edges_scenarios
-from core.orchestration.session import get_session, clear_session, save_session
-from core.orchestration.orchestrator import handle_message
-from core.orchestration.api.session_merge import build_session_state_from_outcome
-import os
-import sys
-from pathlib import Path
-from typing import Dict, Any, Optional, List, Set
-import json
-import time
-import uuid
 
 # Set execution mode to test for deterministic tests
 os.environ["CORE_EXECUTION_MODE"] = "test"
@@ -42,6 +43,7 @@ if str(src_path) not in sys.path:
 # Load environment variables
 try:
     from dotenv import load_dotenv
+
     project_root = Path(__file__).parent.parent.parent.parent
     core_env_file = Path(__file__).parent.parent.parent / ".env"
     env_file = project_root / ".env"
@@ -81,19 +83,19 @@ def parse_scenario_args(args: List[str]) -> Set[int]:
     scenario_ids = set()
 
     for arg in args:
-        if ',' in arg:
+        if "," in arg:
             # Comma-separated IDs
-            for part in arg.split(','):
+            for part in arg.split(","):
                 part = part.strip()
-                if '-' in part:
+                if "-" in part:
                     # Range within comma-separated
-                    start, end = map(int, part.split('-'))
+                    start, end = map(int, part.split("-"))
                     scenario_ids.update(range(start, end + 1))
                 else:
                     scenario_ids.add(int(part))
-        elif '-' in arg:
+        elif "-" in arg:
             # Range
-            start, end = map(int, arg.split('-'))
+            start, end = map(int, arg.split("-"))
             scenario_ids.update(range(start, end + 1))
         else:
             # Single ID
@@ -102,7 +104,9 @@ def parse_scenario_args(args: List[str]) -> Set[int]:
     return scenario_ids
 
 
-def filter_scenarios_by_id(scenarios: List[Dict[str, Any]], scenario_ids: Set[int]) -> List[Dict[str, Any]]:
+def filter_scenarios_by_id(
+    scenarios: List[Dict[str, Any]], scenario_ids: Set[int]
+) -> List[Dict[str, Any]]:
     """
     Filter scenarios by sequential number (1-based index).
 
@@ -121,9 +125,7 @@ def filter_scenarios_by_id(scenarios: List[Dict[str, Any]], scenario_ids: Set[in
 
 
 def assert_turn_expectations(
-    result: Dict[str, Any],
-    expected: Dict[str, Any],
-    turn_index: int
+    result: Dict[str, Any], expected: Dict[str, Any], turn_index: int
 ) -> Optional[str]:
     """Assert turn result matches expectations.
 
@@ -181,10 +183,12 @@ def assert_turn_expectations(
     if expected_stage:
         actual_stage = outcome.get("stage")
         print(
-            f"[ISOLATION_ASSERT] Checking stage: expected={expected_stage}, actual={actual_stage}, outcome.keys()={list(outcome.keys())}")
-        plan_dict = outcome.get('plan', {})
+            f"[ISOLATION_ASSERT] Checking stage: expected={expected_stage}, actual={actual_stage}, outcome.keys()={list(outcome.keys())}"
+        )
+        plan_dict = outcome.get("plan", {})
         print(
-            f"[ISOLATION_ASSERT] outcome.get('stage')={outcome.get('stage')}, outcome.get('plan', {{}}).get('stage')={plan_dict.get('stage')}")
+            f"[ISOLATION_ASSERT] outcome.get('stage')={outcome.get('stage')}, outcome.get('plan', {{}}).get('stage')={plan_dict.get('stage')}"
+        )
         if actual_stage != expected_stage:
             return f"Turn {turn_index + 1} stage mismatch: expected {expected_stage}, got {actual_stage}"
 
@@ -194,10 +198,12 @@ def assert_turn_expectations(
     if expected_action:
         actual_action = outcome.get("action")
         print(
-            f"[ISOLATION_ASSERT] Checking action: expected={expected_action}, actual={actual_action}, outcome.keys()={list(outcome.keys())}")
-        plan_dict = outcome.get('plan', {})
+            f"[ISOLATION_ASSERT] Checking action: expected={expected_action}, actual={actual_action}, outcome.keys()={list(outcome.keys())}"
+        )
+        plan_dict = outcome.get("plan", {})
         print(
-            f"[ISOLATION_ASSERT] outcome.get('action')={outcome.get('action')}, outcome.get('plan', {{}}).get('action')={plan_dict.get('action')}")
+            f"[ISOLATION_ASSERT] outcome.get('action')={outcome.get('action')}, outcome.get('plan', {{}}).get('action')={plan_dict.get('action')}"
+        )
         if actual_action != expected_action:
             return f"Turn {turn_index + 1} action mismatch: expected {expected_action}, got {actual_action}"
 
@@ -305,7 +311,7 @@ def run_scenario_test(
     scenario_id: int,
     customer_details: Dict[str, Optional[Any]],
     verbose: bool = False,
-    run_id: Optional[str] = None
+    run_id: Optional[str] = None,
 ) -> tuple:
     """
     Test a single follow-up scenario.
@@ -368,8 +374,7 @@ def run_scenario_test(
             expected = turn.get("expected", {})
 
             if verbose:
-                print(
-                    f"\n--- Turn {turn_index + 1}/{len(turns)}: {sentence} ---")
+                print(f"\n--- Turn {turn_index + 1}/{len(turns)}: {sentence} ---")
                 print(f"Expected: {json.dumps(expected, indent=2)}")
 
             # Load session state before each turn
@@ -379,19 +384,29 @@ def run_scenario_test(
             if session_state:
                 session_status = session_state.get("status")
                 session_intent = session_state.get("intent")
-                session_intent_str = session_intent if isinstance(session_intent, str) else (
-                    session_intent.get("name", "") if isinstance(session_intent, dict) else "")
+                session_intent_str = (
+                    session_intent
+                    if isinstance(session_intent, str)
+                    else (
+                        session_intent.get("name", "")
+                        if isinstance(session_intent, dict)
+                        else ""
+                    )
+                )
                 # Only consider session if status is NEEDS_CLARIFICATION, or READY for CREATE_APPOINTMENT
-                if session_status != "NEEDS_CLARIFICATION" and (session_status != "READY" or session_intent_str != "CREATE_APPOINTMENT"):
+                if session_status != "NEEDS_CLARIFICATION" and (
+                    session_status != "READY"
+                    or session_intent_str != "CREATE_APPOINTMENT"
+                ):
                     session_state = None
 
             # Print session state before turn
             if verbose or turn_index > 0:  # Always print for turns after first
-                print(
-                    f"\n[SESSION BEFORE TURN {turn_index + 1}] user_id={user_id}")
+                print(f"\n[SESSION BEFORE TURN {turn_index + 1}] user_id={user_id}")
                 if session_state:
                     print(
-                        f"  Session state: {json.dumps(session_state, indent=2, default=str)}")
+                        f"  Session state: {json.dumps(session_state, indent=2, default=str)}"
+                    )
                 else:
                     print("  Session state: None (no session found)")
 
@@ -403,16 +418,17 @@ def run_scenario_test(
                 text=sentence,
                 domain=domain,
                 timezone="UTC",
-                phone_number=customer_details.get(
-                    'phone_number') if customer_details else None,
-                email=customer_details.get(
-                    'email') if customer_details else None,
-                customer_id=customer_details.get(
-                    'customer_id') if customer_details else None,
+                phone_number=(
+                    customer_details.get("phone_number") if customer_details else None
+                ),
+                email=customer_details.get("email") if customer_details else None,
+                customer_id=(
+                    customer_details.get("customer_id") if customer_details else None
+                ),
                 luma_client=luma_client,
                 catalog_client=catalog_client,
                 session_state=session_state,
-                planning_only=True  # Stop at READY, don't execute
+                planning_only=True,  # Stop at READY, don't execute
             )
 
             if not result or not isinstance(result, dict):
@@ -420,16 +436,20 @@ def run_scenario_test(
                 # Print minimal snapshot on failure
                 print(f"\n{'='*70}")
                 print(
-                    f"FAIL_SNAPSHOT: scenario={scenario_name} turn={turn_index + 1} user_id={user_id}")
+                    f"FAIL_SNAPSHOT: scenario={scenario_name} turn={turn_index + 1} user_id={user_id}"
+                )
                 print(f"{'='*70}")
                 fail_snapshot = {
                     "expected": expected,
-                    "got": {"error": "handle_message returned None or not a dict", "result": result},
+                    "got": {
+                        "error": "handle_message returned None or not a dict",
+                        "result": result,
+                    },
                     "session_before": session_state,
                     "session_after": None,
                     "merged_luma_response": None,
                     "final_plan": {},
-                    "facts": {}
+                    "facts": {},
                 }
                 print(json.dumps(fail_snapshot, indent=2, default=str))
                 print(f"{'='*70}\n")
@@ -447,7 +467,8 @@ def run_scenario_test(
                 # DEBUG: Print outcome status to understand what's happening
                 if verbose or turn_index >= 2:  # Always print for turn 3+
                     print(
-                        f"\n[OUTCOME STATUS] Turn {turn_index + 1} outcome_status={outcome_status} outcome_keys={list(outcome.keys())}")
+                        f"\n[OUTCOME STATUS] Turn {turn_index + 1} outcome_status={outcome_status} outcome_keys={list(outcome.keys())}"
+                    )
                 # Initialize new_session_state for all paths
                 new_session_state = None
                 merged_luma_response = result.get("_merged_luma_response")
@@ -455,45 +476,59 @@ def run_scenario_test(
                 if outcome_status == "NEEDS_CLARIFICATION":
                     # Save session state for follow-up
                     new_session_state = build_session_state_from_outcome(
-                        outcome, outcome_status, merged_luma_response, session_state, user_id
+                        outcome,
+                        outcome_status,
+                        merged_luma_response,
+                        session_state,
+                        user_id,
                     )
                     if new_session_state:
                         save_session(user_id, new_session_state)
                         # Print session state after save
                         print(
-                            f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - SAVED")
+                            f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - SAVED"
+                        )
                         print(
-                            f"  Session state: {json.dumps(new_session_state, indent=2, default=str)}")
+                            f"  Session state: {json.dumps(new_session_state, indent=2, default=str)}"
+                        )
                     else:
                         print(
-                            f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - NOT SAVED (new_session_state is None)")
+                            f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - NOT SAVED (new_session_state is None)"
+                        )
                 elif outcome_status in ("READY", "EXECUTED", "AWAITING_CONFIRMATION"):
                     # For READY status, try to build session state (will be None for non-CREATE_APPOINTMENT)
                     # EXECUTED/AWAITING_CONFIRMATION also try to build (but will return None)
                     # Exception: CREATE_APPOINTMENT with READY status preserves session for follow-up modifications
                     new_session_state = build_session_state_from_outcome(
-                        outcome, outcome_status, merged_luma_response, session_state, user_id
+                        outcome,
+                        outcome_status,
+                        merged_luma_response,
+                        session_state,
+                        user_id,
                     )
                     if new_session_state is None:
                         clear_session(user_id)
                         print(
-                            f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - CLEARED (status={outcome_status})")
+                            f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - CLEARED (status={outcome_status})"
+                        )
                     else:
                         # Session was preserved (e.g., CREATE_APPOINTMENT on READY for follow-up modifications)
                         save_session(user_id, new_session_state)
                         print(
-                            f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - SAVED (status={outcome_status}, preserved for modifications)")
+                            f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - SAVED (status={outcome_status}, preserved for modifications)"
+                        )
                         print(
-                            f"  Session state: {json.dumps(new_session_state, indent=2, default=str)}")
+                            f"  Session state: {json.dumps(new_session_state, indent=2, default=str)}"
+                        )
                 else:
                     print(
-                        f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - NOT SAVED (status={outcome_status})")
+                        f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - NOT SAVED (status={outcome_status})"
+                    )
 
             # Capture data for failure snapshot after save, before assertions
             session_state_before = session_state
             session_state_after = None
-            merged_luma_response_for_snapshot = result.get(
-                "_merged_luma_response")
+            merged_luma_response_for_snapshot = result.get("_merged_luma_response")
             plan_for_snapshot = outcome.get("plan", {}) if outcome else {}
             facts_for_snapshot = outcome.get("facts", {}) if outcome else {}
 
@@ -512,20 +547,29 @@ def run_scenario_test(
                 actual_json = {
                     "intent": actual_outcome.get("intent_name"),
                     "status": actual_outcome.get("status"),
-                    "missing_slots": actual_outcome.get("facts", {}).get("missing_slots", []),
-                    "slots": actual_outcome.get("facts", {}).get("slots", {})
+                    "missing_slots": actual_outcome.get("facts", {}).get(
+                        "missing_slots", []
+                    ),
+                    "slots": actual_outcome.get("facts", {}).get("slots", {}),
                 }
 
                 # TRACE_MERGE 8: Snapshot builder debug line
-                outcome_keys = list(outcome.keys()) if isinstance(
-                    outcome, dict) else []
+                outcome_keys = list(outcome.keys()) if isinstance(outcome, dict) else []
                 outcome_missing_slots_top = outcome.get("missing_slots")
-                outcome_missing_slots_facts = outcome.get("facts", {}).get(
-                    "missing_slots") if isinstance(outcome.get("facts"), dict) else None
+                outcome_missing_slots_facts = (
+                    outcome.get("facts", {}).get("missing_slots")
+                    if isinstance(outcome.get("facts"), dict)
+                    else None
+                )
                 outcome_slots_top = outcome.get("slots")
-                outcome_slots_facts = outcome.get("facts", {}).get(
-                    "slots") if isinstance(outcome.get("facts"), dict) else None
-                print(f"[TRACE_MERGE] user_id={user_id} point=SNAPSHOT_BUILDER outcome_keys={outcome_keys} outcome_missing_slots_top={outcome_missing_slots_top} outcome_missing_slots_facts={outcome_missing_slots_facts} outcome_slots_top={outcome_slots_top} outcome_slots_facts={outcome_slots_facts}")
+                outcome_slots_facts = (
+                    outcome.get("facts", {}).get("slots")
+                    if isinstance(outcome.get("facts"), dict)
+                    else None
+                )
+                print(
+                    f"[TRACE_MERGE] user_id={user_id} point=SNAPSHOT_BUILDER outcome_keys={outcome_keys} outcome_missing_slots_top={outcome_missing_slots_top} outcome_missing_slots_facts={outcome_missing_slots_facts} outcome_slots_top={outcome_slots_top} outcome_slots_facts={outcome_slots_facts}"
+                )
 
                 fail_snapshot = {
                     "expected": expected,
@@ -534,12 +578,13 @@ def run_scenario_test(
                     "session_after": session_state_after,
                     "merged_luma_response": merged_luma_response_for_snapshot,
                     "final_plan": plan_for_snapshot,
-                    "facts": facts_for_snapshot
+                    "facts": facts_for_snapshot,
                 }
 
                 print(f"\n{'='*70}")
                 print(
-                    f"FAIL_SNAPSHOT: scenario={scenario_name} turn={turn_index + 1} user_id={user_id}")
+                    f"FAIL_SNAPSHOT: scenario={scenario_name} turn={turn_index + 1} user_id={user_id}"
+                )
                 print(f"{'='*70}")
                 print(json.dumps(fail_snapshot, indent=2, default=str))
                 print(f"{'='*70}\n")
@@ -568,22 +613,29 @@ def run_scenario_test(
             # Single rule: Never expect session clearing for CREATE_APPOINTMENT
             # Check both final_intent (from expected) and session_intent (from actual session)
             is_create_appointment = (
-                final_intent == "CREATE_APPOINTMENT" or session_intent == "CREATE_APPOINTMENT")
+                final_intent == "CREATE_APPOINTMENT"
+                or session_intent == "CREATE_APPOINTMENT"
+            )
             if session_state is not None and not is_create_appointment:
                 error_msg = f"Session not cleared after planning complete (missing_slots=[]). Session state: {session_state}"
                 # Print FAIL_SNAPSHOT on session not cleared
                 fail_snapshot = {
                     "expected": {"missing_slots": [], "session_cleared": True},
-                    "got": {"missing_slots": [], "session_cleared": False, "session_state": session_state},
+                    "got": {
+                        "missing_slots": [],
+                        "session_cleared": False,
+                        "session_state": session_state,
+                    },
                     "session_before": None,
                     "session_after": session_state,
                     "merged_luma_response": None,
                     "final_plan": {},
-                    "facts": {}
+                    "facts": {},
                 }
                 print(f"\n{'='*70}")
                 print(
-                    f"FAIL_SNAPSHOT: scenario={scenario_name} turn=FINAL user_id={user_id}")
+                    f"FAIL_SNAPSHOT: scenario={scenario_name} turn=FINAL user_id={user_id}"
+                )
                 print(f"{'='*70}")
                 print(json.dumps(fail_snapshot, indent=2, default=str))
                 print(f"{'='*70}\n")
@@ -616,17 +668,19 @@ def run_scenario_test(
             "session_after": session_state_after,
             "merged_luma_response": merged_luma_response_for_snapshot,
             "final_plan": plan_for_snapshot,
-            "facts": facts_for_snapshot
+            "facts": facts_for_snapshot,
         }
 
         print(f"\n{'='*70}")
         print(
-            f"FAIL_SNAPSHOT: scenario={scenario_name} turn=EXCEPTION user_id={user_id}")
+            f"FAIL_SNAPSHOT: scenario={scenario_name} turn=EXCEPTION user_id={user_id}"
+        )
         print(f"{'='*70}")
         print(json.dumps(fail_snapshot, indent=2, default=str))
         print(f"{'='*70}\n")
 
         import traceback
+
         tb = traceback.format_exc()
         return False, f"Exception in scenario {scenario_id}: {str(e)}\n{tb}", user_id
     finally:
@@ -647,7 +701,11 @@ def cleanup_test_sessions(verbose: bool = False) -> None:
     try:
         # Import here to avoid circular dependencies
         import redis
-        from core.orchestration.session.session_manager import _get_redis_url, SESSION_KEY_PREFIX
+
+        from core.orchestration.session.session_manager import (
+            SESSION_KEY_PREFIX,
+            _get_redis_url,
+        )
 
         redis_url = _get_redis_url()
         if not redis_url:
@@ -683,7 +741,7 @@ def cleanup_test_sessions(verbose: bool = False) -> None:
 def run_all_scenarios(
     scenarios: List[Dict[str, Any]],
     customer_details: Dict[str, Optional[Any]],
-    verbose: bool = False
+    verbose: bool = False,
 ) -> tuple:
     """
     Run all scenarios and return statistics.
@@ -715,14 +773,14 @@ def run_all_scenarios(
         scenario_id = index
 
         success, error_msg, user_id = test_scenario(
-            scenario, scenario_id, customer_details, verbose, run_id=run_id)
+            scenario, scenario_id, customer_details, verbose, run_id=run_id
+        )
 
         if success:
             passed += 1
         else:
             failed += 1
-            failures.append(
-                (scenario_id, error_msg or "Unknown error", user_id))
+            failures.append((scenario_id, error_msg or "Unknown error", user_id))
             failing_scenario_names.append(scenario_name)
 
     return passed, failed, skipped, failures, failing_scenario_names
@@ -732,7 +790,7 @@ class TeeOutput:
     """Write to both file and stdout."""
 
     def __init__(self, file_path, verbose=True):
-        self.file = open(file_path, 'w', encoding='utf-8')
+        self.file = open(file_path, "w", encoding="utf-8")
         self.stdout = sys.stdout
         self.verbose = verbose
 
@@ -776,23 +834,15 @@ Examples:
   python -m core.tests.session.test_session 30-33
   python -m core.tests.session.test_session 22,24,30-33
   python -m core.tests.session.test_session --v -o result.txt
-        """
+        """,
     )
     parser.add_argument(
         "scenarios",
         nargs="*",
-        help="Scenario IDs to run (single, comma-separated, or range like 30-33)"
+        help="Scenario IDs to run (single, comma-separated, or range like 30-33)",
     )
-    parser.add_argument(
-        "--verbose", "-v",
-        action="store_true",
-        help="Verbose output"
-    )
-    parser.add_argument(
-        "-o", "--output",
-        type=str,
-        help="Save output to file"
-    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    parser.add_argument("-o", "--output", type=str, help="Save output to file")
 
     args = parser.parse_args()
 
@@ -816,8 +866,7 @@ Examples:
         all_scenarios = followup_scenarios + planning_edges_scenarios
 
         # Filter scenarios
-        scenarios_to_run = filter_scenarios_by_id(
-            all_scenarios, scenario_ids)
+        scenarios_to_run = filter_scenarios_by_id(all_scenarios, scenario_ids)
 
         if not scenarios_to_run:
             print("No scenarios to run!")
@@ -830,34 +879,38 @@ Examples:
             if not args.verbose:
                 scenarios_count = len(scenarios_to_run)
                 print(
-                    f"Running session follow-up tests ({scenarios_count} scenario{'s' if scenarios_count != 1 else ''})...")
+                    f"Running session follow-up tests ({scenarios_count} scenario{'s' if scenarios_count != 1 else ''})..."
+                )
             else:
-                print("="*70)
+                print("=" * 70)
                 print("CORE SESSION FOLLOW-UP TEST SUITE")
-                print("="*70)
+                print("=" * 70)
                 print(
-                    f"Total scenarios: {len(all_scenarios)} (followup: {len(followup_scenarios)}, planning_edges: {len(planning_edges_scenarios)})")
+                    f"Total scenarios: {len(all_scenarios)} (followup: {len(followup_scenarios)}, planning_edges: {len(planning_edges_scenarios)})"
+                )
                 if len(scenarios_to_run) != len(all_scenarios):
                     print(
-                        f"Running: {len(scenarios_to_run)} scenario{'s' if len(scenarios_to_run) != 1 else ''}")
+                        f"Running: {len(scenarios_to_run)} scenario{'s' if len(scenarios_to_run) != 1 else ''}"
+                    )
 
             # Run scenarios
-            passed, failed, skipped, failures, failing_scenario_names = run_all_scenarios(
-                scenarios_to_run,
-                customer_details,
-                verbose=args.verbose
+            passed, failed, skipped, failures, failing_scenario_names = (
+                run_all_scenarios(
+                    scenarios_to_run, customer_details, verbose=args.verbose
+                )
             )
 
             # Print summary
             if args.verbose:
-                print("\n" + "="*70)
+                print("\n" + "=" * 70)
                 print("TEST SUMMARY")
-                print("="*70)
+                print("=" * 70)
             else:
                 print()
 
             print(
-                f"Total: {len(scenarios_to_run)} | Passed: {passed} | Failed: {failed} | Skipped: {skipped}")
+                f"Total: {len(scenarios_to_run)} | Passed: {passed} | Failed: {failed} | Skipped: {skipped}"
+            )
 
             # Print final summary: TOTAL FAILURES and failing scenario names with IDs
             if failures:
@@ -869,12 +922,13 @@ Examples:
                             scenario_id = failures[i][0]
                             user_id = failures[i][2]
                             print(
-                                f"  - Scenario {scenario_id}: {scenario_name} (id: {user_id})")
+                                f"  - Scenario {scenario_id}: {scenario_name} (id: {user_id})"
+                            )
                         else:
                             print(f"  - {scenario_name}")
 
             if args.verbose:
-                print("="*70)
+                print("=" * 70)
 
             exit_code = 1 if failed > 0 else 0
     finally:
@@ -892,15 +946,16 @@ Examples:
 # Isolated Unit Tests for awaiting_slot Behavior
 # ============================================================================
 
+
 def test_awaiting_slot_cleared_when_slot_filled():
     """
     Test that awaiting_slot is cleared when the slot is filled in outcome.
-    
+
     Scenario 1: Slot filled
     - previous_session_state has awaiting_slot="time"
     - outcome.slots includes "time"
     - Expected: session_state["awaiting_slot"] is None
-    
+
     Scenario 2: Slot still missing
     - previous_session_state has awaiting_slot="time"
     - outcome.slots does NOT include "time"
@@ -912,79 +967,75 @@ def test_awaiting_slot_cleared_when_slot_filled():
         "status": "NEEDS_CLARIFICATION",
         "missing_slots": ["time"],
         "slots": {"service_id": "haircut", "date": "2026-01-16"},
-        "awaiting_slot": "time"
+        "awaiting_slot": "time",
     }
-    
+
     outcome = {
         "intent_name": "CREATE_APPOINTMENT",
         "status": "NEEDS_CLARIFICATION",
         "slots": {
             "service_id": "haircut",
             "date": "2026-01-16",
-            "time": "14:00"  # time slot is now filled
+            "time": "14:00",  # time slot is now filled
         },
-        "missing_slots": []
+        "missing_slots": [],
     }
-    
+
     outcome_status = "NEEDS_CLARIFICATION"
-    merged_luma_response = {
-        "slots": outcome["slots"],
-        "missing_slots": []
-    }
+    merged_luma_response = {"slots": outcome["slots"], "missing_slots": []}
     user_id = "test_user_awaiting_slot"
-    
+
     # Execute: build session state
     session_state = build_session_state_from_outcome(
         outcome=outcome,
         outcome_status=outcome_status,
         merged_luma_response=merged_luma_response,
         previous_session_state=previous_session_state,
-        user_id=user_id
+        user_id=user_id,
     )
-    
+
     # Assert: awaiting_slot is cleared when slot is filled
     assert session_state is not None, "Session state should be created"
-    assert session_state.get("awaiting_slot") is None, \
-        f"Expected awaiting_slot to be None when slot is filled, got {session_state.get('awaiting_slot')}"
-    
+    assert (
+        session_state.get("awaiting_slot") is None
+    ), f"Expected awaiting_slot to be None when slot is filled, got {session_state.get('awaiting_slot')}"
+
     # Scenario 2: Slot still missing - awaiting_slot should be preserved
     previous_session_state_2 = {
         "intent_name": "CREATE_APPOINTMENT",
         "status": "NEEDS_CLARIFICATION",
         "missing_slots": ["time"],
         "slots": {"service_id": "haircut", "date": "2026-01-16"},
-        "awaiting_slot": "time"
+        "awaiting_slot": "time",
     }
-    
+
     outcome_2 = {
         "intent_name": "CREATE_APPOINTMENT",
         "status": "NEEDS_CLARIFICATION",
         "slots": {
             "service_id": "haircut",
-            "date": "2026-01-16"
+            "date": "2026-01-16",
             # time slot is still missing
         },
-        "missing_slots": ["time"]
+        "missing_slots": ["time"],
     }
-    
-    merged_luma_response_2 = {
-        "slots": outcome_2["slots"],
-        "missing_slots": ["time"]
-    }
-    
+
+    merged_luma_response_2 = {"slots": outcome_2["slots"], "missing_slots": ["time"]}
+
     # Execute: build session state
     session_state_2 = build_session_state_from_outcome(
         outcome=outcome_2,
         outcome_status=outcome_status,
         merged_luma_response=merged_luma_response_2,
         previous_session_state=previous_session_state_2,
-        user_id=user_id
+        user_id=user_id,
     )
-    
+
     # Assert: awaiting_slot is preserved when slot is still missing
     assert session_state_2 is not None, "Session state should be created"
-    assert session_state_2.get("awaiting_slot") == "time", \
-        f"Expected awaiting_slot to be preserved as 'time', got {session_state_2.get('awaiting_slot')}"
+    assert (
+        session_state_2.get("awaiting_slot") == "time"
+    ), f"Expected awaiting_slot to be preserved as 'time', got {session_state_2.get('awaiting_slot')}"
 
 
 if __name__ == "__main__":

@@ -4,13 +4,11 @@ Booking Execution
 Executes booking creation actions.
 """
 
-from typing import Dict, Any
+from typing import Any, Dict
 
 
 def execute_booking(
-    user_id: str,
-    slots: Dict[str, Any],
-    intent_name: str
+    user_id: str, slots: Dict[str, Any], intent_name: str
 ) -> Dict[str, Any]:
     """
     Execute booking creation action.
@@ -39,9 +37,6 @@ def execute_booking(
             "service_id": service_id,
             "date": date,
             "time": time,
-            "booking_code": "PLACEHOLDER_CODE"
-        }
+            "booking_code": "PLACEHOLDER_CODE",
+        },
     }
-
-
-

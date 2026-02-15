@@ -9,4 +9,3 @@ def test_post_normalize_preserves_servicetokenfamily():
     assert "servicetokenfamily" in normalized
     assert "servicetoken " not in normalized
     assert normalized.count("servicetokenfamily") == 1
-

@@ -14,11 +14,11 @@ Responsibilities:
 """
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
-from core.routing import get_template_key, get_action_name
-from core.orchestration.errors import UnsupportedIntentError
 from core.config.capabilities_loader import load_capability_policies
+from core.orchestration.errors import UnsupportedIntentError
+from core.routing import get_action_name, get_template_key
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,9 @@ def _extract_missing_slots(luma_response: Dict[str, Any]) -> List[str]:
     if isinstance(issues, dict):
         missing = []
         for slot_name, issue_value in issues.items():
-            if issue_value == "missing" or (isinstance(issue_value, dict) and issue_value.get("status") == "missing"):
+            if issue_value == "missing" or (
+                isinstance(issue_value, dict) and issue_value.get("status") == "missing"
+            ):
                 missing.append(slot_name)
         return missing
 
@@ -59,7 +61,7 @@ def _evaluate_condition(
     condition_expr: str,
     facts: Dict[str, Any],
     slots: Dict[str, Any],
-    session_state: Optional[Dict[str, Any]] = None
+    session_state: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """
     Evaluate a single condition expression.
@@ -169,7 +171,7 @@ def _evaluate_capability_blocking(
     next_action: Optional[str],
     effective_slots: Dict[str, Any],
     luma_response: Dict[str, Any],
-    session_state: Optional[Dict[str, Any]] = None
+    session_state: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     """
     Evaluate capability blocking constraints from YAML configuration.
@@ -301,7 +303,9 @@ def _evaluate_capability_blocking(
                 all_conditions_met = False
                 break
 
-            if not _evaluate_condition(condition_expr, facts, effective_slots, session_state):
+            if not _evaluate_condition(
+                condition_expr, facts, effective_slots, session_state
+            ):
                 all_conditions_met = False
                 break
 
@@ -325,7 +329,7 @@ def _enforce_committing_step_invariants(
     selected_step: Dict[str, Any],
     effective_slots: Dict[str, Any],
     flags: Dict[str, Any],
-    session_state: Optional[Dict[str, Any]] = None
+    session_state: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
     Enforce runtime invariants before executing a committing step.
@@ -356,7 +360,8 @@ def _enforce_committing_step_invariants(
 
     # Invariant 1: All required_slots must be present
     collected_slot_names = set(
-        slot_name for slot_name, slot_value in effective_slots.items()
+        slot_name
+        for slot_name, slot_value in effective_slots.items()
         if slot_value is not None
     )
     required_slots_set = set(required_slots)
@@ -379,7 +384,10 @@ def _enforce_committing_step_invariants(
             )
         elif requirement == "booking_hold_created":
             # booking_hold_created means booking_id must be present (created by CREATE_BOOKING_HOLD)
-            assert "booking_id" in effective_slots and effective_slots.get("booking_id") is not None, (
+            assert (
+                "booking_id" in effective_slots
+                and effective_slots.get("booking_id") is not None
+            ), (
                 f"Invariant violation: Cannot execute committing step {action} for {intent_name}. "
                 f"Requirement 'booking_hold_created' not satisfied (booking_id not in slots or None)"
             )
@@ -390,7 +398,10 @@ def _enforce_committing_step_invariants(
             )
         elif requirement == "booking_id_resolved":
             # booking_id_resolved means booking_id must be present and non-None
-            assert "booking_id" in effective_slots and effective_slots.get("booking_id") is not None, (
+            assert (
+                "booking_id" in effective_slots
+                and effective_slots.get("booking_id") is not None
+            ), (
                 f"Invariant violation: Cannot execute committing step {action} for {intent_name}. "
                 f"Requirement 'booking_id_resolved' not satisfied (booking_id not in slots or None)"
             )
@@ -412,7 +423,7 @@ def build_decision_plan(
     luma_response: Dict[str, Any],
     domain: str,
     availability_resolved: bool = False,
-    session_state: Optional[Dict[str, Any]] = None
+    session_state: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Build a decision plan from Luma response using intent_policy.yaml as the single source of truth.
@@ -446,6 +457,7 @@ def build_decision_plan(
     effective_intent_from_response = luma_response.get("_effective_intent", "")
     if effective_intent_from_response and effective_intent_from_response != "UNKNOWN":
         from core.orchestration.persistence.durable_intents import is_durable_intent
+
         if is_durable_intent(effective_intent_from_response):
             assert intent_name and intent_name != "UNKNOWN", (
                 f"build_decision_plan called with invalid intent while durable session intent exists. "
@@ -454,6 +466,7 @@ def build_decision_plan(
 
     # Get commit action from unified policy (intent_policy.yaml)
     from core.policy.intent_policy import get_commit_action
+
     commit_action = get_commit_action(intent_name)
 
     # Extract missing slots
@@ -485,8 +498,9 @@ def build_decision_plan(
     # Determine status
     needs_clarification = luma_response.get("needs_clarification", False)
     booking = luma_response.get("booking", {})
-    confirmation_state = booking.get(
-        "confirmation_state") if isinstance(booking, dict) else None
+    confirmation_state = (
+        booking.get("confirmation_state") if isinstance(booking, dict) else None
+    )
 
     # Extract active_capability from multiple sources (preserve if already set)
     # Priority: 1) existing plan in luma_response, 2) session_state, 3) facts/context
@@ -534,13 +548,15 @@ def build_decision_plan(
         next_action = None
         if intent_name:
             from core.policy.intent_policy import select_next_execution_step
+
             flags = {
                 "availability_resolved": availability_resolved,
                 "confirmation_state": confirmation_state,
-                "booking_hold_created": bool(effective_slots.get("booking_id"))
+                "booking_hold_created": bool(effective_slots.get("booking_id")),
             }
             selected_step = select_next_execution_step(
-                intent_name, effective_slots, flags)
+                intent_name, effective_slots, flags
+            )
             if selected_step:
                 next_action = selected_step.get("action")
 
@@ -550,7 +566,7 @@ def build_decision_plan(
             next_action=next_action,
             effective_slots=effective_slots,
             luma_response=luma_response,
-            session_state=session_state
+            session_state=session_state,
         )
 
         # If capability blocking detected, set active_capability
@@ -609,7 +625,8 @@ def build_decision_plan(
     # Get executable_actions from planner (ONLY source of truth for partial execution)
     executable_actions = []
     if intent_name:
-        from core.planning.policy.action_policy import plan_intent, load_planning_policy
+        from core.planning.policy.action_policy import load_planning_policy, plan_intent
+
         effective_slots = luma_response.get("_effective_collected_slots")
         if effective_slots is None:
             effective_slots = luma_response.get("slots", {})
@@ -667,11 +684,10 @@ def build_decision_plan(
 
         flags = {
             "availability_resolved": availability_resolved,
-            "confirmation_state": confirmation_state
+            "confirmation_state": confirmation_state,
         }
 
-        selected_step = select_next_execution_step(
-            intent_name, effective_slots, flags)
+        selected_step = select_next_execution_step(intent_name, effective_slots, flags)
 
         if selected_step:
             action = selected_step.get("action")
@@ -687,7 +703,12 @@ def build_decision_plan(
                 stage = "IDENTIFY"
             elif action == "SEARCH_AVAILABILITY":
                 stage = "AVAILABILITY"
-            elif action in ("CONFIRM_APPOINTMENT", "FINALIZE_RESERVATION", "APPLY_MODIFICATION", "CONFIRM_CANCELLATION"):
+            elif action in (
+                "CONFIRM_APPOINTMENT",
+                "FINALIZE_RESERVATION",
+                "APPLY_MODIFICATION",
+                "CONFIRM_CANCELLATION",
+            ):
                 stage = "CONFIRM"
             else:
                 # Default based on mode
@@ -744,7 +765,7 @@ def build_decision_plan(
         "allowed_actions": allowed_actions,
         "blocked_actions": blocked_actions,
         "awaiting": awaiting,
-        "executable_actions": executable_actions
+        "executable_actions": executable_actions,
     }
 
     # CRITICAL: Preserve active_capability if it was already set (from capability gating or previous planning)

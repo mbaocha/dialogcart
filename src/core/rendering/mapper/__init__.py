@@ -1,2 +1,1 @@
 """Mapper module for rendering."""
-

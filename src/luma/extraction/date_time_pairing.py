@@ -10,17 +10,15 @@ Rules:
 - Do NOT infer ownership, resolve ambiguity, or promote readiness
 """
 
-import re
 import logging
-from typing import List, Dict, Any, Optional, Tuple
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
 
 def detect_date_time_pairs(
-    text: str,
-    entities: Dict[str, List],
-    doc: Optional[Any] = None
+    text: str, entities: Dict[str, List], doc: Optional[Any] = None
 ) -> List[Dict[str, str]]:
     """
     Detect explicit syntactic date-time pairs in text.
@@ -47,67 +45,72 @@ def detect_date_time_pairs(
         return []
 
     text_lower = text.lower()
-    
+
     # Get all date and time entities with their positions
     date_entities = []
     time_entities = []
-    
+
     # Collect relative dates
     for date_ent in entities.get("dates", []):
         if isinstance(date_ent, dict):
             date_text = date_ent.get("text", "")
             position = date_ent.get("position", 0)
-            date_entities.append({
-                "text": date_text,
-                "position": position,
-                "normalized": None  # Will be filled later
-            })
-    
+            date_entities.append(
+                {
+                    "text": date_text,
+                    "position": position,
+                    "normalized": None,  # Will be filled later
+                }
+            )
+
     # Collect absolute dates
     for date_ent in entities.get("dates_absolute", []):
         if isinstance(date_ent, dict):
             date_text = date_ent.get("text", "")
             position = date_ent.get("position", 0)
-            date_entities.append({
-                "text": date_text,
-                "position": position,
-                "normalized": None  # Will be filled later
-            })
-    
+            date_entities.append(
+                {
+                    "text": date_text,
+                    "position": position,
+                    "normalized": None,  # Will be filled later
+                }
+            )
+
     # Collect times
     for time_ent in entities.get("times", []):
         if isinstance(time_ent, dict):
             time_text = time_ent.get("text", "")
             position = time_ent.get("position", 0)
-            time_entities.append({
-                "text": time_text,
-                "position": position,
-                "normalized": None  # Will be filled later
-            })
-    
+            time_entities.append(
+                {
+                    "text": time_text,
+                    "position": position,
+                    "normalized": None,  # Will be filled later
+                }
+            )
+
     if not date_entities or not time_entities:
         # No dates or no times - cannot form pairs
         return []
-    
+
     # Pattern 1: "on <date> at <time>" or "on <date>, <time>"
     # Pattern 2: "<date> at <time>"
     # Pattern 3: "<date>, <time>"
     # Pattern 4: "<date> <time>" (adjacent, only if very explicit like "march 3 3pm")
-    
+
     pairs = []
     used_date_indices = set()
     used_time_indices = set()
-    
+
     # Pattern 1: "on <date> at <time>" or "on <date>, <time>"
     on_at_pattern = re.compile(
-        r'\b(?:on\s+)?(.+?)\s+(?:at|,)\s+(.+?)(?:\s|$|,|\.)',
-        re.IGNORECASE
+        r"\b(?:on\s+)?(.+?)\s+(?:at|,)\s+(.+?)(?:\s|$|,|\.)", re.IGNORECASE
     )
-    
+
     for match in on_at_pattern.finditer(text_lower):
         date_part = match.group(1).strip()
         time_part = match.group(2).strip()
-        
+
         # Find matching date and time entities
         for date_idx, date_ent in enumerate(date_entities):
             if date_idx in used_date_indices:
@@ -121,29 +124,31 @@ def detect_date_time_pairs(
                     time_text_lower = time_ent["text"].lower()
                     # Check if time_part contains or matches time_text
                     if time_text_lower in time_part or time_part in time_text_lower:
-                        pairs.append({
-                            "date": date_ent["text"],
-                            "time": time_ent["text"],
-                            "date_index": date_idx,
-                            "time_index": time_idx
-                        })
+                        pairs.append(
+                            {
+                                "date": date_ent["text"],
+                                "time": time_ent["text"],
+                                "date_index": date_idx,
+                                "time_index": time_idx,
+                            }
+                        )
                         used_date_indices.add(date_idx)
                         used_time_indices.add(time_idx)
                         break
                 if date_idx in used_date_indices:
                     break
-    
+
     # Pattern 2: "<date> at <time>" (without "on")
     # This catches cases like "March 3rd at 3pm" or "tomorrow at 3pm"
     date_at_time_pattern = re.compile(
-        r'\b([a-z]+(?:\s+\d+(?:st|nd|rd|th)?)?|tomorrow|today|next\s+\w+)\s+at\s+(\d+(?::\d+)?\s*(?:am|pm)|morning|afternoon|evening)',
-        re.IGNORECASE
+        r"\b([a-z]+(?:\s+\d+(?:st|nd|rd|th)?)?|tomorrow|today|next\s+\w+)\s+at\s+(\d+(?::\d+)?\s*(?:am|pm)|morning|afternoon|evening)",
+        re.IGNORECASE,
     )
-    
+
     for match in date_at_time_pattern.finditer(text_lower):
         date_part = match.group(1).strip()
         time_part = match.group(2).strip()
-        
+
         # Find matching date and time entities
         for date_idx, date_ent in enumerate(date_entities):
             if date_idx in used_date_indices:
@@ -155,29 +160,31 @@ def detect_date_time_pairs(
                         continue
                     time_text_lower = time_ent["text"].lower()
                     if time_text_lower in time_part or time_part in time_text_lower:
-                        pairs.append({
-                            "date": date_ent["text"],
-                            "time": time_ent["text"],
-                            "date_index": date_idx,
-                            "time_index": time_idx
-                        })
+                        pairs.append(
+                            {
+                                "date": date_ent["text"],
+                                "time": time_ent["text"],
+                                "date_index": date_idx,
+                                "time_index": time_idx,
+                            }
+                        )
                         used_date_indices.add(date_idx)
                         used_time_indices.add(time_idx)
                         break
                 if date_idx in used_date_indices:
                     break
-    
+
     # Pattern 3: "<date>, <time>" (comma-separated, e.g., "March 3rd, 3pm")
     # Only match if comma directly connects date and time without other words
     date_comma_time_pattern = re.compile(
-        r'\b([a-z]+(?:\s+\d+(?:st|nd|rd|th)?)?|tomorrow|today|next\s+\w+)\s*,\s*(\d+(?::\d+)?\s*(?:am|pm))',
-        re.IGNORECASE
+        r"\b([a-z]+(?:\s+\d+(?:st|nd|rd|th)?)?|tomorrow|today|next\s+\w+)\s*,\s*(\d+(?::\d+)?\s*(?:am|pm))",
+        re.IGNORECASE,
     )
-    
+
     for match in date_comma_time_pattern.finditer(text_lower):
         date_part = match.group(1).strip()
         time_part = match.group(2).strip()
-        
+
         # Find matching date and time entities
         for date_idx, date_ent in enumerate(date_entities):
             if date_idx in used_date_indices:
@@ -189,23 +196,25 @@ def detect_date_time_pairs(
                         continue
                     time_text_lower = time_ent["text"].lower()
                     if time_text_lower in time_part or time_part in time_text_lower:
-                        pairs.append({
-                            "date": date_ent["text"],
-                            "time": time_ent["text"],
-                            "date_index": date_idx,
-                            "time_index": time_idx
-                        })
+                        pairs.append(
+                            {
+                                "date": date_ent["text"],
+                                "time": time_ent["text"],
+                                "date_index": date_idx,
+                                "time_index": time_idx,
+                            }
+                        )
                         used_date_indices.add(date_idx)
                         used_time_indices.add(time_idx)
                         break
                 if date_idx in used_date_indices:
                     break
-    
+
     logger.debug(
         f"[DATE_TIME_PAIRING] Detected {len(pairs)} explicit pairs in text: {text}",
-        extra={'text': text, 'pairs': pairs}
+        extra={"text": text, "pairs": pairs},
     )
-    
+
     return pairs
 
 
@@ -214,7 +223,7 @@ def normalize_date_time_pairs(
     date_normalizer: Optional[Any] = None,
     time_normalizer: Optional[Any] = None,
     now: Optional[Any] = None,
-    tz: Optional[Any] = None
+    tz: Optional[Any] = None,
 ) -> List[Dict[str, str]]:
     """
     Normalize date-time pairs by converting raw date/time strings to ISO format.
@@ -231,16 +240,16 @@ def normalize_date_time_pairs(
     """
     if not pairs:
         return []
-    
+
     normalized_pairs = []
-    
+
     for pair in pairs:
         date_str = pair.get("date", "")
         time_str = pair.get("time", "")
-        
+
         normalized_date = None
         normalized_time = None
-        
+
         # Normalize date if normalizer provided
         if date_normalizer and date_str and now and tz:
             try:
@@ -248,10 +257,11 @@ def normalize_date_time_pairs(
                 if bound_date:
                     normalized_date = bound_date.strftime("%Y-%m-%d")
             except Exception as e:
-                logger.debug(f"[DATE_TIME_PAIRING] Date normalization failed: {e}", extra={
-                    'date_str': date_str, 'error': str(e)
-                })
-        
+                logger.debug(
+                    f"[DATE_TIME_PAIRING] Date normalization failed: {e}",
+                    extra={"date_str": date_str, "error": str(e)},
+                )
+
         # Normalize time if normalizer provided
         if time_normalizer and time_str and now and tz:
             try:
@@ -260,6 +270,7 @@ def normalize_date_time_pairs(
                 if callable(time_normalizer):
                     # Check if it accepts keyword arguments
                     import inspect
+
                     sig = inspect.signature(time_normalizer)
                     params = list(sig.parameters.keys())
                     if len(params) >= 4:
@@ -269,17 +280,21 @@ def normalize_date_time_pairs(
                             normalized_time = time_result.get("start_time")
                             # Extract HH:MM if full time string
                             if normalized_time and ":" in normalized_time:
-                                normalized_time = ":".join(normalized_time.split(":")[:2])
+                                normalized_time = ":".join(
+                                    normalized_time.split(":")[:2]
+                                )
             except Exception as e:
-                logger.debug(f"[DATE_TIME_PAIRING] Time normalization failed: {e}", extra={
-                    'time_str': time_str, 'error': str(e)
-                })
-        
-        if normalized_date or normalized_time:
-            normalized_pairs.append({
-                "date": normalized_date or date_str,
-                "time": normalized_time or time_str
-            })
-    
-    return normalized_pairs
+                logger.debug(
+                    f"[DATE_TIME_PAIRING] Time normalization failed: {e}",
+                    extra={"time_str": time_str, "error": str(e)},
+                )
 
+        if normalized_date or normalized_time:
+            normalized_pairs.append(
+                {
+                    "date": normalized_date or date_str,
+                    "time": normalized_time or time_str,
+                }
+            )
+
+    return normalized_pairs

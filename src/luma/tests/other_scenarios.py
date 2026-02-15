@@ -11,8 +11,8 @@ other_scenarios = [
         "expected": {
             "intent": "MODIFY_BOOKING",
             "status": STATUS_NEEDS_CLARIFICATION,
-            "missing_slots": ["booking_id"]
-        }
+            "missing_slots": ["booking_id"],
+        },
     },
     {
         "sentence": "reschedule my appointment",
@@ -20,8 +20,8 @@ other_scenarios = [
         "expected": {
             "intent": "MODIFY_BOOKING",
             "status": STATUS_NEEDS_CLARIFICATION,
-            "missing_slots": ["booking_id"]
-        }
+            "missing_slots": ["booking_id"],
+        },
     },
     {
         "sentence": "cancel my reservation",
@@ -29,8 +29,8 @@ other_scenarios = [
         "expected": {
             "intent": "CANCEL_BOOKING",
             "status": STATUS_NEEDS_CLARIFICATION,
-            "missing_slots": ["booking_id"]
-        }
+            "missing_slots": ["booking_id"],
+        },
     },
     {
         "sentence": "cancel appointment",
@@ -38,7 +38,7 @@ other_scenarios = [
         "expected": {
             "intent": "CANCEL_BOOKING",
             "status": STATUS_NEEDS_CLARIFICATION,
-            "missing_slots": ["booking_id"]
-        }
+            "missing_slots": ["booking_id"],
+        },
     },
 ]

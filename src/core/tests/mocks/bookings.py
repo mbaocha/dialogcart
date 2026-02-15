@@ -8,9 +8,9 @@ Mocks booking creation and confirmation endpoints:
 Response formats match real API.
 """
 
-from typing import Dict, Any, Optional, Literal
-from datetime import datetime, timedelta
 import logging
+from datetime import datetime, timedelta
+from typing import Any, Dict, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -54,20 +54,20 @@ def mock_create_booking(
     check_out: Optional[str] = None,
     guests: int = 1,
     extras: Optional[list] = None,
-    **kwargs
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Mock POST /api/internal/bookings endpoint.
-    
+
     Generates deterministic booking response based on:
     - start_time/end_time for service bookings
     - check_in/check_out for reservation bookings
-    
+
     Rules:
     - starts_at = resolved date + time_constraint.start (from request)
     - ends_at = starts_at + service duration
     - Do NOT include pricing, staff, payments, or metadata
-    
+
     Args:
         organization_id: Organization identifier
         customer_id: Customer identifier
@@ -82,73 +82,75 @@ def mock_create_booking(
         guests: Number of guests (ignored in mock)
         extras: Reservation extras (ignored in mock)
         **kwargs: Additional parameters (ignored)
-    
+
     Returns:
         Mock booking creation response
     """
     booking_code = _generate_booking_code()
-    
+
     if booking_type == "service":
         if not start_time or not end_time:
             # If end_time not provided, calculate from start_time + duration
             if start_time:
                 try:
                     start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-                    end_dt = start_dt + timedelta(minutes=DEFAULT_SERVICE_DURATION_MINUTES)
+                    end_dt = start_dt + timedelta(
+                        minutes=DEFAULT_SERVICE_DURATION_MINUTES
+                    )
                     end_time = end_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
                 except Exception:
-                    logger.warning(f"Could not parse start_time '{start_time}', using default")
+                    logger.warning(
+                        f"Could not parse start_time '{start_time}', using default"
+                    )
                     end_time = start_time  # Fallback
             else:
                 raise ValueError("start_time is required for service bookings")
-        
+
         starts_at = start_time
         ends_at = end_time
     else:  # reservation
         if not check_in or not check_out:
-            raise ValueError("check_in and check_out are required for reservation bookings")
+            raise ValueError(
+                "check_in and check_out are required for reservation bookings"
+            )
         starts_at = check_in
         ends_at = check_out
-    
+
     logger.debug(
         f"[MOCK] Creating booking: code={booking_code}, type={booking_type}, "
         f"starts_at={starts_at}, ends_at={ends_at}"
     )
-    
+
     # Store booking state for confirm endpoint
     booking_data = {
         "id": _booking_counter,
         "booking_code": booking_code,
         "status": "pending",
         "starts_at": starts_at,
-        "ends_at": ends_at
+        "ends_at": ends_at,
     }
     _booking_store[booking_code] = booking_data.copy()
-    
-    return {
-        "booking": booking_data
-    }
+
+    return {"booking": booking_data}
 
 
 def mock_confirm_booking(
-    booking_code: str,
-    organization_id: int,
-    **kwargs
+    booking_code: str, organization_id: int, **kwargs
 ) -> Dict[str, Any]:
     """
     Mock POST /api/internal/bookings/{bookingCode}/confirm endpoint.
-    
+
     Generates deterministic confirmation response.
-    
+
     Rules:
     - Must preserve starts_at / ends_at from original booking
     - Only status changes to confirmed
-    
+
     Args:
         booking_code: Booking code identifier
         organization_id: Organization identifier (unused in mock)
         **kwargs: Additional parameters (ignored)
-    
+
     Returns:
         Mock booking confirmation response
     """
@@ -164,22 +166,21 @@ def mock_confirm_booking(
         )
         starts_at = "2026-01-16T10:00:00Z"
         ends_at = "2026-01-16T11:00:00Z"
-    
+
     logger.debug(
         f"[MOCK] Confirming booking: code={booking_code}, "
         f"starts_at={starts_at}, ends_at={ends_at}"
     )
-    
+
     # Update stored booking status
     if booking_code in _booking_store:
         _booking_store[booking_code]["status"] = "confirmed"
-    
+
     return {
         "booking": {
             "booking_code": booking_code,
             "status": "confirmed",
             "starts_at": starts_at,
-            "ends_at": ends_at
+            "ends_at": ends_at,
         }
     }
-

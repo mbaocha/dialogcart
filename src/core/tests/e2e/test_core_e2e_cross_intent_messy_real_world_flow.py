@@ -31,20 +31,25 @@ Requirements:
 """
 
 import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from unittest.mock import Mock
+
 import pytest
 import yaml
-import sys
-from pathlib import Path
-from unittest.mock import Mock
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
 
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.execution.clients.availability_client import AvailabilityClient
 from core.orchestration.execution.clients.booking_client import BookingClient
-from core.orchestration.orchestrator import handle_message
 from core.orchestration.nlu import LumaClient
-from core.tests.mocks import mock_get_service_availability, mock_create_booking, mock_cancel_booking
+from core.orchestration.orchestrator import handle_message
+from core.tests.mocks import (
+    mock_cancel_booking,
+    mock_create_booking,
+    mock_get_service_availability,
+)
 from core.tests.planning.adapter import normalize_planning_outcome
 
 # Add src to path BEFORE importing core modules
@@ -55,8 +60,10 @@ if str(src_path) not in sys.path:
 
 # Skip entire test module if RUN_REAL_LUMA_E2E is not set
 if not os.getenv("RUN_REAL_LUMA_E2E"):
-    pytest.skip("Real Luma E2E tests disabled. Set RUN_REAL_LUMA_E2E=true to enable.",
-                allow_module_level=True)
+    pytest.skip(
+        "Real Luma E2E tests disabled. Set RUN_REAL_LUMA_E2E=true to enable.",
+        allow_module_level=True,
+    )
 
 
 class TestLumaClient(LumaClient):
@@ -74,7 +81,7 @@ class TestLumaClient(LumaClient):
         text: str,
         domain: str = "service",
         timezone: str = "UTC",
-        tenant_context: Optional[Dict[str, Any]] = None
+        tenant_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Override resolve to inject test aliases into tenant_context.
@@ -92,7 +99,7 @@ class TestLumaClient(LumaClient):
             text=text,
             domain=domain,
             timezone=timezone,
-            tenant_context=merged_tenant_context
+            tenant_context=merged_tenant_context,
         )
 
         # Store last response for debugging
@@ -103,8 +110,9 @@ class TestLumaClient(LumaClient):
 
 def load_scenarios() -> List[Dict[str, Any]]:
     """Load test scenarios from YAML file."""
-    scenarios_file = Path(__file__).parent / "scenarios" / \
-        "cross_intent_messy_real_world_flow.yaml"
+    scenarios_file = (
+        Path(__file__).parent / "scenarios" / "cross_intent_messy_real_world_flow.yaml"
+    )
     if not scenarios_file.exists():
         pytest.skip(f"Scenarios file not found: {scenarios_file}")
 
@@ -127,23 +135,26 @@ def load_scenarios() -> List[Dict[str, Any]]:
                         selected_indices.append(index)
                     else:
                         print(
-                            f"\n[E2E_TEST] WARNING: Test index {index} is out of range (0-{len(scenarios)-1}). Skipping.\n")
+                            f"\n[E2E_TEST] WARNING: Test index {index} is out of range (0-{len(scenarios)-1}). Skipping.\n"
+                        )
 
             if selected_indices:
                 # Return only the selected scenarios (preserve order)
                 # Remove duplicates and sort
-                selected = [scenarios[i]
-                            for i in sorted(set(selected_indices))]
-                names = [s.get('name', 'unnamed') for s in selected]
+                selected = [scenarios[i] for i in sorted(set(selected_indices))]
+                names = [s.get("name", "unnamed") for s in selected]
                 print(
-                    f"\n[E2E_TEST] Running {len(selected)} test(s) at indices {sorted(set(selected_indices))}: {', '.join(names)}\n")
+                    f"\n[E2E_TEST] Running {len(selected)} test(s) at indices {sorted(set(selected_indices))}: {', '.join(names)}\n"
+                )
                 return selected
             else:
                 print(
-                    f"\n[E2E_TEST] WARNING: No valid test indices found. Running all tests.\n")
+                    f"\n[E2E_TEST] WARNING: No valid test indices found. Running all tests.\n"
+                )
         except ValueError as e:
             print(
-                f"\n[E2E_TEST] WARNING: Invalid E2E_TEST_INDEX value '{test_index_env}'. Must be comma-separated numbers. Running all tests.\n")
+                f"\n[E2E_TEST] WARNING: Invalid E2E_TEST_INDEX value '{test_index_env}'. Must be comma-separated numbers. Running all tests.\n"
+            )
 
     return scenarios
 
@@ -157,10 +168,17 @@ def create_mock_availability_client(frozen_time: Optional[datetime] = None) -> M
                     If provided, "tomorrow" will resolve to frozen_time + 1 day.
     """
     mock_availability_client = Mock(spec=AvailabilityClient)
+
     # Use mock_get_service_availability from tests.mocks to generate response
     # Wrap it to handle service_id type (mock expects int, but we may pass strings)
-    def mock_get_availability(organization_id=None, service_id=None, date=None,
-                              time_constraint=None, extra_params=None, **kwargs):
+    def mock_get_availability(
+        organization_id=None,
+        service_id=None,
+        date=None,
+        time_constraint=None,
+        extra_params=None,
+        **kwargs,
+    ):
         # Convert service_id to int if needed (mock expects int but doesn't use the value)
         service_id_int = 1  # Default
         if service_id is not None:
@@ -171,14 +189,16 @@ def create_mock_availability_client(frozen_time: Optional[datetime] = None) -> M
 
         # Resolve relative dates like "tomorrow" to actual dates
         from datetime import timedelta
+
         resolved_date = date
         if date and isinstance(date, str):
             date_lower = date.lower().strip()
             if date_lower == "tomorrow":
                 # Resolve "tomorrow" to frozen_time + 1 day (or default if no frozen_time)
                 if frozen_time:
-                    resolved_date = (
-                        frozen_time + timedelta(days=1)).strftime("%Y-%m-%d")
+                    resolved_date = (frozen_time + timedelta(days=1)).strftime(
+                        "%Y-%m-%d"
+                    )
                 else:
                     resolved_date = "2026-01-16"  # Default fallback
             elif date_lower in ("today", "now"):
@@ -188,22 +208,24 @@ def create_mock_availability_client(frozen_time: Optional[datetime] = None) -> M
                 else:
                     resolved_date = "2026-01-15"  # Default fallback
             # If date is already in YYYY-MM-DD format, use it as-is
-            elif len(date_lower) == 10 and date_lower[4] == "-" and date_lower[7] == "-":
+            elif (
+                len(date_lower) == 10 and date_lower[4] == "-" and date_lower[7] == "-"
+            ):
                 # Looks like YYYY-MM-DD format, use as-is
                 resolved_date = date
             # Otherwise, try to use frozen_time + 1 day or default
             else:
                 if frozen_time:
-                    resolved_date = (
-                        frozen_time + timedelta(days=1)).strftime("%Y-%m-%d")
+                    resolved_date = (frozen_time + timedelta(days=1)).strftime(
+                        "%Y-%m-%d"
+                    )
                 else:
                     resolved_date = "2026-01-16"
 
         # Default to frozen_time + 1 day if no date provided and frozen_time is available
         if not resolved_date:
             if frozen_time:
-                resolved_date = (frozen_time + timedelta(days=1)
-                                 ).strftime("%Y-%m-%d")
+                resolved_date = (frozen_time + timedelta(days=1)).strftime("%Y-%m-%d")
             else:
                 resolved_date = "2026-01-16"
 
@@ -213,9 +235,12 @@ def create_mock_availability_client(frozen_time: Optional[datetime] = None) -> M
             date=resolved_date,
             time_constraint=time_constraint,
             extra_params=extra_params,
-            **kwargs
+            **kwargs,
         )
-    mock_availability_client.get_service_availability.side_effect = mock_get_availability
+
+    mock_availability_client.get_service_availability.side_effect = (
+        mock_get_availability
+    )
     return mock_availability_client
 
 
@@ -228,8 +253,15 @@ def create_mock_booking_client() -> Mock:
     # Track most recently created booking for context inference
     most_recent_booking = None
 
-    def mock_booking(organization_id=None, customer_id=None, booking_type=None,
-                     item_id=None, start_time=None, end_time=None, **kwargs):
+    def mock_booking(
+        organization_id=None,
+        customer_id=None,
+        booking_type=None,
+        item_id=None,
+        start_time=None,
+        end_time=None,
+        **kwargs,
+    ):
         booking_result = mock_create_booking(
             organization_id=organization_id or 1,
             customer_id=customer_id or 1,
@@ -237,12 +269,11 @@ def create_mock_booking_client() -> Mock:
             item_id=item_id or 1,
             start_time=start_time,
             end_time=end_time,
-            **kwargs
+            **kwargs,
         )
         # Store booking for later retrieval/cancellation
         if isinstance(booking_result, dict):
-            booking_id = booking_result.get(
-                "booking_id") or booking_result.get("id")
+            booking_id = booking_result.get("booking_id") or booking_result.get("id")
             if booking_id:
                 booking_id_str = str(booking_id)
                 created_bookings[booking_id_str] = booking_result
@@ -263,7 +294,7 @@ def create_mock_booking_client() -> Mock:
             "booking_id": booking_id,
             "status": "confirmed",
             "service_id": 1,
-            "item_id": 1
+            "item_id": 1,
         }
 
     def mock_cancel_booking_func(booking_id: str, **kwargs):
@@ -285,10 +316,12 @@ def create_mock_booking_client() -> Mock:
             "booking_id": booking_id,
             "status": "confirmed",
             "service_id": 1,
-            "item_id": 1
+            "item_id": 1,
         }
 
-    def get_most_recent_booking_wrapper(organization_id=None, customer_id=None, **kwargs):
+    def get_most_recent_booking_wrapper(
+        organization_id=None, customer_id=None, **kwargs
+    ):
         """Return the most recently created booking (test helper for FETCH_BOOKING)."""
         nonlocal most_recent_booking
         # Return most recent booking if available, even if organization_id/customer_id are None
@@ -300,8 +333,11 @@ def create_mock_booking_client() -> Mock:
         result = mock_booking(*args, **kwargs)
         if isinstance(result, dict):
             # Extract booking_id from nested structure: {"booking": {"id": 1, ...}}
-            booking_obj = result.get("booking") if isinstance(
-                result.get("booking"), dict) else result
+            booking_obj = (
+                result.get("booking")
+                if isinstance(result.get("booking"), dict)
+                else result
+            )
             booking_id = booking_obj.get("booking_id") or booking_obj.get("id")
             if booking_id:
                 booking_id_str = str(booking_id)
@@ -320,9 +356,7 @@ def create_mock_organization_client() -> Mock:
     """Create a mocked organization client."""
     mock_org_client = Mock(spec=OrganizationClient)
     mock_org_client.get_details.return_value = {
-        "organization": {
-            "businessCategoryId": 1  # Maps to "service" domain
-        }
+        "organization": {"businessCategoryId": 1}  # Maps to "service" domain
     }
     return mock_org_client
 
@@ -364,7 +398,7 @@ def assert_turn_expectations(
     result: Dict[str, Any],
     expectations: Dict[str, Any],
     turn_number: int,
-    scenario_name: str
+    scenario_name: str,
 ) -> None:
     """
     Assert turn expectations against Core result.
@@ -375,8 +409,9 @@ def assert_turn_expectations(
     - Do NOT assert execution counts
     """
     # Assert success
-    assert result.get("success") is True, \
-        f"[{scenario_name}] Turn {turn_number}: Expected success=True, got {result.get('success')} with error: {result.get('error')}"
+    assert (
+        result.get("success") is True
+    ), f"[{scenario_name}] Turn {turn_number}: Expected success=True, got {result.get('success')} with error: {result.get('error')}"
 
     # Normalize result using planning test adapter (same as planning tests)
     # This ensures we assert against the same contract as planning tests
@@ -391,24 +426,28 @@ def assert_turn_expectations(
     # Assert expected intent (if specified)
     if "intent" in expectations:
         expected_intent = expectations["intent"]
-        actual_intent = normalized.get("intent") or plan.get(
-            "intent_name") or plan.get("intent")
-        assert actual_intent == expected_intent, \
-            f"[{scenario_name}] Turn {turn_number}: Expected intent {expected_intent}, got {actual_intent}"
+        actual_intent = (
+            normalized.get("intent") or plan.get("intent_name") or plan.get("intent")
+        )
+        assert (
+            actual_intent == expected_intent
+        ), f"[{scenario_name}] Turn {turn_number}: Expected intent {expected_intent}, got {actual_intent}"
 
     # Assert expected status
     if "status" in expectations:
         expected_status = expectations["status"]
         actual_status = normalized.get("status")
-        assert actual_status == expected_status, \
-            f"[{scenario_name}] Turn {turn_number}: Expected status {expected_status}, got {actual_status}"
+        assert (
+            actual_status == expected_status
+        ), f"[{scenario_name}] Turn {turn_number}: Expected status {expected_status}, got {actual_status}"
 
     # Assert expected action (from plan.action, same as planning tests)
     if "action" in expectations:
         expected_action = expectations["action"]
         actual_action = plan.get("action")
-        assert actual_action == expected_action, \
-            f"[{scenario_name}] Turn {turn_number}: Expected action {expected_action}, got {actual_action}"
+        assert (
+            actual_action == expected_action
+        ), f"[{scenario_name}] Turn {turn_number}: Expected action {expected_action}, got {actual_action}"
 
     # NOTE: We do NOT assert missing_slots, execution counts, or internal details
     # This is a sentinel test focused on user-visible behavior only
@@ -421,8 +460,9 @@ _scenarios_for_parametrize = load_scenarios()
 def _scenario_id(scenario: Dict[str, Any]) -> str:
     """Generate test ID with index and name."""
     # Load all scenarios to get index
-    scenarios_file = Path(__file__).parent / "scenarios" / \
-        "cross_intent_messy_real_world_flow.yaml"
+    scenarios_file = (
+        Path(__file__).parent / "scenarios" / "cross_intent_messy_real_world_flow.yaml"
+    )
     if scenarios_file.exists():
         with open(scenarios_file, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
@@ -431,8 +471,8 @@ def _scenario_id(scenario: Dict[str, Any]) -> str:
             idx = all_scenarios.index(scenario)
             return f"{idx}-{scenario.get('name', 'unnamed')}"
         except ValueError:
-            return scenario.get('name', 'unnamed')
-    return scenario.get('name', 'unnamed')
+            return scenario.get("name", "unnamed")
+    return scenario.get("name", "unnamed")
 
 
 @pytest.mark.parametrize("scenario", _scenarios_for_parametrize, ids=_scenario_id)
@@ -452,8 +492,7 @@ def test_cross_intent_messy_real_world_flow(scenario: Dict[str, Any]):
 
     # Extract aliases from scenario (same pattern as planning tests)
     # Default to common service aliases if not specified
-    aliases = scenario.get(
-        "aliases", {"haircut": "haircut", "massage": "massage"})
+    aliases = scenario.get("aliases", {"haircut": "haircut", "massage": "massage"})
 
     # Frozen time: 2026-01-15 10:00:00 UTC
     # "tomorrow" should resolve to 2026-01-16
@@ -467,8 +506,7 @@ def test_cross_intent_messy_real_world_flow(scenario: Dict[str, Any]):
     # Create mocked clients for execution
     mock_org_client = create_mock_organization_client()
     # Pass frozen_time to availability mock so it can resolve relative dates like "tomorrow"
-    mock_availability_client = create_mock_availability_client(
-        frozen_time=frozen_time)
+    mock_availability_client = create_mock_availability_client(frozen_time=frozen_time)
     mock_booking_client = create_mock_booking_client()
 
     # Create session store
@@ -507,7 +545,7 @@ def test_cross_intent_messy_real_world_flow(scenario: Dict[str, Any]):
             # Only use session store after first turn
             session_store=session_store if turn_idx > 1 else None,
             frozen_time=frozen_time,
-            organization_id=1
+            organization_id=1,
         )
 
         # Extract booking_id from execution result for cross-intent flows
@@ -516,10 +554,18 @@ def test_cross_intent_messy_real_world_flow(scenario: Dict[str, Any]):
         if isinstance(execution_result, dict):
             # Check for booking_id in execution result (from CONFIRM_APPOINTMENT or FETCH_BOOKING)
             booking_id = (
-                execution_result.get("booking_id") or
-                (execution_result.get("booking", {}).get("id") if isinstance(execution_result.get("booking"), dict) else None) or
-                (execution_result.get("booking", {}).get("booking_id") if isinstance(execution_result.get("booking"), dict) else None) or
-                execution_result.get("booking_code")
+                execution_result.get("booking_id")
+                or (
+                    execution_result.get("booking", {}).get("id")
+                    if isinstance(execution_result.get("booking"), dict)
+                    else None
+                )
+                or (
+                    execution_result.get("booking", {}).get("booking_id")
+                    if isinstance(execution_result.get("booking"), dict)
+                    else None
+                )
+                or execution_result.get("booking_code")
             )
             if booking_id:
                 created_booking_id = booking_id
@@ -529,21 +575,24 @@ def test_cross_intent_messy_real_world_flow(scenario: Dict[str, Any]):
 
         # Extract intent from normalized result (same as assertion function)
         normalized = normalize_planning_outcome(result)
-        current_intent = normalized.get("intent") or normalized.get(
-            "plan", {}).get("intent_name")
+        current_intent = normalized.get("intent") or normalized.get("plan", {}).get(
+            "intent_name"
+        )
 
         # Validate intent behavior across turns
         if turn_idx > 1 and previous_intent:
             if expectations.get("intent_switched"):
                 # Intent should have changed from previous turn
-                assert current_intent != previous_intent, \
-                    f"[{scenario_name}] Turn {turn_idx}: Intent should have switched from turn {turn_idx - 1}. " \
+                assert current_intent != previous_intent, (
+                    f"[{scenario_name}] Turn {turn_idx}: Intent should have switched from turn {turn_idx - 1}. "
                     f"Previous: {previous_intent}, Current: {current_intent} (expected different)"
+                )
             elif expectations.get("intent_preserved", False):
                 # Intent should be preserved from previous turn
-                assert current_intent == previous_intent, \
-                    f"[{scenario_name}] Turn {turn_idx}: Intent should be preserved from turn {turn_idx - 1}. " \
+                assert current_intent == previous_intent, (
+                    f"[{scenario_name}] Turn {turn_idx}: Intent should be preserved from turn {turn_idx - 1}. "
                     f"Previous: {previous_intent}, Current: {current_intent}"
+                )
 
         # Update previous intent for next turn
         if current_intent and current_intent != "":
@@ -584,20 +633,24 @@ def test_cross_intent_messy_real_world_flow(scenario: Dict[str, Any]):
                 # Check if execution_result has availability_fingerprint (from SEARCH_AVAILABILITY)
                 if execution_result.get("availability_fingerprint"):
                     session_state["availability_fingerprint"] = execution_result.get(
-                        "availability_fingerprint")
+                        "availability_fingerprint"
+                    )
                 # Also check plan for fingerprint (attached by orchestrator for persistence)
                 elif plan_obj.get("availability_fingerprint"):
                     session_state["availability_fingerprint"] = plan_obj.get(
-                        "availability_fingerprint")
+                        "availability_fingerprint"
+                    )
 
                 # CRITICAL: Preserve resolved_datetime_range from execution result
                 if execution_result.get("resolved_datetime_range"):
                     session_state["resolved_datetime_range"] = execution_result.get(
-                        "resolved_datetime_range")
+                        "resolved_datetime_range"
+                    )
                 # Also check plan for resolved_datetime_range (attached by orchestrator for persistence)
                 elif plan_obj.get("resolved_datetime_range"):
                     session_state["resolved_datetime_range"] = plan_obj.get(
-                        "resolved_datetime_range")
+                        "resolved_datetime_range"
+                    )
 
             # Also preserve from previous session if present (cross-turn persistence)
             previous_session = session_store.get_session(user_id)
@@ -605,12 +658,14 @@ def test_cross_intent_messy_real_world_flow(scenario: Dict[str, Any]):
                 if previous_session.get("availability_fingerprint"):
                     # Only preserve if not already set from execution result
                     if "availability_fingerprint" not in session_state:
-                        session_state["availability_fingerprint"] = previous_session.get(
-                            "availability_fingerprint")
+                        session_state["availability_fingerprint"] = (
+                            previous_session.get("availability_fingerprint")
+                        )
                 if previous_session.get("resolved_datetime_range"):
                     # Only preserve if not already set from execution result
                     if "resolved_datetime_range" not in session_state:
                         session_state["resolved_datetime_range"] = previous_session.get(
-                            "resolved_datetime_range")
+                            "resolved_datetime_range"
+                        )
 
             session_store.save_session(user_id, session_state)

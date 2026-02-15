@@ -4,6 +4,7 @@ Luma Configuration
 Centralized configuration for all luma features and components.
 All settings can be overridden via environment variables.
 """
+
 import os
 from typing import Optional
 
@@ -30,16 +31,19 @@ class LumaConfig:
     # Feature Toggles
     # ========================================================================
 
-    ENABLE_INTENT_MAPPER: bool = os.getenv(
-        "ENABLE_INTENT_MAPPER", "true").lower() == "true"
+    ENABLE_INTENT_MAPPER: bool = (
+        os.getenv("ENABLE_INTENT_MAPPER", "true").lower() == "true"
+    )
     """Enable ML-based intent mapping (add → ADD_TO_CART, etc.)"""
 
-    ENABLE_LLM_FALLBACK: bool = os.getenv(
-        "ENABLE_LLM_FALLBACK", "false").lower() == "true"
+    ENABLE_LLM_FALLBACK: bool = (
+        os.getenv("ENABLE_LLM_FALLBACK", "false").lower() == "true"
+    )
     """Enable LLM fallback for complex/ambiguous extractions"""
 
-    ENABLE_FUZZY_MATCHING: bool = os.getenv(
-        "ENABLE_FUZZY_MATCHING", "false").lower() == "true"
+    ENABLE_FUZZY_MATCHING: bool = (
+        os.getenv("ENABLE_FUZZY_MATCHING", "false").lower() == "true"
+    )
     """Enable fuzzy matching for typo tolerance (requires rapidfuzz)"""
 
     # ========================================================================
@@ -65,16 +69,17 @@ class LumaConfig:
     LOG_FILE: Optional[str] = os.getenv("LOG_FILE")
     """Optional: Write logs to file (e.g., '/var/log/luma/api.log')"""
 
-    ENABLE_REQUEST_LOGGING: bool = os.getenv(
-        "ENABLE_REQUEST_LOGGING", "true").lower() == "true"
+    ENABLE_REQUEST_LOGGING: bool = (
+        os.getenv("ENABLE_REQUEST_LOGGING", "true").lower() == "true"
+    )
     """Log all HTTP requests/responses with timing"""
 
-    LOG_PERFORMANCE_METRICS: bool = os.getenv(
-        "LOG_PERFORMANCE_METRICS", "true").lower() == "true"
+    LOG_PERFORMANCE_METRICS: bool = (
+        os.getenv("LOG_PERFORMANCE_METRICS", "true").lower() == "true"
+    )
     """Log extraction performance metrics (processing time, groups count, etc.)"""
 
-    LOG_SLOT_TRACKING: bool = os.getenv(
-        "LOG_SLOT_TRACKING", "false").lower() == "true"
+    LOG_SLOT_TRACKING: bool = os.getenv("LOG_SLOT_TRACKING", "false").lower() == "true"
     """Enable detailed slot tracking logs for debugging data loss (adds overhead)"""
 
     # ========================================================================
@@ -91,12 +96,12 @@ class LumaConfig:
     # Model Paths
     # ========================================================================
 
-    NER_MODEL_PATH: str = os.getenv(
-        "NER_MODEL_PATH", "luma/store/bert-ner-best")
+    NER_MODEL_PATH: str = os.getenv("NER_MODEL_PATH", "luma/store/bert-ner-best")
     """Path to trained NER model (relative to src/)"""
 
     ENTITY_CATALOG_PATH: str = os.getenv(
-        "ENTITY_CATALOG_PATH", "luma/store/merged_v9.json")
+        "ENTITY_CATALOG_PATH", "luma/store/merged_v9.json"
+    )
     """Path to entity catalog JSON (relative to src/)"""
 
     # ========================================================================
@@ -130,14 +135,11 @@ class LumaConfig:
     # Performance Settings
     # ========================================================================
 
-    LAZY_LOAD_MODELS: bool = os.getenv(
-        "LAZY_LOAD_MODELS", "false").lower() == "true"
+    LAZY_LOAD_MODELS: bool = os.getenv("LAZY_LOAD_MODELS", "false").lower() == "true"
     """Lazy load models on first request (faster startup, slower first request)"""
 
-    WARMUP_ON_STARTUP: bool = os.getenv(
-        "WARMUP_ON_STARTUP", "true").lower() == "true"
+    WARMUP_ON_STARTUP: bool = os.getenv("WARMUP_ON_STARTUP", "true").lower() == "true"
     """Preload models on startup (slower startup, faster requests)"""
-
 
     # ========================================================================
     # Helper Methods
@@ -176,36 +178,40 @@ class LumaConfig:
         ]
 
         if self.ENABLE_LLM_FALLBACK:
-            lines.extend([
-                "LLM:",
-                f"  Model:              {self.LLM_MODEL}",
-                f"  API Key:            {'✅ Set' if self.OPENAI_API_KEY else '❌ Not set'}",
-                "",
-            ])
+            lines.extend(
+                [
+                    "LLM:",
+                    f"  Model:              {self.LLM_MODEL}",
+                    f"  API Key:            {'✅ Set' if self.OPENAI_API_KEY else '❌ Not set'}",
+                    "",
+                ]
+            )
 
-        lines.extend([
-            "Models:",
-            f"  NER Model:          {self.NER_MODEL_PATH}",
-            f"  Entity Catalog:     {self.ENTITY_CATALOG_PATH}",
-            "",
-            "API:",
-            f"  Host:               {self.API_HOST}",
-            f"  Port:               {self.API_PORT}",
-            "",
-            "Logging:",
-            f"  Level:              {self.LOG_LEVEL}",
-            f"  Format:             {self.LOG_FORMAT}",
-            f"  File:               {self.LOG_FILE or 'None'}",
-            f"  Request Logging:    {'✅ Enabled' if self.ENABLE_REQUEST_LOGGING else '❌ Disabled'}",
-            f"  Performance Logs:   {'✅ Enabled' if self.LOG_PERFORMANCE_METRICS else '❌ Disabled'}",
-            f"  Slot Tracking:      {'✅ Enabled' if self.LOG_SLOT_TRACKING else '❌ Disabled'}",
-            "",
-            "Performance:",
-            f"  Lazy Load:          {'✅ Yes' if self.LAZY_LOAD_MODELS else '❌ No'}",
-            f"  Warmup:             {'✅ Yes' if self.WARMUP_ON_STARTUP else '❌ No'}",
-            "",
-            "=" * 60,
-        ])
+        lines.extend(
+            [
+                "Models:",
+                f"  NER Model:          {self.NER_MODEL_PATH}",
+                f"  Entity Catalog:     {self.ENTITY_CATALOG_PATH}",
+                "",
+                "API:",
+                f"  Host:               {self.API_HOST}",
+                f"  Port:               {self.API_PORT}",
+                "",
+                "Logging:",
+                f"  Level:              {self.LOG_LEVEL}",
+                f"  Format:             {self.LOG_FORMAT}",
+                f"  File:               {self.LOG_FILE or 'None'}",
+                f"  Request Logging:    {'✅ Enabled' if self.ENABLE_REQUEST_LOGGING else '❌ Disabled'}",
+                f"  Performance Logs:   {'✅ Enabled' if self.LOG_PERFORMANCE_METRICS else '❌ Disabled'}",
+                f"  Slot Tracking:      {'✅ Enabled' if self.LOG_SLOT_TRACKING else '❌ Disabled'}",
+                "",
+                "Performance:",
+                f"  Lazy Load:          {'✅ Yes' if self.LAZY_LOAD_MODELS else '❌ No'}",
+                f"  Warmup:             {'✅ Yes' if self.WARMUP_ON_STARTUP else '❌ No'}",
+                "",
+                "=" * 60,
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -223,6 +229,3 @@ def debug_print(*args, **kwargs):
     """Print debug message only if DEBUG_NLP is enabled."""
     if config.DEBUG_ENABLED:
         print(*args, **kwargs)
-
-
-

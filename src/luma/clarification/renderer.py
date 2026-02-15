@@ -4,13 +4,13 @@ Clarification Template Renderer
 Deterministic template rendering from Clarification objects.
 No branching logic, no fallback text.
 
-Templates are loaded from JSON configuration at templates/clarification.json.
+Templates are loaded from JSON configuration at src/core/rendering/templates/clarification.json.
 """
 
-from typing import Dict, Any
-import re
 import json
+import re
 from pathlib import Path
+from typing import Any, Dict
 
 from .models import Clarification
 
@@ -28,7 +28,7 @@ def _load_templates() -> Dict[str, Dict[str, Any]]:
         Dictionary mapping ClarificationReason values to template configs
 
     Raises:
-        FileNotFoundError: If templates/clarification.json not found
+        FileNotFoundError: If src/core/rendering/templates/clarification.json not found
         json.JSONDecodeError: If JSON is invalid
     """
     global _TEMPLATES_CACHE
@@ -38,15 +38,17 @@ def _load_templates() -> Dict[str, Dict[str, Any]]:
 
     # Find templates directory relative to this file
     # renderer.py is at: dialogcart/src/luma/clarification/renderer.py
-    # JSON is at: dialogcart/templates/clarification.json
+    # JSON is at: dialogcart/src/core/rendering/templates/clarification.json
     current_file = Path(__file__)
-    templates_path = current_file.parent.parent.parent.parent / \
-        "templates" / "clarification.json"
+    templates_path = (
+        current_file.parent.parent.parent / "core" /
+        "rendering" / "templates" / "clarification.json"
+    )
 
     if not templates_path.exists():
         raise FileNotFoundError(
             f"Clarification templates not found at {templates_path}. "
-            f"Expected location: dialogcart/templates/clarification.json"
+            f"Expected location: src/core/rendering/templates/clarification.json"
         )
 
     with open(templates_path, "r", encoding="utf-8") as f:
@@ -95,7 +97,8 @@ def render_clarification(clarification: Clarification) -> str:
 
     # Validate required fields
     missing_fields = [
-        field for field in required_fields if field not in clarification.data]
+        field for field in required_fields if field not in clarification.data
+    ]
     if missing_fields:
         raise ValueError(
             f"Missing required fields for {reason_value}: {missing_fields}. "
@@ -103,7 +106,7 @@ def render_clarification(clarification: Clarification) -> str:
         )
 
     # Extract all placeholders from template
-    placeholders = re.findall(r'\{\{(\w+)\}\}', template)
+    placeholders = re.findall(r"\{\{(\w+)\}\}", template)
 
     # Replace each placeholder with data value
     rendered = template

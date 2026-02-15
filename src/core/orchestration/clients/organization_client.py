@@ -4,7 +4,7 @@ Organization API Client
 Thin HTTP client for calling organization internal API.
 """
 
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from core.orchestration.clients.base_client import BaseClient
 
@@ -22,7 +22,7 @@ class OrganizationClient(BaseClient):
         super().__init__(
             base_url=base_url,
             env_var="INTERNAL_API_BASE_URL",
-            default_url="http://localhost:3000"
+            default_url="http://localhost:3000",
         )
 
     def get_details(self, organization_id: int) -> Dict[str, Any]:
@@ -51,7 +51,12 @@ class OrganizationClient(BaseClient):
         path = f"/api/internal/organizations/{organization_id}/hours"
         return self._request("GET", path)
 
-    def get_faqs(self, organization_id: int, query: Optional[str] = None, limit: Optional[int] = None) -> Dict[str, Any]:
+    def get_faqs(
+        self,
+        organization_id: int,
+        query: Optional[str] = None,
+        limit: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """
         Get organization FAQs.
 

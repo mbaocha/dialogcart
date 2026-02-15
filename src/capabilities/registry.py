@@ -27,27 +27,29 @@ ADAPTER_REGISTRY: Dict[str, CapabilityAdapter] = {}
 def register_adapter(adapter: CapabilityAdapter) -> None:
     """
     Register a capability adapter.
-    
+
     Args:
         adapter: Adapter instance to register
-    
+
     Raises:
         ValueError: If adapter name is invalid or already registered
-    
+
     Example:
         payment_adapter = PaymentAdapter()
         register_adapter(payment_adapter)
     """
     if not isinstance(adapter, CapabilityAdapter):
-        raise ValueError(f"Adapter must be instance of CapabilityAdapter, got {type(adapter)}")
-    
+        raise ValueError(
+            f"Adapter must be instance of CapabilityAdapter, got {type(adapter)}"
+        )
+
     name = adapter.name
     if not name or not isinstance(name, str):
         raise ValueError(f"Adapter name must be non-empty string, got {name!r}")
-    
+
     if name in ADAPTER_REGISTRY:
         logger.warning(f"Adapter {name} already registered, overwriting")
-    
+
     ADAPTER_REGISTRY[name] = adapter
     logger.info(f"Registered adapter: {name}")
 
@@ -55,16 +57,16 @@ def register_adapter(adapter: CapabilityAdapter) -> None:
 def get_adapter(capability: str) -> CapabilityAdapter:
     """
     Get adapter for capability name.
-    
+
     Args:
         capability: Capability name (e.g., "payment", "kyc")
-    
+
     Returns:
         Adapter instance
-    
+
     Raises:
         KeyError: If adapter not registered for capability
-    
+
     Example:
         adapter = get_adapter("payment")
         response = adapter.start(context)
@@ -75,14 +77,14 @@ def get_adapter(capability: str) -> CapabilityAdapter:
             f"Adapter not registered for capability: {capability}. "
             f"Available adapters: {available}"
         )
-    
+
     return ADAPTER_REGISTRY[capability]
 
 
 def list_adapters() -> list[str]:
     """
     List all registered adapter names.
-    
+
     Returns:
         List of capability names
     """
@@ -92,9 +94,8 @@ def list_adapters() -> list[str]:
 def clear_registry() -> None:
     """
     Clear all registered adapters.
-    
+
     Useful for testing.
     """
     ADAPTER_REGISTRY.clear()
     logger.info("Cleared adapter registry")
-

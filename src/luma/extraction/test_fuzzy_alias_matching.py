@@ -5,9 +5,10 @@ Isolated test for fuzzy alias matching functionality.
 Tests the _apply_fuzzy_matching_post_process function directly.
 """
 
-from luma.extraction.matcher import _apply_fuzzy_matching_post_process
 import sys
 from pathlib import Path
+
+from luma.extraction.matcher import _apply_fuzzy_matching_post_process
 
 # Add src directory to path for imports
 script_dir = Path(__file__).parent.resolve()  # extraction/
@@ -37,7 +38,8 @@ def test_premium_suite_fuzzy_match():
     suite_pos = normalized_text.find("suite")
     print(f"Debug: 'suite' found at position {suite_pos}")
     print(
-        f"Debug: Text around position: '{normalized_text[max(0, suite_pos-10):suite_pos+15]}'")
+        f"Debug: Text around position: '{normalized_text[max(0, suite_pos-10):suite_pos+15]}'"
+    )
 
     # Simulate what compiled version would return (exact match for "suite")
     existing_spans = [
@@ -88,10 +90,12 @@ def test_premium_suite_fuzzy_match():
 
     # Assertions
     assert len(fuzzy_matches) > 0, "Expected at least one fuzzy match"
-    assert any(m["alias_key"] == "premum suite" for m in fuzzy_matches), \
-        "Expected fuzzy match to 'premum suite'"
-    assert not any(m["alias_key"] == "suite" for m in result), \
-        "Expected 'suite' exact match to be removed"
+    assert any(
+        m["alias_key"] == "premum suite" for m in fuzzy_matches
+    ), "Expected fuzzy match to 'premum suite'"
+    assert not any(
+        m["alias_key"] == "suite" for m in result
+    ), "Expected 'suite' exact match to be removed"
 
     print()
     print("✓ Test 1 PASSED")
@@ -143,8 +147,9 @@ def test_premum_suite_exact_match():
     print()
 
     assert len(exact_matches) > 0, "Expected exact match to remain"
-    assert any(m["alias_key"] == "premum suite" for m in exact_matches), \
-        "Expected exact match to 'premum suite'"
+    assert any(
+        m["alias_key"] == "premum suite" for m in exact_matches
+    ), "Expected exact match to 'premum suite'"
 
     print("✓ Test 2 PASSED")
     print()
@@ -192,10 +197,12 @@ if __name__ == "__main__":
     except AssertionError as e:
         print(f"\nTEST FAILED: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
     except Exception as e:
         print(f"\n✗ ERROR: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

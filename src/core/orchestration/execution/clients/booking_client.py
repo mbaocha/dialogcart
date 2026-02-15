@@ -4,7 +4,7 @@ Booking API Client
 Thin HTTP client for calling booking internal API.
 """
 
-from typing import Dict, Any, Optional, Literal, List
+from typing import Any, Dict, List, Literal, Optional
 
 from core.orchestration.execution.clients.base_client import BaseClient
 
@@ -22,7 +22,7 @@ class BookingClient(BaseClient):
         super().__init__(
             base_url=base_url,
             env_var="INTERNAL_API_BASE_URL",
-            default_url="http://localhost:3000"
+            default_url="http://localhost:3000",
         )
 
     def create_booking(
@@ -70,7 +70,8 @@ class BookingClient(BaseClient):
         if booking_type == "service":
             if not start_time or not end_time:
                 raise ValueError(
-                    "start_time and end_time are required for service bookings")
+                    "start_time and end_time are required for service bookings"
+                )
             payload = {
                 "organization_id": organization_id,
                 "customer_id": customer_id,
@@ -86,7 +87,8 @@ class BookingClient(BaseClient):
         elif booking_type == "reservation":
             if not check_in or not check_out:
                 raise ValueError(
-                    "check_in and check_out are required for reservation bookings")
+                    "check_in and check_out are required for reservation bookings"
+                )
             payload = {
                 "organization_id": organization_id,
                 "customer_id": customer_id,
@@ -104,6 +106,7 @@ class BookingClient(BaseClient):
         path = "/api/internal/bookings"
         # Debug: Log payload before sending
         import logging
+
         logger = logging.getLogger(__name__)
         logger.debug("Creating booking with payload: %s", payload)
         return self._request("POST", path, json=payload)
@@ -128,7 +131,9 @@ class BookingClient(BaseClient):
         self,
         booking_code: str,
         organization_id: int,
-        cancellation_type: Literal["cancelled", "no_show", "rescheduled", "user_initiated"],
+        cancellation_type: Literal[
+            "cancelled", "no_show", "rescheduled", "user_initiated"
+        ],
         *,
         reason: Optional[str] = None,
         notes: Optional[str] = None,
@@ -251,8 +256,3 @@ class BookingClient(BaseClient):
         if extra_payment_fields:
             payload["payment"].update(extra_payment_fields)
         return self._request("POST", "/api/internal/bookings/intent", json=payload)
-
-
-
-
-

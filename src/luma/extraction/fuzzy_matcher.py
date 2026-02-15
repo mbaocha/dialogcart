@@ -5,11 +5,11 @@ Used ONLY as a fallback when EntityRuler misses a grounded entity.
 Matches multi-word phrases (2–4 tokens) using fuzzy string matching.
 """
 
-from typing import List, Dict, Any, Set, Tuple
 import re
+from typing import Any, Dict, List, Set, Tuple
 
 try:
-    from rapidfuzz import process, fuzz
+    from rapidfuzz import fuzz, process
 except ImportError:
     process = None
     fuzz = None
@@ -33,11 +33,7 @@ class TenantFuzzyMatcher:
     - "airport" → "airport pickup"
     """
 
-    def __init__(
-        self,
-        entity_map: Dict[str, List[str]],
-        threshold: int = 88
-    ):
+    def __init__(self, entity_map: Dict[str, List[str]], threshold: int = 88):
         """
         Args:
             entity_map:
@@ -52,8 +48,7 @@ class TenantFuzzyMatcher:
             raise ImportError("rapidfuzz required: pip install rapidfuzz")
 
         self.entity_map = {
-            k: [v.lower() for v in values]
-            for k, values in entity_map.items()
+            k: [v.lower() for v in values] for k, values in entity_map.items()
         }
         self.threshold = threshold
 
@@ -68,9 +63,7 @@ class TenantFuzzyMatcher:
     # -----------------------------------------------------
 
     def _generate_ngrams(
-        self,
-        tokens: List[str],
-        occupied: Set[int]
+        self, tokens: List[str], occupied: Set[int]
     ) -> List[Tuple[int, int, str]]:
         """
         Generate ONLY multi-word spans (2–4 tokens).
@@ -111,10 +104,7 @@ class TenantFuzzyMatcher:
     # -----------------------------------------------------
 
     def recover(
-        self,
-        tokens: List[str],
-        occupied_positions: Set[int],
-        debug: bool = False
+        self, tokens: List[str], occupied_positions: Set[int], debug: bool = False
     ) -> List[Dict[str, Any]]:
         """
         Recover entities missed by EntityRuler.
@@ -140,20 +130,13 @@ class TenantFuzzyMatcher:
         ngrams.sort(key=lambda x: x[1] - x[0], reverse=True)
 
         for start, end, phrase in ngrams:
-            if any(
-                not (end <= s or start >= e)
-                for s, e in matched_spans
-            ):
+            if any(not (end <= s or start >= e) for s, e in matched_spans):
                 continue
 
             best = None
 
             for entity_type, values in self.entity_map.items():
-                match = process.extractOne(
-                    phrase,
-                    values,
-                    scorer=fuzz.token_sort_ratio
-                )
+                match = process.extractOne(phrase, values, scorer=fuzz.token_sort_ratio)
 
                 if not match:
                     continue
@@ -168,7 +151,7 @@ class TenantFuzzyMatcher:
                             "start": start,
                             "end": end,
                             "score": int(score),
-                            "source": "fuzzy"
+                            "source": "fuzzy",
                         }
 
             if best:
@@ -177,9 +160,7 @@ class TenantFuzzyMatcher:
 
                 if debug:
                     span_text = " ".join(tokens[start:end])
-                    print(
-                        f"[FUZZY] '{span_text}' → {best['text']} ({best['score']}%)"
-                    )
+                    print(f"[FUZZY] '{span_text}' → {best['text']} ({best['score']}%)")
 
         # --------------------------------------------------
         # Pass 2: single-token typo recovery (SAFE MODE)
@@ -208,11 +189,7 @@ class TenantFuzzyMatcher:
                     continue
 
                 # Use ratio for single-token matching (better for single-word typos)
-                match = process.extractOne(
-                    token.lower(),
-                    values,
-                    scorer=fuzz.ratio
-                )
+                match = process.extractOne(token.lower(), values, scorer=fuzz.ratio)
 
                 if not match:
                     continue
@@ -225,25 +202,29 @@ class TenantFuzzyMatcher:
 
             if debug and best_score > 0:
                 print(
-                    f"[FUZZY-SINGLE] '{token}' → {best_entity} (score: {best_score:.1f}%, threshold: 85)")
+                    f"[FUZZY-SINGLE] '{token}' → {best_entity} (score: {best_score:.1f}%, threshold: 85)"
+                )
 
             # HIGH threshold to avoid semantic drift (85 for single-token typos)
             # Single-character typos like "hairkut" → "haircut" typically score 85-92%
             if best_score >= 85:
-                recovered.append({
-                    "type": best_type,
-                    "text": best_entity,
-                    "start": i,
-                    "end": i + 1,
-                    "score": int(best_score),
-                    "source": "fuzzy_single"
-                })
+                recovered.append(
+                    {
+                        "type": best_type,
+                        "text": best_entity,
+                        "start": i,
+                        "end": i + 1,
+                        "score": int(best_score),
+                        "source": "fuzzy_single",
+                    }
+                )
 
                 matched_spans.add((i, i + 1))
 
                 if debug:
                     print(
-                        f"[FUZZY-SINGLE] ACCEPTED '{token}' → {best_entity} ({best_score}%)")
+                        f"[FUZZY-SINGLE] ACCEPTED '{token}' → {best_entity} ({best_score}%)"
+                    )
 
         return recovered
 
@@ -259,19 +240,9 @@ if __name__ == "__main__":
     # Test entity map (natural language only)
     # -------------------------------------------------
     entity_map = {
-        "service": [
-            "haircut",
-            "hair trim",
-            "beard trim"
-        ],
-        "room_type": [
-            "double room",
-            "suite"
-        ],
-        "amenity": [
-            "airport pickup",
-            "breakfast"
-        ]
+        "service": ["haircut", "hair trim", "beard trim"],
+        "room_type": ["double room", "suite"],
+        "amenity": ["airport pickup", "breakfast"],
     }
 
     matcher = TenantFuzzyMatcher(entity_map, threshold=88)
@@ -314,7 +285,7 @@ if __name__ == "__main__":
             print("  (none)")
         else:
             for r in results:
-                span_text = " ".join(tokens[r["start"]:r["end"]])
+                span_text = " ".join(tokens[r["start"] : r["end"]])
                 print(
                     f"  [{r['start']}:{r['end']}] "
                     f"'{span_text}' → {r['type']} = '{r['text']}' "

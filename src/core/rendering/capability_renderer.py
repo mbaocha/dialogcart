@@ -7,11 +7,13 @@ This module provides deterministic rendering from semantic signals (status, acti
 Core renderer is the source of truth for capability presentation text.
 """
 
-import re
-import yaml
-from pathlib import Path
-from typing import Dict, Any, Optional
 import logging
+import re
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import yaml
+
 from .clarification_renderer import RenderSpec
 
 # Import at module level for test patching
@@ -68,10 +70,7 @@ def _load_capability_templates() -> Dict[str, Dict[str, Any]]:
     return _TEMPLATES_CACHE
 
 
-def _render_capability_template(
-    capability: str,
-    data: Dict[str, Any]
-) -> Optional[str]:
+def _render_capability_template(capability: str, data: Dict[str, Any]) -> Optional[str]:
     """
     Render capability text from template.
 
@@ -110,11 +109,13 @@ def _render_capability_template(
                     return None
 
                 # Extract all placeholders from template
-                placeholders = re.findall(r'\{\{(\w+)\}\}', template)
+                placeholders = re.findall(r"\{\{(\w+)\}\}", template)
 
                 # Validate all placeholders are present in data
                 missing_placeholders = [
-                    placeholder for placeholder in placeholders if placeholder not in data
+                    placeholder
+                    for placeholder in placeholders
+                    if placeholder not in data
                 ]
                 if missing_placeholders:
                     # If placeholders missing, return None immediately
@@ -124,8 +125,7 @@ def _render_capability_template(
                 rendered = template
                 for placeholder in placeholders:
                     value = str(data[placeholder])
-                    rendered = rendered.replace(
-                        f"{{{{{placeholder}}}}}", value)
+                    rendered = rendered.replace(f"{{{{{placeholder}}}}}", value)
 
                 # Strip trailing newlines from YAML multiline strings
                 return rendered.strip()
@@ -147,11 +147,13 @@ def _render_capability_template(
                     return None
 
                 # Extract all placeholders from template
-                placeholders = re.findall(r'\{\{(\w+)\}\}', template)
+                placeholders = re.findall(r"\{\{(\w+)\}\}", template)
 
                 # Validate all placeholders are present in data
                 missing_placeholders = [
-                    placeholder for placeholder in placeholders if placeholder not in data
+                    placeholder
+                    for placeholder in placeholders
+                    if placeholder not in data
                 ]
                 if missing_placeholders:
                     return None
@@ -160,8 +162,7 @@ def _render_capability_template(
                 rendered = template
                 for placeholder in placeholders:
                     value = str(data[placeholder])
-                    rendered = rendered.replace(
-                        f"{{{{{placeholder}}}}}", value)
+                    rendered = rendered.replace(f"{{{{{placeholder}}}}}", value)
 
                 # Strip trailing newlines from YAML multiline strings
                 return rendered.strip()
@@ -175,7 +176,7 @@ def render_capability(
     active_capability: Optional[str],
     facts: Dict[str, Any],
     slots: Dict[str, Any],
-    context: Optional[Dict[str, Any]] = None
+    context: Optional[Dict[str, Any]] = None,
 ) -> Optional[RenderSpec]:
     """
     Render text for capability states.
@@ -221,7 +222,7 @@ def render_capability(
 def _render_payment_capability(
     facts: Dict[str, Any],
     slots: Dict[str, Any],
-    context: Optional[Dict[str, Any]] = None
+    context: Optional[Dict[str, Any]] = None,
 ) -> Optional[str]:
     """
     Render payment capability text.
@@ -262,8 +263,7 @@ def _render_payment_capability(
 
     # Try to derive from booking_id if available
     if not booking_code:
-        booking_id = session_slots.get(
-            "booking_id") or session_facts.get("booking_id")
+        booking_id = session_slots.get("booking_id") or session_facts.get("booking_id")
         if booking_id:
             booking_code = f"booking_{booking_id}"
 
@@ -276,7 +276,8 @@ def _render_payment_capability(
         # Use module-level get_adapter (imported at top)
         if get_adapter is None:
             logger.debug(
-                "Payment adapter not available - capabilities module not imported")
+                "Payment adapter not available - capabilities module not imported"
+            )
             return None
 
         try:
@@ -290,13 +291,16 @@ def _render_payment_capability(
         except KeyError:
             # Adapter not registered - rendering cannot proceed
             logger.debug(
-                "Payment adapter not registered - skipping capability rendering")
+                "Payment adapter not registered - skipping capability rendering"
+            )
             return None
 
         # Get payment URL (same as adapter.start())
         url_response = payment_client.get_payment_url(booking_code)
 
-        if not url_response.get("success") or not url_response["data"].get("has_payment_intent"):
+        if not url_response.get("success") or not url_response["data"].get(
+            "has_payment_intent"
+        ):
             return "Payment link not available. Please try again."
 
         payment_url = url_response["data"].get("payment_url")
@@ -305,8 +309,7 @@ def _render_payment_capability(
 
         # Render from template (with fallback to hardcoded string)
         rendered = _render_capability_template(
-            capability="PAYMENT",
-            data={"payment_url": payment_url}
+            capability="PAYMENT", data={"payment_url": payment_url}
         )
 
         # Fallback to original hardcoded string if template missing

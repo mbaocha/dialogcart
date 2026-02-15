@@ -22,7 +22,7 @@ class CatalogClient(BaseClient):
         super().__init__(
             base_url=base_url,
             env_var="INTERNAL_API_BASE_URL",
-            default_url="http://localhost:3000"
+            default_url="http://localhost:3000",
         )
 
     def get_services(self, organization_id: int) -> Dict[str, Any]:
@@ -57,4 +57,3 @@ class CatalogClient(BaseClient):
         """
         path = f"/api/internal/organizations/{organization_id}/reservation"
         return self._request("GET", path)
-

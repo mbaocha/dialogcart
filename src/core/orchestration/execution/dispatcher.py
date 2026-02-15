@@ -7,7 +7,7 @@ Supports SEARCH_AVAILABILITY, CONFIRM_APPOINTMENT, and CONFIRM_CANCELLATION acti
 
 import logging
 import re
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 def execute(
     plan: Dict[str, Any],
     availability_client: Optional[Any] = None,
-    booking_client: Optional[Any] = None
+    booking_client: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Execute a planning result using injected clients.
@@ -62,37 +62,40 @@ def execute(
     if action == "SEARCH_AVAILABILITY":
         if not availability_client:
             raise ValueError(
-                "availability_client is required for SEARCH_AVAILABILITY action")
+                "availability_client is required for SEARCH_AVAILABILITY action"
+            )
         return _execute_search_availability(plan, availability_client, booking_client)
     elif action == "CONFIRM_APPOINTMENT":
         if not booking_client:
             raise ValueError(
-                "booking_client is required for CONFIRM_APPOINTMENT action")
+                "booking_client is required for CONFIRM_APPOINTMENT action"
+            )
         return _execute_confirm_appointment(plan, booking_client)
     elif action == "CONFIRM_CANCELLATION":
         if not booking_client:
             raise ValueError(
-                "booking_client is required for CONFIRM_CANCELLATION action")
+                "booking_client is required for CONFIRM_CANCELLATION action"
+            )
         return _execute_confirm_cancellation(plan, booking_client)
     elif action == "APPLY_MODIFICATION":
         if not booking_client:
-            raise ValueError(
-                "booking_client is required for APPLY_MODIFICATION action")
+            raise ValueError("booking_client is required for APPLY_MODIFICATION action")
         return _execute_apply_modification(plan, booking_client)
     elif action == "FETCH_BOOKING":
         if not booking_client:
-            raise ValueError(
-                "booking_client is required for FETCH_BOOKING action")
+            raise ValueError("booking_client is required for FETCH_BOOKING action")
         return _execute_fetch_booking(plan, booking_client)
     elif action == "CREATE_BOOKING_HOLD":
         if not booking_client:
             raise ValueError(
-                "booking_client is required for CREATE_BOOKING_HOLD action")
+                "booking_client is required for CREATE_BOOKING_HOLD action"
+            )
         return _execute_create_booking_hold(plan, booking_client)
     elif action == "FINALIZE_RESERVATION":
         if not booking_client:
             raise ValueError(
-                "booking_client is required for FINALIZE_RESERVATION action")
+                "booking_client is required for FINALIZE_RESERVATION action"
+            )
         return _execute_finalize_reservation(plan, booking_client)
     else:
         raise ValueError(
@@ -101,9 +104,7 @@ def execute(
 
 
 def _execute_search_availability(
-    plan: Dict[str, Any],
-    availability_client: Any,
-    booking_client: Optional[Any] = None
+    plan: Dict[str, Any], availability_client: Any, booking_client: Optional[Any] = None
 ) -> Dict[str, Any]:
     """
     Execute SEARCH_AVAILABILITY action.
@@ -124,8 +125,7 @@ def _execute_search_availability(
     # Extract organization_id (required for all availability calls)
     organization_id = slots.get("organization_id")
     if not organization_id:
-        raise ValueError(
-            "organization_id is required in slots for availability search")
+        raise ValueError("organization_id is required in slots for availability search")
 
     # Route based on intent to determine service vs reservation
     if intent_name == "CREATE_APPOINTMENT":
@@ -136,7 +136,7 @@ def _execute_search_availability(
             time_constraint=time_constraint,
             availability_client=availability_client,
             intent_name=intent_name,
-            booking_client=booking_client
+            booking_client=booking_client,
         )
     elif intent_name == "CREATE_RESERVATION":
         # Reservation availability search
@@ -144,7 +144,7 @@ def _execute_search_availability(
             organization_id=organization_id,
             slots=slots,
             time_constraint=time_constraint,
-            availability_client=availability_client
+            availability_client=availability_client,
         )
     elif intent_name in ("MODIFY_BOOKING", "MODIFY_RESERVATION"):
         # Service availability search (for MODIFY_BOOKING, service_id comes from booking)
@@ -154,7 +154,7 @@ def _execute_search_availability(
             time_constraint=time_constraint,
             availability_client=availability_client,
             intent_name=intent_name,
-            booking_client=booking_client
+            booking_client=booking_client,
         )
     else:
         # Default to service availability for unknown intents
@@ -167,13 +167,12 @@ def _execute_search_availability(
             time_constraint=time_constraint,
             availability_client=availability_client,
             intent_name=intent_name,
-            booking_client=booking_client
+            booking_client=booking_client,
         )
 
 
 def _execute_confirm_appointment(
-    plan: Dict[str, Any],
-    booking_client: Any
+    plan: Dict[str, Any], booking_client: Any
 ) -> Dict[str, Any]:
     """
     Execute CONFIRM_APPOINTMENT action.
@@ -198,12 +197,12 @@ def _execute_confirm_appointment(
     organization_id = slots.get("organization_id")
     if not organization_id:
         raise ValueError(
-            "organization_id is required in slots for appointment confirmation")
+            "organization_id is required in slots for appointment confirmation"
+        )
 
     service_id = slots.get("service_id")
     if not service_id:
-        raise ValueError(
-            "service_id is required in slots for appointment confirmation")
+        raise ValueError("service_id is required in slots for appointment confirmation")
 
     # Extract customer_id (default to 1 if not provided)
     customer_id = slots.get("customer_id", 1)
@@ -237,19 +236,16 @@ def _execute_confirm_appointment(
             "organization_id": organization_id,
             "service_id": service_id,
             "start_time": start_time,
-            "end_time": end_time
+            "end_time": end_time,
         }
-        facts = {
-            "slots": slots,
-            "intent_name": intent_name
-        }
+        facts = {"slots": slots, "intent_name": intent_name}
         if time_constraint:
             facts["time_constraint"] = time_constraint
         return {
             "status": "EXECUTED",
             "booking": booking,
             "facts": facts,
-            "booking_id": existing_booking_id  # Include for test compatibility
+            "booking_id": existing_booking_id,  # Include for test compatibility
         }
 
     # Extract optional fields
@@ -262,12 +258,15 @@ def _execute_confirm_appointment(
             organization_id=organization_id,
             customer_id=customer_id,
             booking_type="service",
-            item_id=service_id if isinstance(service_id, int) else int(
-                service_id) if str(service_id).isdigit() else 1,
+            item_id=(
+                service_id
+                if isinstance(service_id, int)
+                else int(service_id) if str(service_id).isdigit() else 1
+            ),
             start_time=start_time,
             end_time=end_time,
             staff_id=staff_id,
-            addons=addons
+            addons=addons,
         )
     except AttributeError as e:
         raise AttributeError(
@@ -279,14 +278,20 @@ def _execute_confirm_appointment(
         raise ValueError(f"Booking creation failed: {str(e)}") from e
 
     # Extract booking object from response
-    booking = booking_response.get("booking") if isinstance(
-        booking_response, dict) else booking_response
+    booking = (
+        booking_response.get("booking")
+        if isinstance(booking_response, dict)
+        else booking_response
+    )
 
     # Extract booking_id from booking object for idempotency
     booking_id = None
     if isinstance(booking, dict):
-        booking_id = booking.get("id") or booking.get(
-            "booking_id") or booking.get("booking_code")
+        booking_id = (
+            booking.get("id")
+            or booking.get("booking_id")
+            or booking.get("booking_code")
+        )
     elif hasattr(booking, "id"):
         booking_id = booking.id
     elif hasattr(booking, "booking_id"):
@@ -297,23 +302,15 @@ def _execute_confirm_appointment(
     # Store booking_id in slots for idempotency (prevent duplicate creation on next confirmation)
     if booking_id:
         slots["booking_id"] = booking_id
-        logger.debug(
-            f"Stored booking_id={booking_id} in slots for idempotency")
+        logger.debug(f"Stored booking_id={booking_id} in slots for idempotency")
 
     # Build execution result
     # Include original facts (slots) in the result
-    facts = {
-        "slots": slots,
-        "intent_name": intent_name
-    }
+    facts = {"slots": slots, "intent_name": intent_name}
     if time_constraint:
         facts["time_constraint"] = time_constraint
 
-    result = {
-        "status": "EXECUTED",
-        "booking": booking,
-        "facts": facts
-    }
+    result = {"status": "EXECUTED", "booking": booking, "facts": facts}
 
     # Include booking_id in result for test compatibility
     if booking_id:
@@ -323,8 +320,7 @@ def _execute_confirm_appointment(
 
 
 def _execute_confirm_cancellation(
-    plan: Dict[str, Any],
-    booking_client: Any
+    plan: Dict[str, Any], booking_client: Any
 ) -> Dict[str, Any]:
     """
     Execute CONFIRM_CANCELLATION action.
@@ -348,13 +344,15 @@ def _execute_confirm_cancellation(
     organization_id = slots.get("organization_id")
     if not organization_id:
         raise ValueError(
-            "organization_id is required in slots for cancellation confirmation")
+            "organization_id is required in slots for cancellation confirmation"
+        )
 
     # Extract booking_id (required for cancellation)
     booking_id = slots.get("booking_id")
     if not booking_id:
         raise ValueError(
-            "booking_id is required in slots for cancellation confirmation")
+            "booking_id is required in slots for cancellation confirmation"
+        )
 
     # Convert booking_id to string (booking_code expects string)
     booking_code = str(booking_id)
@@ -377,7 +375,7 @@ def _execute_confirm_cancellation(
             reason=reason,
             notes=notes,
             refund_method=refund_method,
-            notify_customer=notify_customer
+            notify_customer=notify_customer,
         )
     except AttributeError as e:
         raise AttributeError(
@@ -389,15 +387,15 @@ def _execute_confirm_cancellation(
         raise ValueError(f"Booking cancellation failed: {str(e)}") from e
 
     # Extract cancellation object from response
-    cancellation = cancellation_response.get("cancellation") if isinstance(
-        cancellation_response, dict) else cancellation_response
+    cancellation = (
+        cancellation_response.get("cancellation")
+        if isinstance(cancellation_response, dict)
+        else cancellation_response
+    )
 
     # Build execution result
     # Include original facts (slots) in the result
-    facts = {
-        "slots": slots,
-        "intent_name": intent_name
-    }
+    facts = {"slots": slots, "intent_name": intent_name}
 
     # Build result with cancellation data
     # Include booking_id for test compatibility (test checks for booking_id or cancellation)
@@ -405,7 +403,7 @@ def _execute_confirm_cancellation(
         "status": "EXECUTED",  # Execution status
         "cancellation": cancellation,
         "facts": facts,
-        "booking_id": booking_id  # Include for test compatibility
+        "booking_id": booking_id,  # Include for test compatibility
     }
 
     # Preserve response fields for test compatibility
@@ -426,10 +424,7 @@ def _execute_confirm_cancellation(
     return result
 
 
-def _execute_fetch_booking(
-    plan: Dict[str, Any],
-    booking_client: Any
-) -> Dict[str, Any]:
+def _execute_fetch_booking(plan: Dict[str, Any], booking_client: Any) -> Dict[str, Any]:
     """
     Execute FETCH_BOOKING action.
 
@@ -465,7 +460,7 @@ def _execute_fetch_booking(
     if not booking_id and not booking_code:
         # Try to infer from context - check if booking_client has a method to get most recent booking
         # This is a placeholder - in a real system, you might query user's bookings
-        if hasattr(booking_client, 'get_most_recent_booking'):
+        if hasattr(booking_client, "get_most_recent_booking"):
             try:
                 # Extract organization_id from slots, or try to get from plan context
                 organization_id = slots.get("organization_id")
@@ -476,25 +471,31 @@ def _execute_fetch_booking(
 
                 most_recent = booking_client.get_most_recent_booking(
                     organization_id=organization_id,
-                    customer_id=slots.get("customer_id")
+                    customer_id=slots.get("customer_id"),
                 )
                 logger.debug(
-                    f"[FETCH_BOOKING] get_most_recent_booking returned: {most_recent}")
+                    f"[FETCH_BOOKING] get_most_recent_booking returned: {most_recent}"
+                )
                 if most_recent:
                     # Handle both wrapped {"booking": {...}} and direct booking dict formats
-                    booking_data = most_recent.get("booking") if isinstance(
-                        most_recent, dict) and "booking" in most_recent else most_recent
+                    booking_data = (
+                        most_recent.get("booking")
+                        if isinstance(most_recent, dict) and "booking" in most_recent
+                        else most_recent
+                    )
                     logger.debug(
-                        f"[FETCH_BOOKING] extracted booking_data: {booking_data}")
+                        f"[FETCH_BOOKING] extracted booking_data: {booking_data}"
+                    )
                     if isinstance(booking_data, dict):
-                        booking_id = booking_data.get(
-                            "id") or booking_data.get("booking_id")
+                        booking_id = booking_data.get("id") or booking_data.get(
+                            "booking_id"
+                        )
                         booking_code = booking_data.get("booking_code")
                         logger.debug(
-                            f"[FETCH_BOOKING] extracted booking_id={booking_id}, booking_code={booking_code}")
+                            f"[FETCH_BOOKING] extracted booking_id={booking_id}, booking_code={booking_code}"
+                        )
             except Exception as e:
-                logger.warning(
-                    f"Failed to get most recent booking: {e}", exc_info=True)
+                logger.warning(f"Failed to get most recent booking: {e}", exc_info=True)
 
         # If still no booking_id, raise error
         if not booking_id and not booking_code:
@@ -510,38 +511,36 @@ def _execute_fetch_booking(
     try:
         booking_response = booking_client.get_booking(booking_code_to_fetch)
     except AttributeError as e:
-        raise AttributeError(
-            f"booking_client must have get_booking method: {e}"
-        ) from e
+        raise AttributeError(f"booking_client must have get_booking method: {e}") from e
     except Exception as e:
         # Surface booking fetch errors as execution failures
         logger.error(f"Booking fetch failed: {e}")
         raise ValueError(f"Booking fetch failed: {str(e)}") from e
 
     # Extract booking object from response
-    booking = booking_response.get("booking") if isinstance(
-        booking_response, dict) else booking_response
+    booking = (
+        booking_response.get("booking")
+        if isinstance(booking_response, dict)
+        else booking_response
+    )
 
     # Extract booking_id from booking if not already in slots
     if not booking_id and isinstance(booking, dict):
         booking_id = (
-            booking.get("id") or
-            booking.get("booking_id") or
-            booking.get("booking_code") or
-            booking_code_to_fetch
+            booking.get("id")
+            or booking.get("booking_id")
+            or booking.get("booking_code")
+            or booking_code_to_fetch
         )
 
     # Build execution result
-    facts = {
-        "slots": slots,
-        "intent_name": intent_name
-    }
+    facts = {"slots": slots, "intent_name": intent_name}
 
     result = {
         "status": "EXECUTED",
         "booking": booking,
         "booking_id": booking_id,
-        "facts": facts
+        "facts": facts,
     }
 
     # Preserve other fields from response
@@ -554,8 +553,7 @@ def _execute_fetch_booking(
 
 
 def _execute_apply_modification(
-    plan: Dict[str, Any],
-    booking_client: Any
+    plan: Dict[str, Any], booking_client: Any
 ) -> Dict[str, Any]:
     """
     Execute APPLY_MODIFICATION action.
@@ -578,14 +576,12 @@ def _execute_apply_modification(
     # Extract required fields
     organization_id = slots.get("organization_id")
     if not organization_id:
-        raise ValueError(
-            "organization_id is required in slots for modification")
+        raise ValueError("organization_id is required in slots for modification")
 
     # Extract booking_id (required for modification)
     booking_id = slots.get("booking_id")
     if not booking_id:
-        raise ValueError(
-            "booking_id is required in slots for modification")
+        raise ValueError("booking_id is required in slots for modification")
 
     # Convert booking_id to string (booking_code expects string)
     booking_code = str(booking_id)
@@ -611,6 +607,7 @@ def _execute_apply_modification(
         # Construct datetime from date and time
         # Date is in ISO format (YYYY-MM-DD), time is in format like "2pm"
         from datetime import datetime, timedelta
+
         try:
             # Parse date
             date_obj = datetime.strptime(date, "%Y-%m-%d").date()
@@ -619,8 +616,7 @@ def _execute_apply_modification(
             time_str = str(time).lower().strip()
             if "pm" in time_str or "am" in time_str:
                 # Handle 12-hour format
-                time_str_clean = time_str.replace(
-                    "pm", "").replace("am", "").strip()
+                time_str_clean = time_str.replace("pm", "").replace("am", "").strip()
                 time_parts = time_str_clean.split(":")
                 hour = int(time_parts[0])
                 minute = int(time_parts[1]) if len(time_parts) > 1 else 0
@@ -638,7 +634,8 @@ def _execute_apply_modification(
 
             # Combine date and time
             start_datetime = datetime.combine(
-                date_obj, datetime.min.time().replace(hour=hour, minute=minute))
+                date_obj, datetime.min.time().replace(hour=hour, minute=minute)
+            )
 
             # Default duration is 60 minutes
             duration_minutes = 60
@@ -658,9 +655,7 @@ def _execute_apply_modification(
     # Call booking client
     try:
         modification_response = booking_client.update_booking(
-            booking_code=booking_code,
-            organization_id=organization_id,
-            updates=updates
+            booking_code=booking_code, organization_id=organization_id, updates=updates
         )
     except AttributeError as e:
         raise AttributeError(
@@ -672,22 +667,22 @@ def _execute_apply_modification(
         raise ValueError(f"Booking modification failed: {str(e)}") from e
 
     # Extract booking object from response
-    booking = modification_response.get("booking") if isinstance(
-        modification_response, dict) else modification_response
+    booking = (
+        modification_response.get("booking")
+        if isinstance(modification_response, dict)
+        else modification_response
+    )
 
     # Build execution result
     # Include original facts (slots) in the result
-    facts = {
-        "slots": slots,
-        "intent_name": intent_name
-    }
+    facts = {"slots": slots, "intent_name": intent_name}
 
     # Build result with modification data
     result = {
         "status": "EXECUTED",
         "booking": booking,
         "facts": facts,
-        "booking_id": booking_id
+        "booking_id": booking_id,
     }
 
     # Preserve response fields for test compatibility
@@ -699,8 +694,7 @@ def _execute_apply_modification(
 
 
 def _execute_create_booking_hold(
-    plan: Dict[str, Any],
-    booking_client: Any
+    plan: Dict[str, Any], booking_client: Any
 ) -> Dict[str, Any]:
     """
     Execute CREATE_BOOKING_HOLD action.
@@ -732,7 +726,8 @@ def _execute_create_booking_hold(
     organization_id = slots.get("organization_id")
     if not organization_id:
         raise ValueError(
-            "organization_id is required in slots for booking hold creation")
+            "organization_id is required in slots for booking hold creation"
+        )
 
     # Extract customer_id (default to 1 if not provided)
     customer_id = slots.get("customer_id", 1)
@@ -754,12 +749,9 @@ def _execute_create_booking_hold(
             "id": existing_booking_id,
             "booking_code": slots.get("booking_code", str(existing_booking_id)),
             "organization_id": organization_id,
-            "status": "pending"  # Assume pending if already exists
+            "status": "pending",  # Assume pending if already exists
         }
-        facts = {
-            "slots": slots,
-            "intent_name": intent_name
-        }
+        facts = {"slots": slots, "intent_name": intent_name}
         if time_constraint:
             facts["time_constraint"] = time_constraint
         return {
@@ -769,7 +761,7 @@ def _execute_create_booking_hold(
             "booking_code": booking.get("booking_code"),
             "total_amount": slots.get("total_amount"),
             "currency": slots.get("currency", "USD"),
-            "facts": facts
+            "facts": facts,
         }
 
     # Determine booking type from intent
@@ -779,7 +771,8 @@ def _execute_create_booking_hold(
         service_id = slots.get("service_id") or slots.get("item_id")
         if not service_id:
             raise ValueError(
-                "service_id or item_id is required in slots for reservation booking hold")
+                "service_id or item_id is required in slots for reservation booking hold"
+            )
 
         # Extract check_in and check_out from date_range or slots
         date_range = slots.get("date_range")
@@ -792,7 +785,8 @@ def _execute_create_booking_hold(
 
         if not check_in or not check_out:
             raise ValueError(
-                "check_in and check_out (or date_range) are required for reservation booking hold")
+                "check_in and check_out (or date_range) are required for reservation booking hold"
+            )
 
         guests = slots.get("guests", 1)
         extras = slots.get("extras")
@@ -803,12 +797,15 @@ def _execute_create_booking_hold(
                 organization_id=organization_id,
                 customer_id=customer_id,
                 booking_type="reservation",
-                item_id=service_id if isinstance(service_id, int) else int(
-                    service_id) if str(service_id).isdigit() else 1,
+                item_id=(
+                    service_id
+                    if isinstance(service_id, int)
+                    else int(service_id) if str(service_id).isdigit() else 1
+                ),
                 check_in=check_in,
                 check_out=check_out,
                 guests=guests,
-                extras=extras
+                extras=extras,
             )
         except AttributeError as e:
             raise AttributeError(
@@ -822,12 +819,10 @@ def _execute_create_booking_hold(
         booking_type = "service"
         service_id = slots.get("service_id")
         if not service_id:
-            raise ValueError(
-                "service_id is required in slots for service booking hold")
+            raise ValueError("service_id is required in slots for service booking hold")
 
         # Extract start_time and end_time from slots or time_constraint
-        start_time, end_time = _extract_datetime_from_slots(
-            slots, time_constraint)
+        start_time, end_time = _extract_datetime_from_slots(slots, time_constraint)
         if not start_time or not end_time:
             raise ValueError(
                 "start_time and end_time are required for service booking hold. "
@@ -843,12 +838,15 @@ def _execute_create_booking_hold(
                 organization_id=organization_id,
                 customer_id=customer_id,
                 booking_type="service",
-                item_id=service_id if isinstance(service_id, int) else int(
-                    service_id) if str(service_id).isdigit() else 1,
+                item_id=(
+                    service_id
+                    if isinstance(service_id, int)
+                    else int(service_id) if str(service_id).isdigit() else 1
+                ),
                 start_time=start_time,
                 end_time=end_time,
                 staff_id=staff_id,
-                addons=addons
+                addons=addons,
             )
         except AttributeError as e:
             raise AttributeError(
@@ -859,8 +857,11 @@ def _execute_create_booking_hold(
             raise ValueError(f"Booking hold creation failed: {str(e)}") from e
 
     # Extract booking object from response
-    booking = booking_response.get("booking") if isinstance(
-        booking_response, dict) else booking_response
+    booking = (
+        booking_response.get("booking")
+        if isinstance(booking_response, dict)
+        else booking_response
+    )
 
     # Extract booking_id, booking_code, total_amount, currency from booking
     booking_id = None
@@ -894,18 +895,11 @@ def _execute_create_booking_hold(
         )
 
     # Build execution result
-    facts = {
-        "slots": slots,
-        "intent_name": intent_name
-    }
+    facts = {"slots": slots, "intent_name": intent_name}
     if time_constraint:
         facts["time_constraint"] = time_constraint
 
-    result = {
-        "status": "EXECUTED",
-        "booking": booking,
-        "facts": facts
-    }
+    result = {"status": "EXECUTED", "booking": booking, "facts": facts}
 
     # Include booking identifiers and payment info for capability evaluation
     if booking_id:
@@ -921,8 +915,7 @@ def _execute_create_booking_hold(
 
 
 def _execute_finalize_reservation(
-    plan: Dict[str, Any],
-    booking_client: Any
+    plan: Dict[str, Any], booking_client: Any
 ) -> Dict[str, Any]:
     """
     Execute FINALIZE_RESERVATION action.
@@ -950,7 +943,8 @@ def _execute_finalize_reservation(
     organization_id = slots.get("organization_id")
     if not organization_id:
         raise ValueError(
-            "organization_id is required in slots for reservation confirmation")
+            "organization_id is required in slots for reservation confirmation"
+        )
 
     # Extract booking_code (required for confirmation)
     booking_code = slots.get("booking_code")
@@ -961,7 +955,8 @@ def _execute_finalize_reservation(
             booking_code = str(booking_id)
         else:
             raise ValueError(
-                "booking_code or booking_id is required in slots for reservation confirmation")
+                "booking_code or booking_id is required in slots for reservation confirmation"
+            )
 
     # GUARD 1: Explicit payment verification
     # This is a defensive check that enforces payment requirement even if capability blocking is bypassed
@@ -1000,28 +995,26 @@ def _execute_finalize_reservation(
                 booking_id = slots.get("booking_id")
                 if not booking_id and isinstance(existing_booking, dict):
                     booking_id = (
-                        existing_booking.get("id") or
-                        existing_booking.get("booking_id") or
-                        existing_booking.get("booking_code") or
-                        booking_code
+                        existing_booking.get("id")
+                        or existing_booking.get("booking_id")
+                        or existing_booking.get("booking_code")
+                        or booking_code
                     )
 
-                result_facts = {
-                    "slots": slots,
-                    "intent_name": intent_name
-                }
+                result_facts = {"slots": slots, "intent_name": intent_name}
 
                 return {
                     "status": "EXECUTED",
                     "booking": existing_booking,
                     "booking_id": booking_id,
-                    "facts": result_facts
+                    "facts": result_facts,
                 }
     except AttributeError:
         # booking_client doesn't have get_booking method - skip idempotency check
         logger.warning(
             "booking_client does not have get_booking method. "
-            "Skipping idempotency check for booking_code=%s", booking_code
+            "Skipping idempotency check for booking_code=%s",
+            booking_code,
         )
     except Exception as e:
         # If fetching booking fails, log but continue (defensive: don't block confirmation if fetch fails)
@@ -1033,8 +1026,7 @@ def _execute_finalize_reservation(
     # Call booking client to confirm the booking
     try:
         confirmation_response = booking_client.confirm_booking(
-            booking_code=booking_code,
-            organization_id=organization_id
+            booking_code=booking_code, organization_id=organization_id
         )
     except AttributeError as e:
         raise AttributeError(
@@ -1045,30 +1037,30 @@ def _execute_finalize_reservation(
         raise ValueError(f"Reservation confirmation failed: {str(e)}") from e
 
     # Extract booking object from response
-    booking = confirmation_response.get("booking") if isinstance(
-        confirmation_response, dict) else confirmation_response
+    booking = (
+        confirmation_response.get("booking")
+        if isinstance(confirmation_response, dict)
+        else confirmation_response
+    )
 
     # Extract booking_id from booking if not already in slots
     booking_id = slots.get("booking_id")
     if not booking_id and isinstance(booking, dict):
         booking_id = (
-            booking.get("id") or
-            booking.get("booking_id") or
-            booking.get("booking_code") or
-            booking_code
+            booking.get("id")
+            or booking.get("booking_id")
+            or booking.get("booking_code")
+            or booking_code
         )
 
     # Build execution result
-    facts = {
-        "slots": slots,
-        "intent_name": intent_name
-    }
+    facts = {"slots": slots, "intent_name": intent_name}
 
     result = {
         "status": "EXECUTED",
         "booking": booking,
         "booking_id": booking_id,
-        "facts": facts
+        "facts": facts,
     }
 
     # Preserve other fields from response
@@ -1081,8 +1073,7 @@ def _execute_finalize_reservation(
 
 
 def _extract_datetime_from_slots(
-    slots: Dict[str, Any],
-    time_constraint: Optional[Dict[str, Any]] = None
+    slots: Dict[str, Any], time_constraint: Optional[Dict[str, Any]] = None
 ) -> Tuple[Optional[str], Optional[str]]:
     """
     Extract start_time and end_time from slots or time_constraint.
@@ -1131,7 +1122,7 @@ def _execute_service_availability(
     time_constraint: Optional[Dict[str, Any]],
     availability_client: Any,
     intent_name: Optional[str] = None,
-    booking_client: Optional[Any] = None
+    booking_client: Optional[Any] = None,
 ) -> Dict[str, Any]:
     """
     Execute service availability search.
@@ -1160,10 +1151,11 @@ def _execute_service_availability(
                 if isinstance(booking, dict):
                     # Try common field names for service_id in booking response
                     extracted_service_id = (
-                        booking.get("service_id") or
-                        booking.get("item_id") or
-                        booking.get("service", {}).get("id") if isinstance(
-                            booking.get("service"), dict) else None
+                        booking.get("service_id")
+                        or booking.get("item_id")
+                        or booking.get("service", {}).get("id")
+                        if isinstance(booking.get("service"), dict)
+                        else None
                     )
                     if extracted_service_id:
                         logger.info(
@@ -1185,7 +1177,8 @@ def _execute_service_availability(
 
     if not service_id:
         raise ValueError(
-            "service_id is required in slots for service availability search")
+            "service_id is required in slots for service availability search"
+        )
 
     # Extract date (can be date, start_date, or from date_range/datetime_range)
     # POLICY: date is OPTIONAL for SEARCH_AVAILABILITY (mode=exploratory)
@@ -1193,16 +1186,19 @@ def _execute_service_availability(
     date = _extract_date_from_slots(slots)
 
     # DATE_NORMALIZATION_TRACE: Log date value used for availability execution
-    is_iso_date = isinstance(date, str) and bool(
-        re.match(r'^\d{4}-\d{2}-\d{2}$', date)) if date else False
+    is_iso_date = (
+        isinstance(date, str) and bool(re.match(r"^\d{4}-\d{2}-\d{2}$", date))
+        if date
+        else False
+    )
     logger.info(
         "[DATE_NORMALIZATION_TRACE] _execute_service_availability: using date for execution",
         extra={
-            'date_value': date,
-            'is_iso_format': is_iso_date,
-            'action': 'SEARCH_AVAILABILITY',
-            'normalization_point': 'dispatcher:_execute_service_availability'
-        }
+            "date_value": date,
+            "is_iso_format": is_iso_date,
+            "action": "SEARCH_AVAILABILITY",
+            "normalization_point": "dispatcher:_execute_service_availability",
+        },
     )
 
     # Build extra_params from time_constraint if present
@@ -1219,7 +1215,7 @@ def _execute_service_availability(
             organization_id=organization_id,
             service_id=service_id,
             date=date,  # Can be None - client should handle this
-            extra_params=extra_params
+            extra_params=extra_params,
         )
     except AttributeError as e:
         raise AttributeError(
@@ -1234,7 +1230,7 @@ def _execute_reservation_availability(
     organization_id: int,
     slots: Dict[str, Any],
     time_constraint: Optional[Dict[str, Any]],
-    availability_client: Any
+    availability_client: Any,
 ) -> Dict[str, Any]:
     """
     Execute reservation availability search.
@@ -1267,7 +1263,7 @@ def _execute_reservation_availability(
             organization_id=organization_id,
             start_date=start_date,
             end_date=end_date,
-            extra_params=extra_params
+            extra_params=extra_params,
         )
     except AttributeError as e:
         raise AttributeError(
@@ -1320,7 +1316,9 @@ def _extract_date_from_slots(slots: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def _extract_date_range_from_slots(slots: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
+def _extract_date_range_from_slots(
+    slots: Dict[str, Any]
+) -> Tuple[Optional[str], Optional[str]]:
     """
     Extract start_date and end_date from slots.
 
@@ -1404,7 +1402,8 @@ def _normalize_availability_response(response: Dict[str, Any]) -> Dict[str, Any]
     """
     if not isinstance(response, dict):
         raise ValueError(
-            f"Expected dict response from availability client, got {type(response)}")
+            f"Expected dict response from availability client, got {type(response)}"
+        )
 
     # Extract slots from response
     raw_slots = response.get("slots", [])
@@ -1425,14 +1424,7 @@ def _normalize_availability_response(response: Dict[str, Any]) -> Dict[str, Any]
             logger.warning(f"Skipping slot missing start/end times: {slot}")
             continue
 
-        normalized_slot = {
-            "starts_at": str(starts_at),
-            "ends_at": str(ends_at)
-        }
+        normalized_slot = {"starts_at": str(starts_at), "ends_at": str(ends_at)}
         normalized_slots.append(normalized_slot)
 
-    return {
-        "type": "availability",
-        "status": "success",
-        "slots": normalized_slots
-    }
+    return {"type": "availability", "status": "success", "slots": normalized_slots}

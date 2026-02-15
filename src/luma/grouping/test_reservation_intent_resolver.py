@@ -4,24 +4,23 @@ Test cases for reservation intent resolver.
 
 Tests rule-based intent resolution for all 10 production intents.
 """
-import sys
 import importlib.util
+import sys
 from pathlib import Path
 
 # Load modules directly to avoid import issues
 script_dir = Path(__file__).parent.resolve()
 
 # Mock luma.config before importing
-mock_config = type('MockConfig', (), {
-    'DEBUG_ENABLED': False
-})()
-sys.modules['luma'] = type('MockLuma', (), {})()
-sys.modules['luma.config'] = mock_config
+mock_config = type("MockConfig", (), {"DEBUG_ENABLED": False})()
+sys.modules["luma"] = type("MockLuma", (), {})()
+sys.modules["luma.config"] = mock_config
 
 # Load reservation_intent_resolver module
 resolver_path = script_dir / "reservation_intent_resolver.py"
 spec_resolver = importlib.util.spec_from_file_location(
-    "luma.grouping.reservation_intent_resolver", resolver_path)
+    "luma.grouping.reservation_intent_resolver", resolver_path
+)
 resolver_module = importlib.util.module_from_spec(spec_resolver)
 resolver_module.__package__ = "luma.grouping"
 resolver_module.__name__ = "luma.grouping.reservation_intent_resolver"
@@ -75,7 +74,9 @@ def test_cancel_booking_intent():
 
     for sentence, entities in test_cases:
         intent, confidence = resolve_intent(sentence, entities)
-        assert intent == CANCEL_BOOKING, f"Expected CANCEL_BOOKING, got {intent} for '{sentence}'"
+        assert (
+            intent == CANCEL_BOOKING
+        ), f"Expected CANCEL_BOOKING, got {intent} for '{sentence}'"
         assert confidence >= 0.9, f"Expected high confidence for cancel"
 
     print("  [OK] CANCEL_BOOKING intent: PASSED")
@@ -94,7 +95,9 @@ def test_modify_booking_intent():
 
     for sentence, entities in test_cases:
         intent, confidence = resolve_intent(sentence, entities)
-        assert intent == MODIFY_BOOKING, f"Expected MODIFY_BOOKING, got {intent} for '{sentence}'"
+        assert (
+            intent == MODIFY_BOOKING
+        ), f"Expected MODIFY_BOOKING, got {intent} for '{sentence}'"
         assert confidence >= 0.9, f"Expected high confidence for modify"
 
     print("  [OK] MODIFY_BOOKING intent: PASSED")
@@ -110,9 +113,9 @@ def test_create_booking_intent():
                 "dates": [{"text": "tomorrow"}],
                 "times": [],
                 "time_windows": [],
-                "durations": []
+                "durations": [],
             },
-            0.9  # min confidence
+            0.9,  # min confidence
         ),
         (
             "schedule beard trim at 9am",
@@ -121,9 +124,9 @@ def test_create_booking_intent():
                 "dates": [],
                 "times": [{"text": "9am"}],
                 "time_windows": [],
-                "durations": []
+                "durations": [],
             },
-            0.9
+            0.9,
         ),
         (
             "reserve haircut for one hour",
@@ -132,9 +135,9 @@ def test_create_booking_intent():
                 "dates": [],
                 "times": [],
                 "time_windows": [],
-                "durations": [{"text": "one hour"}]
+                "durations": [{"text": "one hour"}],
             },
-            0.9
+            0.9,
         ),
         # Fallback scenario: verbs + date, but service extraction fails: should still trigger CREATE_BOOKING
         (
@@ -144,9 +147,9 @@ def test_create_booking_intent():
                 "dates": [{"text": "this Friday"}],
                 "times": [{"text": "4pm"}],
                 "time_windows": [],
-                "durations": []
+                "durations": [],
             },
-            0.85
+            0.85,
         ),
         # Fallback: verbs + vague time
         (
@@ -156,19 +159,24 @@ def test_create_booking_intent():
                 "dates": [],
                 "times": [{"text": "6ish"}],  # Not exact, but still triggers fallback
                 "time_windows": [],
-                "durations": []
+                "durations": [],
             },
-            0.85
-        )
+            0.85,
+        ),
     ]
 
     for sentence, entities, min_conf in test_cases:
         intent, confidence = resolve_intent(sentence, entities)
-        assert intent == CREATE_BOOKING, f"Expected CREATE_BOOKING, got {intent} for '{sentence}'"
-        assert confidence >= min_conf, f"Expected >= {min_conf} confidence for booking, got {confidence}"
+        assert (
+            intent == CREATE_BOOKING
+        ), f"Expected CREATE_BOOKING, got {intent} for '{sentence}'"
+        assert (
+            confidence >= min_conf
+        ), f"Expected >= {min_conf} confidence for booking, got {confidence}"
 
-    print("  [OK] CREATE_BOOKING intent (+fallback): PASSED  [Guardrail: Fallback supports booking verbs + date/time]")
-
+    print(
+        "  [OK] CREATE_BOOKING intent (+fallback): PASSED  [Guardrail: Fallback supports booking verbs + date/time]"
+    )
 
 
 def test_availability_intent():
@@ -180,31 +188,27 @@ def test_availability_intent():
                 "dates": [{"text": "tomorrow"}],
                 "times": [],
                 "time_windows": [],
-                "durations": []
-            }
+                "durations": [],
+            },
         ),
-        (
-            "do you have any slots?",
-            {}
-        ),
-        (
-            "what times are available?",
-            {}
-        ),
+        ("do you have any slots?", {}),
+        ("what times are available?", {}),
         (
             "is there availability next week?",
             {
                 "dates": [{"text": "next week"}],
                 "times": [],
                 "time_windows": [],
-                "durations": []
-            }
+                "durations": [],
+            },
         ),
     ]
 
     for sentence, entities in test_cases:
         intent, confidence = resolve_intent(sentence, entities)
-        assert intent == AVAILABILITY, f"Expected AVAILABILITY, got {intent} for '{sentence}'"
+        assert (
+            intent == AVAILABILITY
+        ), f"Expected AVAILABILITY, got {intent} for '{sentence}'"
         assert confidence >= 0.8, f"Expected medium+ confidence for availability"
 
     print("  [OK] AVAILABILITY intent: PASSED")
@@ -223,7 +227,9 @@ def test_booking_inquiry_intent():
 
     for sentence, entities in test_cases:
         intent, confidence = resolve_intent(sentence, entities)
-        assert intent == BOOKING_INQUIRY, f"Expected BOOKING_INQUIRY, got {intent} for '{sentence}'"
+        assert (
+            intent == BOOKING_INQUIRY
+        ), f"Expected BOOKING_INQUIRY, got {intent} for '{sentence}'"
         assert confidence >= 0.9, f"Expected high confidence for booking inquiry"
 
     print("  [OK] BOOKING_INQUIRY intent: PASSED")
@@ -234,28 +240,15 @@ def test_details_intent():
     test_cases = [
         (
             "does standard room include breakfast",
-            {
-                "business_categories": [{"text": "standard room"}]
-            }
+            {"business_categories": [{"text": "standard room"}]},
         ),
         (
             "how long does a haircut take",
-            {
-                "business_categories": [{"text": "haircut"}]
-            }
+            {"business_categories": [{"text": "haircut"}]},
         ),
-        (
-            "what's your cancellation policy",
-            {}
-        ),
-        (
-            "what's your address",
-            {}
-        ),
-        (
-            "what are your hours",
-            {}
-        ),
+        ("what's your cancellation policy", {}),
+        ("what's your address", {}),
+        ("what are your hours", {}),
     ]
 
     for sentence, entities in test_cases:
@@ -271,24 +264,14 @@ def test_quote_intent():
     test_cases = [
         (
             "how much does a haircut cost",
-            {
-                "business_categories": [{"text": "haircut"}]
-            }
+            {"business_categories": [{"text": "haircut"}]},
         ),
         (
             "what's the price for standard room",
-            {
-                "business_categories": [{"text": "standard room"}]
-            }
+            {"business_categories": [{"text": "standard room"}]},
         ),
-        (
-            "how much",
-            {}
-        ),
-        (
-            "what's the cost",
-            {}
-        ),
+        ("how much", {}),
+        ("what's the cost", {}),
     ]
 
     for sentence, entities in test_cases:
@@ -309,8 +292,8 @@ def test_discovery_intent():
                 "dates": [],
                 "times": [],
                 "time_windows": [],
-                "durations": []
-            }
+                "durations": [],
+            },
         ),
         (
             "what rooms do you have",
@@ -319,8 +302,8 @@ def test_discovery_intent():
                 "dates": [],
                 "times": [],
                 "time_windows": [],
-                "durations": []
-            }
+                "durations": [],
+            },
         ),
         (
             "tell me about your services",
@@ -329,8 +312,8 @@ def test_discovery_intent():
                 "dates": [],
                 "times": [],
                 "time_windows": [],
-                "durations": []
-            }
+                "durations": [],
+            },
         ),
     ]
 
@@ -354,7 +337,9 @@ def test_recommendation_intent():
 
     for sentence, entities in test_cases:
         intent, confidence = resolve_intent(sentence, entities)
-        assert intent == RECOMMENDATION, f"Expected RECOMMENDATION, got {intent} for '{sentence}'"
+        assert (
+            intent == RECOMMENDATION
+        ), f"Expected RECOMMENDATION, got {intent} for '{sentence}'"
         assert confidence >= 0.8, f"Expected medium+ confidence for recommendation"
 
     print("  [OK] RECOMMENDATION intent: PASSED")

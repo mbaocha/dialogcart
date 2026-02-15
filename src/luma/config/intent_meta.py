@@ -3,15 +3,20 @@ Intent metadata loading and slot validation.
 
 Loads intent metadata from intent_signals.yaml and provides slot validation.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
 import yaml
 
-from ..config.temporal import APPOINTMENT_TEMPORAL_TYPE, RESERVATION_TEMPORAL_TYPE, TimeMode
-
+from ..config.temporal import (
+    APPOINTMENT_TEMPORAL_TYPE,
+    RESERVATION_TEMPORAL_TYPE,
+    TimeMode,
+)
 
 # Cache for intent metadata (required_slots, etc.)
 _INTENT_META_CACHE: Dict[str, Dict[str, Any]] = {}
@@ -25,6 +30,7 @@ class IntentMeta:
     Represents policy metadata for an intent loaded from intent_signals.yaml.
     All fields are optional to support intents with varying metadata.
     """
+
     intent_name: str
     is_booking: Optional[bool] = None
     temporal_shape: Optional[str] = None
@@ -146,8 +152,7 @@ def load_intent_meta() -> Dict[str, Dict[str, Any]]:
     # Try config/data first, fallback to store/normalization for backward compatibility
     config_dir = Path(__file__).resolve().parent
     config_data_path = config_dir / "data" / "intent_signals.yaml"
-    store_path = config_dir.parent / "store" / \
-        "normalization" / "intent_signals.yaml"
+    store_path = config_dir.parent / "store" / "normalization" / "intent_signals.yaml"
 
     path = config_data_path if config_data_path.exists() else store_path
 
@@ -168,7 +173,9 @@ def load_intent_meta() -> Dict[str, Dict[str, Any]]:
     return _INTENT_META_CACHE
 
 
-def validate_required_slots(intent_name: str, resolved_slots: Dict[str, Any], entities: Dict[str, Any]) -> List[str]:
+def validate_required_slots(
+    intent_name: str, resolved_slots: Dict[str, Any], entities: Dict[str, Any]
+) -> List[str]:
     """
     Validate required slots from intent_signals.yaml.
     Returns list of missing slots.
@@ -249,7 +256,11 @@ def validate_required_slots(intent_name: str, resolved_slots: Dict[str, Any], en
         else:
             tc = resolved_slots.get("time_constraint") or {}
             tc_mode = tc.get("mode")
-            if tc_mode in {TimeMode.EXACT.value, TimeMode.WINDOW.value, TimeMode.RANGE.value}:
+            if tc_mode in {
+                TimeMode.EXACT.value,
+                TimeMode.WINDOW.value,
+                TimeMode.RANGE.value,
+            }:
                 has_time = True
             elif tc_mode == TimeMode.FUZZY.value:
                 has_time = False  # fuzzy not allowed for appointments
@@ -265,8 +276,7 @@ def validate_required_slots(intent_name: str, resolved_slots: Dict[str, Any], en
         # Get requires_end_date from IntentRegistry (sole policy source)
         require_end = intent_meta_obj.requires_end_date if intent_meta_obj else False
         # Enforce two refs (or explicit end_date) when require_end is True
-        end_present = bool(resolved_slots.get(
-            "end_date")) or len(date_refs) >= 2
+        end_present = bool(resolved_slots.get("end_date")) or len(date_refs) >= 2
         if require_end and not end_present and "end_date" not in missing:
             missing.append("end_date")
 

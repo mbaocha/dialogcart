@@ -4,48 +4,53 @@ Tests for Orchestrator Flow
 Tests resolved flow, partial flow, and contract violations.
 """
 
-import pytest
 from unittest.mock import Mock, patch
 
-from core.orchestration.orchestrator import handle_message
-from core.orchestration.errors import ContractViolation, UpstreamError
-from core.orchestration.nlu import LumaClient
-from core.orchestration.execution.clients.booking_client import BookingClient
-from core.orchestration.clients.customer_client import CustomerClient
+import pytest
+
 from core.orchestration.clients.catalog_client import CatalogClient
+from core.orchestration.clients.customer_client import CustomerClient
+from core.orchestration.errors import ContractViolation, UpstreamError
+from core.orchestration.execution.clients.booking_client import BookingClient
+from core.orchestration.nlu import LumaClient
+from core.orchestration.orchestrator import handle_message
 
 
 def test_resolved_flow_calls_booking_client():
     """Test that resolved booking flow calls booking client."""
     luma_response = {
         "success": True,
-        "intent": {"name": "CREATE_APPOINTMENT"},  # CREATE_BOOKING is not durable - use CREATE_APPOINTMENT
+        "intent": {
+            "name": "CREATE_APPOINTMENT"
+        },  # CREATE_BOOKING is not durable - use CREATE_APPOINTMENT
         "needs_clarification": False,
         # CRITICAL: Provide facts structure for slot extraction
         # The code extracts slots from facts, not from booking structure
         "facts": {
             "service_id": "haircut",
             "dates": ["2024-01-01"],
-            "times": ["10:00:00"]
+            "times": ["10:00:00"],
         },
         "booking": {
             "booking_type": "service",
             "services": [{"text": "haircut", "canonical": "haircut", "id": 1}],
-            "datetime_range": {"start": "2024-01-01T10:00:00Z", "end": "2024-01-01T11:00:00Z"},
-            "booking_state": "RESOLVED"
-        }
+            "datetime_range": {
+                "start": "2024-01-01T10:00:00Z",
+                "end": "2024-01-01T11:00:00Z",
+            },
+            "booking_state": "RESOLVED",
+        },
     }
 
     # Mock responses
     services_response = {
         "catalog_last_updated_at": "2024-01-01T00:00:00Z",
         "business_category_id": 10,
-        "services": [{"id": 1, "name": "Haircut", "canonical": "haircut"}]
+        "services": [{"id": 1, "name": "Haircut", "canonical": "haircut"}],
     }
     reservation_response = {"room_types": [], "extras": []}
     customer_response = {"customer_id": 100, "id": 100}
-    booking_response = {"booking_code": "ABC123",
-                        "code": "ABC123", "status": "pending"}
+    booking_response = {"booking_code": "ABC123", "code": "ABC123", "status": "pending"}
 
     mock_luma_client = Mock(spec=LumaClient)
     mock_luma_client.resolve.return_value = luma_response
@@ -67,7 +72,7 @@ def test_resolved_flow_calls_booking_client():
         luma_client=mock_luma_client,
         customer_client=mock_customer_client,
         booking_client=mock_booking_client,
-        catalog_client=mock_catalog_client
+        catalog_client=mock_catalog_client,
     )
 
     # Note: handle_message does NOT support booking_client execution yet
@@ -88,17 +93,16 @@ def test_partial_flow_returns_template_key():
     """Test that partial booking (clarification) returns template_key."""
     luma_response = {
         "success": True,
-        "intent": {"name": "CREATE_APPOINTMENT"},  # CREATE_BOOKING is not durable - use CREATE_APPOINTMENT
+        "intent": {
+            "name": "CREATE_APPOINTMENT"
+        },  # CREATE_BOOKING is not durable - use CREATE_APPOINTMENT
         "needs_clarification": True,
-        "clarification": {
-            "reason": "MISSING_TIME",
-            "data": {}
-        },
+        "clarification": {"reason": "MISSING_TIME", "data": {}},
         "booking": {
             "services": [{"text": "haircut"}],
             "datetime_range": None,
-            "booking_state": "PARTIAL"
-        }
+            "booking_state": "PARTIAL",
+        },
     }
 
     mock_luma_client = Mock(spec=LumaClient)
@@ -108,7 +112,7 @@ def test_partial_flow_returns_template_key():
         user_id="user123",
         text="book haircut",
         domain="hotel",
-        luma_client=mock_luma_client
+        luma_client=mock_luma_client,
     )
 
     assert result["success"] is True
@@ -120,7 +124,7 @@ def test_partial_flow_returns_template_key():
 
 def test_contract_violation_returns_error_structure():
     """Test that contract violations return error structure instead of raising exceptions.
-    
+
     Contracts are enforced at boundaries, not inside handle_message.
     When a contract violation occurs, handle_message returns an error structure
     rather than raising ContractViolation internally.
@@ -133,8 +137,8 @@ def test_contract_violation_returns_error_structure():
         "booking": {
             "services": [{"text": "haircut"}],
             "datetime_range": {},  # Missing "start"
-            "booking_state": "RESOLVED"
-        }
+            "booking_state": "RESOLVED",
+        },
     }
 
     mock_luma_client = Mock(spec=LumaClient)
@@ -143,7 +147,7 @@ def test_contract_violation_returns_error_structure():
     result = handle_message(
         user_id="user123",
         text="book haircut tomorrow at 2pm",
-        luma_client=mock_luma_client
+        luma_client=mock_luma_client,
     )
 
     # Contract violations are caught and handled - may return planning result or error
@@ -152,7 +156,9 @@ def test_contract_violation_returns_error_structure():
     # If not, it returns planning result
     if result["success"] is False:
         assert result["error"] == "contract_violation"
-        assert "datetime_range" in result.get("message", "") or "intent" in result.get("message", "")
+        assert "datetime_range" in result.get("message", "") or "intent" in result.get(
+            "message", ""
+        )
     else:
         # Contract passed - return planning result
         assert "result" in result or "plan" in result
@@ -161,13 +167,10 @@ def test_contract_violation_returns_error_structure():
 def test_luma_error_handled():
     """Test that Luma upstream errors are handled gracefully."""
     mock_luma_client = Mock(spec=LumaClient)
-    mock_luma_client.resolve.side_effect = UpstreamError(
-        "Luma service unavailable")
+    mock_luma_client.resolve.side_effect = UpstreamError("Luma service unavailable")
 
     result = handle_message(
-        user_id="user123",
-        text="book haircut",
-        luma_client=mock_luma_client
+        user_id="user123", text="book haircut", luma_client=mock_luma_client
     )
 
     assert result["success"] is False
@@ -177,18 +180,13 @@ def test_luma_error_handled():
 
 def test_success_false_returns_error():
     """Test that success=false from Luma returns error response."""
-    luma_response = {
-        "success": False,
-        "error": "Invalid input"
-    }
+    luma_response = {"success": False, "error": "Invalid input"}
 
     mock_luma_client = Mock(spec=LumaClient)
     mock_luma_client.resolve.return_value = luma_response
 
     result = handle_message(
-        user_id="user123",
-        text="invalid",
-        luma_client=mock_luma_client
+        user_id="user123", text="invalid", luma_client=mock_luma_client
     )
 
     # Luma error handling: success=false is treated as contract violation
@@ -206,22 +204,22 @@ def test_unsupported_intent_returns_error():
         "booking": {
             "services": [],
             "datetime_range": {"start": "2024-01-01T10:00:00Z"},
-            "booking_state": "RESOLVED"
-        }
+            "booking_state": "RESOLVED",
+        },
     }
 
     mock_luma_client = Mock(spec=LumaClient)
     mock_luma_client.resolve.return_value = luma_response
 
     result = handle_message(
-        user_id="user123",
-        text="unsupported action",
-        luma_client=mock_luma_client
+        user_id="user123", text="unsupported action", luma_client=mock_luma_client
     )
 
     # Unsupported intents are no longer errors - they return planning results
     # Planning proceeds even for unsupported intents (execution layer handles them)
     assert result["success"] is True
     plan = result["result"]
-    assert plan.get("intent_name") == "UNSUPPORTED_INTENT" or plan.get("intent") == "UNSUPPORTED_INTENT"
-
+    assert (
+        plan.get("intent_name") == "UNSUPPORTED_INTENT"
+        or plan.get("intent") == "UNSUPPORTED_INTENT"
+    )

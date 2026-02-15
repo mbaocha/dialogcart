@@ -29,10 +29,10 @@ CORE_BASE_INTENTS: Set[str] = {
 def is_core_intent(intent_name: str) -> bool:
     """
     Check if an intent is a core-owned base intent.
-    
+
     Args:
         intent_name: Intent name to check
-        
+
     Returns:
         True if the intent is a core-owned base intent, False otherwise
     """
@@ -42,13 +42,13 @@ def is_core_intent(intent_name: str) -> bool:
 def validate_core_intent(intent_name: str) -> None:
     """
     Validate that an intent is a core-owned base intent.
-    
+
     Raises ValueError if the intent is not a core intent.
     This is a defensive check to enforce the orchestration boundary.
-    
+
     Args:
         intent_name: Intent name to validate
-        
+
     Raises:
         ValueError: If the intent is not a core-owned base intent
     """
@@ -57,4 +57,3 @@ def validate_core_intent(intent_name: str) -> None:
             f"Intent '{intent_name}' is not a core-owned base intent. "
             f"Core only orchestrates: {', '.join(sorted(CORE_BASE_INTENTS))}"
         )
-

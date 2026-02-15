@@ -5,9 +5,10 @@ Isolated test for fuzzy matching in tenant alias detection.
 Tests the _apply_fuzzy_matching_post_process function directly.
 """
 
-from luma.extraction.matcher import _apply_fuzzy_matching_post_process
 import sys
 from pathlib import Path
+
+from luma.extraction.matcher import _apply_fuzzy_matching_post_process
 
 # Add src directory to path for imports
 script_dir = Path(__file__).parent.resolve()  # extraction/
@@ -33,6 +34,7 @@ def test_premium_suite_fuzzy_match():
 
     # Find actual position of "suite" in the text
     import re
+
     suite_match = re.search(r"\bsuite\b", normalized_text.lower())
     suite_start = suite_match.start() if suite_match else 20
     suite_end = suite_match.end() if suite_match else 25
@@ -54,25 +56,26 @@ def test_premium_suite_fuzzy_match():
     print(f"\nExisting spans (from exact matching):")
     for span in existing_spans:
         print(
-            f"  - {span['text']} at [{span['start_char']}:{span['end_char']}] (match_type: {span['match_type']})")
+            f"  - {span['text']} at [{span['start_char']}:{span['end_char']}] (match_type: {span['match_type']})"
+        )
 
     # Apply fuzzy matching
     result = _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, existing_spans)
+        normalized_text, tenant_aliases, existing_spans
+    )
 
     print(f"\nResult spans (after fuzzy matching):")
     for span in result:
         match_type = span.get("match_type", "unknown")
         fuzzy_score = span.get("fuzzy_score", "")
         score_str = f", fuzzy_score: {fuzzy_score}" if fuzzy_score else ""
-        print(f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
-              f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})")
+        print(
+            f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
+            f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})"
+        )
 
     # Check if "premum suite" was matched
-    premum_suite_found = any(
-        span.get("alias_key") == "premum suite"
-        for span in result
-    )
+    premum_suite_found = any(span.get("alias_key") == "premum suite" for span in result)
 
     suite_only_found = any(
         span.get("alias_key") == "suite" and span.get("match_type") == "exact"
@@ -84,11 +87,13 @@ def test_premium_suite_fuzzy_match():
 
     if premum_suite_found and not suite_only_found:
         print(
-            "\n[PASS] TEST PASSED: Fuzzy matching correctly preferred 'premum suite' over 'suite'")
+            "\n[PASS] TEST PASSED: Fuzzy matching correctly preferred 'premum suite' over 'suite'"
+        )
         return True
     else:
         print(
-            "\n[FAIL] TEST FAILED: Expected 'premum suite' to be matched, but got different result")
+            "\n[FAIL] TEST FAILED: Expected 'premum suite' to be matched, but got different result"
+        )
         return False
 
 
@@ -120,30 +125,32 @@ def test_exact_match_still_works():
     print(f"\nExisting spans (from exact matching):")
     for span in existing_spans:
         print(
-            f"  - {span['text']} at [{span['start_char']}:{span['end_char']}] (match_type: {span['match_type']})")
+            f"  - {span['text']} at [{span['start_char']}:{span['end_char']}] (match_type: {span['match_type']})"
+        )
 
     # Apply fuzzy matching
     result = _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, existing_spans)
+        normalized_text, tenant_aliases, existing_spans
+    )
 
     print(f"\nResult spans (after fuzzy matching):")
     for span in result:
         match_type = span.get("match_type", "unknown")
-        print(f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
-              f"(match_type: {match_type}, alias_key: {span.get('alias_key', 'N/A')})")
+        print(
+            f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
+            f"(match_type: {match_type}, alias_key: {span.get('alias_key', 'N/A')})"
+        )
 
     # Check if "premum suite" is still there
-    premum_suite_found = any(
-        span.get("alias_key") == "premum suite"
-        for span in result
-    )
+    premum_suite_found = any(span.get("alias_key") == "premum suite" for span in result)
 
     if premum_suite_found:
         print("\n[PASS] TEST PASSED: Exact match 'premum suite' still works")
         return True
     else:
         print(
-            "\n[FAIL] TEST FAILED: Expected 'premum suite' to remain, but it was removed")
+            "\n[FAIL] TEST FAILED: Expected 'premum suite' to remain, but it was removed"
+        )
         return False
 
 
@@ -159,6 +166,7 @@ def test_character_positions():
 
     # Find "premium suite" position
     import re
+
     match = re.search(r"premium suite", normalized_text.lower())
     if match:
         start, end = match.span()
@@ -182,7 +190,8 @@ def test_character_positions():
     print(f"  'premium suite': [{premium_start}:{premium_end}]")
     print(f"  'suite': [{suite_start}:{suite_end}]")
     print(
-        f"  'suite' contained in 'premium suite': {suite_start >= premium_start and suite_end <= premium_end}")
+        f"  'suite' contained in 'premium suite': {suite_start >= premium_start and suite_end <= premium_end}"
+    )
 
 
 def test_single_word_fuzzy_match():
@@ -206,20 +215,22 @@ def test_single_word_fuzzy_match():
 
     # Apply fuzzy matching
     result = _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, existing_spans)
+        normalized_text, tenant_aliases, existing_spans
+    )
 
     print(f"\nResult spans (after fuzzy matching):")
     for span in result:
         match_type = span.get("match_type", "unknown")
         fuzzy_score = span.get("fuzzy_score", "")
         score_str = f", fuzzy_score: {fuzzy_score:.1f}%" if fuzzy_score else ""
-        print(f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
-              f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})")
+        print(
+            f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
+            f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})"
+        )
 
     # Check if "massage" was matched
     massage_found = any(
-        span.get("alias_key") == "massage" and span.get(
-            "match_type") == "fuzzy"
+        span.get("alias_key") == "massage" and span.get("match_type") == "fuzzy"
         for span in result
     )
 
@@ -250,19 +261,21 @@ def test_single_word_typo_standard():
     print(f"Tenant aliases: {list(tenant_aliases.keys())}")
 
     result = _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, existing_spans)
+        normalized_text, tenant_aliases, existing_spans
+    )
 
     print(f"\nResult spans (after fuzzy matching):")
     for span in result:
         match_type = span.get("match_type", "unknown")
         fuzzy_score = span.get("fuzzy_score", "")
         score_str = f", fuzzy_score: {fuzzy_score:.1f}%" if fuzzy_score else ""
-        print(f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
-              f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})")
+        print(
+            f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
+            f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})"
+        )
 
     standard_found = any(
-        span.get("alias_key") == "standard" and span.get(
-            "match_type") == "fuzzy"
+        span.get("alias_key") == "standard" and span.get("match_type") == "fuzzy"
         for span in result
     )
 
@@ -293,15 +306,18 @@ def test_single_word_typo_deluxe():
     print(f"Tenant aliases: {list(tenant_aliases.keys())}")
 
     result = _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, existing_spans)
+        normalized_text, tenant_aliases, existing_spans
+    )
 
     print(f"\nResult spans (after fuzzy matching):")
     for span in result:
         match_type = span.get("match_type", "unknown")
         fuzzy_score = span.get("fuzzy_score", "")
         score_str = f", fuzzy_score: {fuzzy_score:.1f}%" if fuzzy_score else ""
-        print(f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
-              f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})")
+        print(
+            f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
+            f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})"
+        )
 
     delux_found = any(
         span.get("alias_key") == "delux" and span.get("match_type") == "fuzzy"
@@ -335,20 +351,22 @@ def test_two_word_phrase_fuzzy():
     print(f"Tenant aliases: {list(tenant_aliases.keys())}")
 
     result = _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, existing_spans)
+        normalized_text, tenant_aliases, existing_spans
+    )
 
     print(f"\nResult spans (after fuzzy matching):")
     for span in result:
         match_type = span.get("match_type", "unknown")
         fuzzy_score = span.get("fuzzy_score", "")
         score_str = f", fuzzy_score: {fuzzy_score:.1f}%" if fuzzy_score else ""
-        print(f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
-              f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})")
+        print(
+            f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
+            f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})"
+        )
 
     # Should match "hair cut" (exact or fuzzy)
     hair_cut_found = any(
-        span.get("alias_key") in ["hair cut", "haircut"]
-        for span in result
+        span.get("alias_key") in ["hair cut", "haircut"] for span in result
     )
 
     if hair_cut_found:
@@ -378,20 +396,22 @@ def test_three_word_phrase_fuzzy():
     print(f"Tenant aliases: {list(tenant_aliases.keys())}")
 
     result = _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, existing_spans)
+        normalized_text, tenant_aliases, existing_spans
+    )
 
     print(f"\nResult spans (after fuzzy matching):")
     for span in result:
         match_type = span.get("match_type", "unknown")
         fuzzy_score = span.get("fuzzy_score", "")
         score_str = f", fuzzy_score: {fuzzy_score:.1f}%" if fuzzy_score else ""
-        print(f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
-              f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})")
+        print(
+            f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
+            f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})"
+        )
 
     # Should prefer longer match "delux king suite" over shorter "king suite" or "suite"
     deluxe_king_suite_found = any(
-        span.get("alias_key") == "delux king suite"
-        for span in result
+        span.get("alias_key") == "delux king suite" for span in result
     )
 
     if deluxe_king_suite_found:
@@ -422,19 +442,23 @@ def test_word_count_priority():
     print(f"Tenant aliases: {list(tenant_aliases.keys())}")
 
     result = _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, existing_spans)
+        normalized_text, tenant_aliases, existing_spans
+    )
 
     print(f"\nResult spans (after fuzzy matching):")
     for span in result:
         match_type = span.get("match_type", "unknown")
         fuzzy_score = span.get("fuzzy_score", "")
         score_str = f", fuzzy_score: {fuzzy_score:.1f}%" if fuzzy_score else ""
-        print(f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
-              f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})")
+        print(
+            f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
+            f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})"
+        )
 
     # Should match the longest phrase first
-    longest_match = max(
-        result, key=lambda s: s["end_char"] - s["start_char"]) if result else None
+    longest_match = (
+        max(result, key=lambda s: s["end_char"] - s["start_char"]) if result else None
+    )
     longest_alias = longest_match.get("alias_key") if longest_match else None
 
     if longest_alias == "premium delux king suite":
@@ -442,7 +466,8 @@ def test_word_count_priority():
         return True
     else:
         print(
-            f"\n[FAIL] TEST FAILED: Expected 'premium delux king suite', got '{longest_alias}'")
+            f"\n[FAIL] TEST FAILED: Expected 'premium delux king suite', got '{longest_alias}'"
+        )
         return False
 
 
@@ -466,32 +491,30 @@ def test_single_word_only_matches_single_word_aliases():
     print(f"Tenant aliases: {list(tenant_aliases.keys())}")
 
     result = _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, existing_spans)
+        normalized_text, tenant_aliases, existing_spans
+    )
 
     print(f"\nResult spans (after fuzzy matching):")
     for span in result:
         match_type = span.get("match_type", "unknown")
         fuzzy_score = span.get("fuzzy_score", "")
         score_str = f", fuzzy_score: {fuzzy_score:.1f}%" if fuzzy_score else ""
-        print(f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
-              f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})")
+        print(
+            f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
+            f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})"
+        )
 
     # Should only match "massage" (single-word), not multi-word aliases
-    massage_found = any(
-        span.get("alias_key") == "massage"
-        for span in result
-    )
-    multi_word_matched = any(
-        " " in span.get("alias_key", "")
-        for span in result
-    )
+    massage_found = any(span.get("alias_key") == "massage" for span in result)
+    multi_word_matched = any(" " in span.get("alias_key", "") for span in result)
 
     if massage_found and not multi_word_matched:
         print("\n[PASS] TEST PASSED: Single word only matched single-word alias")
         return True
     else:
         print(
-            f"\n[FAIL] TEST FAILED: Single word matched multi-word alias: {multi_word_matched}")
+            f"\n[FAIL] TEST FAILED: Single word matched multi-word alias: {multi_word_matched}"
+        )
         return False
 
 
@@ -514,19 +537,19 @@ def test_no_false_positives_short_words():
     print(f"Tenant aliases: {list(tenant_aliases.keys())}")
 
     result = _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, existing_spans)
+        normalized_text, tenant_aliases, existing_spans
+    )
 
     print(f"\nResult spans (after fuzzy matching):")
     for span in result:
         match_type = span.get("match_type", "unknown")
-        print(f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
-              f"(match_type: {match_type}, alias_key: {span.get('alias_key', 'N/A')})")
+        print(
+            f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
+            f"(match_type: {match_type}, alias_key: {span.get('alias_key', 'N/A')})"
+        )
 
     # "cat" (3 chars) should not be matched
-    cat_matched = any(
-        span.get("text") == "cat"
-        for span in result
-    )
+    cat_matched = any(span.get("text") == "cat" for span in result)
 
     if not cat_matched:
         print("\n[PASS] TEST PASSED: Short word 'cat' was not matched")
@@ -559,12 +582,10 @@ def test_single_word_typo_haircut():
 
         existing_spans = []
         result = _apply_fuzzy_matching_post_process(
-            normalized_text, tenant_aliases, existing_spans)
-
-        found = any(
-            span.get("alias_key") == expected
-            for span in result
+            normalized_text, tenant_aliases, existing_spans
         )
+
+        found = any(span.get("alias_key") == expected for span in result)
 
         if found:
             print(f"  [PASS] '{typo}' -> '{expected}'")
@@ -598,12 +619,10 @@ def test_single_word_typo_massage():
 
         existing_spans = []
         result = _apply_fuzzy_matching_post_process(
-            normalized_text, tenant_aliases, existing_spans)
-
-        found = any(
-            span.get("alias_key") == expected
-            for span in result
+            normalized_text, tenant_aliases, existing_spans
         )
+
+        found = any(span.get("alias_key") == expected for span in result)
 
         if found:
             print(f"  [PASS] '{typo}' -> '{expected}'")
@@ -638,12 +657,10 @@ def test_two_word_typo_variations():
 
         existing_spans = []
         result = _apply_fuzzy_matching_post_process(
-            normalized_text, tenant_aliases, existing_spans)
-
-        found = any(
-            span.get("alias_key") == alias_key
-            for span in result
+            normalized_text, tenant_aliases, existing_spans
         )
+
+        found = any(span.get("alias_key") == alias_key for span in result)
 
         if found == should_match:
             if should_match:
@@ -651,10 +668,12 @@ def test_two_word_typo_variations():
             else:
                 status = "PASS (correctly not matched)"
             print(
-                f"  [{status}] '{user_input}' -> '{alias_key}' (expected match={should_match})")
+                f"  [{status}] '{user_input}' -> '{alias_key}' (expected match={should_match})"
+            )
         else:
             print(
-                f"  [FAIL] '{user_input}' expected match={should_match}, got found={found}")
+                f"  [FAIL] '{user_input}' expected match={should_match}, got found={found}"
+            )
             # Print actual matches for debugging
             actual_matches = [span.get("alias_key") for span in result]
             print(f"         Actual matches: {actual_matches}")
@@ -678,7 +697,8 @@ def test_three_word_typo_variations():
 
     existing_spans = []
     result = _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, existing_spans)
+        normalized_text, tenant_aliases, existing_spans
+    )
 
     print(f"\nInput text: '{normalized_text}'")
     print(f"Tenant aliases: {list(tenant_aliases.keys())}")
@@ -688,18 +708,20 @@ def test_three_word_typo_variations():
         match_type = span.get("match_type", "unknown")
         fuzzy_score = span.get("fuzzy_score", "")
         score_str = f", fuzzy_score: {fuzzy_score:.1f}%" if fuzzy_score else ""
-        print(f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
-              f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})")
+        print(
+            f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
+            f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})"
+        )
 
     # Should match "delux king suite" (longest match)
     deluxe_king_suite_found = any(
-        span.get("alias_key") == "delux king suite"
-        for span in result
+        span.get("alias_key") == "delux king suite" for span in result
     )
 
     if deluxe_king_suite_found:
         print(
-            "\n[PASS] TEST PASSED: Three-word phrase 'deluxe king suite' matched to 'delux king suite'")
+            "\n[PASS] TEST PASSED: Three-word phrase 'deluxe king suite' matched to 'delux king suite'"
+        )
         return True
     else:
         print("\n[FAIL] TEST FAILED: Expected 'delux king suite' to be matched")
@@ -726,19 +748,23 @@ def test_four_word_phrase_fuzzy():
     print(f"Tenant aliases: {list(tenant_aliases.keys())}")
 
     result = _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, existing_spans)
+        normalized_text, tenant_aliases, existing_spans
+    )
 
     print(f"\nResult spans (after fuzzy matching):")
     for span in result:
         match_type = span.get("match_type", "unknown")
         fuzzy_score = span.get("fuzzy_score", "")
         score_str = f", fuzzy_score: {fuzzy_score:.1f}%" if fuzzy_score else ""
-        print(f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
-              f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})")
+        print(
+            f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
+            f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})"
+        )
 
     # Should match the longest phrase (4-word)
-    longest_match = max(
-        result, key=lambda s: s["end_char"] - s["start_char"]) if result else None
+    longest_match = (
+        max(result, key=lambda s: s["end_char"] - s["start_char"]) if result else None
+    )
     longest_alias = longest_match.get("alias_key") if longest_match else None
 
     if longest_alias == "premium delux king suite":
@@ -746,7 +772,8 @@ def test_four_word_phrase_fuzzy():
         return True
     else:
         print(
-            f"\n[FAIL] TEST FAILED: Expected 'premium delux king suite', got '{longest_alias}'")
+            f"\n[FAIL] TEST FAILED: Expected 'premium delux king suite', got '{longest_alias}'"
+        )
         return False
 
 
@@ -768,30 +795,28 @@ def test_word_boundary_matching():
     print(f"Tenant aliases: {list(tenant_aliases.keys())}")
 
     result = _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, existing_spans)
+        normalized_text, tenant_aliases, existing_spans
+    )
 
     print(f"\nResult spans (after fuzzy matching):")
     for span in result:
         match_type = span.get("match_type", "unknown")
-        print(f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
-              f"(match_type: {match_type}, alias_key: {span.get('alias_key', 'N/A')})")
+        print(
+            f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
+            f"(match_type: {match_type}, alias_key: {span.get('alias_key', 'N/A')})"
+        )
 
     # Should match "massage" but not "age" (substring)
-    massage_found = any(
-        span.get("alias_key") == "massage"
-        for span in result
-    )
-    age_found = any(
-        span.get("alias_key") == "age"
-        for span in result
-    )
+    massage_found = any(span.get("alias_key") == "massage" for span in result)
+    age_found = any(span.get("alias_key") == "age" for span in result)
 
     if massage_found and not age_found:
         print("\n[PASS] TEST PASSED: Word boundaries respected")
         return True
     else:
         print(
-            f"\n[FAIL] TEST FAILED: massage={massage_found}, age={age_found} (age should not match)")
+            f"\n[FAIL] TEST FAILED: massage={massage_found}, age={age_found} (age should not match)"
+        )
         return False
 
 
@@ -810,6 +835,7 @@ def test_overlapping_matches_priority():
 
     # Simulate exact match for "suite"
     import re
+
     suite_match = re.search(r"\bsuite\b", normalized_text.lower())
     suite_start = suite_match.start() if suite_match else 20
     suite_end = suite_match.end() if suite_match else 25
@@ -829,25 +855,24 @@ def test_overlapping_matches_priority():
     print(f"Tenant aliases: {list(tenant_aliases.keys())}")
     print(f"\nExisting spans (exact match for 'suite'):")
     for span in existing_spans:
-        print(
-            f"  - {span['text']} at [{span['start_char']}:{span['end_char']}]")
+        print(f"  - {span['text']} at [{span['start_char']}:{span['end_char']}]")
 
     result = _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, existing_spans)
+        normalized_text, tenant_aliases, existing_spans
+    )
 
     print(f"\nResult spans (after fuzzy matching):")
     for span in result:
         match_type = span.get("match_type", "unknown")
         fuzzy_score = span.get("fuzzy_score", "")
         score_str = f", fuzzy_score: {fuzzy_score:.1f}%" if fuzzy_score else ""
-        print(f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
-              f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})")
+        print(
+            f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
+            f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})"
+        )
 
     # Should have "premum suite" (fuzzy) and NOT "suite" (exact, removed)
-    premum_suite_found = any(
-        span.get("alias_key") == "premum suite"
-        for span in result
-    )
+    premum_suite_found = any(span.get("alias_key") == "premum suite" for span in result)
     suite_still_present = any(
         span.get("alias_key") == "suite" and span.get("match_type") == "exact"
         for span in result
@@ -858,7 +883,8 @@ def test_overlapping_matches_priority():
         return True
     else:
         print(
-            f"\n[FAIL] TEST FAILED: premum_suite={premum_suite_found}, suite_still_present={suite_still_present}")
+            f"\n[FAIL] TEST FAILED: premum_suite={premum_suite_found}, suite_still_present={suite_still_present}"
+        )
         return False
 
 
@@ -876,7 +902,8 @@ def test_threshold_boundaries():
 
     existing_spans = []
     result = _apply_fuzzy_matching_post_process(
-        normalized_text, tenant_aliases, existing_spans)
+        normalized_text, tenant_aliases, existing_spans
+    )
 
     print(f"\nInput text: '{normalized_text}'")
     print(f"Tenant aliases: {list(tenant_aliases.keys())}")
@@ -886,8 +913,10 @@ def test_threshold_boundaries():
         match_type = span.get("match_type", "unknown")
         fuzzy_score = span.get("fuzzy_score", "")
         score_str = f", fuzzy_score: {fuzzy_score:.1f}%" if fuzzy_score else ""
-        print(f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
-              f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})")
+        print(
+            f"  - '{span['text']}' at [{span['start_char']}:{span['end_char']}] "
+            f"(match_type: {match_type}{score_str}, alias_key: {span.get('alias_key', 'N/A')})"
+        )
 
     massage_found = any(
         span.get("alias_key") == "massage" and span.get("fuzzy_score", 0) >= 85
@@ -915,30 +944,27 @@ if __name__ == "__main__":
         # Basic functionality
         ("Premium suite fuzzy match", test_premium_suite_fuzzy_match),
         ("Exact match still works", test_exact_match_still_works),
-
         # Single-word tests
         ("Single-word: massge -> massage", test_single_word_fuzzy_match),
         ("Single-word: standrd -> standard", test_single_word_typo_standard),
         ("Single-word: deluxe -> delux", test_single_word_typo_deluxe),
         ("Single-word: haircut variations", test_single_word_typo_haircut),
         ("Single-word: massage variations", test_single_word_typo_massage),
-
         # Multi-word tests
         ("Two-word phrase: hair cut", test_two_word_phrase_fuzzy),
         ("Two-word phrase: typo variations", test_two_word_typo_variations),
         ("Three-word phrase: deluxe king suite", test_three_word_phrase_fuzzy),
         ("Three-word phrase: typo variations", test_three_word_typo_variations),
         ("Four-word phrase: premium deluxe king suite", test_four_word_phrase_fuzzy),
-
         # Priority and ordering
         ("Word count priority (4->3->2->1)", test_word_count_priority),
         ("Overlapping matches priority", test_overlapping_matches_priority),
-
         # Edge cases
-        ("Single words only match single-word aliases",
-         test_single_word_only_matches_single_word_aliases),
-        ("No false positives for short words",
-         test_no_false_positives_short_words),
+        (
+            "Single words only match single-word aliases",
+            test_single_word_only_matches_single_word_aliases,
+        ),
+        ("No false positives for short words", test_no_false_positives_short_words),
         ("Word boundary matching", test_word_boundary_matching),
         ("Threshold boundaries", test_threshold_boundaries),
     ]
@@ -951,6 +977,7 @@ if __name__ == "__main__":
         except Exception as e:
             print(f"\n[ERROR] Test '{test_name}' raised exception: {e}")
             import traceback
+
             traceback.print_exc()
             results.append((test_name, False))
 

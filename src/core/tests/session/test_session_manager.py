@@ -4,16 +4,17 @@ Unit tests for session manager.
 Tests session save/load, TTL expiry, and clear operations.
 """
 
-import pytest
 import json
 from unittest.mock import Mock, patch
 
+import pytest
+
 from core.orchestration.session.session_manager import (
+    SESSION_KEY_PREFIX,
+    SESSION_TTL_SECONDS,
+    clear_session,
     get_session,
     save_session,
-    clear_session,
-    SESSION_TTL_SECONDS,
-    SESSION_KEY_PREFIX,
 )
 
 
@@ -29,13 +30,16 @@ class TestSaveLoad:
             "missing_slots": ["time"],
             "status": "NEEDS_CLARIFICATION",
             "facts": {},
-            "last_filled_slot": None
+            "last_filled_slot": None,
         }
 
         mock_redis = Mock()
-        mock_redis.get.return_value = json.dumps(session_state).encode('utf-8')
+        mock_redis.get.return_value = json.dumps(session_state).encode("utf-8")
 
-        with patch('core.orchestration.session.session_manager._get_redis_client', return_value=mock_redis):
+        with patch(
+            "core.orchestration.session.session_manager._get_redis_client",
+            return_value=mock_redis,
+        ):
             save_session(user_id, session_state)
             result = get_session(user_id)
 
@@ -60,7 +64,10 @@ class TestSaveLoad:
         mock_redis = Mock()
         mock_redis.get.return_value = None
 
-        with patch('core.orchestration.session.session_manager._get_redis_client', return_value=mock_redis):
+        with patch(
+            "core.orchestration.session.session_manager._get_redis_client",
+            return_value=mock_redis,
+        ):
             result = get_session(user_id)
 
             assert result is None
@@ -76,12 +83,15 @@ class TestSaveLoad:
             "missing_slots": ["check_in_date", "check_out_date"],
             "status": "NEEDS_CLARIFICATION",
             "facts": {},
-            "last_filled_slot": None
+            "last_filled_slot": None,
         }
 
         mock_redis = Mock()
 
-        with patch('core.orchestration.session.session_manager._get_redis_client', return_value=mock_redis):
+        with patch(
+            "core.orchestration.session.session_manager._get_redis_client",
+            return_value=mock_redis,
+        ):
             save_session(user_id, session_state)
 
             # Verify setex was called with correct parameters
@@ -98,12 +108,15 @@ class TestSaveLoad:
             "missing_slots": ["service"],
             "status": "NEEDS_CLARIFICATION",
             "facts": {},
-            "last_filled_slot": None
+            "last_filled_slot": None,
         }
 
         mock_redis = Mock()
 
-        with patch('core.orchestration.session.session_manager._get_redis_client', return_value=mock_redis):
+        with patch(
+            "core.orchestration.session.session_manager._get_redis_client",
+            return_value=mock_redis,
+        ):
             # Save multiple times
             save_session(user_id, session_state)
             save_session(user_id, session_state)
@@ -125,7 +138,10 @@ class TestTTLExpiry:
         mock_redis = Mock()
         mock_redis.get.return_value = None  # Redis returns None for expired keys
 
-        with patch('core.orchestration.session.session_manager._get_redis_client', return_value=mock_redis):
+        with patch(
+            "core.orchestration.session.session_manager._get_redis_client",
+            return_value=mock_redis,
+        ):
             result = get_session(user_id)
 
             assert result is None
@@ -141,12 +157,15 @@ class TestTTLExpiry:
             "missing_slots": ["new_date"],
             "status": "NEEDS_CLARIFICATION",
             "facts": {},
-            "last_filled_slot": None
+            "last_filled_slot": None,
         }
 
         mock_redis = Mock()
 
-        with patch('core.orchestration.session.session_manager._get_redis_client', return_value=mock_redis):
+        with patch(
+            "core.orchestration.session.session_manager._get_redis_client",
+            return_value=mock_redis,
+        ):
             save_session(user_id, session_state)
 
             call_args = mock_redis.setex.call_args
@@ -165,7 +184,10 @@ class TestClear:
         mock_redis = Mock()
         mock_redis.delete.return_value = 1
 
-        with patch('core.orchestration.session.session_manager._get_redis_client', return_value=mock_redis):
+        with patch(
+            "core.orchestration.session.session_manager._get_redis_client",
+            return_value=mock_redis,
+        ):
             clear_session(user_id)
 
             expected_key = f"{SESSION_KEY_PREFIX}{user_id}"
@@ -180,13 +202,16 @@ class TestClear:
             "missing_slots": [],
             "status": "READY",
             "facts": {},
-            "last_filled_slot": None
+            "last_filled_slot": None,
         }
 
         mock_redis = Mock()
         mock_redis.get.return_value = None  # After clear, get returns None
 
-        with patch('core.orchestration.session.session_manager._get_redis_client', return_value=mock_redis):
+        with patch(
+            "core.orchestration.session.session_manager._get_redis_client",
+            return_value=mock_redis,
+        ):
             save_session(user_id, session_state)
             clear_session(user_id)
             result = get_session(user_id)
@@ -203,7 +228,10 @@ class TestRedisUnavailable:
         """Test that get returns None when Redis is not available."""
         user_id = "test_user"
 
-        with patch('core.orchestration.session.session_manager._get_redis_client', return_value=None):
+        with patch(
+            "core.orchestration.session.session_manager._get_redis_client",
+            return_value=None,
+        ):
             result = get_session(user_id)
             assert result is None
 
@@ -216,10 +244,13 @@ class TestRedisUnavailable:
             "missing_slots": [],
             "status": "READY",
             "facts": {},
-            "last_filled_slot": None
+            "last_filled_slot": None,
         }
 
-        with patch('core.orchestration.session.session_manager._get_redis_client', return_value=None):
+        with patch(
+            "core.orchestration.session.session_manager._get_redis_client",
+            return_value=None,
+        ):
             # Should not raise
             save_session(user_id, session_state)
 
@@ -227,7 +258,10 @@ class TestRedisUnavailable:
         """Test that clear fails silently when Redis is not available."""
         user_id = "test_user"
 
-        with patch('core.orchestration.session.session_manager._get_redis_client', return_value=None):
+        with patch(
+            "core.orchestration.session.session_manager._get_redis_client",
+            return_value=None,
+        ):
             # Should not raise
             clear_session(user_id)
 
@@ -245,18 +279,21 @@ class TestSerialization:
                 "count": 2,
                 "price": 50.99,
                 "active": True,
-                "tags": ["urgent", "priority"]
+                "tags": ["urgent", "priority"],
             },
             "missing_slots": ["date", "time"],
             "status": "NEEDS_CLARIFICATION",
             "facts": {},
-            "last_filled_slot": None
+            "last_filled_slot": None,
         }
 
         mock_redis = Mock()
-        mock_redis.get.return_value = json.dumps(session_state).encode('utf-8')
+        mock_redis.get.return_value = json.dumps(session_state).encode("utf-8")
 
-        with patch('core.orchestration.session.session_manager._get_redis_client', return_value=mock_redis):
+        with patch(
+            "core.orchestration.session.session_manager._get_redis_client",
+            return_value=mock_redis,
+        ):
             save_session(user_id, session_state)
             result = get_session(user_id)
 

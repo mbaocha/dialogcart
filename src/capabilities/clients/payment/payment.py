@@ -5,17 +5,17 @@ Protocol defining the contract for payment API clients.
 No implementation logic - contract only.
 """
 
-from typing import Protocol, Dict, Any
+from typing import Any, Dict, Protocol
 
 
 class PaymentClient(Protocol):
     """
     Protocol for payment API clients.
-    
+
     Defines the contract that payment clients must implement.
     Adapters depend on this interface, not concrete implementations.
     """
-    
+
     def create_payment_intent(
         self,
         booking_id: int,
@@ -24,12 +24,12 @@ class PaymentClient(Protocol):
     ) -> Dict[str, Any]:
         """
         Create a payment intent.
-        
+
         Args:
             booking_id: Booking identifier (integer)
             amount: Payment amount (float, in major currency units)
             currency: Currency code (default: "USD")
-        
+
         Returns:
             Response dict matching API shape:
             {
@@ -41,14 +41,14 @@ class PaymentClient(Protocol):
             }
         """
         ...
-    
+
     def get_payment_url(self, booking_code: str) -> Dict[str, Any]:
         """
         Get payment URL for a booking.
-        
+
         Args:
             booking_code: Booking code identifier (string)
-        
+
         Returns:
             Response dict matching API shape:
             {
@@ -60,14 +60,14 @@ class PaymentClient(Protocol):
             }
         """
         ...
-    
+
     def get_payment_status(self, booking_code: str) -> Dict[str, Any]:
         """
         Get payment status for a booking.
-        
+
         Args:
             booking_code: Booking code identifier (string)
-        
+
         Returns:
             Response dict matching API shape:
             {
@@ -81,4 +81,3 @@ class PaymentClient(Protocol):
             }
         """
         ...
-

@@ -17,9 +17,9 @@ Design:
 
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
-from .base import CapabilityAdapter, AdapterResponse
+from .base import AdapterResponse, CapabilityAdapter
 from .registry import ADAPTER_REGISTRY, get_adapter
 
 logger = logging.getLogger(__name__)
@@ -39,6 +39,7 @@ class RunnerResult:
     - `text` is adapter prompt to show user (if any)
     - `facts` are merged into session only when adapter completes
     """
+
     passthrough: bool
     """
     Whether to pass through to core.
@@ -98,7 +99,7 @@ class CapabilityRunner:
         self,
         user_input: Optional[str],
         core_outcome: Dict[str, Any],
-        context: Dict[str, Any]
+        context: Dict[str, Any],
     ) -> RunnerResult:
         """
         Handle capability activation and routing.
@@ -155,15 +156,15 @@ class CapabilityRunner:
         capability = core_outcome.get("active_capability")
         if not capability:
             logger.warning(
-                "AWAITING_CAPABILITY status but no active_capability in core_outcome")
+                "AWAITING_CAPABILITY status but no active_capability in core_outcome"
+            )
             return RunnerResult(passthrough=True)
 
         # Step 3: Look up adapter
         try:
             adapter = get_adapter(capability)
         except KeyError:
-            logger.error(
-                f"Adapter not registered for capability: {capability}")
+            logger.error(f"Adapter not registered for capability: {capability}")
             # Fail fast - do not proceed without adapter
             return RunnerResult(passthrough=True)
 
@@ -179,25 +180,28 @@ class CapabilityRunner:
         try:
             if is_first_activation:
                 logger.info(
-                    f"First activation of capability: {capability} for user: {user_id}")
+                    f"First activation of capability: {capability} for user: {user_id}"
+                )
                 response = adapter.start(context)
             else:
                 if not user_input:
                     logger.warning(
-                        f"Capability {capability} active but no user_input provided")
+                        f"Capability {capability} active but no user_input provided"
+                    )
                     return RunnerResult(passthrough=True)
                 logger.debug(
-                    f"Handling input for capability: {capability} for user: {user_id}")
+                    f"Handling input for capability: {capability} for user: {user_id}"
+                )
                 response = adapter.handle_input(user_input, context)
         except Exception as e:
             logger.error(
-                f"Adapter error for capability {capability}: {e}", exc_info=True)
+                f"Adapter error for capability {capability}: {e}", exc_info=True
+            )
             # Abort adapter on error
             try:
                 adapter.abort(reason="error", context=context)
             except Exception as abort_error:
-                logger.error(
-                    f"Adapter abort error: {abort_error}", exc_info=True)
+                logger.error(f"Adapter abort error: {abort_error}", exc_info=True)
             # Clear adapter state
             self._clear_adapter_state(user_id, capability)
             # Passthrough to core (core will handle error state)
@@ -205,15 +209,13 @@ class CapabilityRunner:
 
         # Step 6: Handle adapter response
         if not isinstance(response, AdapterResponse):
-            logger.error(
-                f"Adapter returned invalid response type: {type(response)}")
+            logger.error(f"Adapter returned invalid response type: {type(response)}")
             return RunnerResult(passthrough=True)
 
         # Step 7: Process response
         if response.completed:
             # Adapter completed → merge facts and clear capability
-            logger.info(
-                f"Capability {capability} completed for user: {user_id}")
+            logger.info(f"Capability {capability} completed for user: {user_id}")
 
             # CRITICAL: Extract facts from adapter response
             # Adapters MUST emit completion facts (e.g., payment_satisfied: True)
@@ -262,7 +264,7 @@ class CapabilityRunner:
             result = RunnerResult(
                 passthrough=True,  # Core handles next
                 facts=facts,  # Facts to merge (must be dict, not None)
-                active_capability=None  # Capability cleared
+                active_capability=None,  # Capability cleared
             )
 
             # TEMPORARY LOG: Verify RunnerResult after construction
@@ -277,8 +279,7 @@ class CapabilityRunner:
             return result
         else:
             # Adapter still active → persist state and return prompt
-            logger.debug(
-                f"Capability {capability} still active for user: {user_id}")
+            logger.debug(f"Capability {capability} still active for user: {user_id}")
 
             # Persist adapter-local state (if adapter maintains state)
             # Note: Adapter state is separate from core session
@@ -295,7 +296,7 @@ class CapabilityRunner:
             result = RunnerResult(
                 passthrough=False,  # Do not send to core yet
                 text=response.text,  # Show adapter prompt
-                active_capability=capability  # Capability still active
+                active_capability=capability,  # Capability still active
             )
 
             # TEMPORARY LOG: Verify RunnerResult after construction (non-completion)
@@ -308,10 +309,7 @@ class CapabilityRunner:
             return result
 
     def abort(
-        self,
-        reason: str,
-        core_outcome: Dict[str, Any],
-        context: Dict[str, Any]
+        self, reason: str, core_outcome: Dict[str, Any], context: Dict[str, Any]
     ) -> None:
         """
         Abort active capability.
@@ -334,21 +332,22 @@ class CapabilityRunner:
 
         user_id = context.get("user_id")
         if not user_id:
-            logger.warning(
-                "Cannot abort capability: user_id missing from context")
+            logger.warning("Cannot abort capability: user_id missing from context")
             return
 
         try:
             adapter = get_adapter(capability)
         except KeyError:
             logger.warning(
-                f"Adapter not registered for capability: {capability}, skipping abort")
+                f"Adapter not registered for capability: {capability}, skipping abort"
+            )
             self._clear_adapter_state(user_id, capability)
             return
 
         try:
             logger.info(
-                f"Aborting capability {capability} for user {user_id}, reason: {reason}")
+                f"Aborting capability {capability} for user {user_id}, reason: {reason}"
+            )
             adapter.abort(reason=reason, context=context)
         except Exception as e:
             logger.error(f"Error during adapter abort: {e}", exc_info=True)
@@ -370,7 +369,9 @@ class CapabilityRunner:
         state = self._state_store.get(user_id, capability)
         return state is None
 
-    def _persist_adapter_state(self, user_id: str, capability: str, response: AdapterResponse) -> None:
+    def _persist_adapter_state(
+        self, user_id: str, capability: str, response: AdapterResponse
+    ) -> None:
         """
         Persist adapter-local state.
 
@@ -386,8 +387,7 @@ class CapabilityRunner:
         """
         # Store activation flag (indicates capability is active)
         self._state_store.set(user_id, capability, {"active": True})
-        logger.debug(
-            f"Persisted adapter state for {capability} for user {user_id}")
+        logger.debug(f"Persisted adapter state for {capability} for user {user_id}")
 
     def _clear_adapter_state(self, user_id: str, capability: str) -> None:
         """
@@ -403,8 +403,7 @@ class CapabilityRunner:
             capability: Capability name
         """
         self._state_store.delete(user_id, capability)
-        logger.debug(
-            f"Cleared adapter state for {capability} for user {user_id}")
+        logger.debug(f"Cleared adapter state for {capability} for user {user_id}")
 
 
 class InMemoryStateStore:

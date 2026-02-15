@@ -12,11 +12,12 @@ Assumptions:
 - No ML-based intent mapping
 - No token indexing or reverse mapping
 """
-from typing import Dict, Any, Optional
+
+from typing import Any, Dict, Optional
 
 from luma.structure.structure_types import StructureResult
-from .time_constraints import resolve_time_constraint
 
+from .time_constraints import resolve_time_constraint
 
 # Default intent for all appointment/reservation requests
 BOOK_APPOINTMENT_INTENT = "BOOK_APPOINTMENT"
@@ -27,8 +28,7 @@ STATUS_NEEDS_CLARIFICATION = "NEEDS_CLARIFICATION"
 
 
 def group_appointment(
-    entities: Dict[str, Any],
-    structure: StructureResult
+    entities: Dict[str, Any], structure: StructureResult
 ) -> Dict[str, Any]:
     """
     Group extracted entities into a single appointment booking.
@@ -66,7 +66,7 @@ def group_appointment(
             "booking": _build_booking_dict(entities, structure),
             "structure": structure.to_dict()["structure"],
             "status": STATUS_NEEDS_CLARIFICATION,
-            "reason": _determine_clarification_reason(entities, structure)
+            "reason": _determine_clarification_reason(entities, structure),
         }
 
     # Rule 2: Build normal booking
@@ -75,13 +75,12 @@ def group_appointment(
         "booking": _build_booking_dict(entities, structure),
         "structure": structure.to_dict()["structure"],
         "status": STATUS_OK,
-        "reason": None
+        "reason": None,
     }
 
 
 def _build_booking_dict(
-    entities: Dict[str, Any],
-    structure: StructureResult
+    entities: Dict[str, Any], structure: StructureResult
 ) -> Dict[str, Any]:
     """
     Build the booking dictionary from entities and structure.
@@ -95,7 +94,8 @@ def _build_booking_dict(
     """
     # Extract services
     services = entities.get("business_categories") or entities.get(
-        "service_families", [])
+        "service_families", []
+    )
 
     # Extract date reference (prefer absolute over relative)
     date_ref = _extract_date_reference(entities)
@@ -111,7 +111,7 @@ def _build_booking_dict(
         "date_ref": date_ref,
         "time_ref": None,  # deprecated; no fallback if time_constraint is None
         "time_constraint": time_constraint,
-        "duration": duration
+        "duration": duration,
     }
 
 
@@ -142,14 +142,13 @@ def _extract_date_reference(entities: Dict[str, Any]) -> Optional[str]:
 
 
 def _extract_time_constraint(
-    entities: Dict[str, Any],
-    structure: StructureResult
+    entities: Dict[str, Any], structure: StructureResult
 ) -> Optional[Dict[str, Any]]:
     """Delegate time normalization to canonical resolver."""
     return resolve_time_constraint(
         entities.get("times", []) or [],
         entities.get("time_windows", []) or [],
-        structure.time_type
+        structure.time_type,
     )
 
 
@@ -171,8 +170,7 @@ def _extract_duration(entities: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def _determine_clarification_reason(
-    entities: Dict[str, Any],
-    structure: StructureResult
+    entities: Dict[str, Any], structure: StructureResult
 ) -> Optional[str]:
     """
     Determine reason for clarification needed.
@@ -201,8 +199,7 @@ def _determine_clarification_reason(
 
     # Check for conflicting scopes
     if structure.service_scope == "separate" and structure.time_scope == "shared":
-        reasons.append(
-            "Conflicting scopes: separate services with shared time")
+        reasons.append("Conflicting scopes: separate services with shared time")
 
     if reasons:
         return "; ".join(reasons)

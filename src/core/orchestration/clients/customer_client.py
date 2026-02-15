@@ -4,7 +4,7 @@ Customer API Client
 Thin HTTP client for calling customer internal API.
 """
 
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from core.orchestration.clients.base_client import BaseClient
 
@@ -22,14 +22,14 @@ class CustomerClient(BaseClient):
         super().__init__(
             base_url=base_url,
             env_var="INTERNAL_API_BASE_URL",
-            default_url="http://localhost:3000"
+            default_url="http://localhost:3000",
         )
 
     def get_customer(
         self,
         organization_id: int,
         email: Optional[str] = None,
-        phone: Optional[str] = None
+        phone: Optional[str] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Get customer by email or phone.

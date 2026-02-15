@@ -5,7 +5,8 @@ Shared base class for thin HTTP clients.
 """
 
 import os
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 import httpx
 
 from core.orchestration.errors import UpstreamError
@@ -19,7 +20,7 @@ class BaseClient:
         base_url: Optional[str] = None,
         env_var: str = "INTERNAL_API_BASE_URL",
         default_url: Optional[str] = None,
-        timeout: float = 30.0
+        timeout: float = 30.0,
     ):
         """
         Initialize base client.
@@ -57,7 +58,7 @@ class BaseClient:
         method: str,
         path: str,
         json: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None
+        params: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Make HTTP request and return parsed JSON.
@@ -78,10 +79,7 @@ class BaseClient:
 
         try:
             response = self._client.request(
-                method=method,
-                url=url,
-                json=json,
-                params=params
+                method=method, url=url, json=json, params=params
             )
             response.raise_for_status()
             return response.json()
@@ -98,20 +96,16 @@ class BaseClient:
                 f"API returned error {status_code}: {error_text}"
             ) from e
         except httpx.RequestError as e:
-            raise UpstreamError(
-                f"API request failed: {str(e)}"
-            ) from e
+            raise UpstreamError(f"API request failed: {str(e)}") from e
         except Exception as e:
-            raise UpstreamError(
-                f"Unexpected error calling API: {str(e)}"
-            ) from e
+            raise UpstreamError(f"Unexpected error calling API: {str(e)}") from e
 
     def _request_allow_404(
         self,
         method: str,
         path: str,
         json: Optional[Dict[str, Any]] = None,
-        params: Optional[Dict[str, Any]] = None
+        params: Optional[Dict[str, Any]] = None,
     ) -> Optional[Dict[str, Any]]:
         """
         Make HTTP request and return parsed JSON, or None on 404.
@@ -132,10 +126,7 @@ class BaseClient:
 
         try:
             response = self._client.request(
-                method=method,
-                url=url,
-                json=json,
-                params=params
+                method=method, url=url, json=json, params=params
             )
             if response.status_code == 404:
                 return None
@@ -150,13 +141,9 @@ class BaseClient:
                 f"API returned error {status_code}: {error_text}"
             ) from e
         except httpx.RequestError as e:
-            raise UpstreamError(
-                f"API request failed: {str(e)}"
-            ) from e
+            raise UpstreamError(f"API request failed: {str(e)}") from e
         except Exception as e:
-            raise UpstreamError(
-                f"Unexpected error calling API: {str(e)}"
-            ) from e
+            raise UpstreamError(f"Unexpected error calling API: {str(e)}") from e
 
     def __del__(self):
         """Close httpx client on cleanup."""
