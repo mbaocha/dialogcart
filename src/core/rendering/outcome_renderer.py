@@ -64,10 +64,10 @@ def render_outcome(
     """
     Render outcome text from decision and outcome.
     
-    Only renders for EXECUTED status.
+    Only renders for EXECUTED or FAILED status.
     
     Behavior:
-    - If outcome.status != "EXECUTED": return None
+    - If outcome.status not in ("EXECUTED", "FAILED"): return None
     - Generate candidate keys via outcome_mapper
     - Build interpolation data from outcome (use outcome dict as data)
     - For first matching key:
@@ -83,9 +83,9 @@ def render_outcome(
     Returns:
         RenderSpec with rendered text, or None if not applicable or template not found
     """
-    # Only render for EXECUTED status
+    # Only render for EXECUTED or FAILED status
     outcome_status = outcome.get("status")
-    if outcome_status != "EXECUTED":
+    if outcome_status not in ("EXECUTED", "FAILED"):
         return None
     
     # Derive template key candidates

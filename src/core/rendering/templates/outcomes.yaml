@@ -15,6 +15,14 @@ OUTCOME__EXECUTED:
   template: "Your request has been completed successfully."
   required_fields: []
 
+OUTCOME__CREATE_APPOINTMENT__FAILED:
+  template: "Sorry, we couldn't create your appointment. Please try again."
+  required_fields: []
+
+OUTCOME__FAILED:
+  template: "Sorry, something went wrong. Please try again."
+  required_fields: []
+
 OUTCOME:
   template: "Your request has been completed successfully."
   required_fields: []

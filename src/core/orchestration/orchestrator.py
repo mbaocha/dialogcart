@@ -277,10 +277,10 @@ def _inject_outcome_text(
     outcome: Dict[str, Any]
 ) -> None:
     """
-    Inject rendered outcome text into result for EXECUTED outcomes.
+    Inject rendered outcome text into result for EXECUTED or FAILED outcomes.
     
     This is a pure post-processing step that:
-    - Only triggers for outcome.status == "EXECUTED"
+    - Only triggers for outcome.status in ("EXECUTED", "FAILED")
     - Derives template key from decision + outcome
     - Renders text using outcome templates
     - Injects result["text"] = rendered_text
@@ -290,9 +290,9 @@ def _inject_outcome_text(
         decision: Decision dictionary (optional, for intent extraction)
         outcome: Outcome dictionary with status, intent_name, etc.
     """
-    # Only render for EXECUTED status
+    # Only render for EXECUTED or FAILED status
     outcome_status = outcome.get("status")
-    if outcome_status != "EXECUTED":
+    if outcome_status not in ("EXECUTED", "FAILED"):
         return
     
     try:
@@ -3307,10 +3307,13 @@ def handle_message_legacy(
         if plan_status not in ("NEEDS_CLARIFICATION", "AWAITING_CAPABILITY", "EXECUTED"):
             _inject_system_text(result, decision)
 
-        # Inject rendering text for clarification states
-        _inject_rendering_text(result, decision, session_state)
+        # Inject rendering text for clarification states (ONLY for NEEDS_CLARIFICATION)
+        if plan_status == "NEEDS_CLARIFICATION":
+            _inject_rendering_text(result, decision, session_state)
 
-        return result
+        # Do NOT return early for AWAITING_* statuses - let the handler below process them
+        if plan_status not in ("AWAITING_CONFIRMATION", "AWAITING_CAPABILITY"):
+            return result
 
     # Handle AWAITING_* statuses (AWAITING_CONFIRMATION, AWAITING_CAPABILITY, etc.)
     # Generic handler that mirrors plan status and awaiting without special-casing
@@ -3578,13 +3581,8 @@ def handle_message_legacy(
                         exc_info=True
                     )
 
-        # Inject rendering text for clarification states (AWAITING_* doesn't need clarification)
-        # Only inject if missing_slots is non-empty (clarification needed)
-        facts = decision.get("facts", {})
-        missing_slots = facts.get("missing_slots", [])
-        if isinstance(missing_slots, list) and len(missing_slots) > 0:
-            _inject_rendering_text(result, decision)
-
+        # AWAITING_* statuses must never render clarification text at top-level
+        # Capability/awaiting UI owns the text for these statuses
         return result
 
     # Handle NEEDS_CLARIFICATION status
@@ -3926,10 +3924,7 @@ def handle_message_legacy(
         result["outcome"]["missing_slots"] = missing_slots
         result["outcome"]["slots"] = slots
 
-        # Inject rendering text for clarification states (READY doesn't need clarification)
-        # Only inject if missing_slots is non-empty (clarification needed)
-        if isinstance(missing_slots, list) and len(missing_slots) > 0:
-            _inject_rendering_text(result, decision)
+        # READY must remain silent per phase 1 contract (no clarification rendering here)
 
         # Store effective Luma response for session building
         result["_merged_luma_response"] = effective_response

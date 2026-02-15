@@ -3,48 +3,301 @@ platform linux -- Python 3.10.13, pytest-9.0.2, pluggy-1.6.0
 rootdir: /mnt/c/Users/user/Documents/projects/my-project/dialogcart/src
 configfile: pytest.ini
 plugins: anyio-4.12.0
-collected 200 items / 6 skipped
+collected 215 items / 6 skipped
 
-core/tests/e2e/test_acknowledgement_rendering_e2e.py ..                  [  1%]
+core/tests/e2e/test_acknowledgement_rendering_e2e.py ..                  [  0%]
 core/tests/e2e/test_adaptive_clarification_rendering_e2e.py .            [  1%]
-core/tests/e2e/test_awaiting_slot_e2e.py .                               [  2%]
+core/tests/e2e/test_awaiting_slot_e2e.py .                               [  1%]
+core/tests/e2e/test_capability_text_preserved_with_missing_slots.py F    [  2%]
 core/tests/e2e/test_conversation_rendering_e2e.py ..                     [  3%]
 core/tests/e2e/test_core_capability_noop_e2e.py .                        [  3%]
 core/tests/e2e/test_core_capability_payment_e2e.py .                     [  4%]
 core/tests/e2e/test_core_e2e_followup_availability.py .                  [  4%]
 core/tests/e2e/test_core_e2e_single_turn_availability.py .               [  5%]
 core/tests/e2e/test_rendering_verification.py ...                        [  6%]
-core/tests/e2e/test_slot_retry_tracking_e2e.py .                         [  7%]
-core/tests/execution/test_availability_execution.py ..                   [  8%]
-core/tests/execution/test_booking_execution.py ..                        [  9%]
-core/tests/execution/test_confirmation_execution.py ..                   [ 10%]
+core/tests/e2e/test_slot_retry_tracking_e2e.py .                         [  6%]
+core/tests/execution/test_availability_execution.py ..                   [  7%]
+core/tests/execution/test_booking_execution.py ..                        [  8%]
+core/tests/execution/test_confirmation_execution.py ..                   [  9%]
 core/tests/execution/test_test_backend.py .......                        [ 13%]
-core/tests/integration/test_capability_bootstrap_integration.py ..       [ 14%]
-core/tests/integration/test_commit_gated_workflow.py ...                 [ 16%]
-core/tests/integration/test_lifecycle_notification.py .                  [ 16%]
-core/tests/intents/test_base_intents.py .........                        [ 21%]
-core/tests/orchestration/contracts/test_luma_contracts.py ......         [ 24%]
-core/tests/orchestration/test_non_core_intent_passthrough.py ..........  [ 29%]
-core/tests/orchestration/test_orchestrator_flow.py ......                [ 32%]
-core/tests/orchestration/test_orchestrator_invariants.py ...             [ 33%]
-core/tests/orchestration/test_time_normalization.py .....                [ 36%]
-core/tests/planning/test_awaiting_slot_planning.py .....                 [ 38%]
-core/tests/planning/test_capability_org_condition.py .....               [ 41%]
-core/tests/planning/test_confirm_continuation_hardening.py .......       [ 44%]
-core/tests/planning/test_planning.py .............................       [ 59%]
-core/tests/planning/test_policy_invariants.py ...................        [ 68%]
-core/tests/rendering/test_clarification_mapper.py ...........            [ 74%]
-core/tests/rendering/test_clarification_rendering.py .                   [ 74%]
-core/tests/rendering/test_missing_template_error.py ..                   [ 75%]
-core/tests/rendering/test_outcome_rendering.py .............             [ 82%]
-core/tests/rendering/test_system_rendering.py .......                    [ 85%]
+core/tests/integration/test_capability_bootstrap_integration.py ..       [ 13%]
+core/tests/integration/test_commit_gated_workflow.py ...                 [ 15%]
+core/tests/integration/test_lifecycle_notification.py .                  [ 15%]
+core/tests/intents/test_base_intents.py .........                        [ 20%]
+core/tests/orchestration/contracts/test_luma_contracts.py ......         [ 22%]
+core/tests/orchestration/test_non_core_intent_passthrough.py ..........  [ 27%]
+core/tests/orchestration/test_orchestrator_flow.py ......                [ 30%]
+core/tests/orchestration/test_orchestrator_invariants.py F..             [ 31%]
+core/tests/orchestration/test_time_normalization.py .....                [ 33%]
+core/tests/planning/test_awaiting_slot_planning.py .....                 [ 36%]
+core/tests/planning/test_capability_org_condition.py .....               [ 38%]
+core/tests/planning/test_confirm_continuation_hardening.py .......       [ 41%]
+core/tests/planning/test_planning.py .............................       [ 55%]
+core/tests/planning/test_policy_invariants.py ...................        [ 64%]
+core/tests/rendering/test_capability_template_rendering.py ......        [ 66%]
+core/tests/rendering/test_clarification_mapper.py ...........            [ 72%]
+core/tests/rendering/test_clarification_rendering.py .                   [ 72%]
+core/tests/rendering/test_missing_template_error.py ..                   [ 73%]
+core/tests/rendering/test_outcome_failed_rendering.py ........           [ 77%]
+core/tests/rendering/test_outcome_rendering.py .............             [ 83%]
+core/tests/rendering/test_system_rendering.py .......                    [ 86%]
 core/tests/session/test_session.py .                                     [ 86%]
 core/tests/session/test_session_manager.py ............                  [ 92%]
 core/tests/workflows/test_workflow_invocation.py ......                  [ 95%]
 core/tests/workflows/test_workflow_manual.py ...                         [ 96%]
 core/tests/workflows/test_workflow_registry.py .......                   [100%]
 
-======================= 200 passed, 6 skipped in 17.65s ========================
+=================================== FAILURES ===================================
+__________ test_capability_text_preserved_when_missing_slots_present ___________
+core/tests/e2e/test_capability_text_preserved_with_missing_slots.py:163: in test_capability_text_preserved_when_missing_slots_present
+    assert "text" in result, \
+E   AssertionError: Expected 'text' in result, got keys: ['success', 'result', 'outcome', 'ui_actions']
+E   assert 'text' in {'outcome': {'action': 'SEARCH_AVAILABILITY', 'active_capability': 'payment', 'allowed_actions': ['SEARCH_AVAILABILITY... 'payment', 'allowed_actions': ['SEARCH_AVAILABILITY'], 'awaiting': 'PAYMENT', ...}, 'success': True, 'ui_actions': []}
+----------------------------- Captured stdout call -----------------------------
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut", "date": "2026-01-16"}, "raw_luma_context": {}}
+[_compute_effective_collected_slots] raw_slots keys=['service_id', 'date']
+  effective_slots_for_filtering.keys()=['service_id', 'date']
+  promoted_slots={'service_id': 'haircut', 'date': '2026-01-16'}
+  effective_collected_slots (after filter)={'service_id': 'haircut', 'date': '2026-01-16'}
+  effective_collected_slots.keys()=['service_id', 'date']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut", "date": "2026-01-16"}, "effective_collected_slots": {"service_id": "haircut", "date": "2026-01-16"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut", "date": "2026-01-16"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_APPOINTMENT, missing_slots=['time']
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_APPOINTMENT",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION"
+}
+TURN_STATE: {
+  "intent": "CREATE_APPOINTMENT",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date"
+    ],
+    "values": {
+      "service_id": "haircut",
+      "date": "2026-01-16"
+    }
+  },
+  "required_slots": [
+    "date",
+    "service_id",
+    "time"
+  ],
+  "missing_slots": [
+    "time"
+  ],
+  "status": "NEEDS_CLARIFICATION",
+  "decision_reason": "MISSING_REQUIRED_SLOTS"
+}
+------------------------------ Captured log call -------------------------------
+INFO     core.turn_log:orchestrator.py:515 {"turn": "INPUT", "user_id": "test-capability-text-preserved", "text": "book haircut tomorrow"}
+ERROR    core.orchestration.session.session_manager:session_manager.py:174 [SESSION_LOAD] Attempting to load: user_id=test-capability-text-preserved key=session:test-capability-text-preserved
+ERROR    core.orchestration.session.session_manager:session_manager.py:227 [SESSION_LOAD] Not found anywhere: user_id=test-capability-text-preserved key=session:test-capability-text-preserved
+INFO     core.turn_log:orchestrator.py:557 {"turn": "SESSION_READ", "session": null}
+INFO     core.turn_log:orchestrator.py:1564 {"turn": "LUMA", "intent": "CREATE_APPOINTMENT", "slots": {"service_id": "haircut", "date": "2026-01-16"}, "missing_slots": ["time"]}
+ERROR    core.planning.orchestration.intent_resolution:intent_resolution.py:128 [SESSION_RESET_WRITER] WRITER=initial_default value=False location=line_122_default reason=initial_assignment luma_intent=CREATE_APPOINTMENT user_id=test-capability-text-preserved
+ERROR    core.planning.orchestration.intent_resolution:intent_resolution.py:482 [SESSION_RESET_WRITER] FINAL_VALUE=False effective_intent=CREATE_APPOINTMENT location=line_337_before_return user_id=test-capability-text-preserved
+ERROR    core.planning.orchestration.intent_resolution:intent_resolution.py:488 [INTENT_RESOLVE] RETURNING effective_intent=CREATE_APPOINTMENT session_reset_occurred=False user_id=test-capability-text-preserved
+ERROR    core.orchestration.orchestrator:orchestrator.py:2027 [SESSION_RESET_WRITER] RECEIVED_FROM_RESOLVER value=False source=resolve_effective_intent effective_intent=CREATE_APPOINTMENT user_id=test-capability-text-preserved
+ERROR    core.orchestration.orchestrator:orchestrator.py:2035 [ORCHESTRATOR] AFTER resolve_effective_intent: effective_intent=CREATE_APPOINTMENT session_reset_occurred=False will_null_session_state=False user_id=test-capability-text-preserved
+ERROR    core.orchestration.orchestrator:orchestrator.py:2241 [INTENT_TRACE_ORCHESTRATOR] BEFORE merge_luma_with_session: effective_intent=CREATE_APPOINTMENT, effective_response['intent']['name']=CREATE_APPOINTMENT, session.intent_name=None, session.status=None, session_reset_occurred=False, user_id=test-capability-text-preserved
+ERROR    core.orchestration.orchestrator:orchestrator.py:2304 [SESSION_RESET_WRITER] FINAL_CHECK_BEFORE_MERGE: session_reset_occurred=False source=resolve_effective_intent session_for_merge_exists=False session_for_merge_intent=None session_for_merge_slots=[] session_status_for_merge=None will_block_merge=False user_id=test-capability-text-preserved
+ERROR    core.orchestration.orchestrator:orchestrator.py:2316 [ORCHESTRATOR] BEFORE should_merge_session: session_reset_occurred=False session_for_merge_intent=None session_for_merge_slots=[] session_status_for_merge=None is_session_intent_durable=False user_id=test-capability-text-preserved
+ERROR    core.orchestration.orchestrator:orchestrator.py:2333 [ORCHESTRATOR] should_merge_session=None user_id=test-capability-text-preserved
+ERROR    core.orchestration.orchestrator:orchestrator.py:2552 [INTENT_TRACE_ORCHESTRATOR] BEFORE process_luma_response: effective_response['intent']['name']=CREATE_APPOINTMENT, effective_response['_effective_intent']=CREATE_APPOINTMENT, session.intent_name=None, session.status=None, user_id=test-capability-text-preserved
+ERROR    core.orchestration.api.turn_state:turn_state.py:173 [MISSING_SLOTS_TRACE] finalize_turn_state: INITIAL computation from planner, intent=CREATE_APPOINTMENT, required_slots=['date', 'service_id', 'time'], collected_slots=['date', 'service_id'], effective_collected_slots_keys=['date', 'service_id'], missing_slots=['time'], missing_slots_length=1
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1024 [MISSING_SLOTS_TRACE] process_luma_response: AFTER finalize_turn_state, BEFORE time_constraint logic, intent=CREATE_APPOINTMENT, user_id=test-capability-text-preserved, required_slots=['date', 'service_id', 'time'], effective_collected_slots_keys=['date', 'service_id'], effective_collected_slots={'service_id': 'haircut', 'date': '2026-01-16'}, session_slots_keys=['date', 'service_id'], session_slots={'service_id': 'haircut', 'date': '2026-01-16'}, slots_for_filtering_keys=['date', 'service_id'], missing_slots=['time'], missing_slots_length=1, has_time_in_effective=False, has_time_in_session=False, has_time_in_slots_for_filtering=False
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1215 [MISSING_SLOTS_TRACE] process_luma_response: BEFORE build_decision_plan, intent=CREATE_APPOINTMENT, user_id=test-capability-text-preserved, required_slots=['date', 'service_id', 'time'], effective_collected_slots_keys=['date', 'service_id'], has_time_in_effective=False, has_time_in_slots_for_filtering=False, missing_slots=['time'], missing_slots_length=1, luma_response_for_plan['missing_slots']=['time']
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1233 [INTENT_TRACE_PLANNING_ENTRY] BEFORE build_decision_plan: decision.intent_name=CREATE_APPOINTMENT, facts.intent_name=, luma_response['intent']['name']=CREATE_APPOINTMENT, luma_response['_effective_intent']=CREATE_APPOINTMENT, user_id=test-capability-text-preserved
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1314 [PLANNING_DECISION] AFTER planner build_decision_plan: intent=CREATE_APPOINTMENT, plan.status=NEEDS_CLARIFICATION, plan.stage=AVAILABILITY, plan.action=SEARCH_AVAILABILITY, session.intent_name=None, session.status=None, session.stage=None, session.action=None, availability_fingerprint_stored=None, availability_fingerprint_current=fc45d7ec8b0dfda6f7f01922d471b342caa0b0c3acd5ae9783fbd279af6adcd0, availability_resolved=False, last_execution_result=None, current_slots service_id=haircut, date=2026-01-16, time=None, org_id=None
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1330 [MISSING_SLOTS_TRACE] process_luma_response: AFTER build_decision_plan, intent=CREATE_APPOINTMENT, user_id=test-capability-text-preserved, missing_slots_variable=['time'], missing_slots_length=1, luma_response_for_plan['missing_slots']=['time'], plan.keys()=['status', 'stage', 'action', 'allowed_actions', 'blocked_actions', 'awaiting', 'executable_actions']
+ERROR    core.orchestration.orchestrator:orchestrator.py:2967 [CAPABILITY_GATING_INSTRUMENTATION] payment_satisfied sources: decision.facts=None, session_state.facts=None, effective_response.facts=None, FINAL=False
+ERROR    core.orchestration.orchestrator:orchestrator.py:3110 [FINALIZATION_DECISION] BEFORE PLAN_FINAL (after all overrides): intent=CREATE_APPOINTMENT, plan.status=AWAITING_CAPABILITY, plan.stage=AVAILABILITY, plan.action=SEARCH_AVAILABILITY, session.intent_name=None, session.status=None, session.stage=None, session.action=None, availability_fingerprint_stored=None, availability_fingerprint_current=fc45d7ec8b0dfda6f7f01922d471b342caa0b0c3acd5ae9783fbd279af6adcd0, last_execution_result=None, slots service_id=haircut, date=2026-01-16, time=None, org_id=None
+ERROR    core.orchestration.orchestrator:orchestrator.py:3128 [PLAN_FINAL] stage=AVAILABILITY action=SEARCH_AVAILABILITY missing=['time'] slots={'service_id': 'haircut', 'date': '2026-01-16'}
+ERROR    capabilities.runner:runner.py:288 [PAYMENT_CAPABILITY_DEBUG] Adapter still active for capability=payment, user=test-capability-text-preserved: response.completed=False, response.facts={}, returning RunnerResult(passthrough=False, active_capability=payment)
+ERROR    capabilities.runner:runner.py:302 [PAYMENT_CAPABILITY_DEBUG] RunnerResult (non-completion) constructed: passthrough=False, facts=None, active_capability=payment
+ERROR    capabilities.runner:runner.py:288 [PAYMENT_CAPABILITY_DEBUG] Adapter still active for capability=payment, user=test-capability-text-preserved: response.completed=False, response.facts={}, returning RunnerResult(passthrough=False, active_capability=payment)
+ERROR    capabilities.runner:runner.py:302 [PAYMENT_CAPABILITY_DEBUG] RunnerResult (non-completion) constructed: passthrough=False, facts=None, active_capability=payment
+WARNING  core.rendering.capability_renderer:capability_renderer.py:271 Payment capability rendering: booking_code not found
+_____________ test_rendered_ui_appears_at_api_boundary_capability ______________
+core/tests/orchestration/test_orchestrator_invariants.py:124: in test_rendered_ui_appears_at_api_boundary_capability
+    assert text_value is not None, (
+E   AssertionError: [INVARIANT] Capability rendering must produce top-level 'text'. Got: None
+E   assert None is not None
+----------------------------- Captured stdout call -----------------------------
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_RESERVATION", "is_first_turn": true, "raw_luma_slots": {"service_id": "room", "date_range": "2026-01-20 to 2026-01-22"}, "raw_luma_context": {}}
+[_compute_effective_collected_slots] raw_slots keys=['service_id', 'date_range']
+  effective_slots_for_filtering.keys()=['service_id', 'date_range']
+  promoted_slots={'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'}
+  effective_collected_slots (after filter)={'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'}
+  effective_collected_slots.keys()=['service_id', 'date_range']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_RESERVATION", "modification_context": null, "promoted_slots": {"service_id": "room", "date_range": "2026-01-20 to 2026-01-22"}, "effective_collected_slots": {"service_id": "room", "date_range": "2026-01-20 to 2026-01-22"}}
+
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_RESERVATION", "slots_used": {"service_id": "room", "date_range": "2026-01-20 to 2026-01-22"}, "session_slots": null, "modification_context": null}
+[MISSING_SLOTS] Computed missing_slots for first turn: intent=CREATE_RESERVATION, missing_slots=[]
+[SLOT_STATE_TRACE] Before finalization: {
+  "intent": "CREATE_RESERVATION",
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date_range"
+    ],
+    "values": {
+      "service_id": "room",
+      "date_range": "2026-01-20 to 2026-01-22"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date_range"
+    ],
+    "values": {
+      "service_id": "room",
+      "date_range": "2026-01-20 to 2026-01-22"
+    }
+  },
+  "missing_slots": [],
+  "status": "READY"
+}
+TURN_STATE: {
+  "intent": "CREATE_RESERVATION",
+  "raw_luma_slots": {
+    "keys": [],
+    "values": {}
+  },
+  "merged_session_slots": {
+    "keys": [
+      "service_id",
+      "date_range"
+    ],
+    "values": {
+      "service_id": "room",
+      "date_range": "2026-01-20 to 2026-01-22"
+    }
+  },
+  "promoted_slots": {
+    "keys": [
+      "service_id",
+      "date_range"
+    ],
+    "values": {
+      "service_id": "room",
+      "date_range": "2026-01-20 to 2026-01-22"
+    }
+  },
+  "effective_collected_slots": {
+    "keys": [
+      "service_id",
+      "date_range"
+    ],
+    "values": {
+      "service_id": "room",
+      "date_range": "2026-01-20 to 2026-01-22"
+    }
+  },
+  "required_slots": [
+    "date_range",
+    "service_id"
+  ],
+  "missing_slots": [],
+  "status": "READY",
+  "decision_reason": "READY_ALL_SATISFIED"
+}
+------------------------------ Captured log call -------------------------------
+INFO     core.turn_log:orchestrator.py:515 {"turn": "INPUT", "user_id": "test-invariant-capability", "text": "book a room"}
+ERROR    core.orchestration.session.session_manager:session_manager.py:174 [SESSION_LOAD] Attempting to load: user_id=test-invariant-capability key=session:test-invariant-capability
+ERROR    core.orchestration.session.session_manager:session_manager.py:227 [SESSION_LOAD] Not found anywhere: user_id=test-invariant-capability key=session:test-invariant-capability
+INFO     core.turn_log:orchestrator.py:557 {"turn": "SESSION_READ", "session": null}
+INFO     core.turn_log:orchestrator.py:1564 {"turn": "LUMA", "intent": "CREATE_RESERVATION", "slots": {"service_id": "room", "date_range": "2026-01-20 to 2026-01-22"}, "missing_slots": []}
+ERROR    core.planning.orchestration.intent_resolution:intent_resolution.py:128 [SESSION_RESET_WRITER] WRITER=initial_default value=False location=line_122_default reason=initial_assignment luma_intent=CREATE_RESERVATION user_id=test-invariant-capability
+ERROR    core.planning.orchestration.intent_resolution:intent_resolution.py:482 [SESSION_RESET_WRITER] FINAL_VALUE=False effective_intent=CREATE_RESERVATION location=line_337_before_return user_id=test-invariant-capability
+ERROR    core.planning.orchestration.intent_resolution:intent_resolution.py:488 [INTENT_RESOLVE] RETURNING effective_intent=CREATE_RESERVATION session_reset_occurred=False user_id=test-invariant-capability
+ERROR    core.orchestration.orchestrator:orchestrator.py:2027 [SESSION_RESET_WRITER] RECEIVED_FROM_RESOLVER value=False source=resolve_effective_intent effective_intent=CREATE_RESERVATION user_id=test-invariant-capability
+ERROR    core.orchestration.orchestrator:orchestrator.py:2035 [ORCHESTRATOR] AFTER resolve_effective_intent: effective_intent=CREATE_RESERVATION session_reset_occurred=False will_null_session_state=False user_id=test-invariant-capability
+ERROR    core.orchestration.orchestrator:orchestrator.py:2241 [INTENT_TRACE_ORCHESTRATOR] BEFORE merge_luma_with_session: effective_intent=CREATE_RESERVATION, effective_response['intent']['name']=CREATE_RESERVATION, session.intent_name=None, session.status=None, session_reset_occurred=False, user_id=test-invariant-capability
+ERROR    core.orchestration.orchestrator:orchestrator.py:2304 [SESSION_RESET_WRITER] FINAL_CHECK_BEFORE_MERGE: session_reset_occurred=False source=resolve_effective_intent session_for_merge_exists=False session_for_merge_intent=None session_for_merge_slots=[] session_status_for_merge=None will_block_merge=False user_id=test-invariant-capability
+ERROR    core.orchestration.orchestrator:orchestrator.py:2316 [ORCHESTRATOR] BEFORE should_merge_session: session_reset_occurred=False session_for_merge_intent=None session_for_merge_slots=[] session_status_for_merge=None is_session_intent_durable=False user_id=test-invariant-capability
+ERROR    core.orchestration.orchestrator:orchestrator.py:2333 [ORCHESTRATOR] should_merge_session=None user_id=test-invariant-capability
+ERROR    core.orchestration.orchestrator:orchestrator.py:2552 [INTENT_TRACE_ORCHESTRATOR] BEFORE process_luma_response: effective_response['intent']['name']=CREATE_RESERVATION, effective_response['_effective_intent']=CREATE_RESERVATION, session.intent_name=None, session.status=None, user_id=test-invariant-capability
+ERROR    core.orchestration.api.turn_state:turn_state.py:173 [MISSING_SLOTS_TRACE] finalize_turn_state: INITIAL computation from planner, intent=CREATE_RESERVATION, required_slots=['date_range', 'service_id'], collected_slots=['date_range', 'service_id'], effective_collected_slots_keys=['date_range', 'service_id'], missing_slots=[], missing_slots_length=0
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1024 [MISSING_SLOTS_TRACE] process_luma_response: AFTER finalize_turn_state, BEFORE time_constraint logic, intent=CREATE_RESERVATION, user_id=test-invariant-capability, required_slots=['date_range', 'service_id'], effective_collected_slots_keys=['date_range', 'service_id'], effective_collected_slots={'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'}, session_slots_keys=['date_range', 'service_id'], session_slots={'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'}, slots_for_filtering_keys=['date_range', 'service_id'], missing_slots=[], missing_slots_length=0, has_time_in_effective=False, has_time_in_session=False, has_time_in_slots_for_filtering=False
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1215 [MISSING_SLOTS_TRACE] process_luma_response: BEFORE build_decision_plan, intent=CREATE_RESERVATION, user_id=test-invariant-capability, required_slots=['date_range', 'service_id'], effective_collected_slots_keys=['date_range', 'service_id'], has_time_in_effective=False, has_time_in_slots_for_filtering=False, missing_slots=[], missing_slots_length=0, luma_response_for_plan['missing_slots']=[]
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1233 [INTENT_TRACE_PLANNING_ENTRY] BEFORE build_decision_plan: decision.intent_name=CREATE_RESERVATION, facts.intent_name=, luma_response['intent']['name']=CREATE_RESERVATION, luma_response['_effective_intent']=CREATE_RESERVATION, user_id=test-invariant-capability
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1314 [PLANNING_DECISION] AFTER planner build_decision_plan: intent=CREATE_RESERVATION, plan.status=READY, plan.stage=AVAILABILITY, plan.action=SEARCH_AVAILABILITY, session.intent_name=None, session.status=None, session.stage=None, session.action=None, availability_fingerprint_stored=None, availability_fingerprint_current=2a90e438b73b29ecb7993c06b90b8885477211ccf0da87fcc7fbf63cf988e178, availability_resolved=False, last_execution_result=None, current_slots service_id=room, date=None, time=None, org_id=None
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1330 [MISSING_SLOTS_TRACE] process_luma_response: AFTER build_decision_plan, intent=CREATE_RESERVATION, user_id=test-invariant-capability, missing_slots_variable=[], missing_slots_length=0, luma_response_for_plan['missing_slots']=[], plan.keys()=['status', 'stage', 'action', 'allowed_actions', 'blocked_actions', 'awaiting', 'executable_actions']
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1558 [FLOW_TRACE] process_luma_response building facts:
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1559 [FLOW_TRACE]   facts.slots: {'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'} (keys: ['service_id', 'date_range'])
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1561 [FLOW_TRACE]   facts.missing_slots: [] (len: 0)
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1564 [FLOW_TRACE]   facts.slots.service_id: room
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1633 [FLOW_TRACE] process_luma_response RETURNING:
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1634 [FLOW_TRACE]   decision.keys(): ['intent_name', 'action_name', 'booking', 'plan', 'facts']
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1636 [FLOW_TRACE]   decision.facts: {'org': {'payment_required': True, 'businessCategoryId': 1}, 'slots': {'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'}, 'missing_slots': [], 'context': {}, '_debug': {'recomputed_missing_slots': [], 'effective_collected_slots': ['service_id', 'date_range'], 'slots_keys': ['service_id', 'date_range'], 'booking_has_services': True, 'service_id_in_slots': True, 'service_id_value': 'room'}}
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1638 [FLOW_TRACE]   decision.facts.slots: {'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'}
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1640 [FLOW_TRACE]   decision.facts.missing_slots: []
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1642 [FLOW_TRACE]   decision.plan.stage: AVAILABILITY
+ERROR    core.orchestration.nlu.luma_response_processor:luma_response_processor.py:1644 [FLOW_TRACE]   decision.plan.action: SEARCH_AVAILABILITY
+ERROR    core.orchestration.orchestrator:orchestrator.py:2967 [CAPABILITY_GATING_INSTRUMENTATION] payment_satisfied sources: decision.facts=None, session_state.facts=None, effective_response.facts=None, FINAL=False
+ERROR    core.orchestration.orchestrator:orchestrator.py:3110 [FINALIZATION_DECISION] BEFORE PLAN_FINAL (after all overrides): intent=CREATE_RESERVATION, plan.status=AWAITING_CAPABILITY, plan.stage=AVAILABILITY, plan.action=SEARCH_AVAILABILITY, session.intent_name=None, session.status=None, session.stage=None, session.action=None, availability_fingerprint_stored=None, availability_fingerprint_current=2a90e438b73b29ecb7993c06b90b8885477211ccf0da87fcc7fbf63cf988e178, last_execution_result=None, slots service_id=room, date=None, time=None, org_id=None
+ERROR    core.orchestration.orchestrator:orchestrator.py:3128 [PLAN_FINAL] stage=AVAILABILITY action=SEARCH_AVAILABILITY missing=[] slots={'service_id': 'room', 'date_range': '2026-01-20 to 2026-01-22'}
+ERROR    capabilities.runner:runner.py:288 [PAYMENT_CAPABILITY_DEBUG] Adapter still active for capability=payment, user=test-invariant-capability: response.completed=False, response.facts={}, returning RunnerResult(passthrough=False, active_capability=payment)
+ERROR    capabilities.runner:runner.py:302 [PAYMENT_CAPABILITY_DEBUG] RunnerResult (non-completion) constructed: passthrough=False, facts=None, active_capability=payment
+ERROR    capabilities.runner:runner.py:288 [PAYMENT_CAPABILITY_DEBUG] Adapter still active for capability=payment, user=test-invariant-capability: response.completed=False, response.facts={}, returning RunnerResult(passthrough=False, active_capability=payment)
+ERROR    capabilities.runner:runner.py:302 [PAYMENT_CAPABILITY_DEBUG] RunnerResult (non-completion) constructed: passthrough=False, facts=None, active_capability=payment
+WARNING  core.rendering.capability_renderer:capability_renderer.py:271 Payment capability rendering: booking_code not found
+=========================== short test summary info ============================
+FAILED core/tests/e2e/test_capability_text_preserved_with_missing_slots.py::test_capability_text_preserved_when_missing_slots_present
+FAILED core/tests/orchestration/test_orchestrator_invariants.py::test_rendered_ui_appears_at_api_boundary_capability
+================== 2 failed, 213 passed, 6 skipped in 21.04s ===================
 ================================================================================
 Running tests: all
 Path: core/tests
