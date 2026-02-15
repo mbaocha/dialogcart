@@ -8,184 +8,119 @@ booking_scenarios = [
     {
         "sentence": "book me in for delux rom from oct 5th to 9th",
         "booking_mode": "reservation",
-        "aliases": {
-            "delux": "room"
-        },
+        "aliases": {"delux": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "facts": {
-                "service_id": "delux",
-                "dates": ["2026-10-05", "2026-10-09"]
-            }
-        }
+            "facts": {"service_id": "delux", "dates": ["2026-10-05", "2026-10-09"]},
+        },
     },
     {
         "sentence": "reserve standard room october 12 to 14",
         "booking_mode": "reservation",
-        "aliases": {
-            "standard": "room"
-        },
+        "aliases": {"standard": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "facts": {
-                "service_id": "standard",
-                "dates": ["2026-10-12", "2026-10-14"]
-            }
-        }
+            "facts": {"service_id": "standard", "dates": ["2026-10-12", "2026-10-14"]},
+        },
     },
     {
         "sentence": "book delux room from nov 1st to 3rd",
         "booking_mode": "reservation",
-        "aliases": {
-            "delux": "room"
-        },
+        "aliases": {"delux": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "facts": {
-                "service_id": "delux",
-                "dates": ["2026-11-01", "2026-11-03"]
-            }
-        }
+            "facts": {"service_id": "delux", "dates": ["2026-11-01", "2026-11-03"]},
+        },
     },
     {
         "sentence": "book me a room dec 20 2026 to dec 25 2026",
         "booking_mode": "reservation",
-        "aliases": {
-            "room": "room"
-        },
+        "aliases": {"room": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "facts": {
-                "service_id": "room",
-                "dates": ["2026-12-20", "2026-12-25"]
-            }
-        }
+            "facts": {"service_id": "room", "dates": ["2026-12-20", "2026-12-25"]},
+        },
     },
     {
         "sentence": "reserve a suite from feb 1st to fe 5th",
         "booking_mode": "reservation",
-        "aliases": {
-            "suite": "room"
-        },
+        "aliases": {"suite": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "facts": {
-                "service_id": "suite",
-                "dates": ["2026-02-01", "2026-02-05"]
-            }
-        }
+            "facts": {"service_id": "suite", "dates": ["2026-02-01", "2026-02-05"]},
+        },
     },
     {
         "sentence": "book standard room from feb 10 to feb 15",
         "booking_mode": "reservation",
-        "aliases": {
-            "standard": "room"
-        },
+        "aliases": {"standard": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "facts": {
-                "service_id": "standard",
-                "dates": ["2026-02-10", "2026-02-15"]
-            }
-        }
+            "facts": {"service_id": "standard", "dates": ["2026-02-10", "2026-02-15"]},
+        },
     },
     {
         "sentence": "reserve delux room march 1 to march 5",
         "booking_mode": "reservation",
-        "aliases": {
-            "delux": "room"
-        },
+        "aliases": {"delux": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "facts": {
-                "service_id": "delux",
-                "dates": ["2026-03-01", "2026-03-05"]
-            }
-        }
+            "facts": {"service_id": "delux", "dates": ["2026-03-01", "2026-03-05"]},
+        },
     },
     {
         "sentence": "book a room from april 10th to april 15th",
         "booking_mode": "reservation",
-        "aliases": {
-            "room": "room"
-        },
+        "aliases": {"room": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "facts": {
-                "service_id": "room",
-                "dates": ["2026-04-10", "2026-04-15"]
-            }
-        }
+            "facts": {"service_id": "room", "dates": ["2026-04-10", "2026-04-15"]},
+        },
     },
     {
         "sentence": "reserve suite may 5 to may 10",
         "booking_mode": "reservation",
-        "aliases": {
-            "suite": "room"
-        },
+        "aliases": {"suite": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "facts": {
-                "service_id": "suite",
-                "dates": ["2026-05-05", "2026-05-10"]
-            }
-        }
+            "facts": {"service_id": "suite", "dates": ["2026-05-05", "2026-05-10"]},
+        },
     },
     {
         "sentence": "book delux room nov 5 to 7 at night",
         "booking_mode": "reservation",
-        "aliases": {
-            "delux": "room"
-        },
+        "aliases": {"delux": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "facts": {
-                "service_id": "delux",
-                "dates": ["2026-11-05", "2026-11-07"]
-            }
-        }
+            "facts": {"service_id": "delux", "dates": ["2026-11-05", "2026-11-07"]},
+        },
     },
     {
         "sentence": "reserve standard room from dec 1 to dec 5 in the morning",
         "booking_mode": "reservation",
-        "aliases": {
-            "standard": "room"
-        },
+        "aliases": {"standard": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "facts": {
-                "service_id": "standard",
-                "dates": ["2026-12-01", "2026-12-05"]
-            }
-        }
+            "facts": {"service_id": "standard", "dates": ["2026-12-01", "2026-12-05"]},
+        },
     },
     {
         "sentence": "book suite jan 10 to jan 15 evening",
         "booking_mode": "reservation",
-        "aliases": {
-            "suite": "room"
-        },
+        "aliases": {"suite": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "facts": {
-                "service_id": "suite",
-                "dates": ["2026-01-10", "2026-01-15"]
-            }
-        }
+            "facts": {"service_id": "suite", "dates": ["2026-01-10", "2026-01-15"]},
+        },
     },
     {
         "sentence": "reserve room from feb 20 to feb 25 afternoon",
         "booking_mode": "reservation",
-        "aliases": {
-            "room": "room"
-        },
+        "aliases": {"room": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "facts": {
-                "service_id": "room",
-                "dates": ["2026-02-20", "2026-02-25"]
-            }
-        }
+            "facts": {"service_id": "room", "dates": ["2026-02-20", "2026-02-25"]},
+        },
     },
     # ────────────────
     # CREATE_APPOINTMENT — Date and time extraction
@@ -193,366 +128,276 @@ booking_scenarios = [
     {
         "sentence": "book hair cut tomorrow at 3pm",
         "booking_mode": "service",
-        "aliases": {
-            "hair cut": "haircut"
-        },
+        "aliases": {"hair cut": "haircut"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "hair cut",
-                "dates": ["2026-01-14"]
-            },
+            "facts": {"service_id": "hair cut", "dates": ["2026-01-14"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "15:00",
                 "end": "15:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "schedule beerd trim this friday at noon",
         "booking_mode": "service",
-        "aliases": {
-            "beerd": "beard grooming"
-        },
+        "aliases": {"beerd": "beard grooming"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "beerd",
-                "dates": ["2026-01-16"]
-            },
+            "facts": {"service_id": "beerd", "dates": ["2026-01-16"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "12:00",
                 "end": "12:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "book massage next monday at 10am",
         "booking_mode": "service",
-        "aliases": {
-            "massage": "massage"
-        },
+        "aliases": {"massage": "massage"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "massage",
-                "dates": ["2026-01-19"]
-            },
+            "facts": {"service_id": "massage", "dates": ["2026-01-19"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "10:00",
                 "end": "10:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "book haircut for next friday at 2pm",
         "booking_mode": "service",
-        "aliases": {
-            "haircut": "haircut"
-        },
+        "aliases": {"haircut": "haircut"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "haircut",
-                "dates": ["2026-01-23"]
-            },
+            "facts": {"service_id": "haircut", "dates": ["2026-01-23"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "14:00",
                 "end": "14:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "schedule massage tomorrow at 9am",
         "booking_mode": "service",
-        "aliases": {
-            "massage": "massage"
-        },
+        "aliases": {"massage": "massage"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "massage",
-                "dates": ["2026-01-14"]
-            },
+            "facts": {"service_id": "massage", "dates": ["2026-01-14"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "09:00",
                 "end": "09:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "book beard trim this monday at 11am",
         "booking_mode": "service",
-        "aliases": {
-            "beard": "beard grooming"
-        },
+        "aliases": {"beard": "beard grooming"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "beard",
-                "dates": ["2026-01-19"]
-            },
+            "facts": {"service_id": "beard", "dates": ["2026-01-19"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "11:00",
                 "end": "11:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "book massage tomorrow at 2pm",
         "booking_mode": "service",
-        "aliases": {
-            "massage": "massage"
-        },
+        "aliases": {"massage": "massage"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "massage",
-                "dates": ["2026-01-14"]
-            },
+            "facts": {"service_id": "massage", "dates": ["2026-01-14"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "14:00",
                 "end": "14:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "schedule haircut this friday at 4pm",
         "booking_mode": "service",
-        "aliases": {
-            "haircut": "haircut"
-        },
+        "aliases": {"haircut": "haircut"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "haircut",
-                "dates": ["2026-01-16"]
-            },
+            "facts": {"service_id": "haircut", "dates": ["2026-01-16"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "16:00",
                 "end": "16:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "book hair cut tomorrow at 2pm",
         "booking_mode": "service",
-        "aliases": {
-            "hair cut": "haircut"
-        },
+        "aliases": {"hair cut": "haircut"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "hair cut",
-                "dates": ["2026-01-14"]
-            },
+            "facts": {"service_id": "hair cut", "dates": ["2026-01-14"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "14:00",
                 "end": "14:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "book beerd trim tomorrow at 11am",
         "booking_mode": "service",
-        "aliases": {
-            "beerd": "beard grooming"
-        },
+        "aliases": {"beerd": "beard grooming"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "beerd",
-                "dates": ["2026-01-14"]
-            },
+            "facts": {"service_id": "beerd", "dates": ["2026-01-14"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "11:00",
                 "end": "11:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "book massage tomorrow at 4pm",
         "booking_mode": "service",
-        "aliases": {
-            "massage": "massage"
-        },
+        "aliases": {"massage": "massage"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "massage",
-                "dates": ["2026-01-14"]
-            },
+            "facts": {"service_id": "massage", "dates": ["2026-01-14"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "16:00",
                 "end": "16:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "schedule massage next monday at 9am",
         "booking_mode": "service",
-        "aliases": {
-            "massage": "massage"
-        },
+        "aliases": {"massage": "massage"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "massage",
-                "dates": ["2026-01-19"]
-            },
+            "facts": {"service_id": "massage", "dates": ["2026-01-19"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "09:00",
                 "end": "09:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "book haircut next friday at 3pm",
         "booking_mode": "service",
-        "aliases": {
-            "haircut": "haircut"
-        },
+        "aliases": {"haircut": "haircut"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "haircut",
-                "dates": ["2026-01-23"]
-            },
+            "facts": {"service_id": "haircut", "dates": ["2026-01-23"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "15:00",
                 "end": "15:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "schedule massage this friday after 3pm",
         "booking_mode": "service",
-        "aliases": {
-            "massage": "massage"
-        },
+        "aliases": {"massage": "massage"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "massage",
-                "dates": ["2026-01-16"]
-            },
+            "facts": {"service_id": "massage", "dates": ["2026-01-16"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "15:00",
                 "end": "15:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "book haircut tomorrow evening",
         "booking_mode": "service",
-        "aliases": {
-            "haircut": "haircut"
-        },
+        "aliases": {"haircut": "haircut"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "haircut",
-                "dates": ["2026-01-14"]
-            },
+            "facts": {"service_id": "haircut", "dates": ["2026-01-14"]},
             # STAGE 4: Assert time_constraint for fuzzy time instead of slots.time
             # start/end are populated from FUZZY_TIME_WINDOWS
             "time_constraint": {
                 "mode": "fuzzy",
                 "label": "evening",
                 "start": "17:00",
-                "end": "21:59"
-            }
-        }
+                "end": "21:59",
+            },
+        },
     },
     {
         "sentence": "schedule massage this friday morning",
         "booking_mode": "service",
-        "aliases": {
-            "massage": "massage"
-        },
+        "aliases": {"massage": "massage"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "massage",
-                "dates": ["2026-01-16"]
-            },
+            "facts": {"service_id": "massage", "dates": ["2026-01-16"]},
             # STAGE 4: Assert time_constraint for fuzzy time instead of slots.time
             # start/end are populated from FUZZY_TIME_WINDOWS
             "time_constraint": {
                 "mode": "fuzzy",
                 "label": "morning",
                 "start": "00:00",
-                "end": "11:59"
-            }
-        }
+                "end": "11:59",
+            },
+        },
     },
     {
         "sentence": "book haircut tomorrow at noon",
         "booking_mode": "service",
-        "aliases": {
-            "haircut": "haircut"
-        },
+        "aliases": {"haircut": "haircut"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "haircut",
-                "dates": ["2026-01-14"]
-            },
+            "facts": {"service_id": "haircut", "dates": ["2026-01-14"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "12:00",
                 "end": "12:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "schedule massage tomorrow at midnight",
         "booking_mode": "service",
-        "aliases": {
-            "massage": "massage"
-        },
+        "aliases": {"massage": "massage"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "massage",
-                "dates": ["2026-01-14"]
-            },
+            "facts": {"service_id": "massage", "dates": ["2026-01-14"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "00:00",
                 "end": "00:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     # ────────────────
     # EXPLICIT ALIAS MATCHING — Multiple aliases for same canonical
@@ -563,21 +408,18 @@ booking_scenarios = [
         "aliases": {
             "premium haircut": "haircut",
             "standard haircut": "haircut",
-            "express haircut": "haircut"
+            "express haircut": "haircut",
         },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "premium haircut",
-                "dates": ["2026-01-14"]
-            },
+            "facts": {"service_id": "premium haircut", "dates": ["2026-01-14"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "14:00",
                 "end": "14:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "schedule standard haircut next friday at 10am",
@@ -585,21 +427,18 @@ booking_scenarios = [
         "aliases": {
             "premium haircut": "haircut",
             "standard haircut": "haircut",
-            "express haircut": "haircut"
+            "express haircut": "haircut",
         },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "standard haircut",
-                "dates": ["2026-01-23"]
-            },
+            "facts": {"service_id": "standard haircut", "dates": ["2026-01-23"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "10:00",
                 "end": "10:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "book premium haircut tomorrow at 2pm",
@@ -611,17 +450,14 @@ booking_scenarios = [
         },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "premium haircut",
-                "dates": ["2026-01-14"]
-            },
+            "facts": {"service_id": "premium haircut", "dates": ["2026-01-14"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "14:00",
                 "end": "14:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "book premium haircut tomorrow at 2pm",
@@ -633,17 +469,14 @@ booking_scenarios = [
         },
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "premium haircut",
-                "dates": ["2026-01-14"]
-            },
+            "facts": {"service_id": "premium haircut", "dates": ["2026-01-14"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "14:00",
                 "end": "14:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     # ────────────────
     # FUZZY MATCHING TESTS — Tenant typo tolerance
@@ -651,30 +484,26 @@ booking_scenarios = [
     {
         "sentence": "book me in for premium suite from oct 5th to 9th",
         "booking_mode": "reservation",
-        "aliases": {
-            "premum suite": "room"  # Tenant typo alias for fuzzy matching
-        },
+        "aliases": {"premum suite": "room"},  # Tenant typo alias for fuzzy matching
         "expected": {
             "intent": "CREATE_RESERVATION",
             "facts": {
                 "service_id": "premum suite",
-                "dates": ["2026-10-05", "2026-10-09"]
-            }
-        }
+                "dates": ["2026-10-05", "2026-10-09"],
+            },
+        },
     },
     {
         "sentence": "reserve premum suite october 12 to 14",
         "booking_mode": "reservation",
-        "aliases": {
-            "premum suite": "room"  # Tenant typo alias
-        },
+        "aliases": {"premum suite": "room"},  # Tenant typo alias
         "expected": {
             "intent": "CREATE_RESERVATION",
             "facts": {
                 "service_id": "premum suite",
-                "dates": ["2026-10-12", "2026-10-14"]
-            }
-        }
+                "dates": ["2026-10-12", "2026-10-14"],
+            },
+        },
     },
     # ────────────────
     # EXTENDED BOOKING SCENARIOS — Various phrasings with spelling errors
@@ -682,126 +511,97 @@ booking_scenarios = [
     {
         "sentence": "i need a hair cut tomorow at 3pm",
         "booking_mode": "service",
-        "aliases": {
-            "hair cut": "haircut"
-        },
+        "aliases": {"hair cut": "haircut"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "hair cut",
-                "dates": ["2026-01-14"]
-            },
+            "facts": {"service_id": "hair cut", "dates": ["2026-01-14"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "15:00",
                 "end": "15:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "can u book me a massge for next friday morning",
         "booking_mode": "service",
-        "aliases": {
-            "massage": "massage"
-        },
+        "aliases": {"massage": "massage"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "massage",
-                "dates": ["2026-01-23"]
-            },
+            "facts": {"service_id": "massage", "dates": ["2026-01-23"]},
             # STAGE 4: Assert time_constraint for fuzzy time instead of slots.time
             # start/end are populated from FUZZY_TIME_WINDOWS
             "time_constraint": {
                 "mode": "fuzzy",
                 "label": "morning",
                 "start": "00:00",
-                "end": "11:59"
-            }
-        }
+                "end": "11:59",
+            },
+        },
     },
     {
         "sentence": "i'd like to schedual a beard trim this monday at 11am",
         "booking_mode": "service",
-        "aliases": {
-            "beard": "beard grooming"
-        },
+        "aliases": {"beard": "beard grooming"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "beard",
-                "dates": ["2026-01-19"]
-            },
+            "facts": {"service_id": "beard", "dates": ["2026-01-19"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "11:00",
                 "end": "11:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "reserv a presidental rom from dec 15th to dec 20th",
         "booking_mode": "reservation",
-        "aliases": {
-            "presidential room": "room"
-        },
+        "aliases": {"presidential room": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
             "facts": {
                 "service_id": "presidential room",
-                "dates": ["2026-12-15", "2026-12-20"]
-            }
-        }
+                "dates": ["2026-12-15", "2026-12-20"],
+            },
+        },
     },
     {
         "sentence": "book me a presdential room november 1st through november 5th",
         "booking_mode": "reservation",
-        "aliases": {
-            "presidential room": "room"
-        },
+        "aliases": {"presidential room": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
             "facts": {
                 "service_id": "presidential room",
-                "dates": ["2026-11-01", "2026-11-05"]
-            }
-        }
+                "dates": ["2026-11-01", "2026-11-05"],
+            },
+        },
     },
     {
         "sentence": "i want to make an apointment for a haircut this tuesday at 2pm",
         "booking_mode": "service",
-        "aliases": {
-            "haircut": "haircut"
-        },
+        "aliases": {"haircut": "haircut"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
-            "facts": {
-                "service_id": "haircut",
-                "dates": ["2026-01-20"]
-            },
+            "facts": {"service_id": "haircut", "dates": ["2026-01-20"]},
             "time_constraint": {
                 "mode": "exact",
                 "start": "14:00",
                 "end": "14:00",
-                "label": None
-            }
-        }
+                "label": None,
+            },
+        },
     },
     {
         "sentence": "can i get a suite from jan 10 to jan 15 please",
         "booking_mode": "reservation",
-        "aliases": {
-            "suite": "room"
-        },
+        "aliases": {"suite": "room"},
         "expected": {
             "intent": "CREATE_RESERVATION",
-            "facts": {
-                "service_id": "suite",
-                "dates": ["2026-01-10", "2026-01-15"]
-            }
-        }
+            "facts": {"service_id": "suite", "dates": ["2026-01-10", "2026-01-15"]},
+        },
     },
     # ────────────────
     # MODIFY_BOOKING — Extraction of booking_id and temporal facts
@@ -809,197 +609,147 @@ booking_scenarios = [
     {
         "sentence": "reschedule my booking ABC123 to tomorrow at 3pm",
         "booking_mode": "service",
-        "aliases": {
-            "haircut": "haircut"
-        },
+        "aliases": {"haircut": "haircut"},
         "expected": {
             "intent": "MODIFY_BOOKING",
             "facts": {
                 "booking_id": "ABC123",
                 "dates": ["2026-01-14"],
-                "times": ["15:00"]
-            }
-        }
+                "times": ["15:00"],
+            },
+        },
     },
     {
         "sentence": "change my appointment XYZ789 to next friday at 10am",
         "booking_mode": "service",
-        "aliases": {
-            "massage": "massage"
-        },
+        "aliases": {"massage": "massage"},
         "expected": {
             "intent": "MODIFY_BOOKING",
             "facts": {
                 "booking_id": "XYZ789",
                 "dates": ["2026-01-23"],
-                "times": ["10:00"]
-            }
-        }
+                "times": ["10:00"],
+            },
+        },
     },
     {
         "sentence": "move my reservation DEF456 from oct 5th to oct 10th",
         "booking_mode": "reservation",
-        "aliases": {
-            "suite": "room"
-        },
+        "aliases": {"suite": "room"},
         "expected": {
             "intent": "MODIFY_BOOKING",
-            "facts": {
-                "booking_id": "DEF456",
-                "dates": ["2026-10-05", "2026-10-10"]
-            }
-        }
+            "facts": {"booking_id": "DEF456", "dates": ["2026-10-05", "2026-10-10"]},
+        },
     },
     {
         "sentence": "update booking GHI789 to dec 15 to dec 20",
         "booking_mode": "reservation",
-        "aliases": {
-            "delux": "room"
-        },
+        "aliases": {"delux": "room"},
         "expected": {
             "intent": "MODIFY_BOOKING",
-            "facts": {
-                "booking_id": "GHI789",
-                "dates": ["2026-12-15", "2026-12-20"]
-            }
-        }
+            "facts": {"booking_id": "GHI789", "dates": ["2026-12-15", "2026-12-20"]},
+        },
     },
     {
         "sentence": "postpone my booking JKL012 to next monday at 2pm",
         "booking_mode": "service",
-        "aliases": {
-            "haircut": "haircut"
-        },
+        "aliases": {"haircut": "haircut"},
         "expected": {
             "intent": "MODIFY_BOOKING",
             "facts": {
                 "booking_id": "JKL012",
                 "dates": ["2026-01-19"],
-                "times": ["14:00"]
-            }
-        }
+                "times": ["14:00"],
+            },
+        },
     },
     {
         "sentence": "modify reservation MNO345 to november 1st through november 5th",
         "booking_mode": "reservation",
-        "aliases": {
-            "standard": "room"
-        },
+        "aliases": {"standard": "room"},
         "expected": {
             "intent": "MODIFY_BOOKING",
-            "facts": {
-                "booking_id": "MNO345",
-                "dates": ["2026-11-01", "2026-11-05"]
-            }
-        }
+            "facts": {"booking_id": "MNO345", "dates": ["2026-11-01", "2026-11-05"]},
+        },
     },
     {
         "sentence": "change the time for booking PQR678 to 4pm",
         "booking_mode": "service",
-        "aliases": {
-            "massage": "massage"
-        },
+        "aliases": {"massage": "massage"},
         "expected": {
             "intent": "MODIFY_BOOKING",
-            "facts": {
-                "booking_id": "PQR678",
-                "times": ["16:00"]
-            }
-        }
+            "facts": {"booking_id": "PQR678", "times": ["16:00"]},
+        },
     },
     {
         "sentence": "reschedule appointment STU901 to this friday evening",
         "booking_mode": "service",
-        "aliases": {
-            "haircut": "haircut"
-        },
+        "aliases": {"haircut": "haircut"},
         "expected": {
             "intent": "MODIFY_BOOKING",
-            "facts": {
-                "booking_id": "STU901",
-                "dates": ["2026-01-16"]
-            },
+            "facts": {"booking_id": "STU901", "dates": ["2026-01-16"]},
             # STAGE 4: Assert time_constraint for fuzzy time instead of slots.time
             # start/end are populated from FUZZY_TIME_WINDOWS
             "time_constraint": {
                 "mode": "fuzzy",
                 "label": "evening",
                 "start": "17:00",
-                "end": "21:59"
-            }
-        }
+                "end": "21:59",
+            },
+        },
     },
     {
         "sentence": "update my room booking VWX234 to jan 10 to jan 15",
         "booking_mode": "reservation",
-        "aliases": {
-            "premium suite": "room"
-        },
+        "aliases": {"premium suite": "room"},
         "expected": {
             "intent": "MODIFY_BOOKING",
-            "facts": {
-                "booking_id": "VWX234",
-                "dates": ["2026-01-10", "2026-01-15"]
-            }
-        }
+            "facts": {"booking_id": "VWX234", "dates": ["2026-01-10", "2026-01-15"]},
+        },
     },
     {
         "sentence": "change booking YZA567 time to tomorrow at noon",
         "booking_mode": "service",
-        "aliases": {
-            "beard": "beard grooming"
-        },
+        "aliases": {"beard": "beard grooming"},
         "expected": {
             "intent": "MODIFY_BOOKING",
             "facts": {
                 "booking_id": "YZA567",
                 "dates": ["2026-01-14"],
-                "times": ["12:00"]
-            }
-        }
+                "times": ["12:00"],
+            },
+        },
     },
     {
         "sentence": "reschedule booking LMN456 to tomorrow at 2pm",
         "booking_mode": "service",
-        "aliases": {
-            "haircut": "haircut"
-        },
+        "aliases": {"haircut": "haircut"},
         "expected": {
             "intent": "MODIFY_BOOKING",
             "facts": {
                 "booking_id": "LMN456",
                 "dates": ["2026-01-14"],
-                "times": ["14:00"]
-            }
-        }
+                "times": ["14:00"],
+            },
+        },
     },
     {
         "sentence": "change apointment OPQ789 to next friday",
         "booking_mode": "service",
-        "aliases": {
-            "massage": "massage"
-        },
+        "aliases": {"massage": "massage"},
         "expected": {
             "intent": "MODIFY_BOOKING",
-            "facts": {
-                "booking_id": "OPQ789",
-                "dates": ["2026-01-23"]
-            }
-        }
+            "facts": {"booking_id": "OPQ789", "dates": ["2026-01-23"]},
+        },
     },
     {
         "sentence": "modify reservtion RST012 to dec 20 to dec 25",
         "booking_mode": "reservation",
-        "aliases": {
-            "suite": "room"
-        },
+        "aliases": {"suite": "room"},
         "expected": {
             "intent": "MODIFY_BOOKING",
-            "facts": {
-                "booking_id": "RST012",
-                "dates": ["2026-12-20", "2026-12-25"]
-            }
-        }
+            "facts": {"booking_id": "RST012", "dates": ["2026-12-20", "2026-12-25"]},
+        },
     },
     {
         "sentence": "change my reservation ABC123 to feb 9 to feb 11",
@@ -1007,11 +757,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "MODIFY_BOOKING",
-            "facts": {
-                "booking_id": "ABC123",
-                "dates": ["2026-02-09", "2026-02-11"]
-            }
-        }
+            "facts": {"booking_id": "ABC123", "dates": ["2026-02-09", "2026-02-11"]},
+        },
     },
     {
         "sentence": "change my reservation ABC123 to feb 9",
@@ -1019,11 +766,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "MODIFY_BOOKING",
-            "facts": {
-                "booking_id": "ABC123",
-                "dates": ["2026-02-09"]
-            }
-        }
+            "facts": {"booking_id": "ABC123", "dates": ["2026-02-09"]},
+        },
     },
     {
         "sentence": "move my booking ABC123 to 3pm",
@@ -1031,22 +775,14 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "MODIFY_BOOKING",
-            "facts": {
-                "booking_id": "ABC123",
-                "times": ["15:00"]
-            }
-        }
+            "facts": {"booking_id": "ABC123", "times": ["15:00"]},
+        },
     },
     {
         "sentence": "change my booking to 3pm",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "MODIFY_BOOKING",
-            "facts": {
-                "times": ["15:00"]
-            }
-        }
+        "expected": {"intent": "MODIFY_BOOKING", "facts": {"times": ["15:00"]}},
     },
     {
         "sentence": "change the time for booking PQR678 to 4pm",
@@ -1054,11 +790,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "MODIFY_BOOKING",
-            "facts": {
-                "booking_id": "PQR678",
-                "times": ["16:00"]
-            }
-        }
+            "facts": {"booking_id": "PQR678", "times": ["16:00"]},
+        },
     },
     # ────────────────
     # CANCEL_BOOKING — Extraction of booking_id
@@ -1067,111 +800,61 @@ booking_scenarios = [
         "sentence": "cancel my booking BCD890",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "CANCEL_BOOKING",
-            "facts": {
-                "booking_id": "BCD890"
-            }
-        }
+        "expected": {"intent": "CANCEL_BOOKING", "facts": {"booking_id": "BCD890"}},
     },
     {
         "sentence": "cancel booking EFG123",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "CANCEL_BOOKING",
-            "facts": {
-                "booking_id": "EFG123"
-            }
-        }
+        "expected": {"intent": "CANCEL_BOOKING", "facts": {"booking_id": "EFG123"}},
     },
     {
         "sentence": "delete my reservation HIJ456",
         "booking_mode": "reservation",
         "aliases": {},
-        "expected": {
-            "intent": "CANCEL_BOOKING",
-            "facts": {
-                "booking_id": "HIJ456"
-            }
-        }
+        "expected": {"intent": "CANCEL_BOOKING", "facts": {"booking_id": "HIJ456"}},
     },
     {
         "sentence": "cancel my appointment KLM789",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "CANCEL_BOOKING",
-            "facts": {
-                "booking_id": "KLM789"
-            }
-        }
+        "expected": {"intent": "CANCEL_BOOKING", "facts": {"booking_id": "KLM789"}},
     },
     {
         "sentence": "i need to cancel booking NOP012",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "CANCEL_BOOKING",
-            "facts": {
-                "booking_id": "NOP012"
-            }
-        }
+        "expected": {"intent": "CANCEL_BOOKING", "facts": {"booking_id": "NOP012"}},
     },
     {
         "sentence": "please cancel reservation QRS345",
         "booking_mode": "reservation",
         "aliases": {},
-        "expected": {
-            "intent": "CANCEL_BOOKING",
-            "facts": {
-                "booking_id": "QRS345"
-            }
-        }
+        "expected": {"intent": "CANCEL_BOOKING", "facts": {"booking_id": "QRS345"}},
     },
     {
         "sentence": "delete booking TUV678",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "CANCEL_BOOKING",
-            "facts": {
-                "booking_id": "TUV678"
-            }
-        }
+        "expected": {"intent": "CANCEL_BOOKING", "facts": {"booking_id": "TUV678"}},
     },
     {
         "sentence": "cancel my room reservation WXY901",
         "booking_mode": "reservation",
         "aliases": {},
-        "expected": {
-            "intent": "CANCEL_BOOKING",
-            "facts": {
-                "booking_id": "WXY901"
-            }
-        }
+        "expected": {"intent": "CANCEL_BOOKING", "facts": {"booking_id": "WXY901"}},
     },
     {
         "sentence": "i want to cancel appointment ZAB234",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "CANCEL_BOOKING",
-            "facts": {
-                "booking_id": "ZAB234"
-            }
-        }
+        "expected": {"intent": "CANCEL_BOOKING", "facts": {"booking_id": "ZAB234"}},
     },
     {
         "sentence": "can't make it, cancel booking CDE567",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "CANCEL_BOOKING",
-            "facts": {
-                "booking_id": "CDE567"
-            }
-        }
+        "expected": {"intent": "CANCEL_BOOKING", "facts": {"booking_id": "CDE567"}},
     },
     # ────────────────
     # UNKNOWN / FRAGMENT INPUTS — Extraction only, no semantics
@@ -1180,23 +863,13 @@ booking_scenarios = [
         "sentence": "feb 12th",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-02-12"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-02-12"]}},
     },
     {
         "sentence": "3pm",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "times": ["15:00"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"times": ["15:00"]}},
     },
     {
         "sentence": "feb 12th at 3pm",
@@ -1204,11 +877,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-02-12"],
-                "times": ["15:00"]
-            }
-        }
+            "facts": {"dates": ["2026-02-12"], "times": ["15:00"]},
+        },
     },
     {
         "sentence": "from april 12th to april 16th",
@@ -1216,21 +886,14 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-04-12", "2026-04-16"]
-            }
-        }
+            "facts": {"dates": ["2026-04-12", "2026-04-16"]},
+        },
     },
     {
         "sentence": "deluxe room",
         "booking_mode": "reservation",
         "aliases": {"deluxe room": "room"},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "service_id": "deluxe room"
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"service_id": "deluxe room"}},
     },
     {
         "sentence": "haircut tomorrow",
@@ -1238,11 +901,8 @@ booking_scenarios = [
         "aliases": {"haircut": "haircut"},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "service_id": "haircut",
-                "dates": ["2026-01-14"]
-            }
-        }
+            "facts": {"service_id": "haircut", "dates": ["2026-01-14"]},
+        },
     },
     # ────────────────
     # FOLLOW-UP DATE INPUTS — Weekday phrases (fragment extraction)
@@ -1251,133 +911,73 @@ booking_scenarios = [
         "sentence": "friday",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-16"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-01-16"]}},
     },
     {
         "sentence": "this friday",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-16"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-01-16"]}},
     },
     {
         "sentence": "next friday",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-23"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-01-23"]}},
     },
     {
         "sentence": "monday",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-19"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-01-19"]}},
     },
     {
         "sentence": "this monday",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-19"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-01-19"]}},
     },
     {
         "sentence": "next monday",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-19"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-01-19"]}},
     },
     {
         "sentence": "tuesday",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-20"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-01-20"]}},
     },
     {
         "sentence": "wednesday",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-14"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-01-14"]}},
     },
     {
         "sentence": "thursday",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-15"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-01-15"]}},
     },
     {
         "sentence": "next thursday",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-22"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-01-22"]}},
     },
     {
         "sentence": "saturday",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-17"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-01-17"]}},
     },
     {
         "sentence": "sunday",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-18"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-01-18"]}},
     },
     {
         "sentence": "next week",
@@ -1385,10 +985,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-19", "2026-01-25"]
-            }
-        }
+            "facts": {"dates": ["2026-01-19", "2026-01-25"]},
+        },
     },
     {
         "sentence": "this weekend",
@@ -1396,10 +994,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-17", "2026-01-18"]
-            }
-        }
+            "facts": {"dates": ["2026-01-17", "2026-01-18"]},
+        },
     },
     {
         "sentence": "3rd mar by 3pm",
@@ -1407,220 +1003,122 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"],
-                "times": ["15:00"]
-            }
-        }
+            "facts": {"dates": ["2026-03-03"], "times": ["15:00"]},
+        },
     },
     {
         "sentence": "3rd march",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-03"]}},
     },
     {
         "sentence": "march 3",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-03"]}},
     },
     {
         "sentence": "mar 2nd",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-02"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-02"]}},
     },
     {
         "sentence": "04/03",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-04"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-04"]}},
     },
     {
         "sentence": "3:00pm",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "times": ["15:00"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"times": ["15:00"]}},
     },
     {
         "sentence": "3:00 PM",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "times": ["15:00"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"times": ["15:00"]}},
     },
     {
         "sentence": "15:00",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "times": ["15:00"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"times": ["15:00"]}},
     },
     {
         "sentence": "3 PM",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "times": ["15:00"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"times": ["15:00"]}},
     },
     {
         "sentence": "at 3pm",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "times": ["15:00"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"times": ["15:00"]}},
     },
     {
         "sentence": "March 3rd",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-03"]}},
     },
     {
         "sentence": "3 March",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-03"]}},
     },
     {
         "sentence": "03/03",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-03"]}},
     },
     {
         "sentence": "3/3",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-03"]}},
     },
     {
         "sentence": "3-Mar",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-03"]}},
     },
     {
         "sentence": "March 3, 2026",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-03"]}},
     },
     {
         "sentence": "3rd of March",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-03"]}},
     },
     {
         "sentence": "March the 3rd",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-03"]}},
     },
     {
         "sentence": "Mar 3rd",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-03"]}},
     },
     {
         "sentence": "MAR 3",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-03"]}},
     },
     {
         "sentence": "March 3rd at 3pm",
@@ -1628,11 +1126,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"],
-                "times": ["15:00"]
-            }
-        }
+            "facts": {"dates": ["2026-03-03"], "times": ["15:00"]},
+        },
     },
     {
         "sentence": "3 March at 3:00pm",
@@ -1640,11 +1135,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"],
-                "times": ["15:00"]
-            }
-        }
+            "facts": {"dates": ["2026-03-03"], "times": ["15:00"]},
+        },
     },
     {
         "sentence": "03/03 at 15:00",
@@ -1652,11 +1144,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"],
-                "times": ["15:00"]
-            }
-        }
+            "facts": {"dates": ["2026-03-03"], "times": ["15:00"]},
+        },
     },
     {
         "sentence": "march 3 by 3pm",
@@ -1664,11 +1153,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"],
-                "times": ["15:00"]
-            }
-        }
+            "facts": {"dates": ["2026-03-03"], "times": ["15:00"]},
+        },
     },
     {
         "sentence": "3rd march at 3:00 PM",
@@ -1676,44 +1162,26 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"],
-                "times": ["15:00"]
-            }
-        }
+            "facts": {"dates": ["2026-03-03"], "times": ["15:00"]},
+        },
     },
     {
         "sentence": "3/03",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-03"]}},
     },
     {
         "sentence": "03/3",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-03"]}},
     },
     {
         "sentence": "3-Mar-2026",
         "booking_mode": "service",
         "aliases": {},
-        "expected": {
-            "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"]
-            }
-        }
+        "expected": {"intent": "UNKNOWN", "facts": {"dates": ["2026-03-03"]}},
     },
     {
         "sentence": "March 3rd, 2026 at 3pm",
@@ -1721,11 +1189,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"],
-                "times": ["15:00"]
-            }
-        }
+            "facts": {"dates": ["2026-03-03"], "times": ["15:00"]},
+        },
     },
     # ────────────────
     # UNKNOWN / FRAGMENT INPUTS — Date range fragments
@@ -1736,10 +1201,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-05", "2026-03-08"]
-            }
-        }
+            "facts": {"dates": ["2026-03-05", "2026-03-08"]},
+        },
     },
     {
         "sentence": "Mar 5 to Mar 8",
@@ -1747,10 +1210,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-05", "2026-03-08"]
-            }
-        }
+            "facts": {"dates": ["2026-03-05", "2026-03-08"]},
+        },
     },
     {
         "sentence": "05/03 to 08/03",
@@ -1758,10 +1219,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-05", "2026-03-08"]
-            }
-        }
+            "facts": {"dates": ["2026-03-05", "2026-03-08"]},
+        },
     },
     {
         "sentence": "March 5 to 8",
@@ -1769,10 +1228,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-05", "2026-03-08"]
-            }
-        }
+            "facts": {"dates": ["2026-03-05", "2026-03-08"]},
+        },
     },
     {
         "sentence": "March 5 to March 8",
@@ -1780,10 +1237,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-05", "2026-03-08"]
-            }
-        }
+            "facts": {"dates": ["2026-03-05", "2026-03-08"]},
+        },
     },
     {
         "sentence": "5th Mar to 8th Mar",
@@ -1791,10 +1246,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-05", "2026-03-08"]
-            }
-        }
+            "facts": {"dates": ["2026-03-05", "2026-03-08"]},
+        },
     },
     {
         "sentence": "5 March to 8 March",
@@ -1802,10 +1255,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-05", "2026-03-08"]
-            }
-        }
+            "facts": {"dates": ["2026-03-05", "2026-03-08"]},
+        },
     },
     {
         "sentence": "Mar 5th to Mar 8th",
@@ -1813,10 +1264,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-05", "2026-03-08"]
-            }
-        }
+            "facts": {"dates": ["2026-03-05", "2026-03-08"]},
+        },
     },
     {
         "sentence": "Mar 5 through 8",
@@ -1824,10 +1273,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-05", "2026-03-08"]
-            }
-        }
+            "facts": {"dates": ["2026-03-05", "2026-03-08"]},
+        },
     },
     {
         "sentence": "from Mar 5th through Mar 8th",
@@ -1835,10 +1282,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-05", "2026-03-08"]
-            }
-        }
+            "facts": {"dates": ["2026-03-05", "2026-03-08"]},
+        },
     },
     # ────────────────
     # DATE-TIME PAIRING — Explicit vs ambiguous
@@ -1849,11 +1294,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"],
-                "times": ["15:00"]
-            }
-        }
+            "facts": {"dates": ["2026-03-03"], "times": ["15:00"]},
+        },
     },
     {
         "sentence": "March 3rd, 3pm",
@@ -1861,11 +1303,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03"],
-                "times": ["15:00"]
-            }
-        }
+            "facts": {"dates": ["2026-03-03"], "times": ["15:00"]},
+        },
     },
     {
         "sentence": "tomorrow at 3pm",
@@ -1873,11 +1312,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-14"],
-                "times": ["15:00"]
-            }
-        }
+            "facts": {"dates": ["2026-01-14"], "times": ["15:00"]},
+        },
     },
     {
         "sentence": "on tomorrow at 3pm",
@@ -1885,11 +1321,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-01-14"],
-                "times": ["15:00"]
-            }
-        }
+            "facts": {"dates": ["2026-01-14"], "times": ["15:00"]},
+        },
     },
     # Ambiguous: dates and times mentioned separately (no explicit pairing)
     {
@@ -1898,11 +1331,8 @@ booking_scenarios = [
         "aliases": {},
         "expected": {
             "intent": "UNKNOWN",
-            "facts": {
-                "dates": ["2026-03-03", "2026-04-08"],
-                "times": ["14:00"]
-            }
-        }
+            "facts": {"dates": ["2026-03-03", "2026-04-08"], "times": ["14:00"]},
+        },
     },
     {
         "sentence": "April 3 at 14:00 and April 8 at 15:00",
@@ -1912,22 +1342,20 @@ booking_scenarios = [
             "intent": "UNKNOWN",
             "facts": {
                 "dates": ["2026-04-03", "2026-04-08"],
-                "times": ["14:00", "15:00"]
-            }
-        }
+                "times": ["14:00", "15:00"],
+            },
+        },
     },
     # STAGE 4: Explicit test for fuzzy time - should produce time_constraint.mode == "fuzzy"
     {
         "sentence": "book haircut friday evening",
         "booking_mode": "service",
-        "aliases": {
-            "haircut": "haircut"
-        },
+        "aliases": {"haircut": "haircut"},
         "expected": {
             "intent": "CREATE_APPOINTMENT",
             "facts": {
                 "service_id": "haircut",
-                "dates": ["2026-01-16"]  # Next Friday from test date
+                "dates": ["2026-01-16"],  # Next Friday from test date
             },
             # STAGE 4: Assert time_constraint for fuzzy time (evening)
             # This should NOT set has_datetime=True (Stage 2 requirement)
@@ -1936,8 +1364,8 @@ booking_scenarios = [
                 "mode": "fuzzy",
                 "label": "evening",
                 "start": "17:00",
-                "end": "21:59"
-            }
-        }
+                "end": "21:59",
+            },
+        },
     },
 ]

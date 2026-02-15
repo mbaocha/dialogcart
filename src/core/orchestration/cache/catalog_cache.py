@@ -150,4 +150,3 @@ class CatalogCache:
 
 # Module-level cache instance (shared)
 catalog_cache = CatalogCache()
-

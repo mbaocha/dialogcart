@@ -13,15 +13,17 @@ This test:
 - Asserts returned slots are normalized
 """
 
-from core.orchestration.orchestrator import handle_message
-from core.orchestration.nlu import LumaClient
-from core.orchestration.execution.clients.availability_client import AvailabilityClient
-from core.orchestration.clients.organization_client import OrganizationClient
-import pytest
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import Mock
-from datetime import datetime, timezone
+
+import pytest
+
+from core.orchestration.clients.organization_client import OrganizationClient
+from core.orchestration.execution.clients.availability_client import AvailabilityClient
+from core.orchestration.nlu import LumaClient
+from core.orchestration.orchestrator import handle_message
 
 # Add src to path BEFORE importing core modules
 src_path = Path(__file__).parent.parent.parent.parent
@@ -51,42 +53,25 @@ def test_core_e2e_single_turn_availability():
     # This response must pass contract validation (assert_luma_contract)
     mock_luma_response = {
         "success": True,
-        "intent": {
-            "name": "CREATE_APPOINTMENT",
-            "confidence": 0.95
-        },
+        "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
         "needs_clarification": False,
         "booking": {
             "booking_type": "service",
             "services": [
-                {
-                    "text": "haircut",
-                    "canonical": "beauty_and_wellness.haircut"
-                }
+                {"text": "haircut", "canonical": "beauty_and_wellness.haircut"}
             ],
             "datetime_range": {
                 "start": "2026-01-16T15:00:00Z",
-                "end": "2026-01-16T15:30:00Z"
+                "end": "2026-01-16T15:30:00Z",
             },
             "confirmation_state": "pending",
-            "booking_state": "RESOLVED"
+            "booking_state": "RESOLVED",
         },
-        "facts": {
-            "service_id": "haircut",
-            "times": ["3pm"]
-        },
-        "slots": {
-            "service_id": "haircut",
-            "date": "2026-01-16",
-            "time": "3pm"
-        },
-        "time_constraint": {
-            "mode": "exact",
-            "start": "15:00",
-            "end": "15:00"
-        },
+        "facts": {"service_id": "haircut", "times": ["3pm"]},
+        "slots": {"service_id": "haircut", "date": "2026-01-16", "time": "3pm"},
+        "time_constraint": {"mode": "exact", "start": "15:00", "end": "15:00"},
         "missing_slots": [],
-        "context": {}
+        "context": {},
     }
 
     # Mock Luma client
@@ -98,9 +83,7 @@ def test_core_e2e_single_turn_availability():
     # organization.businessCategoryId. For service domain, businessCategoryId should be 1.
     mock_org_client = Mock(spec=OrganizationClient)
     mock_org_client.get_details.return_value = {
-        "organization": {
-            "businessCategoryId": 1  # Maps to "service" domain
-        }
+        "organization": {"businessCategoryId": 1}  # Maps to "service" domain
     }
 
     # Step 1: Mock availability client
@@ -110,16 +93,18 @@ def test_core_e2e_single_turn_availability():
             {
                 "start": "2026-01-16T15:00:00Z",
                 "end": "2026-01-16T15:30:00Z",
-                "staff_id": 5
+                "staff_id": 5,
             },
             {
                 "start": "2026-01-16T15:30:00Z",
                 "end": "2026-01-16T16:00:00Z",
-                "staff_id": 5
-            }
+                "staff_id": 5,
+            },
         ]
     }
-    mock_availability_client.get_service_availability.return_value = mock_availability_response
+    mock_availability_client.get_service_availability.return_value = (
+        mock_availability_response
+    )
 
     # Step 2: Call canonical handle_message() which orchestrates planning and execution
     # Note: frozen_time is reserved for future use, but we pass it for API compatibility
@@ -131,13 +116,14 @@ def test_core_e2e_single_turn_availability():
         availability_client=mock_availability_client,
         organization_client=mock_org_client,
         frozen_time=frozen_time,
-        organization_id=1
+        organization_id=1,
     )
 
     # Step 3: Assert result structure
     assert result is not None
-    assert result.get("success") is True, \
-        f"Expected success=True, got {result.get('success')} with error: {result.get('error')}"
+    assert (
+        result.get("success") is True
+    ), f"Expected success=True, got {result.get('success')} with error: {result.get('error')}"
 
     # Extract plan and execution result from response
     plan = result.get("plan")
@@ -145,19 +131,22 @@ def test_core_e2e_single_turn_availability():
 
     # Step 4: Assert planning result
     assert plan is not None
-    assert plan.get("action") == "SEARCH_AVAILABILITY", \
-        f"Expected action SEARCH_AVAILABILITY, got {plan.get('action')}"
+    assert (
+        plan.get("action") == "SEARCH_AVAILABILITY"
+    ), f"Expected action SEARCH_AVAILABILITY, got {plan.get('action')}"
     assert plan.get("intent_name") == "CREATE_APPOINTMENT"
     assert plan.get("stage") is not None
     assert "slots" in plan
     assert plan["slots"].get("service_id") == "haircut"
     assert plan["slots"].get("date") == "2026-01-16"
-    assert plan["slots"].get("time") == "3pm", \
-        f"Expected raw time '3pm', got {plan['slots'].get('time')}"
+    assert (
+        plan["slots"].get("time") == "3pm"
+    ), f"Expected raw time '3pm', got {plan['slots'].get('time')}"
     # Assert normalized time in time_constraint
     assert "time_constraint" in plan
-    assert plan["time_constraint"].get("start") == "15:00", \
-        f"Expected normalized time '15:00' in time_constraint, got {plan['time_constraint'].get('start')}"
+    assert (
+        plan["time_constraint"].get("start") == "15:00"
+    ), f"Expected normalized time '15:00' in time_constraint, got {plan['time_constraint'].get('start')}"
 
     # Step 5: Assert availability client was called
     mock_availability_client.get_service_availability.assert_called_once()
@@ -196,8 +185,9 @@ def test_core_e2e_single_turn_availability():
     assert slot2["ends_at"] == "2026-01-16T16:00:00Z"
 
     # Verify no other fields in normalized slots (only starts_at and ends_at)
-    assert len(slot1.keys(
-    )) == 2, f"Expected only starts_at and ends_at, got {list(slot1.keys())}"
+    assert (
+        len(slot1.keys()) == 2
+    ), f"Expected only starts_at and ends_at, got {list(slot1.keys())}"
 
 
 if __name__ == "__main__":

@@ -30,7 +30,7 @@ def test_ambiguous_alias_resolution():
     # This happens when multiple aliases appear as phrases in the input text
     tenant_aliases = {
         "premium": "beauty_and_wellness.haircut",
-        "premium service": "beauty_and_wellness.haircut"
+        "premium service": "beauty_and_wellness.haircut",
     }
 
     # Input text where multiple aliases could match as phrases
@@ -39,13 +39,16 @@ def test_ambiguous_alias_resolution():
     normalized_input = "book premium service tomorrow"
 
     canonical, status = _resolve_tenant_alias(
-        service_text, normalized_input, tenant_aliases)
+        service_text, normalized_input, tenant_aliases
+    )
 
     # Should return None with "ambiguous" status because both "premium" and "premium service" match
     assert canonical is None, "Ambiguous alias should return None canonical"
     assert status == "ambiguous", f"Expected 'ambiguous' status, got '{status}'"
 
-    print("Test 1 passed: Ambiguous alias resolution returns None with 'ambiguous' status")
+    print(
+        "Test 1 passed: Ambiguous alias resolution returns None with 'ambiguous' status"
+    )
 
 
 def test_no_alias_match():
@@ -54,7 +57,7 @@ def test_no_alias_match():
 
     tenant_aliases = {
         "premium": "beauty_and_wellness.haircut",
-        "standard": "beauty_and_wellness.haircut"
+        "standard": "beauty_and_wellness.haircut",
     }
 
     # Input text that matches no aliases
@@ -62,7 +65,8 @@ def test_no_alias_match():
     normalized_input = "book unknown_service tomorrow"
 
     canonical, status = _resolve_tenant_alias(
-        service_text, normalized_input, tenant_aliases)
+        service_text, normalized_input, tenant_aliases
+    )
 
     # Should return None with "no_match" status
     assert canonical is None, "No match should return None canonical"
@@ -77,7 +81,7 @@ def test_single_alias_match():
 
     tenant_aliases = {
         "premium": "beauty_and_wellness.haircut",
-        "standard": "beauty_and_wellness.haircut"
+        "standard": "beauty_and_wellness.haircut",
     }
 
     # Input text that matches exactly one alias
@@ -85,11 +89,13 @@ def test_single_alias_match():
     normalized_input = "book premium tomorrow"
 
     canonical, status = _resolve_tenant_alias(
-        service_text, normalized_input, tenant_aliases)
+        service_text, normalized_input, tenant_aliases
+    )
 
     # Should return the canonical with None status
-    assert canonical == "beauty_and_wellness.haircut", \
-        f"Expected 'beauty_and_wellness.haircut', got '{canonical}'"
+    assert (
+        canonical == "beauty_and_wellness.haircut"
+    ), f"Expected 'beauty_and_wellness.haircut', got '{canonical}'"
     assert status is None, f"Expected None status for success, got '{status}'"
 
     print("Test 3 passed: Single alias match succeeds")
@@ -101,7 +107,7 @@ def test_phrase_match():
 
     tenant_aliases = {
         "premium haircut": "beauty_and_wellness.haircut",
-        "standard": "beauty_and_wellness.haircut"
+        "standard": "beauty_and_wellness.haircut",
     }
 
     # Input text with phrase that should match
@@ -109,11 +115,13 @@ def test_phrase_match():
     normalized_input = "book premium haircut tomorrow"
 
     canonical, status = _resolve_tenant_alias(
-        service_text, normalized_input, tenant_aliases)
+        service_text, normalized_input, tenant_aliases
+    )
 
     # Should return the canonical
-    assert canonical == "beauty_and_wellness.haircut", \
-        f"Expected 'beauty_and_wellness.haircut', got '{canonical}'"
+    assert (
+        canonical == "beauty_and_wellness.haircut"
+    ), f"Expected 'beauty_and_wellness.haircut', got '{canonical}'"
     assert status is None, f"Expected None status for success, got '{status}'"
 
     print("Test 4 passed: Phrase matching works correctly")
@@ -135,5 +143,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"\nUnexpected error: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

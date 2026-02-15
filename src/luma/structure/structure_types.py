@@ -3,6 +3,7 @@ Data types for structural interpretation layer.
 
 Defines StructureResult dataclass for rule-based structure analysis.
 """
+
 from dataclasses import dataclass
 from typing import Literal
 
@@ -11,10 +12,11 @@ from typing import Literal
 class StructureResult:
     """
     Structural interpretation result.
-    
+
     Describes how extracted entities relate to each other,
     not what the entities are.
     """
+
     booking_count: int = 1
     service_scope: Literal["shared", "separate"] = "separate"
     time_scope: Literal["shared", "per_service"] = "shared"
@@ -22,7 +24,7 @@ class StructureResult:
     time_type: Literal["exact", "window", "range", "none"] = "none"
     has_duration: bool = False
     needs_clarification: bool = False
-    
+
     def to_dict(self) -> dict:
         """Convert to dictionary format."""
         return {
@@ -33,7 +35,6 @@ class StructureResult:
                 "date_scope": self.date_scope,
                 "time_type": self.time_type,
                 "has_duration": self.has_duration,
-                "needs_clarification": self.needs_clarification
+                "needs_clarification": self.needs_clarification,
             }
         }
-

@@ -10,14 +10,9 @@ from typing import Dict, Tuple
 TEMPLATES = {
     "payment_request": {
         "message": "💳 Deposit required: {{currency}}{{amount}}\nTap below to pay securely.",
-        "cta": {
-            "label": "Pay {{currency}}{{amount}}",
-            "url": "{{payment_link}}"
-        }
+        "cta": {"label": "Pay {{currency}}{{amount}}", "url": "{{payment_link}}"},
     },
-    "ask_checkin": {
-        "message": "Sure 😊 What is your check-in date?"
-    },
+    "ask_checkin": {"message": "Sure 😊 What is your check-in date?"},
     "fallback": {
         "message": (
             "I want to help 😊\n"
@@ -26,7 +21,7 @@ TEMPLATES = {
             "• Pay deposit\n"
             "• Ask about prices"
         )
-    }
+    },
 }
 
 # -----------------------------
@@ -52,24 +47,20 @@ def rule_intent_detector(text: str) -> Tuple[str, float]:
 # This simulates what an LLM would do
 # It NEVER generates user text
 
+
 def llm_fallback(text: str) -> Dict:
     text = text.lower()
 
     if "half" in text or "deposit" in text:
-        return {
-            "intent": "MAKE_PAYMENT",
-            "slots": {"payment_type": "deposit"}
-        }
+        return {"intent": "MAKE_PAYMENT", "slots": {"payment_type": "deposit"}}
 
-    return {
-        "intent": "UNKNOWN",
-        "slots": {}
-    }
+    return {"intent": "UNKNOWN", "slots": {}}
 
 
 # -----------------------------
 # 4. Business Logic / Policy Layer
 # -----------------------------
+
 
 def decide_action(intent: str, slots: Dict, state: Dict) -> Dict:
     """
@@ -83,25 +74,20 @@ def decide_action(intent: str, slots: Dict, state: Dict) -> Dict:
                 "context": {
                     "currency": state["currency"],
                     "amount": f"{amount:,}",
-                    "payment_link": state["payment_link"]
-                }
+                    "payment_link": state["payment_link"],
+                },
             }
 
     if intent == "BOOK_ROOM":
-        return {
-            "template_id": "ask_checkin",
-            "context": {}
-        }
+        return {"template_id": "ask_checkin", "context": {}}
 
-    return {
-        "template_id": "fallback",
-        "context": {}
-    }
+    return {"template_id": "fallback", "context": {}}
 
 
 # -----------------------------
 # 5. Template Renderer
 # -----------------------------
+
 
 def render_template(template: Dict, context: Dict) -> Dict:
     def replace(value):
@@ -123,6 +109,7 @@ def render_template(template: Dict, context: Dict) -> Dict:
 # -----------------------------
 # 6. Main Chat Handler
 # -----------------------------
+
 
 def handle_message(user_text: str, state: Dict):
     print(f"\nUSER: {user_text}")
@@ -161,7 +148,7 @@ if __name__ == "__main__":
         "currency": "₦",
         "total": 170000,
         "deposit_allowed": True,
-        "payment_link": "https://pay.dialogcart.com/tx/abc123"
+        "payment_link": "https://pay.dialogcart.com/tx/abc123",
     }
 
     # Try different messages

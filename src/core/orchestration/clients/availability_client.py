@@ -43,7 +43,9 @@ class AvailabilityClient(BaseClient):
             params["channel"] = channel
         if extra_params:
             params.update(extra_params)
-        return self._request("GET", "/api/internal/availability/reservation", params=params)
+        return self._request(
+            "GET", "/api/internal/availability/reservation", params=params
+        )
 
     def get_service_availability(
         self,
@@ -60,7 +62,9 @@ class AvailabilityClient(BaseClient):
         }
         if extra_params:
             params.update(extra_params)
-        return self._request("GET", "/api/internal/availability/services", params=params)
+        return self._request(
+            "GET", "/api/internal/availability/services", params=params
+        )
 
     def get_staff_availability(
         self,
@@ -79,5 +83,3 @@ class AvailabilityClient(BaseClient):
         if extra_params:
             params.update(extra_params)
         return self._request("GET", "/api/internal/availability/staff", params=params)
-
-

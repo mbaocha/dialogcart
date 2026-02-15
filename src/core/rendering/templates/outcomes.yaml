@@ -1,0 +1,29 @@
+OUTCOME__CREATE_APPOINTMENT__EXECUTED:
+  template: "Your appointment has been confirmed! Booking code: {{booking_code}}"
+  required_fields:
+    - booking_code
+
+OUTCOME__MODIFY_BOOKING__EXECUTED:
+  template: "Your booking has been updated successfully."
+  required_fields: []
+
+OUTCOME__CANCEL_BOOKING__EXECUTED:
+  template: "Your booking has been cancelled successfully."
+  required_fields: []
+
+OUTCOME__EXECUTED:
+  template: "Your request has been completed successfully."
+  required_fields: []
+
+OUTCOME__CREATE_APPOINTMENT__FAILED:
+  template: "Sorry, we couldn't create your appointment. Please try again."
+  required_fields: []
+
+OUTCOME__FAILED:
+  template: "Sorry, something went wrong. Please try again."
+  required_fields: []
+
+OUTCOME:
+  template: "Your request has been completed successfully."
+  required_fields: []
+

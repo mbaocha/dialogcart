@@ -1,4 +1,3 @@
 """
 Tests for workflow system.
 """
-

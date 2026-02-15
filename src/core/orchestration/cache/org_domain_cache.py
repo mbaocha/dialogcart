@@ -105,7 +105,9 @@ class OrgDomainCache:
         elif isinstance(data, dict) and isinstance(data.get("organization"), dict):
             org = data.get("organization")
         if not isinstance(org, dict):
-            raise UpstreamError("Invalid organization details response: missing organization")
+            raise UpstreamError(
+                "Invalid organization details response: missing organization"
+            )
         business_category_id = org.get("businessCategoryId")
         if business_category_id is None:
             raise UpstreamError("businessCategoryId missing in organization details")
@@ -135,4 +137,3 @@ class OrgDomainCache:
 
 
 org_domain_cache = OrgDomainCache()
-

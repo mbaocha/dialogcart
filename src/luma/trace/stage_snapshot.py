@@ -4,8 +4,8 @@ Stage snapshot capture for execution tracing.
 Captures input/output/diff snapshots for each pipeline stage to make data inconsistencies obvious.
 """
 
-from typing import Dict, Any, Optional, Set
 import copy
+from typing import Any, Dict, Optional, Set
 
 
 def _redact_sensitive_data(data: Any, redact_keys: Optional[Set[str]] = None) -> Any:
@@ -21,8 +21,13 @@ def _redact_sensitive_data(data: Any, redact_keys: Optional[Set[str]] = None) ->
     """
     if redact_keys is None:
         redact_keys = {
-            "tenant_aliases", "aliases", "psentence", "osentence",
-            "raw_text", "text", "original_text"
+            "tenant_aliases",
+            "aliases",
+            "psentence",
+            "osentence",
+            "raw_text",
+            "text",
+            "original_text",
         }
 
     if isinstance(data, dict):
@@ -75,8 +80,7 @@ def _minimize_snapshot(data: Any, max_depth: int = 3, max_keys: int = 20) -> Any
         # Limit list length
         minimized_list = []
         for item in data[:max_keys]:
-            minimized_list.append(_minimize_snapshot(
-                item, max_depth - 1, max_keys))
+            minimized_list.append(_minimize_snapshot(item, max_depth - 1, max_keys))
         if len(data) > max_keys:
             minimized_list.append(f"<{len(data) - max_keys} more items>")
         return minimized_list
@@ -105,7 +109,7 @@ def _compute_diff(before: Dict[str, Any], after: Dict[str, Any]) -> Dict[str, An
             diff[key] = {
                 "action": "changed",
                 "before": before[key],
-                "after": after_value
+                "after": after_value,
             }
 
     # Find keys in before that were removed
@@ -122,7 +126,7 @@ def capture_stage_snapshot(
     output_data: Any,
     decision_flags: Optional[Dict[str, Any]] = None,
     minimize: bool = True,
-    redact: bool = True
+    redact: bool = True,
 ) -> Dict[str, Any]:
     """
     Capture a stage snapshot with input, output, and diff.
@@ -161,7 +165,7 @@ def capture_stage_snapshot(
         "stage_name": stage_name,
         "input_snapshot": input_snapshot,
         "output_snapshot": output_snapshot,
-        "diff": diff
+        "diff": diff,
     }
 
     if decision_flags:
@@ -182,14 +186,14 @@ def _to_dict(data: Any) -> Dict[str, Any]:
     """
     if isinstance(data, dict):
         return data
-    elif hasattr(data, 'to_dict'):
+    elif hasattr(data, "to_dict"):
         result = data.to_dict()
         if isinstance(result, dict):
             return result
         else:
             return {"_raw": str(data)}
-    elif hasattr(data, '__dict__'):
-        return {k: v for k, v in data.__dict__.items() if not k.startswith('_')}
+    elif hasattr(data, "__dict__"):
+        return {k: v for k, v in data.__dict__.items() if not k.startswith("_")}
     else:
         # Fallback: convert to string representation
         return {"_raw": str(data)}
@@ -212,7 +216,7 @@ class StageSnapshot:
         input_data: Any,
         decision_flags: Optional[Dict[str, Any]] = None,
         minimize: bool = True,
-        redact: bool = True
+        redact: bool = True,
     ):
         self.trace = trace
         self.stage_name = stage_name
@@ -233,7 +237,7 @@ class StageSnapshot:
                 output_data=self.output_data,
                 decision_flags=self.decision_flags,
                 minimize=self.minimize,
-                redact=self.redact
+                redact=self.redact,
             )
 
             # Initialize stages list if needed
@@ -244,10 +248,3 @@ class StageSnapshot:
             self.trace["stages"].append(snapshot)
 
         return False  # Never suppress exceptions
-
-
-
-
-
-
-

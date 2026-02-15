@@ -8,10 +8,11 @@ All planning and execution data MUST come from intent_policy.yaml.
 No fallback to legacy configs - policy file is required.
 """
 
-import yaml
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
+import yaml
 
 logger = logging.getLogger(__name__)
 
@@ -21,6 +22,7 @@ _cache_lock = None
 
 try:
     import threading
+
     _cache_lock = threading.Lock()
 except ImportError:
     _cache_lock = None
@@ -86,8 +88,7 @@ def _load_unified_policy_impl() -> Dict[str, Any]:
             raw = yaml.safe_load(f) or {}
 
         # Extract intents dict from YAML (structure: {intents: {INTENT_NAME: {...}}})
-        unified_policy = raw.get(
-            "intents", {}) if isinstance(raw, dict) else {}
+        unified_policy = raw.get("intents", {}) if isinstance(raw, dict) else {}
 
         if not unified_policy:
             raise RuntimeError(
@@ -356,7 +357,7 @@ def get_execution_steps(intent_name: str) -> List[Dict[str, Any]]:
                 "optional_slots": step_config.get("optional_slots", []),
                 "resolves": step_config.get("resolves", []),
                 "requires": step_config.get("requires", []),
-                "client": step_config.get("client", "")
+                "client": step_config.get("client", ""),
             }
             steps.append(step)
 
@@ -364,9 +365,7 @@ def get_execution_steps(intent_name: str) -> List[Dict[str, Any]]:
 
 
 def select_next_execution_step(
-    intent_name: str,
-    slots: Dict[str, Any],
-    flags: Optional[Dict[str, Any]] = None
+    intent_name: str, slots: Dict[str, Any], flags: Optional[Dict[str, Any]] = None
 ) -> Optional[Dict[str, Any]]:
     """
     Select the next execution step to execute based on policy and current state.
@@ -410,8 +409,7 @@ def select_next_execution_step(
 
     # Get collected slot names (non-None values)
     collected_slot_names = set(
-        slot_name for slot_name, slot_value in slots.items()
-        if slot_value is not None
+        slot_name for slot_name, slot_value in slots.items() if slot_value is not None
     )
 
     # For CONFIRM_APPOINTMENT, we need to check planning.required_slots, not just step.required_slots
@@ -508,7 +506,8 @@ def validate_policy_completeness() -> List[str]:
         unified_policy = _load_unified_policy()
     except Exception as e:
         raise RuntimeError(
-            f"Failed to load intent_policy.yaml for validation: {e}") from e
+            f"Failed to load intent_policy.yaml for validation: {e}"
+        ) from e
 
     if not unified_policy:
         errors.append("intent_policy.yaml is empty - no intents defined")
@@ -516,15 +515,13 @@ def validate_policy_completeness() -> List[str]:
 
     for intent_name, intent_config in unified_policy.items():
         if not isinstance(intent_config, dict):
-            errors.append(
-                f"Intent '{intent_name}': config must be a dictionary")
+            errors.append(f"Intent '{intent_name}': config must be a dictionary")
             continue
 
         # Check 1: Every intent must have planning.required_slots
         planning_config = intent_config.get("planning")
         if not isinstance(planning_config, dict):
-            errors.append(
-                f"Intent '{intent_name}': missing 'planning' section")
+            errors.append(f"Intent '{intent_name}': missing 'planning' section")
             continue
 
         required_slots = planning_config.get("required_slots")
@@ -535,8 +532,9 @@ def validate_policy_completeness() -> List[str]:
 
         # Check 2: Every durable intent must have execution steps
         metadata = intent_config.get("metadata", {})
-        is_durable = metadata.get("durable", False) if isinstance(
-            metadata, dict) else False
+        is_durable = (
+            metadata.get("durable", False) if isinstance(metadata, dict) else False
+        )
 
         execution_config = intent_config.get("execution", {})
         if not isinstance(execution_config, dict) or not execution_config:
@@ -571,9 +569,7 @@ def validate_policy_completeness() -> List[str]:
 try:
     validation_errors = validate_policy_completeness()
     if validation_errors:
-        error_msg = (
-            f"intent_policy.yaml validation failed with {len(validation_errors)} error(s):\n\n"
-        )
+        error_msg = f"intent_policy.yaml validation failed with {len(validation_errors)} error(s):\n\n"
         for error in validation_errors:
             error_msg += f"  - {error}\n"
         error_msg += (

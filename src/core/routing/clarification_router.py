@@ -32,20 +32,20 @@ def _load_clarification_templates() -> Dict[str, str]:
     # clarification_router.py is at: src/core/routing/clarification_router.py
     # config file is at: src/core/routing/config/clarification_templates.yaml
     current_file = Path(__file__)
-    config_file = current_file.parent / \
-        "config" / "clarification_templates.yaml"
+    config_file = current_file.parent / "config" / "clarification_templates.yaml"
 
     if not config_file.exists():
         logger.warning(
             "Clarification templates config not found at %s. "
             "Using empty mapping (all reasons will fall back to {domain}.clarify)",
-            config_file
+            config_file,
         )
         return {}
 
     try:
         import yaml
-        with open(config_file, 'r', encoding='utf-8') as f:
+
+        with open(config_file, "r", encoding="utf-8") as f:
             config_data = yaml.safe_load(f) or {}
 
         if not isinstance(config_data, dict):
@@ -59,15 +59,14 @@ def _load_clarification_templates() -> Dict[str, str]:
         for reason, template_pattern in config_data.items():
             if not isinstance(reason, str):
                 logger.warning(
-                    "Skipping invalid key in config (must be string): %r",
-                    reason
+                    "Skipping invalid key in config (must be string): %r", reason
                 )
                 continue
             if not isinstance(template_pattern, str):
                 logger.warning(
                     "Skipping invalid template pattern for %r: expected string, got %s",
                     reason,
-                    type(template_pattern).__name__
+                    type(template_pattern).__name__,
                 )
                 continue
             if "{domain}" not in template_pattern:
@@ -75,14 +74,14 @@ def _load_clarification_templates() -> Dict[str, str]:
                     "Template pattern for %r missing {domain} placeholder: %r. "
                     "It will not be domain-aware.",
                     reason,
-                    template_pattern
+                    template_pattern,
                 )
             validated[reason] = template_pattern
 
         logger.info(
             "Loaded %d clarification template mappings from %s",
             len(validated),
-            config_file
+            config_file,
         )
         return validated
 
@@ -91,23 +90,19 @@ def _load_clarification_templates() -> Dict[str, str]:
             "PyYAML not available. Cannot load clarification templates from %s. "
             "Using empty mapping (all reasons will fall back to {domain}.clarify). "
             "Install PyYAML to enable config-driven templates.",
-            config_file
+            config_file,
         )
         return {}
     except yaml.YAMLError as e:
-        raise ValueError(
-            f"Failed to parse YAML config file {config_file}: {e}"
-        ) from e
+        raise ValueError(f"Failed to parse YAML config file {config_file}: {e}") from e
     except Exception as e:
         logger.error(
             "Error loading clarification templates from %s: %s",
             config_file,
             e,
-            exc_info=True
+            exc_info=True,
         )
-        raise ValueError(
-            f"Failed to load clarification templates: {e}"
-        ) from e
+        raise ValueError(f"Failed to load clarification templates: {e}") from e
 
 
 # Load templates at module import time
@@ -137,7 +132,6 @@ def get_template_key(reason: str, domain: str = "service") -> str:
             "Template pattern for %r has unexpected placeholder: %s. "
             "Falling back to {domain}.clarify",
             reason,
-            e
+            e,
         )
         return f"{domain}.clarify"
-

@@ -5,12 +5,13 @@ Tests the capability runner and adapter directly without calling core.
 This validates the runner-adapter integration without external dependencies.
 """
 
-from capabilities.adapters.noop import NoopAdapter
-from capabilities.registry import register_adapter, clear_registry, get_adapter
-from capabilities.runner import CapabilityRunner
 import os
 import sys
 from pathlib import Path
+
+from capabilities.adapters.noop import NoopAdapter
+from capabilities.registry import clear_registry, get_adapter, register_adapter
+from capabilities.runner import CapabilityRunner
 
 # Add src/ to Python path (test is in src/capabilities/tests/)
 # Go up to src/ directory
@@ -37,7 +38,9 @@ def test_noop_adapter_direct():
 
         # Assert
         assert response.completed is True, "Adapter should complete immediately"
-        assert "noop_done" in response.facts, f"Facts should contain 'noop_done', got: {response.facts}"
+        assert (
+            "noop_done" in response.facts
+        ), f"Facts should contain 'noop_done', got: {response.facts}"
         assert response.facts["noop_done"] is True, "noop_done should be True"
         assert response.text is None, "Noop adapter should not return text"
 
@@ -59,7 +62,7 @@ def test_runner_with_noop_adapter():
     core_outcome = {
         "status": "AWAITING_CAPABILITY",
         "active_capability": "noop",
-        "facts": {}
+        "facts": {},
     }
 
     context = {
@@ -69,29 +72,31 @@ def test_runner_with_noop_adapter():
         "domain": "service",
         "timezone": "UTC",
         "organization_id": 1,
-        "transaction_id": "test-001"
+        "transaction_id": "test-001",
     }
 
     try:
         # Act
         runner = CapabilityRunner()
         runner_result = runner.handle(
-            user_input="hello",
-            core_outcome=core_outcome,
-            context=context
+            user_input="hello", core_outcome=core_outcome, context=context
         )
 
         # Assert
-        assert runner_result.passthrough is True, \
-            f"Runner should return passthrough=True when adapter completes, got: {runner_result.passthrough}"
+        assert (
+            runner_result.passthrough is True
+        ), f"Runner should return passthrough=True when adapter completes, got: {runner_result.passthrough}"
         assert runner_result.facts is not None, "Runner should return facts"
-        assert "noop_done" in runner_result.facts, \
-            f"Facts should contain 'noop_done', got: {runner_result.facts}"
-        assert runner_result.facts["noop_done"] is True, \
-            f"noop_done should be True, got: {runner_result.facts.get('noop_done')}"
+        assert (
+            "noop_done" in runner_result.facts
+        ), f"Facts should contain 'noop_done', got: {runner_result.facts}"
+        assert (
+            runner_result.facts["noop_done"] is True
+        ), f"noop_done should be True, got: {runner_result.facts.get('noop_done')}"
         # When adapter completes, active_capability should be cleared
-        assert runner_result.active_capability is None, \
-            f"active_capability should be None after adapter completes, got: {runner_result.active_capability}"
+        assert (
+            runner_result.active_capability is None
+        ), f"active_capability should be None after adapter completes, got: {runner_result.active_capability}"
 
         print("  PASS: Runner correctly routes to adapter and merges facts")
 
@@ -109,7 +114,7 @@ def test_runner_with_missing_adapter():
     core_outcome = {
         "status": "AWAITING_CAPABILITY",
         "active_capability": "noop",
-        "facts": {}
+        "facts": {},
     }
 
     context = {
@@ -119,26 +124,27 @@ def test_runner_with_missing_adapter():
         "domain": "service",
         "timezone": "UTC",
         "organization_id": 1,
-        "transaction_id": "test-002"
+        "transaction_id": "test-002",
     }
 
     try:
         # Act
         runner = CapabilityRunner()
         runner_result = runner.handle(
-            user_input="hello",
-            core_outcome=core_outcome,
-            context=context
+            user_input="hello", core_outcome=core_outcome, context=context
         )
 
         # Assert: Runner should handle missing adapter gracefully
         # It returns passthrough=True to allow system to continue
-        assert runner_result.passthrough is True, \
-            "Runner should return passthrough=True when adapter missing"
-        assert runner_result.facts is None, \
-            "Runner should not return facts when adapter missing"
-        assert runner_result.active_capability is None, \
-            "Runner should clear active_capability when adapter missing"
+        assert (
+            runner_result.passthrough is True
+        ), "Runner should return passthrough=True when adapter missing"
+        assert (
+            runner_result.facts is None
+        ), "Runner should not return facts when adapter missing"
+        assert (
+            runner_result.active_capability is None
+        ), "Runner should clear active_capability when adapter missing"
 
         print("  PASS: Runner handles missing adapter gracefully (passthrough)")
 
@@ -155,10 +161,7 @@ def test_runner_passthrough_when_no_capability():
     register_adapter(NoopAdapter())
 
     # Core outcome without AWAITING_CAPABILITY
-    core_outcome = {
-        "status": "READY",
-        "facts": {}
-    }
+    core_outcome = {"status": "READY", "facts": {}}
 
     context = {
         "user_id": "test-user",
@@ -167,25 +170,26 @@ def test_runner_passthrough_when_no_capability():
         "domain": "service",
         "timezone": "UTC",
         "organization_id": 1,
-        "transaction_id": "test-003"
+        "transaction_id": "test-003",
     }
 
     try:
         # Act
         runner = CapabilityRunner()
         runner_result = runner.handle(
-            user_input="hello",
-            core_outcome=core_outcome,
-            context=context
+            user_input="hello", core_outcome=core_outcome, context=context
         )
 
         # Assert
-        assert runner_result.passthrough is True, \
-            "Runner should passthrough when no capability active"
-        assert runner_result.facts is None, \
-            "Runner should not return facts when passthrough"
-        assert runner_result.active_capability is None, \
-            "Runner should not have active_capability when passthrough"
+        assert (
+            runner_result.passthrough is True
+        ), "Runner should passthrough when no capability active"
+        assert (
+            runner_result.facts is None
+        ), "Runner should not return facts when passthrough"
+        assert (
+            runner_result.active_capability is None
+        ), "Runner should not have active_capability when passthrough"
 
         print("  PASS: Runner correctly passes through when no capability")
 
@@ -210,5 +214,6 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Test failed: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

@@ -26,7 +26,7 @@ import json
 import os
 import sys
 import time
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 SESSION_TTL_SECONDS = 20 * 60  # 20 minutes (middle of 15-30 range)
 REDIS_ENV_VAR = "REDIS_URL"
@@ -52,6 +52,7 @@ def _get_redis_url():
     # Fallback to config file (if exists)
     try:
         from pathlib import Path
+
         project_root = Path(__file__).parent.parent.parent.parent.parent
         env_file = project_root / ".env"
         env_local_file = project_root / ".env.local"
@@ -61,6 +62,7 @@ def _get_redis_url():
             if env_path.exists():
                 try:
                     from dotenv import dotenv_values
+
                     config = dotenv_values(env_path)
                     redis_url = config.get(REDIS_ENV_VAR)
                     if redis_url:
@@ -91,6 +93,7 @@ def _get_redis_client():
 
     try:
         import redis  # type: ignore
+
         return redis.from_url(redis_url)
     except Exception:
         return None
@@ -118,6 +121,7 @@ def validate_redis_connection():
 
     try:
         import redis  # type: ignore
+
         client = redis.from_url(redis_url)
 
         # Test write
@@ -129,13 +133,17 @@ def validate_redis_connection():
         retrieved = client.get(test_key)
         if not retrieved:
             print(
-                f"ERROR: Redis health check failed - write succeeded but read returned None", file=sys.stderr)
+                f"ERROR: Redis health check failed - write succeeded but read returned None",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         retrieved_value = json.loads(retrieved)
         if retrieved_value.get("test") is not True:
             print(
-                f"ERROR: Redis health check failed - read returned invalid data", file=sys.stderr)
+                f"ERROR: Redis health check failed - read returned invalid data",
+                file=sys.stderr,
+            )
             sys.exit(1)
 
         # Clean up test key
@@ -143,16 +151,24 @@ def validate_redis_connection():
 
         # Success - print to stdout and flush immediately
         print(
-            f"[OK] Redis connection validated successfully (REDIS_URL={redis_url})", flush=True)
+            f"[OK] Redis connection validated successfully (REDIS_URL={redis_url})",
+            flush=True,
+        )
 
     except ImportError:
         print(
-            f"ERROR: Redis URL is configured ({REDIS_ENV_VAR}={redis_url}) but 'redis' package is not installed", file=sys.stderr, flush=True)
+            f"ERROR: Redis URL is configured ({REDIS_ENV_VAR}={redis_url}) but 'redis' package is not installed",
+            file=sys.stderr,
+            flush=True,
+        )
         print(f"Install with: pip install redis", file=sys.stderr, flush=True)
         sys.exit(1)
     except Exception as e:
         print(
-            f"ERROR: Redis connection failed (REDIS_URL={redis_url})", file=sys.stderr, flush=True)
+            f"ERROR: Redis connection failed (REDIS_URL={redis_url})",
+            file=sys.stderr,
+            flush=True,
+        )
         print(f"Error: {e}", file=sys.stderr, flush=True)
         sys.exit(1)
 
@@ -168,11 +184,11 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
         Session state dictionary or None if not found/expired
     """
     import logging
+
     logger = logging.getLogger(__name__)
 
     key = _get_session_key(user_id)
-    logger.error(
-        "[SESSION_LOAD] Attempting to load: user_id=%s key=%s", user_id, key)
+    logger.error("[SESSION_LOAD] Attempting to load: user_id=%s key=%s", user_id, key)
 
     redis_client = _get_redis_client()
     if redis_client:
@@ -181,22 +197,33 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
             raw = redis_client.get(key)
             if not raw:
                 logger.error(
-                    "[SESSION_LOAD] Not found in Redis: user_id=%s key=%s", user_id, key)
+                    "[SESSION_LOAD] Not found in Redis: user_id=%s key=%s", user_id, key
+                )
                 return None
             session_state = json.loads(raw)
             # Debug log: Print session keys to confirm "facts" is present
             session_keys = list(session_state.keys())
-            facts_keys = list(session_state.get("facts", {}).keys()) if isinstance(
-                session_state.get("facts"), dict) else []
+            facts_keys = (
+                list(session_state.get("facts", {}).keys())
+                if isinstance(session_state.get("facts"), dict)
+                else []
+            )
             logger.error(
                 "[SESSION_LOAD] Found in Redis: user_id=%s key=%s intent_name=%r status=%r keys=%s facts_keys=%s",
-                user_id, key, session_state.get("intent_name"), session_state.get(
-                    "status"), session_keys, facts_keys
+                user_id,
+                key,
+                session_state.get("intent_name"),
+                session_state.get("status"),
+                session_keys,
+                facts_keys,
             )
             return session_state
         except Exception as e:
             logger.warning(
-                "[SESSION_LOAD] Redis load failed, falling back to in-memory: user_id=%s error=%s", user_id, e)
+                "[SESSION_LOAD] Redis load failed, falling back to in-memory: user_id=%s error=%s",
+                user_id,
+                e,
+            )
             # Fall through to in-memory fallback
             pass
 
@@ -207,25 +234,28 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
         if time.time() - stored_at > SESSION_TTL_SECONDS_FALLBACK:
             # Expired, remove it
             del _in_memory_sessions[user_id]
-            logger.error(
-                "[SESSION_LOAD] Expired in in-memory: user_id=%s", user_id)
+            logger.error("[SESSION_LOAD] Expired in in-memory: user_id=%s", user_id)
             return None
         # Return session state (without internal _stored_at field)
-        session_state = {k: v for k, v in session_data.items()
-                         if not k.startswith("_")}
+        session_state = {k: v for k, v in session_data.items() if not k.startswith("_")}
         # Debug log: Print session keys to confirm "facts" is present
         session_keys = list(session_state.keys())
-        facts_keys = list(session_state.get("facts", {}).keys()) if isinstance(
-            session_state.get("facts"), dict) else []
+        facts_keys = (
+            list(session_state.get("facts", {}).keys())
+            if isinstance(session_state.get("facts"), dict)
+            else []
+        )
         logger.error(
             "[SESSION_LOAD] Found in in-memory: user_id=%s intent_name=%r status=%r keys=%s facts_keys=%s",
-            user_id, session_state.get("intent_name"), session_state.get(
-                "status"), session_keys, facts_keys
+            user_id,
+            session_state.get("intent_name"),
+            session_state.get("status"),
+            session_keys,
+            facts_keys,
         )
         return session_state
 
-    logger.error(
-        "[SESSION_LOAD] Not found anywhere: user_id=%s key=%s", user_id, key)
+    logger.error("[SESSION_LOAD] Not found anywhere: user_id=%s key=%s", user_id, key)
     return None
 
 
@@ -245,7 +275,28 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
     Note: missing_slots are NOT stored in session - they are computed fresh.
     """
     import logging
+
     logger = logging.getLogger(__name__)
+
+    # INSTRUMENTATION: Print object IDs at save_session entry
+    print(
+        f"[PERSISTENCE_TRACE] save_session ENTRY: "
+        f"user_id={user_id}, "
+        f"session_state id={id(session_state)}, "
+        f"session_state['facts'] id={id(session_state.get('facts'))}, "
+        f"session_state['slot_attempts'] id={id(session_state.get('slot_attempts'))}, "
+        f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+        f"session_state['facts']['slot_attempts']={session_state.get('facts', {}).get('slot_attempts') if isinstance(session_state.get('facts'), dict) else None}"
+    )
+    logger.error(
+        f"[PERSISTENCE_TRACE] save_session ENTRY: "
+        f"user_id={user_id}, "
+        f"session_state id={id(session_state)}, "
+        f"session_state['facts'] id={id(session_state.get('facts'))}, "
+        f"session_state['slot_attempts'] id={id(session_state.get('slot_attempts'))}, "
+        f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
+        f"session_state['facts']['slot_attempts']={session_state.get('facts', {}).get('slot_attempts') if isinstance(session_state.get('facts'), dict) else None}"
+    )
 
     # HARD GUARD: Ensure session_state["facts"] is always present as a dict before saving
     # This invariant must hold for all sessions, especially those with active_capability
@@ -278,8 +329,11 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
     intent_name = session_state.get("intent_name")
     status = session_state.get("status")
     slots_keys = list(session_state.get("slots", {}).keys())
-    facts_keys = list(session_state.get("facts", {}).keys()) if isinstance(
-        session_state.get("facts"), dict) else []
+    facts_keys = (
+        list(session_state.get("facts", {}).keys())
+        if isinstance(session_state.get("facts"), dict)
+        else []
+    )
     logger.error(
         "[SESSION_SAVE] user_id=%s key=%s intent_name=%r status=%r slots_keys=%s facts_keys=%s",
         user_id,
@@ -287,7 +341,7 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
         intent_name,
         status,
         slots_keys,
-        facts_keys
+        facts_keys,
     )
 
     redis_client = _get_redis_client()
@@ -298,11 +352,15 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
             serialized = json.dumps(session_state)
             redis_client.setex(key, SESSION_TTL_SECONDS, serialized)
             logger.error(
-                "[SESSION_SAVE] Saved to Redis: user_id=%s key=%s", user_id, key)
+                "[SESSION_SAVE] Saved to Redis: user_id=%s key=%s", user_id, key
+            )
             return
         except Exception as e:
             logger.warning(
-                "[SESSION_SAVE] Redis save failed, falling back to in-memory: user_id=%s error=%s", user_id, e)
+                "[SESSION_SAVE] Redis save failed, falling back to in-memory: user_id=%s error=%s",
+                user_id,
+                e,
+            )
             # Fall through to in-memory fallback
             pass
 

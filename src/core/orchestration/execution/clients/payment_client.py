@@ -4,7 +4,7 @@ Payment API Client
 Thin HTTP client for calling payment internal API.
 """
 
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 from core.orchestration.execution.clients.base_client import BaseClient
 
@@ -22,7 +22,7 @@ class PaymentClient(BaseClient):
         super().__init__(
             base_url=base_url,
             env_var="INTERNAL_API_BASE_URL",
-            default_url="http://localhost:3000"
+            default_url="http://localhost:3000",
         )
 
     def create_payment_intent(
@@ -56,6 +56,3 @@ class PaymentClient(BaseClient):
 
         path = "/api/internal/bookings/intent"
         return self._request("POST", path, json=payload)
-
-
-

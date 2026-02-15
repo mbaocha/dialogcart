@@ -17,12 +17,11 @@ Does NOT:
 """
 
 from luma.resolution.semantic_resolver import (
-    resolve_semantics,
     SemanticResolutionResult,
+    resolve_semantics,
 )
 
 __all__ = [
     "resolve_semantics",
     "SemanticResolutionResult",
 ]
-

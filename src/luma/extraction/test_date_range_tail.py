@@ -17,9 +17,11 @@ SRC_PATH = str(SRC_DIR)
 if SRC_PATH not in sys.path:
     sys.path.insert(0, SRC_PATH)
 
-from luma.extraction.matcher import EntityMatcher  # noqa: E402
-from luma.grouping.reservation_intent_resolver import ReservationIntentResolver  # noqa: E402
 from luma.config.core import STATUS_READY
+from luma.extraction.matcher import EntityMatcher  # noqa: E402
+from luma.grouping.reservation_intent_resolver import (
+    ReservationIntentResolver,
+)  # noqa: E402
 
 
 class DateRangeTailTests(unittest.TestCase):
@@ -98,4 +100,3 @@ class DateRangeTailTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

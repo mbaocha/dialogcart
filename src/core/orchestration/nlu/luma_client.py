@@ -6,7 +6,8 @@ Luma is a semantic understanding service, not an execution client.
 """
 
 import os
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 import httpx
 
 from core.orchestration.errors import UpstreamError
@@ -43,7 +44,7 @@ class LumaClient:
         text: str,
         domain: str = "service",
         timezone: str = "UTC",
-        tenant_context: Optional[Dict[str, Any]] = None
+        tenant_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Call Luma /resolve endpoint for semantic understanding.
@@ -67,7 +68,7 @@ class LumaClient:
             "user_id": user_id,
             "text": text,
             "domain": domain,
-            "timezone": timezone
+            "timezone": timezone,
         }
         if tenant_context:
             payload["tenant_context"] = tenant_context
@@ -83,23 +84,16 @@ class LumaClient:
                 f"Luma API returned error {status_code}: {error_text}"
             ) from e
         except httpx.RequestError as e:
-            raise UpstreamError(
-                f"Luma API request failed: {str(e)}"
-            ) from e
+            raise UpstreamError(f"Luma API request failed: {str(e)}") from e
         except Exception as e:
-            raise UpstreamError(
-                f"Unexpected error calling Luma API: {str(e)}"
-            ) from e
+            raise UpstreamError(f"Unexpected error calling Luma API: {str(e)}") from e
 
     def notify_execution(
-        self,
-        user_id: str,
-        booking_id: str,
-        domain: str = "service"
+        self, user_id: str, booking_id: str, domain: str = "service"
     ) -> Dict[str, Any]:
         """
         Notify Luma about booking execution completion.
-        
+
         Updates the booking_lifecycle state to EXECUTED in Luma's memory.
 
         Args:
@@ -119,7 +113,7 @@ class LumaClient:
             "user_id": user_id,
             "booking_id": booking_id,
             "booking_lifecycle": "EXECUTED",
-            "domain": domain
+            "domain": domain,
         }
 
         try:
@@ -135,19 +129,15 @@ class LumaClient:
                 return {
                     "success": False,
                     "error": "endpoint_not_found",
-                    "message": "Luma /notify_execution endpoint not available (404). This is a non-critical lifecycle update."
+                    "message": "Luma /notify_execution endpoint not available (404). This is a non-critical lifecycle update.",
                 }
             raise UpstreamError(
                 f"Luma API returned error {status_code}: {error_text}"
             ) from e
         except httpx.RequestError as e:
-            raise UpstreamError(
-                f"Luma API request failed: {str(e)}"
-            ) from e
+            raise UpstreamError(f"Luma API request failed: {str(e)}") from e
         except Exception as e:
-            raise UpstreamError(
-                f"Unexpected error calling Luma API: {str(e)}"
-            ) from e
+            raise UpstreamError(f"Unexpected error calling Luma API: {str(e)}") from e
 
     def __del__(self):
         """Close httpx client on cleanup."""
@@ -156,4 +146,3 @@ class LumaClient:
                 self._client.close()
             except Exception:
                 pass
-

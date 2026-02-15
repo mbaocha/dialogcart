@@ -8,6 +8,7 @@ Supports entity types:
 - service, room_type, amenity
 - date, time, duration
 """
+
 import re
 import unicodedata
 from typing import Dict
@@ -58,7 +59,11 @@ def pre_normalization(text: str) -> str:
     # Match: digit + space + 'a' or 'p' (not followed by 'm') + optional punctuation or word boundary
     # Use lookahead to ensure we don't match "6 pm" (already has 'm')
     text = re.sub(
-        r"\b(\d{1,2})\s+([ap])(?!m)(?=\s|[,\.]|\b)", r"\1 \2m", text, flags=re.IGNORECASE)
+        r"\b(\d{1,2})\s+([ap])(?!m)(?=\s|[,\.]|\b)",
+        r"\1 \2m",
+        text,
+        flags=re.IGNORECASE,
+    )
 
     # 5️⃣ Add spaces around punctuation
     text = re.sub(r"([.!?;:,])(?=\S)", r"\1 ", text)
@@ -82,7 +87,9 @@ def post_normalize_parameterized_text(text: str) -> str:
     - servicetoken, roomtypetoken, amenitytoken
     - datetoken, timetoken, durationtoken
     """
-    placeholder_pattern = r"(servicetoken|roomtypetoken|amenitytoken|datetoken|timetoken|durationtoken)"
+    placeholder_pattern = (
+        r"(servicetoken|roomtypetoken|amenitytoken|datetoken|timetoken|durationtoken)"
+    )
 
     # 1️⃣ Split consecutive placeholders
     text = re.sub(
@@ -194,8 +201,7 @@ def normalize_orthography(text: str, rules: Dict[str, str]) -> str:
     words = text_lower.split()
 
     # Sort rules by length (longest first) for longest-match-first
-    sorted_rules = sorted(
-        rules.items(), key=lambda x: len(x[0].split()), reverse=True)
+    sorted_rules = sorted(rules.items(), key=lambda x: len(x[0].split()), reverse=True)
 
     normalized = words[:]
     skip_until = -1
@@ -219,7 +225,7 @@ def normalize_orthography(text: str, rules: Dict[str, str]) -> str:
                 continue
 
             # Check for exact word sequence match
-            if words[i:i+variant_len] == variant_words:
+            if words[i : i + variant_len] == variant_words:
                 matched_len = variant_len
                 matched_replacement = preferred
                 break
@@ -228,7 +234,7 @@ def normalize_orthography(text: str, rules: Dict[str, str]) -> str:
             # Replace matched words with preferred form
             # Split replacement in case it's multi-word
             replacement_words = matched_replacement.lower().split()
-            normalized[i:i+matched_len] = replacement_words
+            normalized[i : i + matched_len] = replacement_words
             skip_until = i + matched_len
 
         i += 1
@@ -276,14 +282,14 @@ def normalize_natural_language_variants(
 
         # Try longest matches first
         for n in range(max_n, 0, -1):
-            span = " ".join(words[i: i + n])
+            span = " ".join(words[i : i + n])
             if span in variant_map:
                 matched_len = n
                 matched_value = variant_map[span]
                 break
 
         if matched_value:
-            normalized[i: i + matched_len] = [matched_value]
+            normalized[i : i + matched_len] = [matched_value]
             skip_until = i + matched_len
 
         i += 1

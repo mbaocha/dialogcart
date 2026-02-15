@@ -6,46 +6,43 @@ Service and reservation entity matcher for DialogCart.
 Extracts and parameterizes entities for service-based appointment booking
 and reservation systems.
 """
-from .service_annotation import (
-    annotate_service_tokens,
-    consume_service_annotations,
-)
-from .entity_processing import (
-    extract_entities_from_doc,
-    build_parameterized_sentence,
-)
+
+import logging
+import re
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
 from .entity_loading import (
+    build_business_category_synonym_map,
+    get_global_json_path,
     init_nlp_with_business_categories,
+    load_global_business_categories,
+    load_global_entity_types,
     load_global_noise_set,
     load_global_orthography_rules,
-    load_global_business_categories,
-    build_business_category_synonym_map,
-    load_global_entity_types,
-    get_global_json_path,
 )
+from .entity_processing import build_parameterized_sentence, extract_entities_from_doc
+from .normalization import (
+    normalize_hyphens,
+    normalize_natural_language_variants,
+    normalize_orthography,
+    pre_normalization,
+)
+from .service_annotation import annotate_service_tokens, consume_service_annotations
 from .vocabulary_normalization import (
-    load_vocabularies,
     compile_vocabulary_maps,
+    load_vocabularies,
     normalize_vocabularies,
     validate_vocabularies,
 )
-from .normalization import (
-    normalize_hyphens,
-    pre_normalization,
-    normalize_orthography,
-    normalize_natural_language_variants,
-)
-from typing import Dict, Any, Optional, List, Tuple
-from pathlib import Path
-import re
-import logging
 
 logger = logging.getLogger(__name__)
 
 try:
-    from luma.config import debug_print
     from luma.clarification import Clarification, ClarificationReason
+    from luma.config import debug_print
 except ImportError:  # pragma: no cover - fallback for static analysis
+
     def debug_print(*args, **kwargs):
         return None
 
@@ -67,11 +64,23 @@ except ImportError:  # pragma: no cover - fallback for static analysis
 
 DOMAIN_ENTITY_WHITELIST = {
     "service": {
-        "business_categories", "dates", "dates_absolute", "times", "time_windows", "durations", "booking_id"
+        "business_categories",
+        "dates",
+        "dates_absolute",
+        "times",
+        "time_windows",
+        "durations",
+        "booking_id",
     },
     "reservation": {
-        "business_categories", "dates", "dates_absolute", "times", "time_windows", "durations", "booking_id"
-    }
+        "business_categories",
+        "dates",
+        "dates_absolute",
+        "times",
+        "time_windows",
+        "durations",
+        "booking_id",
+    },
 }
 
 
@@ -152,6 +161,7 @@ def detect_tenant_alias_spans(
     compiled_structure = None
     try:
         from luma.normalization.alias_compiler import get_compiled_aliases
+
         # Get compiled structure (cached) to reuse sorted aliases for fuzzy matching
         compiled_structure = get_compiled_aliases(tenant_aliases)
         if compiled_structure is not None:
@@ -183,7 +193,7 @@ def _apply_fuzzy_matching_post_process(
     normalized_text: str,
     tenant_aliases: Dict[str, str],
     existing_spans: List[Dict[str, Any]],
-    compiled_structure: Optional[Any] = None
+    compiled_structure: Optional[Any] = None,
 ) -> List[Dict[str, Any]]:
     """
     Apply fuzzy matching as post-processing to handle typos in tenant aliases.
@@ -219,7 +229,7 @@ def _apply_fuzzy_matching_post_process(
     used_ranges = [(s["start_char"], s["end_char"]) for s in spans]
 
     # Use pre-sorted aliases from compiled structure if available (avoid re-sorting)
-    if compiled_structure and hasattr(compiled_structure, 'sorted_aliases_tuples'):
+    if compiled_structure and hasattr(compiled_structure, "sorted_aliases_tuples"):
         sorted_aliases = compiled_structure.sorted_aliases_tuples
     else:
         # Fallback: sort aliases by token length desc, then char length desc for deterministic longest-first
@@ -317,28 +327,31 @@ def _apply_fuzzy_matching_post_process(
             if best_match and best_alias:
                 # Check if this fuzzy match overlaps with any existing exact match
                 overlapping_spans = [
-                    s for s in spans
-                    if not (end_char_pos <= s["start_char"] or start_char_pos >= s["end_char"])
+                    s
+                    for s in spans
+                    if not (
+                        end_char_pos <= s["start_char"]
+                        or start_char_pos >= s["end_char"]
+                    )
                 ]
 
                 # If fuzzy match overlaps with exact matches, remove the shorter exact matches
                 if overlapping_spans:
                     # Remove shorter exact matches that are contained within this longer fuzzy match
                     spans = [
-                        s for s in spans
+                        s
+                        for s in spans
                         if not (
-                            s["start_char"] >= start_char_pos and
-                            s["end_char"] <= end_char_pos and
-                            s.get("match_type", "exact") == "exact"
+                            s["start_char"] >= start_char_pos
+                            and s["end_char"] <= end_char_pos
+                            and s.get("match_type", "exact") == "exact"
                         )
                     ]
                     # Update used_ranges to remove the removed spans
                     used_ranges = [
-                        (u_start, u_end) for u_start, u_end in used_ranges
-                        if not (
-                            u_start >= start_char_pos and
-                            u_end <= end_char_pos
-                        )
+                        (u_start, u_end)
+                        for u_start, u_end in used_ranges
+                        if not (u_start >= start_char_pos and u_end <= end_char_pos)
                     ]
 
                 # Add the fuzzy match
@@ -483,28 +496,30 @@ def _detect_tenant_alias_spans_slow(
             # Check if this fuzzy match overlaps with any existing exact match
             # If it does and the fuzzy match is longer, prefer the fuzzy match
             overlapping_spans = [
-                s for s in spans
-                if not (end_char_pos <= s["start_char"] or start_char_pos >= s["end_char"])
+                s
+                for s in spans
+                if not (
+                    end_char_pos <= s["start_char"] or start_char_pos >= s["end_char"]
+                )
             ]
 
             # If fuzzy match overlaps with exact matches, remove the shorter exact matches
             if overlapping_spans:
                 # Remove shorter exact matches that are contained within this longer fuzzy match
                 spans = [
-                    s for s in spans
+                    s
+                    for s in spans
                     if not (
-                        s["start_char"] >= start_char_pos and
-                        s["end_char"] <= end_char_pos and
-                        s.get("match_type") == "exact"
+                        s["start_char"] >= start_char_pos
+                        and s["end_char"] <= end_char_pos
+                        and s.get("match_type") == "exact"
                     )
                 ]
                 # Update used_ranges to remove the removed spans
                 used_ranges = [
-                    (u_start, u_end) for u_start, u_end in used_ranges
-                    if not (
-                        u_start >= start_char_pos and
-                        u_end <= end_char_pos
-                    )
+                    (u_start, u_end)
+                    for u_start, u_end in used_ranges
+                    if not (u_start >= start_char_pos and u_end <= end_char_pos)
                 ]
 
             # Add the fuzzy match
@@ -564,9 +579,7 @@ def merge_alias_spans_into_services(
     alias_token_ranges: List[Tuple[int, int]] = []
 
     for span in alias_spans:
-        mapped = _map_char_span_to_token_span(
-            doc, span["start_char"], span["end_char"]
-        )
+        mapped = _map_char_span_to_token_span(doc, span["start_char"], span["end_char"])
         if not mapped:
             continue
         start_tok, end_tok = mapped
@@ -625,7 +638,7 @@ class EntityMatcher:
         self,
         domain: str,
         entity_file: Optional[str] = None,
-        lazy_load_spacy: bool = False
+        lazy_load_spacy: bool = False,
     ):
         """
         Args:
@@ -635,7 +648,8 @@ class EntityMatcher:
         """
         if domain not in DOMAIN_ENTITY_WHITELIST:
             raise ValueError(
-                f"Unsupported domain: {domain}. Must be one of: {list(DOMAIN_ENTITY_WHITELIST.keys())}")
+                f"Unsupported domain: {domain}. Must be one of: {list(DOMAIN_ENTITY_WHITELIST.keys())}"
+            )
 
         self.domain = domain
 
@@ -651,24 +665,23 @@ class EntityMatcher:
         global_json_path = get_global_json_path(base_dir)
 
         # Load global business categories (GLOBAL semantic concepts)
-        self.business_categories = load_global_business_categories(
-            global_json_path)
-        debug_print(
-            "[EntityMatcher] Loaded business categories from global JSON")
+        self.business_categories = load_global_business_categories(global_json_path)
+        debug_print("[EntityMatcher] Loaded business categories from global JSON")
 
         # Build natural language variant map from business categories
         # This maps variants to preferred natural language forms (NOT canonical IDs)
         self.variant_map = _build_natural_language_variant_map_from_business_categories(
-            self.business_categories)
+            self.business_categories
+        )
 
         # Build business category synonym map (for canonicalization)
         self.business_category_map = build_business_category_synonym_map(
-            self.business_categories)
+            self.business_categories
+        )
 
         # Load global normalization (orthography, noise, vocabularies)
         self.noise_set = load_global_noise_set(global_json_path)
-        self.orthography_rules = load_global_orthography_rules(
-            global_json_path)
+        self.orthography_rules = load_global_orthography_rules(global_json_path)
 
         # Load vocabularies with synonyms and typos
         vocabularies = load_vocabularies(global_json_path)
@@ -681,14 +694,17 @@ class EntityMatcher:
 
         # Compile vocabulary maps
         self.synonym_map, self.typo_map, self.all_canonicals = compile_vocabulary_maps(
-            vocabularies)
+            vocabularies
+        )
 
         # Load global entity types (date, time, duration)
         self.entity_types = load_global_entity_types(global_json_path)
 
         # Tenant entities are unused (kept for backward compatibility)
         self.entities = []
-        self.service_map = {}  # Empty - business categories use business_category_map instead
+        self.service_map = (
+            {}
+        )  # Empty - business categories use business_category_map instead
 
         # spaCy init with business categories
         self.nlp = None
@@ -704,7 +720,7 @@ class EntityMatcher:
         text: str,
         debug_units: bool = False,
         request_id: Optional[str] = None,
-        tenant_aliases: Optional[Dict[str, str]] = None
+        tenant_aliases: Optional[Dict[str, str]] = None,
     ) -> Dict[str, Any]:
         """
         Main extraction entry point.
@@ -735,43 +751,49 @@ class EntityMatcher:
         )
 
         # 1.5️⃣ Pre-extraction tenant alias span detection (on normalized text BEFORE service-family reduction)
-        alias_spans = detect_tenant_alias_spans(
-            normalized, tenant_aliases or {})
+        alias_spans = detect_tenant_alias_spans(normalized, tenant_aliases or {})
 
         # Apply natural language variant normalization (synonym mapping for services)
         # ONLY if no tenant alias spans were found, to avoid collapsing aliases
         if not alias_spans:
             normalized = normalize_natural_language_variants(
-                normalized, self.variant_map)
+                normalized, self.variant_map
+            )
 
         # 2️⃣ Extract entities from spaCy doc
         raw_result, doc = extract_entities_from_doc(self.nlp, normalized)
-        
+
         # 2.5️⃣ Extract booking_id from original text (preserve casing)
         # Booking ID pattern: 2+ letters followed by 3+ digits (e.g., ABC123, ABC1234, AB1234)
         # Extract at most ONE booking_id per sentence (first match)
         # Note: Original requirement was 4+ digits, but test uses ABC123 (3 digits), so using 3+ for compatibility
-        booking_id_pattern = re.compile(r'\b[A-Z]{2,}\d{3,}\b')
+        booking_id_pattern = re.compile(r"\b[A-Z]{2,}\d{3,}\b")
         booking_id_match = booking_id_pattern.search(text)
         if booking_id_match:
             booking_id_value = booking_id_match.group(0)
-            
+
             # Normalize the booking_id the same way as pre_normalization does:
             # Split digits and letters in the same order: (\d)([a-zA-Z]) then ([a-zA-Z])(\d)
-            booking_id_normalized = re.sub(r'(\d)([a-zA-Z])', r'\1 \2', booking_id_value)
-            booking_id_normalized = re.sub(r'([a-zA-Z])(\d)', r'\1 \2', booking_id_normalized)
+            booking_id_normalized = re.sub(
+                r"(\d)([a-zA-Z])", r"\1 \2", booking_id_value
+            )
+            booking_id_normalized = re.sub(
+                r"([a-zA-Z])(\d)", r"\1 \2", booking_id_normalized
+            )
             booking_id_normalized = booking_id_normalized.lower().strip()
-            
+
             # Find corresponding position in normalized text
             # Search for the normalized pattern (e.g., "abc 123" instead of "abc123")
-            pattern = r'\b' + re.escape(booking_id_normalized) + r'\b'
+            pattern = r"\b" + re.escape(booking_id_normalized) + r"\b"
             norm_match = re.search(pattern, normalized)
             if norm_match:
                 norm_start_char = norm_match.start()
                 norm_end_char = norm_match.end()
-                
+
                 # Map character positions to token positions in normalized doc
-                token_span = _map_char_span_to_token_span(doc, norm_start_char, norm_end_char)
+                token_span = _map_char_span_to_token_span(
+                    doc, norm_start_char, norm_end_char
+                )
                 if token_span:
                     start_token, end_token = token_span
                     # Store in raw_result (as single value, not list) - preserve original casing
@@ -781,12 +803,13 @@ class EntityMatcher:
 
         # 2.6️⃣ Apply temporal inference rules if enabled
         from ..config.temporal_rules import TEMPORAL_RULES
+
         if TEMPORAL_RULES.allow_partial_meridiem_propagation:
-            raw_result = self._propagate_meridiem_in_ranges(
-                normalized, raw_result, doc)
+            raw_result = self._propagate_meridiem_in_ranges(normalized, raw_result, doc)
         if TEMPORAL_RULES.allow_time_of_day_inference:
             raw_result = self._infer_meridiem_from_time_window(
-                normalized, raw_result, doc)
+                normalized, raw_result, doc
+            )
 
         # Detect range tails like "oct 5th to 9th" where only the first absolute
         # date is extracted. If safe, synthesize a second absolute date using the
@@ -801,7 +824,7 @@ class EntityMatcher:
             alias_spans=alias_spans,
             services=raw_result.get("services", []),
             business_category_map=self.business_category_map,
-            tenant_aliases=tenant_aliases
+            tenant_aliases=tenant_aliases,
         )
 
         # Log annotated sentence (Step 1 output)
@@ -809,17 +832,19 @@ class EntityMatcher:
             logger.debug(
                 f"[annotation] Step 1 annotated sentence for request {request_id}",
                 extra={
-                    'request_id': request_id,
-                    'alias_count': len(service_annotations.get("alias_annotations", [])),
-                    'family_count': len(service_annotations.get("family_annotations", []))
-                }
+                    "request_id": request_id,
+                    "alias_count": len(
+                        service_annotations.get("alias_annotations", [])
+                    ),
+                    "family_count": len(
+                        service_annotations.get("family_annotations", [])
+                    ),
+                },
             )
 
         # Step 2: Deterministic consumption pass (replace ALIAS with servicetenanttoken, FAMILY with servicefamilytoken)
         psentence_services, consumption_metadata = consume_service_annotations(
-            doc=doc,
-            annotations=service_annotations,
-            logger_instance=logger
+            doc=doc, annotations=service_annotations, logger_instance=logger
         )
 
         # Log consumed sentence (Step 2 output)
@@ -827,10 +852,10 @@ class EntityMatcher:
             logger.debug(
                 f"[consumption] Step 2 consumed sentence for request {request_id}",
                 extra={
-                    'request_id': request_id,
-                    'has_alias': consumption_metadata.get("has_alias", False),
-                    'parameterized_sentence': psentence_services
-                }
+                    "request_id": request_id,
+                    "has_alias": consumption_metadata.get("has_alias", False),
+                    "parameterized_sentence": psentence_services,
+                },
             )
 
         # Rebuild full parameterized sentence: services from consumption + other entities from build_parameterized_sentence
@@ -863,14 +888,14 @@ class EntityMatcher:
         if "booking_id" in raw_result and "_booking_id_token_span" in raw_result:
             start_token, end_token = raw_result["_booking_id_token_span"]
             all_replacements.append((start_token, end_token, "bookingidtoken"))
-        
+
         # Add other entity replacements (dates, times, durations)
         placeholder_map = {
             "dates": "datetoken",
             "dates_absolute": "datetoken",
             "times": "timetoken",
             "time_windows": "timewindowtoken",
-            "durations": "durationtoken"
+            "durations": "durationtoken",
         }
         for entity_type, ents in raw_result.items():
             if entity_type == "services" or entity_type.startswith("_"):
@@ -891,6 +916,7 @@ class EntityMatcher:
 
         # Post-normalize parameterized text
         from .normalization import post_normalize_parameterized_text
+
         psentence = post_normalize_parameterized_text(psentence)
 
         # Build business_categories from annotations (for downstream use)
@@ -898,16 +924,18 @@ class EntityMatcher:
         business_categories = []
         # Add aliases as business categories with tenant_service_id and canonical_family
         for alias_ann in service_annotations.get("alias_annotations", []):
-            business_categories.append({
-                "text": alias_ann["text"],
-                # alias value = canonical_family
-                "canonical": alias_ann.get("canonical_family"),
-                # alias key = tenant_service_id
-                "tenant_service_id": alias_ann["tenant_service_id"],
-                "start": alias_ann["start_token"],
-                "end": alias_ann["end_token"],
-                "annotation_type": "ALIAS"
-            })
+            business_categories.append(
+                {
+                    "text": alias_ann["text"],
+                    # alias value = canonical_family
+                    "canonical": alias_ann.get("canonical_family"),
+                    # alias key = tenant_service_id
+                    "tenant_service_id": alias_ann["tenant_service_id"],
+                    "start": alias_ann["start_token"],
+                    "end": alias_ann["end_token"],
+                    "annotation_type": "ALIAS",
+                }
+            )
         # Add families as business categories (only if not suppressed)
         # Note: MODIFIER annotations are excluded - modifiers are not services
         for family_ann in service_annotations.get("family_annotations", []):
@@ -918,13 +946,15 @@ class EntityMatcher:
                 for a_start, a_end in alias_ranges
             )
             if not suppressed:
-                business_categories.append({
-                    "text": family_ann["text"],
-                    "canonical": family_ann["canonical_family"],
-                    "start": start,
-                    "end": end,
-                    "annotation_type": "FAMILY"
-                })
+                business_categories.append(
+                    {
+                        "text": family_ann["text"],
+                        "canonical": family_ann["canonical_family"],
+                        "start": start,
+                        "end": end,
+                        "annotation_type": "FAMILY",
+                    }
+                )
 
         # Store consumption metadata and annotations for decision layer
         raw_result["_service_consumption_metadata"] = consumption_metadata
@@ -938,18 +968,26 @@ class EntityMatcher:
         for entity_type, ents in raw_result.items():
             if entity_type in ("dates", "dates_absolute"):
                 for e in ents:
-                    phase2_replacements.append({
-                        "type": "date",
-                        "span": e.get("text", ""),
-                        "replaced_with": "datetoken"
-                    })
+                    phase2_replacements.append(
+                        {
+                            "type": "date",
+                            "span": e.get("text", ""),
+                            "replaced_with": "datetoken",
+                        }
+                    )
             elif entity_type in ("times", "time_windows"):
                 for e in ents:
-                    phase2_replacements.append({
-                        "type": "time",
-                        "span": e.get("text", ""),
-                        "replaced_with": "timetoken" if entity_type == "times" else "timewindowtoken"
-                    })
+                    phase2_replacements.append(
+                        {
+                            "type": "time",
+                            "span": e.get("text", ""),
+                            "replaced_with": (
+                                "timetoken"
+                                if entity_type == "times"
+                                else "timewindowtoken"
+                            ),
+                        }
+                    )
 
         osentence = normalized
 
@@ -959,31 +997,37 @@ class EntityMatcher:
         for date_ent in raw_result.get("dates", []):
             position = date_ent.get("position", 0)
             length = date_ent.get("length", 1)
-            dates.append({
-                "text": date_ent.get("text", ""),
-                "start": position,
-                "end": position + length
-            })
+            dates.append(
+                {
+                    "text": date_ent.get("text", ""),
+                    "start": position,
+                    "end": position + length,
+                }
+            )
 
         dates_absolute = []
         for date_abs_ent in raw_result.get("dates_absolute", []):
             position = date_abs_ent.get("position", 0)
             length = date_abs_ent.get("length", 1)
-            dates_absolute.append({
-                "text": date_abs_ent.get("text", ""),
-                "start": position,
-                "end": position + length
-            })
+            dates_absolute.append(
+                {
+                    "text": date_abs_ent.get("text", ""),
+                    "start": position,
+                    "end": position + length,
+                }
+            )
 
         times = []
         for time_ent in raw_result.get("times", []):
             position = time_ent.get("position", 0)
             length = time_ent.get("length", 1)
-            times.append({
-                "text": time_ent.get("text", ""),
-                "start": position,
-                "end": position + length
-            })
+            times.append(
+                {
+                    "text": time_ent.get("text", ""),
+                    "start": position,
+                    "end": position + length,
+                }
+            )
 
         time_windows = []
         for time_window_ent in raw_result.get("time_windows", []):
@@ -997,7 +1041,7 @@ class EntityMatcher:
                 "text": time_window_ent.get("text", ""),
                 "start": position,
                 "end": position + length,
-                "time_window": time_window_text  # Symbolic semantic field only
+                "time_window": time_window_text,  # Symbolic semantic field only
             }
 
             time_windows.append(time_window_obj)
@@ -1006,11 +1050,13 @@ class EntityMatcher:
         for duration_ent in raw_result.get("durations", []):
             position = duration_ent.get("position", 0)
             length = duration_ent.get("length", 1)
-            durations.append({
-                "text": duration_ent.get("text", ""),
-                "start": position,
-                "end": position + length
-            })
+            durations.append(
+                {
+                    "text": duration_ent.get("text", ""),
+                    "start": position,
+                    "end": position + length,
+                }
+            )
 
         # Check for unresolved date/time-like language after normalization
         # If vocabulary canonicals exist but no entities were extracted, require clarification
@@ -1020,11 +1066,16 @@ class EntityMatcher:
             needs_clarification = True
             clarification = Clarification(
                 reason=ClarificationReason.CONFLICTING_SIGNALS,
-                data={"template": "ask_end_date",
-                      "error_type": "ambiguous_date_range"}
+                data={"template": "ask_end_date", "error_type": "ambiguous_date_range"},
             )
 
-        if not dates and not dates_absolute and not times and not time_windows and not needs_clarification:
+        if (
+            not dates
+            and not dates_absolute
+            and not times
+            and not time_windows
+            and not needs_clarification
+        ):
             # Check if normalized text contains vocabulary canonicals that should have been extracted
             normalized_lower = normalized.lower()
             normalized_words = set(normalized_lower.split())
@@ -1041,7 +1092,7 @@ class EntityMatcher:
                 needs_clarification = True
                 clarification = Clarification(
                     reason=ClarificationReason.CONTEXT_DEPENDENT_VALUE,
-                    data={"text": normalized}
+                    data={"text": normalized},
                 )
 
         result = {
@@ -1060,7 +1111,7 @@ class EntityMatcher:
             "_phase2_replacements": phase2_replacements,
             "_tokens": raw_result.get("_tokens", []),
         }
-        
+
         # Add booking_id to result if present
         if "booking_id" in raw_result:
             result["booking_id"] = raw_result["booking_id"]
@@ -1072,8 +1123,19 @@ class EntityMatcher:
         # 6️⃣ Domain filtering
         allowed_keys = DOMAIN_ENTITY_WHITELIST[self.domain]
         final_result = {
-            k: v for k, v in result.items()
-            if k in allowed_keys or k in {"osentence", "psentence", "business_categories", "date_modifiers_vocab", "_phase1_replacements", "_phase2_replacements", "_tokens"}
+            k: v
+            for k, v in result.items()
+            if k in allowed_keys
+            or k
+            in {
+                "osentence",
+                "psentence",
+                "business_categories",
+                "date_modifiers_vocab",
+                "_phase1_replacements",
+                "_phase2_replacements",
+                "_tokens",
+            }
         }
 
         if debug_units:
@@ -1086,7 +1148,9 @@ class EntityMatcher:
     # Private helpers
     # ------------------------------------------------------------------
 
-    def _maybe_expand_absolute_date_range_tail(self, raw_result: Dict[str, Any]) -> None:
+    def _maybe_expand_absolute_date_range_tail(
+        self, raw_result: Dict[str, Any]
+    ) -> None:
         """
         Detect patterns like "oct 5th to 9th" where spaCy only emits one DATE_ABSOLUTE.
         Safe case: tail_day >= start_day -> add second absolute date (same month/year).
@@ -1123,8 +1187,7 @@ class EntityMatcher:
 
         tail_idx = start_end + 1
         tail_token = tokens[tail_idx]
-        tail_next = tokens[tail_idx + 1] if tail_idx + \
-            1 < len(tokens) else None
+        tail_next = tokens[tail_idx + 1] if tail_idx + 1 < len(tokens) else None
 
         def _parse_day(token: str) -> Optional[int]:
             m = re.match(r"^(\d{1,2})(?:st|nd|rd|th)?$", token)
@@ -1138,7 +1201,11 @@ class EntityMatcher:
         else:
             # Try split ordinal: number token followed by suffix
             num_val = _parse_day(tail_token)
-            if num_val is not None and tail_next and tail_next.lower() in {"st", "nd", "rd", "th"}:
+            if (
+                num_val is not None
+                and tail_next
+                and tail_next.lower() in {"st", "nd", "rd", "th"}
+            ):
                 day_val = num_val
                 day_text = f"{tail_token} {tail_next}"
             elif num_val is not None:
@@ -1181,17 +1248,13 @@ class EntityMatcher:
             end_length = 2
 
         # Append to whichever source list we augmented
-        source_list.append({
-            "text": end_text,
-            "position": tail_idx,
-            "length": end_length
-        })
+        source_list.append(
+            {"text": end_text, "position": tail_idx, "length": end_length}
+        )
         # Also append to dates_absolute to improve absolute detection downstream
-        raw_result.setdefault("dates_absolute", []).append({
-            "text": end_text,
-            "position": tail_idx,
-            "length": end_length
-        })
+        raw_result.setdefault("dates_absolute", []).append(
+            {"text": end_text, "position": tail_idx, "length": end_length}
+        )
 
     def _propagate_meridiem_in_ranges(
         self, normalized: str, raw_result: Dict[str, Any], doc: Any
@@ -1211,8 +1274,8 @@ class EntityMatcher:
 
         # Check for range patterns: "between X and Y" or "from X to Y"
         range_pattern = re.compile(
-            r'\b(between|from)\s+(\d{1,2}(?:\s*(?:am|pm))?)\s+(and|to|-)\s+(\d{1,2}(?:\s*(?:am|pm))?)\b',
-            re.IGNORECASE
+            r"\b(between|from)\s+(\d{1,2}(?:\s*(?:am|pm))?)\s+(and|to|-)\s+(\d{1,2}(?:\s*(?:am|pm))?)\b",
+            re.IGNORECASE,
         )
 
         match = range_pattern.search(normalized_lower)
@@ -1220,21 +1283,19 @@ class EntityMatcher:
             return raw_result
 
         start_part = match.group(2).strip()  # e.g., "2pm" or "2"
-        end_part = match.group(4).strip()   # e.g., "5" or "5pm"
+        end_part = match.group(4).strip()  # e.g., "5" or "5pm"
 
         # Extract meridiem from parts
-        start_has_meridiem = bool(
-            re.search(r'\b(am|pm)\b', start_part, re.IGNORECASE))
-        end_has_meridiem = bool(
-            re.search(r'\b(am|pm)\b', end_part, re.IGNORECASE))
+        start_has_meridiem = bool(re.search(r"\b(am|pm)\b", start_part, re.IGNORECASE))
+        end_has_meridiem = bool(re.search(r"\b(am|pm)\b", end_part, re.IGNORECASE))
 
         # Only propagate if exactly one has meridiem
         if start_has_meridiem == end_has_meridiem:
             return raw_result  # Both have it or both don't - no propagation needed
 
         # Extract the hour number and meridiem
-        start_hour_match = re.search(r'(\d{1,2})', start_part)
-        end_hour_match = re.search(r'(\d{1,2})', end_part)
+        start_hour_match = re.search(r"(\d{1,2})", start_part)
+        end_hour_match = re.search(r"(\d{1,2})", end_part)
 
         if not start_hour_match or not end_hour_match:
             return raw_result
@@ -1246,8 +1307,9 @@ class EntityMatcher:
 
         if start_has_meridiem and not end_has_meridiem:
             # Propagate from start to end: "2pm and 5" → add "5pm"
-            start_meridiem = re.search(r'\b(am|pm)\b', start_part,
-                                       re.IGNORECASE).group(1).lower()
+            start_meridiem = (
+                re.search(r"\b(am|pm)\b", start_part, re.IGNORECASE).group(1).lower()
+            )
             start_hour = int(start_hour_match.group(1))
             end_hour = int(end_hour_match.group(1))
             missing_hour = end_hour_match.group(1)
@@ -1270,8 +1332,9 @@ class EntityMatcher:
                     break
         elif end_has_meridiem and not start_has_meridiem:
             # Propagate from end to start: "2 and 5pm" → add "2pm"
-            end_meridiem = re.search(r'\b(am|pm)\b', end_part,
-                                     re.IGNORECASE).group(1).lower()
+            end_meridiem = (
+                re.search(r"\b(am|pm)\b", end_part, re.IGNORECASE).group(1).lower()
+            )
             start_hour = int(start_hour_match.group(1))
             end_hour = int(end_hour_match.group(1))
             missing_hour = start_hour_match.group(1)
@@ -1304,6 +1367,7 @@ class EntityMatcher:
 
         # Add synthetic TIME entity
         from .entity_processing import add_entity
+
         add_entity(raw_result, "times", missing_time_text, missing_pos, 1)
 
         return raw_result
@@ -1346,8 +1410,8 @@ class EntityMatcher:
 
         # Check for range patterns: "between X and Y" or "from X to Y"
         range_pattern = re.compile(
-            r'\b(between|from)\s+(\d{1,2}(?:\s*(?:am|pm))?)\s+(and|to|-)\s+(\d{1,2}(?:\s*(?:am|pm))?)\b',
-            re.IGNORECASE
+            r"\b(between|from)\s+(\d{1,2}(?:\s*(?:am|pm))?)\s+(and|to|-)\s+(\d{1,2}(?:\s*(?:am|pm))?)\b",
+            re.IGNORECASE,
         )
 
         match = range_pattern.search(normalized_lower)
@@ -1355,20 +1419,18 @@ class EntityMatcher:
             return raw_result
 
         start_part = match.group(2).strip()  # e.g., "2pm" or "2"
-        end_part = match.group(4).strip()   # e.g., "5" or "5pm"
+        end_part = match.group(4).strip()  # e.g., "5" or "5pm"
 
         # Extract hour numbers
-        start_hour_match = re.search(r'(\d{1,2})', start_part)
-        end_hour_match = re.search(r'(\d{1,2})', end_part)
+        start_hour_match = re.search(r"(\d{1,2})", start_part)
+        end_hour_match = re.search(r"(\d{1,2})", end_part)
 
         if not start_hour_match or not end_hour_match:
             return raw_result
 
         # Check if times have AM/PM
-        start_has_meridiem = bool(
-            re.search(r'\b(am|pm)\b', start_part, re.IGNORECASE))
-        end_has_meridiem = bool(
-            re.search(r'\b(am|pm)\b', end_part, re.IGNORECASE))
+        start_has_meridiem = bool(re.search(r"\b(am|pm)\b", start_part, re.IGNORECASE))
+        end_has_meridiem = bool(re.search(r"\b(am|pm)\b", end_part, re.IGNORECASE))
 
         # Infer meridiem for times that don't have it
         from .entity_processing import add_entity
@@ -1429,8 +1491,11 @@ class EntityMatcher:
                 noise_words = noise_phrase.split()
                 if len(noise_words) > 1:
                     # Check if this multi-word phrase matches starting at position i
-                    if (i + len(noise_words) <= len(tokens) and
-                            " ".join(tokens[i:i+len(noise_words)]).lower() == noise_phrase.lower()):
+                    if (
+                        i + len(noise_words) <= len(tokens)
+                        and " ".join(tokens[i : i + len(noise_words)]).lower()
+                        == noise_phrase.lower()
+                    ):
                         # Skip this noise phrase
                         i += len(noise_words)
                         matched = True

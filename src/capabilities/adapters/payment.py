@@ -12,8 +12,9 @@ The adapter:
 - Emits facts: payment_satisfied, payment_reference
 """
 
-from typing import Dict, Any
-from ..base import CapabilityAdapter, AdapterResponse
+from typing import Any, Dict
+
+from ..base import AdapterResponse, CapabilityAdapter
 from ..clients.payment import PaymentClient
 
 
@@ -124,8 +125,7 @@ class PaymentAdapter(CapabilityAdapter):
         try:
             booking_id = int(booking_id)
         except (ValueError, TypeError):
-            raise ValueError(
-                f"booking_id must be an integer, got: {booking_id}")
+            raise ValueError(f"booking_id must be an integer, got: {booking_id}")
 
         # Ensure amount is float
         try:
@@ -164,9 +164,7 @@ class PaymentAdapter(CapabilityAdapter):
         except ValueError as e:
             # If we can't extract booking info, return error message
             return AdapterResponse(
-                completed=False,
-                text=f"Payment setup error: {str(e)}",
-                facts={}
+                completed=False, text=f"Payment setup error: {str(e)}", facts={}
             )
 
         booking_id = booking_info["booking_id"]
@@ -177,40 +175,37 @@ class PaymentAdapter(CapabilityAdapter):
         # Create payment intent (idempotent - won't duplicate if already exists)
         try:
             intent_response = self.payment_client.create_payment_intent(
-                booking_id=booking_id,
-                amount=amount,
-                currency=currency
+                booking_id=booking_id, amount=amount, currency=currency
             )
 
             if not intent_response.get("success"):
                 return AdapterResponse(
                     completed=False,
                     text="Failed to create payment intent. Please try again.",
-                    facts={}
+                    facts={},
                 )
 
             payment_url = intent_response["data"]["payment_url"]
 
         except Exception as e:
             return AdapterResponse(
-                completed=False,
-                text=f"Payment setup error: {str(e)}",
-                facts={}
+                completed=False, text=f"Payment setup error: {str(e)}", facts={}
             )
 
         # Fetch payment URL (should exist after intent creation)
         url_response = self.payment_client.get_payment_url(booking_code)
 
-        if not url_response.get("success") or not url_response["data"].get("has_payment_intent"):
+        if not url_response.get("success") or not url_response["data"].get(
+            "has_payment_intent"
+        ):
             return AdapterResponse(
                 completed=False,
                 text="Payment link not available. Please try again.",
-                facts={}
+                facts={},
             )
 
         # Use payment_url from URL response if available, otherwise use intent response
-        final_payment_url = url_response["data"].get(
-            "payment_url") or payment_url
+        final_payment_url = url_response["data"].get("payment_url") or payment_url
 
         # Return payment link message
         return AdapterResponse(
@@ -220,7 +215,7 @@ class PaymentAdapter(CapabilityAdapter):
                 "Please complete payment using the link below:\n\n"
                 f"{final_payment_url}"
             ),
-            facts={}
+            facts={},
         )
 
     def handle_input(self, user_input: str, context: Dict[str, Any]) -> AdapterResponse:
@@ -245,23 +240,20 @@ class PaymentAdapter(CapabilityAdapter):
             booking_info = self._extract_booking_info(context)
         except ValueError as e:
             return AdapterResponse(
-                completed=False,
-                text=f"Payment error: {str(e)}",
-                facts={}
+                completed=False, text=f"Payment error: {str(e)}", facts={}
             )
 
         booking_code = booking_info["booking_code"]
 
         # Check payment status
         try:
-            status_response = self.payment_client.get_payment_status(
-                booking_code)
+            status_response = self.payment_client.get_payment_status(booking_code)
 
             if not status_response.get("success"):
                 return AdapterResponse(
                     completed=False,
                     text="Unable to check payment status. Please try again.",
-                    facts={}
+                    facts={},
                 )
 
             status_data = status_response["data"]
@@ -272,9 +264,7 @@ class PaymentAdapter(CapabilityAdapter):
 
         except Exception as e:
             return AdapterResponse(
-                completed=False,
-                text=f"Payment status error: {str(e)}",
-                facts={}
+                completed=False, text=f"Payment status error: {str(e)}", facts={}
             )
 
         # If payment is complete, return completion
@@ -282,6 +272,7 @@ class PaymentAdapter(CapabilityAdapter):
 
         # LOG: Payment completion status (as requested in investigation prompt)
         import logging
+
         adapter_logger = logging.getLogger(__name__)
         adapter_logger.info(
             f"[PAYMENT_ADAPTER_DEBUG] payment_status={payment_status}, "
@@ -300,16 +291,14 @@ class PaymentAdapter(CapabilityAdapter):
                 f"returning AdapterResponse(completed=True, facts={completion_facts})"
             )
 
-            return AdapterResponse(
-                completed=True,
-                text=None,
-                facts=completion_facts
-            )
+            return AdapterResponse(completed=True, text=None, facts=completion_facts)
 
         # Payment not complete - re-send payment link
         url_response = self.payment_client.get_payment_url(booking_code)
 
-        if url_response.get("success") and url_response["data"].get("has_payment_intent"):
+        if url_response.get("success") and url_response["data"].get(
+            "has_payment_intent"
+        ):
             payment_url = url_response["data"].get("payment_url")
             return AdapterResponse(
                 completed=False,
@@ -318,7 +307,7 @@ class PaymentAdapter(CapabilityAdapter):
                     "Please complete payment using the link below:\n\n"
                     f"{payment_url}"
                 ),
-                facts={}
+                facts={},
             )
         else:
             # Payment intent doesn't exist - try to recreate

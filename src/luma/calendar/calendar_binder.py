@@ -6,15 +6,17 @@ Produces ISO-8601 values for machine consumption.
 
 This layer answers: "What real dates/times does this correspond to?"
 """
+
+import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Any, Optional, Tuple
-import re
+from typing import Any, Dict, Optional, Tuple
 
 # Try zoneinfo first (Python 3.9+), fallback to pytz
 try:
     from zoneinfo import ZoneInfo
+
     try:
         # Test if tzdata is available
         _ = ZoneInfo("UTC")
@@ -26,6 +28,7 @@ except ImportError:
 
 try:
     import pytz
+
     PYTZ_AVAILABLE = True
 except ImportError:
     PYTZ_AVAILABLE = False
@@ -34,30 +37,31 @@ except ImportError:
 import logging
 
 from ..clarification import Clarification, ClarificationReason
+from ..config.core import CREATE_RESERVATION, STATUS_READY
 from ..extraction.entity_loading import (
+    load_booking_policy,
+    load_global_vocabularies,
+    load_month_names,
     load_relative_date_offsets,
     load_time_window_bounds,
-    load_month_names,
-    load_global_vocabularies,
-    load_booking_policy,
 )
-from ..config.core import CREATE_RESERVATION, STATUS_READY
 
 logger = logging.getLogger(__name__)
+from ..config.intent_meta import get_intent_registry
 from ..config.temporal import (
     ALLOW_BARE_WEEKDAY_BINDING,
     APPOINTMENT_TEMPORAL_TYPE,
-    DateMode,
-    RESERVATION_TEMPORAL_TYPE,
-    TimeMode,
     FUZZY_TIME_WINDOWS,
+    RESERVATION_TEMPORAL_TYPE,
+    DateMode,
+    TimeMode,
 )
-from ..config.intent_meta import get_intent_registry
 
 
 def _get_global_config_path() -> Path:
     """Get path to global normalization config JSON."""
     from ..extraction.entity_loading import get_global_json_path
+
     # Use standard location based on configured version
     return get_global_json_path()
 
@@ -70,10 +74,8 @@ def _load_config() -> Dict[str, Any]:
     """Load and cache configuration from JSON."""
     if not _CONFIG_CACHE:
         config_path = _get_global_config_path()
-        _CONFIG_CACHE["relative_date_offsets"] = load_relative_date_offsets(
-            config_path)
-        _CONFIG_CACHE["time_window_bounds"] = load_time_window_bounds(
-            config_path)
+        _CONFIG_CACHE["relative_date_offsets"] = load_relative_date_offsets(config_path)
+        _CONFIG_CACHE["time_window_bounds"] = load_time_window_bounds(config_path)
         _CONFIG_CACHE["month_names"] = load_month_names(config_path)
         _CONFIG_CACHE["booking_policy"] = load_booking_policy(config_path)
         vocabularies = load_global_vocabularies(config_path)
@@ -104,9 +106,9 @@ def _get_month_names() -> Dict[str, int]:
     logger.debug(
         "[BINDER] _get_month_names: Retrieved month names",
         extra={
-            'month_names_keys': list(month_names.keys()) if month_names else [],
-            'month_names': month_names
-        }
+            "month_names_keys": list(month_names.keys()) if month_names else [],
+            "month_names": month_names,
+        },
     )
     return month_names
 
@@ -128,7 +130,11 @@ def _normalize_month_name(month_name: str) -> str:
     if month_lower in months_dict:
         logger.debug(
             "[BINDER] _normalize_month_name: Found as canonical",
-            extra={'month_name': month_name, 'month_lower': month_lower, 'result': month_lower}
+            extra={
+                "month_name": month_name,
+                "month_lower": month_lower,
+                "result": month_lower,
+            },
         )
         return month_lower
 
@@ -137,7 +143,11 @@ def _normalize_month_name(month_name: str) -> str:
         if isinstance(variants, list) and month_lower in variants:
             logger.debug(
                 "[BINDER] _normalize_month_name: Found as variant",
-                extra={'month_name': month_name, 'month_lower': month_lower, 'canonical': canonical}
+                extra={
+                    "month_name": month_name,
+                    "month_lower": month_lower,
+                    "canonical": canonical,
+                },
             )
             return canonical
 
@@ -145,11 +155,11 @@ def _normalize_month_name(month_name: str) -> str:
     logger.warning(
         "[BINDER] _normalize_month_name: Not found, returning lowercased original",
         extra={
-            'month_name': month_name,
-            'month_lower': month_lower,
-            'months_dict_keys': list(months_dict.keys()) if months_dict else [],
-            'months_dict': months_dict
-        }
+            "month_name": month_name,
+            "month_lower": month_lower,
+            "months_dict_keys": list(months_dict.keys()) if months_dict else [],
+            "months_dict": months_dict,
+        },
     )
     return month_lower
 
@@ -160,15 +170,19 @@ def _get_weekday_to_number() -> Dict[str, int]:
     if "weekday_to_number" not in config:
         # Load from entity_types
         from ..extraction.entity_loading import load_global_entity_types
+
         config_path = _get_global_config_path()
         entity_types = load_global_entity_types(config_path)
-        weekday_to_number = entity_types.get("date", {}).get(
-            "weekday", {}).get("to_number", {})
+        weekday_to_number = (
+            entity_types.get("date", {}).get("weekday", {}).get("to_number", {})
+        )
         config["weekday_to_number"] = weekday_to_number
     return config["weekday_to_number"]
 
 
-def _parse_time_token(hour_str: str, minute_str: Optional[str], meridiem: Optional[str]) -> Optional[str]:
+def _parse_time_token(
+    hour_str: str, minute_str: Optional[str], meridiem: Optional[str]
+) -> Optional[str]:
     """Convert simple time token to HH:MM 24h."""
     try:
         hour = int(hour_str)
@@ -186,19 +200,20 @@ def _parse_time_token(hour_str: str, minute_str: Optional[str], meridiem: Option
     return f"{hour:02d}:{minute:02d}"
 
 
-def _extract_time_range_from_entities(entities: Optional[Dict[str, Any]]) -> Optional[Dict[str, str]]:
+def _extract_time_range_from_entities(
+    entities: Optional[Dict[str, Any]]
+) -> Optional[Dict[str, str]]:
     """
     Deterministic extraction of explicit time window phrasing: "between X and Y".
     """
     if not entities:
         return None
-    text = str(entities.get("osentence")
-               or entities.get("psentence") or "").lower()
+    text = str(entities.get("osentence") or entities.get("psentence") or "").lower()
     if "between" not in text or "and" not in text:
         return None
     match = re.search(
         r"between\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:and|-)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?",
-        text
+        text,
     )
     if not match:
         return None
@@ -216,16 +231,21 @@ class CalendarBindingResult:
     Calendar binding result.
 
     Contains actual calendar dates and times in ISO-8601 format.
-    
+
     Internal debug fields (not serialized):
     - _binding_success: True if binding succeeded, False if binding failed or was skipped
     - _binding_error: Error reason string if binding failed/skipped, None if successful
     """
+
     calendar_booking: Dict[str, Any]
     needs_clarification: bool = False
     clarification: Optional[Clarification] = None
-    _binding_success: bool = True  # Internal: explicit success/failure flag for debugging
-    _binding_error: Optional[str] = None  # Internal: error reason if binding failed/skipped
+    _binding_success: bool = (
+        True  # Internal: explicit success/failure flag for debugging
+    )
+    _binding_error: Optional[str] = (
+        None  # Internal: error reason if binding failed/skipped
+    )
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -289,7 +309,7 @@ class CalendarBindingResult:
                 # Normalize service to minimal external shape (text + canonical only)
                 return {
                     "text": self._serialize_value(value.get("text")),
-                    "canonical": self._serialize_value(value.get("canonical"))
+                    "canonical": self._serialize_value(value.get("canonical")),
                 }
             # Regular dict - serialize all values
             return {k: self._serialize_value(v) for k, v in value.items()}
@@ -313,6 +333,7 @@ def get_timezone(timezone_str: str):
             return ZoneInfo(timezone_str)
         except Exception:
             from datetime import timezone
+
             return timezone.utc
     elif PYTZ_AVAILABLE:
         try:
@@ -321,6 +342,7 @@ def get_timezone(timezone_str: str):
             return pytz.UTC
     else:
         from datetime import timezone
+
         return timezone.utc
 
 
@@ -330,7 +352,7 @@ def _localize_datetime(dt: datetime, tz: Any) -> datetime:
         return dt.astimezone(tz)
 
     # Handle pytz vs zoneinfo
-    if PYTZ_AVAILABLE and hasattr(tz, 'localize'):
+    if PYTZ_AVAILABLE and hasattr(tz, "localize"):
         return tz.localize(dt)
     else:
         return dt.replace(tzinfo=tz)
@@ -348,14 +370,11 @@ def _get_binding_intents() -> set:
             binding_intents.add(intent_name)
     return binding_intents
 
+
 BINDING_INTENTS = _get_binding_intents()
 
 
-def _check_date_ambiguity(
-    date_refs: list,
-    date_mode: str,
-    now: datetime
-) -> list[str]:
+def _check_date_ambiguity(date_refs: list, date_mode: str, now: datetime) -> list[str]:
     """
     Check for ambiguous date references.
 
@@ -372,27 +391,31 @@ def _check_date_ambiguity(
         return reasons
 
     # Check for day-of-week references without date context
-    day_of_week_refs = ["monday", "tuesday", "wednesday",
-                        "thursday", "friday", "saturday", "sunday"]
+    day_of_week_refs = [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    ]
     for ref in date_refs:
         ref_lower = ref.lower()
         if any(day in ref_lower for day in day_of_week_refs):
             # Day of week without explicit date - ambiguous
-            reasons.append(
-                f"Day-of-week reference '{ref}' lacks explicit date context")
+            reasons.append(f"Day-of-week reference '{ref}' lacks explicit date context")
 
     # Check for ambiguous relative dates
     if date_mode == DateMode.FLEXIBLE.value and date_refs:
         reasons.append(
-            f"Date references '{', '.join(date_refs)}' are ambiguous without date context")
+            f"Date references '{', '.join(date_refs)}' are ambiguous without date context"
+        )
 
     return reasons
 
 
-def _check_time_ambiguity(
-    time_refs: list,
-    time_mode: str
-) -> list[str]:
+def _check_time_ambiguity(time_refs: list, time_mode: str) -> list[str]:
     """
     Check for ambiguous time references.
 
@@ -411,7 +434,8 @@ def _check_time_ambiguity(
     # Check for time windows without date context
     if time_mode == TimeMode.WINDOW.value and len(time_refs) > 1:
         reasons.append(
-            f"Multiple time windows '{', '.join(time_refs)}' without clear date context")
+            f"Multiple time windows '{', '.join(time_refs)}' without clear date context"
+        )
 
     return reasons
 
@@ -422,7 +446,7 @@ def bind_calendar(
     timezone: str = "UTC",
     intent: Optional[str] = None,
     entities: Optional[Dict[str, Any]] = None,
-    external_intent: Optional[str] = None
+    external_intent: Optional[str] = None,
 ) -> Tuple[CalendarBindingResult, Dict[str, Any]]:
     """
     Bind semantic meaning to actual calendar dates and times.
@@ -455,7 +479,7 @@ def bind_calendar(
     # Extract input for trace
     resolved_booking = semantic_result.resolved_booking
     intent_name = external_intent or intent
-    
+
     # Get temporal shape from IntentRegistry (sole policy source)
     registry = get_intent_registry()
     intent_meta = registry.get(intent_name) if intent_name else None
@@ -475,7 +499,7 @@ def bind_calendar(
         "time_mode": resolved_booking.get("time_mode", "none"),
         "time_refs": resolved_booking.get("time_refs", []),
         "time_constraint": resolved_booking.get("time_constraint"),
-        "timezone": timezone
+        "timezone": timezone,
     }
 
     # Intent-guarded binding: only bind for specific intents
@@ -488,25 +512,31 @@ def bind_calendar(
             logger.info(
                 "[BINDER] Checking for week/weekend range expression (UNKNOWN intent)",
                 extra={
-                    'intent': intent,
-                    'date_mode': date_mode,
-                    'date_refs': date_refs,
-                    'date_refs_len': len(date_refs),
-                    'date_modifiers': date_modifiers
-                }
+                    "intent": intent,
+                    "date_mode": date_mode,
+                    "date_refs": date_refs,
+                    "date_refs_len": len(date_refs),
+                    "date_modifiers": date_modifiers,
+                },
             )
             # Check if this is a week/weekend range expression
             if len(date_refs) == 1:
                 date_str = str(date_refs[0]).lower()
-                if ("week" in date_str and "weekend" not in date_str) or "weekend" in date_str:
+                if (
+                    "week" in date_str and "weekend" not in date_str
+                ) or "weekend" in date_str:
                     has_week_range_expression = True
                     logger.info(
                         "[BINDER] Week/weekend range detected in date_refs",
-                        extra={'date_str': date_str}
+                        extra={"date_str": date_str},
                     )
             # Also check entities for week/weekend phrases (when date_refs is empty but we'll populate it)
             if not has_week_range_expression and entities:
-                osentence = entities.get("osentence", "").lower() if isinstance(entities, dict) else ""
+                osentence = (
+                    entities.get("osentence", "").lower()
+                    if isinstance(entities, dict)
+                    else ""
+                )
                 if osentence:
                     has_week = "week" in osentence and "weekend" not in osentence
                     has_weekend = "weekend" in osentence
@@ -514,19 +544,19 @@ def bind_calendar(
                     logger.info(
                         "[BINDER] Checking entities for week/weekend",
                         extra={
-                            'osentence': osentence,
-                            'has_week': has_week,
-                            'has_weekend': has_weekend,
-                            'has_modifier': has_modifier
-                        }
+                            "osentence": osentence,
+                            "has_week": has_week,
+                            "has_weekend": has_weekend,
+                            "has_modifier": has_modifier,
+                        },
                     )
                     if (has_week or has_weekend) and has_modifier:
                         has_week_range_expression = True
                         logger.info(
                             "[BINDER] Week/weekend range detected in entities",
-                            extra={'has_week_range_expression': True}
+                            extra={"has_week_range_expression": True},
                         )
-        
+
         # Check for absolute single-day dates
         if date_mode == DateMode.SINGLE.value:
             if isinstance(date_refs, list) and len(date_refs) == 1:
@@ -534,58 +564,67 @@ def bind_calendar(
                 logger.info(
                     "[BINDER] Absolute single-day date detected (UNKNOWN intent)",
                     extra={
-                        'intent': intent,
-                        'date_mode': date_mode,
-                        'date_ref': date_refs[0],
-                        'date_refs_len': len(date_refs)
-                    }
+                        "intent": intent,
+                        "date_mode": date_mode,
+                        "date_ref": date_refs[0],
+                        "date_refs_len": len(date_refs),
+                    },
                 )
 
     logger.info(
         "[BINDER] Intent guard check",
         extra={
-            'intent': intent,
-            'intent_in_binding_intents': intent in BINDING_INTENTS if intent else False,
-            'has_week_range_expression': has_week_range_expression,
-            'has_absolute_single_day': has_absolute_single_day,
-            'will_reject': intent is not None and intent not in BINDING_INTENTS and not has_week_range_expression and not has_absolute_single_day
-        }
+            "intent": intent,
+            "intent_in_binding_intents": intent in BINDING_INTENTS if intent else False,
+            "has_week_range_expression": has_week_range_expression,
+            "has_absolute_single_day": has_absolute_single_day,
+            "will_reject": intent is not None
+            and intent not in BINDING_INTENTS
+            and not has_week_range_expression
+            and not has_absolute_single_day,
+        },
     )
-    if intent is not None and intent not in BINDING_INTENTS and not has_week_range_expression and not has_absolute_single_day:
+    if (
+        intent is not None
+        and intent not in BINDING_INTENTS
+        and not has_week_range_expression
+        and not has_absolute_single_day
+    ):
         result = CalendarBindingResult(
             calendar_booking={},
             needs_clarification=False,
             clarification=None,
             _binding_success=False,
-            _binding_error=f"intent_not_in_binding_intents: {intent}"
+            _binding_error=f"intent_not_in_binding_intents: {intent}",
         )
         trace = {
             "binder": {
                 "called": False,
                 "input": binder_input,
                 "output": {},
-                "decision_reason": f"intent_not_in_binding_intents: {intent}"
+                "decision_reason": f"intent_not_in_binding_intents: {intent}",
             }
         }
         return result, trace
 
     # Status guard: bind only when upstream marked booking as ready
-    status = resolved_booking.get("status") if isinstance(
-        resolved_booking, dict) else None
+    status = (
+        resolved_booking.get("status") if isinstance(resolved_booking, dict) else None
+    )
     if status is not None and status != STATUS_READY:
         result = CalendarBindingResult(
             calendar_booking=resolved_booking,
             needs_clarification=False,
             clarification=None,
             _binding_success=False,
-            _binding_error=f"status_not_ready: {status}"
+            _binding_error=f"status_not_ready: {status}",
         )
         trace = {
             "binder": {
                 "called": False,
                 "input": binder_input,
                 "output": {},
-                "decision_reason": f"status_not_ready: {status}"
+                "decision_reason": f"status_not_ready: {status}",
             }
         }
         return result, trace
@@ -605,15 +644,21 @@ def bind_calendar(
     services = resolved_booking.get("services", [])
     # date_mode, date_refs, and date_modifiers already extracted above for intent guard check
     # Build a single normalized list for binding: combine modifier + weekday when applicable
-    weekdays = {"monday", "tuesday", "wednesday",
-                "thursday", "friday", "saturday", "sunday"}
+    weekdays = {
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday",
+    }
     modifiers = {"next", "this"}
     date_refs_for_binding: list = []
     for ref in date_refs:
         ref_norm = str(ref).strip().lower()
         if ref_norm in weekdays and any(m in modifiers for m in date_modifiers):
-            chosen_mod = next(
-                (m for m in date_modifiers if m in modifiers), None)
+            chosen_mod = next((m for m in date_modifiers if m in modifiers), None)
             if chosen_mod:
                 date_refs_for_binding.append(f"{chosen_mod} {ref_norm}")
                 continue
@@ -628,19 +673,19 @@ def bind_calendar(
     logger.info(
         "[BINDER] Calling _bind_dates",
         extra={
-            'date_refs_for_binding': date_refs_for_binding,
-            'date_mode': date_mode,
-            'date_refs_len': len(date_refs_for_binding) if date_refs_for_binding else 0
-        }
+            "date_refs_for_binding": date_refs_for_binding,
+            "date_mode": date_mode,
+            "date_refs_len": len(date_refs_for_binding) if date_refs_for_binding else 0,
+        },
     )
     date_range = _bind_dates(date_refs_for_binding, date_mode, now, tz)
     logger.info(
         "[BINDER] _bind_dates returned",
         extra={
-            'date_range': date_range,
-            'date_range_is_none': date_range is None,
-            'date_range_keys': list(date_range.keys()) if date_range else None
-        }
+            "date_range": date_range,
+            "date_range_is_none": date_range is None,
+            "date_range_keys": list(date_range.keys()) if date_range else None,
+        },
     )
 
     # Time binding: use canonical TimeConstraint only (no language parsing here)
@@ -654,19 +699,14 @@ def bind_calendar(
             start = time_constraint.get("start")
             end = time_constraint.get("end")
             if tc_mode == TimeMode.EXACT.value:
-                time_range = {
-                    "start_time": start,
-                    "end_time": start
-                }
+                time_range = {"start_time": start, "end_time": start}
             else:  # window
                 # Validate ordering if both present
                 if start and end and _time_greater(start, end):
                     raise ValueError(
-                        "Invalid TimeConstraint: start_time must be before end_time")
-                time_range = {
-                    "start_time": start,
-                    "end_time": end
-                }
+                        "Invalid TimeConstraint: start_time must be before end_time"
+                    )
+                time_range = {"start_time": start, "end_time": end}
         else:
             raise ValueError(f"Unsupported TimeConstraint mode: {tc_mode}")
 
@@ -690,26 +730,29 @@ def bind_calendar(
         and time_constraint
         and time_constraint.get("mode") == TimeMode.FUZZY.value
     ):
-        label = (time_constraint.get("label")
-                 or time_constraint.get("text") or "").lower()
+        label = (
+            time_constraint.get("label") or time_constraint.get("text") or ""
+        ).lower()
         if not date_range or not date_range.get("start_date"):
             # No date → cannot bind fuzzy time
             result = CalendarBindingResult(
                 calendar_booking={},
                 needs_clarification=True,
                 clarification=Clarification(
-                    reason=ClarificationReason.MISSING_DATE,
-                    data={"expected": "date"}
+                    reason=ClarificationReason.MISSING_DATE, data={"expected": "date"}
                 ),
                 _binding_success=False,
-                _binding_error="fuzzy_time_no_date"
+                _binding_error="fuzzy_time_no_date",
             )
             trace = {
                 "binder": {
                     "called": True,
                     "input": binder_input,
-                    "output": {"needs_clarification": True, "clarification_reason": "MISSING_DATE"},
-                    "decision_reason": "fuzzy_time_no_date"
+                    "output": {
+                        "needs_clarification": True,
+                        "clarification_reason": "MISSING_DATE",
+                    },
+                    "decision_reason": "fuzzy_time_no_date",
                 }
             }
             return result, trace
@@ -718,18 +761,20 @@ def bind_calendar(
                 calendar_booking={},
                 needs_clarification=True,
                 clarification=Clarification(
-                    reason=ClarificationReason.MISSING_TIME,
-                    data={"expected": "time"}
+                    reason=ClarificationReason.MISSING_TIME, data={"expected": "time"}
                 ),
                 _binding_success=False,
-                _binding_error=f"fuzzy_time_label_not_found: {label}"
+                _binding_error=f"fuzzy_time_label_not_found: {label}",
             )
             trace = {
                 "binder": {
                     "called": True,
                     "input": binder_input,
-                    "output": {"needs_clarification": True, "clarification_reason": "MISSING_TIME"},
-                    "decision_reason": f"fuzzy_time_label_not_found: {label}"
+                    "output": {
+                        "needs_clarification": True,
+                        "clarification_reason": "MISSING_TIME",
+                    },
+                    "decision_reason": f"fuzzy_time_label_not_found: {label}",
                 }
             }
             return result, trace
@@ -752,7 +797,8 @@ def bind_calendar(
     # NOTE: If only time_constraint exists (no regular time), datetime_range will be None
     # For reservations, ignore time_range and use full-day logic
     datetime_range = combine_datetime_range(
-        date_range, time_range, now, tz, external_intent=external_intent)
+        date_range, time_range, now, tz, external_intent=external_intent
+    )
 
     # Apply duration if present
     if duration and datetime_range:
@@ -769,18 +815,18 @@ def bind_calendar(
         logger.info(
             "[BINDER] Adding date_range to calendar_booking",
             extra={
-                'date_range': date_range,
-                'reservation_temporal_type': RESERVATION_TEMPORAL_TYPE
-            }
+                "date_range": date_range,
+                "reservation_temporal_type": RESERVATION_TEMPORAL_TYPE,
+            },
         )
         calendar_booking[RESERVATION_TEMPORAL_TYPE] = date_range
     else:
         logger.warning(
             "[BINDER] date_range is None, not adding to calendar_booking",
             extra={
-                'date_refs_for_binding': date_refs_for_binding,
-                'date_mode': date_mode
-            }
+                "date_refs_for_binding": date_refs_for_binding,
+                "date_mode": date_mode,
+            },
         )
     # Include time_range if present
     if time_range:
@@ -821,26 +867,23 @@ def bind_calendar(
         needs_clarification=False,
         clarification=None,
         _binding_success=True,
-        _binding_error=None
+        _binding_error=None,
     )
-    
+
     trace = {
         "binder": {
             "called": True,
             "input": binder_input,
             "output": calendar_booking,
-            "decision_reason": "success"
+            "decision_reason": "success",
         }
     }
-    
+
     return result, trace
 
 
 def _bind_dates(
-    date_refs: list,
-    date_mode: str,
-    now: datetime,
-    tz: Any
+    date_refs: list, date_mode: str, now: datetime, tz: Any
 ) -> Optional[Dict[str, str]]:
     """
     Bind date references to actual calendar dates.
@@ -861,48 +904,54 @@ def _bind_dates(
         date_str = date_refs[0]
         # Normalize date string: remove spaces between numbers and ordinal suffixes
         # e.g., "3 rd march" -> "3rd march"
-        date_str_normalized = re.sub(r'(\d+)\s+(st|nd|rd|th)\b', r'\1\2', date_str, flags=re.IGNORECASE)
+        date_str_normalized = re.sub(
+            r"(\d+)\s+(st|nd|rd|th)\b", r"\1\2", date_str, flags=re.IGNORECASE
+        )
         logger.info(
             "[BINDER] Normalizing date string in _bind_dates",
             extra={
-                'original': date_str,
-                'normalized': date_str_normalized,
-                'date_mode': date_mode
-            }
+                "original": date_str,
+                "normalized": date_str_normalized,
+                "date_mode": date_mode,
+            },
         )
         bound_date = _bind_single_date(date_str_normalized, now, tz)
         logger.info(
             "[BINDER] _bind_single_date result in _bind_dates",
             extra={
-                'date_str_normalized': date_str_normalized,
-                'bound_date': bound_date.strftime("%Y-%m-%d") if bound_date else None,
-                'bound_date_is_none': bound_date is None
-            }
+                "date_str_normalized": date_str_normalized,
+                "bound_date": bound_date.strftime("%Y-%m-%d") if bound_date else None,
+                "bound_date_is_none": bound_date is None,
+            },
         )
         if bound_date:
             result = {
                 "start_date": bound_date.strftime("%Y-%m-%d"),
-                "end_date": bound_date.strftime("%Y-%m-%d")
+                "end_date": bound_date.strftime("%Y-%m-%d"),
             }
             logger.info(
                 "[BINDER] Returning date_range from _bind_dates",
-                extra={'date_range': result}
+                extra={"date_range": result},
             )
             return result
         else:
             logger.warning(
                 "[BINDER] _bind_single_date returned None in _bind_dates",
                 extra={
-                    'date_str_original': date_str,
-                    'date_str_normalized': date_str_normalized
-                }
+                    "date_str_original": date_str,
+                    "date_str_normalized": date_str_normalized,
+                },
             )
 
     elif date_mode == DateMode.RANGE.value:
         if len(date_refs) >= 2:
             # Normalize date strings: remove spaces between numbers and ordinal suffixes
-            start_date_str = re.sub(r'(\d+)\s+(st|nd|rd|th)\b', r'\1\2', date_refs[0], flags=re.IGNORECASE)
-            end_date_str = re.sub(r'(\d+)\s+(st|nd|rd|th)\b', r'\1\2', date_refs[1], flags=re.IGNORECASE)
+            start_date_str = re.sub(
+                r"(\d+)\s+(st|nd|rd|th)\b", r"\1\2", date_refs[0], flags=re.IGNORECASE
+            )
+            end_date_str = re.sub(
+                r"(\d+)\s+(st|nd|rd|th)\b", r"\1\2", date_refs[1], flags=re.IGNORECASE
+            )
             start_date = _bind_single_date(start_date_str, now, tz)
             end_date = _bind_single_date(end_date_str, now, tz)
             if start_date and end_date:
@@ -915,10 +964,10 @@ def _bind_dates(
                     start_date = _localize_datetime(
                         datetime(end_date.year, start_date.month, start_date.day), tz
                     )
-                
+
                 return {
                     "start_date": start_date.strftime("%Y-%m-%d"),
-                    "end_date": end_date.strftime("%Y-%m-%d")
+                    "end_date": end_date.strftime("%Y-%m-%d"),
                 }
 
     elif date_mode == DateMode.FLEXIBLE.value:
@@ -926,7 +975,7 @@ def _bind_dates(
         # When date_refs contains week/weekend phrases, treat as range
         if len(date_refs) == 1:
             date_str = date_refs[0].lower().strip()
-            
+
             # Handle "next week" / "this week" → Monday to Sunday
             if "week" in date_str and "weekend" not in date_str:
                 # Bind the start of the week (Monday)
@@ -934,7 +983,9 @@ def _bind_dates(
                     # Next week: find next Monday
                     days_until_monday = (7 - now.weekday()) % 7
                     if days_until_monday == 0:
-                        days_until_monday = 7  # If today is Monday, next week is 7 days away
+                        days_until_monday = (
+                            7  # If today is Monday, next week is 7 days away
+                        )
                     start_date = now + timedelta(days=days_until_monday)
                 else:
                     # This week: find this Monday (or today if Monday)
@@ -942,28 +993,32 @@ def _bind_dates(
                     if days_until_monday == 7:
                         days_until_monday = 0  # Today is Monday
                     start_date = now + timedelta(days=days_until_monday)
-                
+
                 # End of week is Sunday (6 days after Monday)
                 end_date = start_date + timedelta(days=6)
-                
-                start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+
+                start_date = start_date.replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
                 end_date = end_date.replace(hour=0, minute=0, second=0, microsecond=0)
-                
+
                 return {
                     "start_date": start_date.strftime("%Y-%m-%d"),
-                    "end_date": end_date.strftime("%Y-%m-%d")
+                    "end_date": end_date.strftime("%Y-%m-%d"),
                 }
-            
+
             # Handle "this weekend" / "next weekend" → Saturday to Sunday
             elif "weekend" in date_str:
                 # Weekend is Saturday (5) to Sunday (6)
                 today_weekday = now.weekday()
-                
+
                 if "next" in date_str:
                     # Next weekend: find next Saturday
                     days_until_saturday = (5 - today_weekday) % 7
                     if days_until_saturday == 0:
-                        days_until_saturday = 7  # If today is Saturday, next weekend is 7 days away
+                        days_until_saturday = (
+                            7  # If today is Saturday, next weekend is 7 days away
+                        )
                     start_date = now + timedelta(days=days_until_saturday)
                 else:
                     # This weekend: find this Saturday (or today if Saturday)
@@ -971,16 +1026,18 @@ def _bind_dates(
                     if days_until_saturday == 7:
                         days_until_saturday = 0  # Today is Saturday
                     start_date = now + timedelta(days=days_until_saturday)
-                
+
                 # End of weekend is Sunday (1 day after Saturday)
                 end_date = start_date + timedelta(days=1)
-                
-                start_date = start_date.replace(hour=0, minute=0, second=0, microsecond=0)
+
+                start_date = start_date.replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
                 end_date = end_date.replace(hour=0, minute=0, second=0, microsecond=0)
-                
+
                 return {
                     "start_date": start_date.strftime("%Y-%m-%d"),
-                    "end_date": end_date.strftime("%Y-%m-%d")
+                    "end_date": end_date.strftime("%Y-%m-%d"),
                 }
 
     # Invalid refs or unhandled flexible mode
@@ -1019,7 +1076,7 @@ def _bind_single_date(date_str: str, now: datetime, tz: Any) -> Optional[datetim
     date_str_lower = date_str.lower().strip()
     logger.info(
         "[BINDER] _bind_single_date: checking patterns",
-        extra={'date_str': date_str, 'date_str_lower': date_str_lower}
+        extra={"date_str": date_str, "date_str_lower": date_str_lower},
     )
 
     # Handle "<weekday>" (bare), "this <weekday>", "next <weekday>"
@@ -1027,7 +1084,7 @@ def _bind_single_date(date_str: str, now: datetime, tz: Any) -> Optional[datetim
     weekday_map = _get_weekday_to_number()
     match = re.search(
         r"\b(this|next)?\s*(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
-        date_str_lower
+        date_str_lower,
     )
     if match:
         modifier, weekday_str = match.group(1), match.group(2)
@@ -1041,9 +1098,15 @@ def _bind_single_date(date_str: str, now: datetime, tz: Any) -> Optional[datetim
             if modifier == "next":
                 # "next <weekday>" = the <weekday> in the NEXT calendar week (Monday-based)
                 # Deterministic calendar-week semantics
-                start_of_week = now - timedelta(days=now.weekday())  # Monday of current week
-                start_of_next_week = start_of_week + timedelta(days=7)  # Monday of next week
-                target_date = start_of_next_week + timedelta(days=target_weekday)  # Target weekday in next week
+                start_of_week = now - timedelta(
+                    days=now.weekday()
+                )  # Monday of current week
+                start_of_next_week = start_of_week + timedelta(
+                    days=7
+                )  # Monday of next week
+                target_date = start_of_next_week + timedelta(
+                    days=target_weekday
+                )  # Target weekday in next week
                 return target_date.replace(hour=0, minute=0, second=0, microsecond=0)
             else:
                 # bare weekday or "this" → use nearest future occurrence
@@ -1051,8 +1114,10 @@ def _bind_single_date(date_str: str, now: datetime, tz: Any) -> Optional[datetim
                 # This ensures no past dates: if weekday <= today, resolve to next week
                 days_ahead = (target_weekday - today_weekday) % 7
                 if days_ahead == 0:
-                    days_ahead = 7  # If today is the target weekday, resolve to next week
-                
+                    days_ahead = (
+                        7  # If today is the target weekday, resolve to next week
+                    )
+
                 target_date = now + timedelta(days=days_ahead)
                 return target_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
@@ -1071,15 +1136,15 @@ def _bind_single_date(date_str: str, now: datetime, tz: Any) -> Optional[datetim
     # Format: "15th dec" or "15 dec" or "dec 15" or "15/12" or "15/12/2025"
     logger.info(
         "[BINDER] _bind_single_date: calling _parse_absolute_date",
-        extra={'date_str_lower': date_str_lower}
+        extra={"date_str_lower": date_str_lower},
     )
     bound_date = _parse_absolute_date(date_str_lower, now, tz)
     logger.info(
         "[BINDER] _bind_single_date: _parse_absolute_date returned",
         extra={
-            'bound_date': bound_date.strftime("%Y-%m-%d") if bound_date else None,
-            'bound_date_is_none': bound_date is None
-        }
+            "bound_date": bound_date.strftime("%Y-%m-%d") if bound_date else None,
+            "bound_date_is_none": bound_date is None,
+        },
     )
     return bound_date
 
@@ -1099,10 +1164,10 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
     logger.warning(
         "[BINDER] _parse_absolute_date: ENTRY",
         extra={
-            'date_str': date_str,
-            'date_str_repr': repr(date_str),
-            'date_str_len': len(date_str) if date_str else 0
-        }
+            "date_str": date_str,
+            "date_str_repr": repr(date_str),
+            "date_str_len": len(date_str) if date_str else 0,
+        },
     )
     # Pattern 1: "15th dec" or "15 dec" or "15th january" or "15 january" or "3 rd of march"
     # Regex matches both abbreviations and full names, then normalizes to canonical
@@ -1112,12 +1177,12 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
     logger.warning(
         "[BINDER] _parse_absolute_date: Pattern1 check",
         extra={
-            'date_str': date_str,
-            'date_str_repr': repr(date_str),
-            'pattern1_matched': match is not None,
-            'match_groups': match.groups() if match else None,
-            'pattern1_regex': pattern1
-        }
+            "date_str": date_str,
+            "date_str_repr": repr(date_str),
+            "pattern1_matched": match is not None,
+            "match_groups": match.groups() if match else None,
+            "pattern1_regex": pattern1,
+        },
     )
     if match:
         day = int(match.group(1))
@@ -1126,16 +1191,16 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
         logger.info(
             "[BINDER] _parse_absolute_date: Pattern1 matched, extracting values",
             extra={
-                'day': day,
-                'month_name_raw': month_name_raw,
-                'year_str': year_str,
-                'match_groups': match.groups()
-            }
+                "day": day,
+                "month_name_raw": month_name_raw,
+                "year_str": year_str,
+                "match_groups": match.groups(),
+            },
         )
         # Normalize month name to canonical form (jan -> january)
         month_names = _get_month_names()
         month_name = _normalize_month_name(month_name_raw)
-        
+
         # Fallback: If normalization failed and month_name is not in month_names,
         # try to find a matching month by checking if month_name_raw is a prefix
         # of any month name in month_names (e.g., "mar" matches "march")
@@ -1151,12 +1216,12 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
                         logger.info(
                             "[BINDER] _parse_absolute_date: Found month via prefix match",
                             extra={
-                                'month_name_raw': month_name_raw,
-                                'matched_canonical': canonical_month
-                            }
+                                "month_name_raw": month_name_raw,
+                                "matched_canonical": canonical_month,
+                            },
                         )
                         break
-        
+
         month = month_names.get(month_name)
         if month:
             year = int(year_str) if year_str else None
@@ -1164,17 +1229,17 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
             logger.info(
                 "[BINDER] _parse_absolute_date: Pattern1 result",
                 extra={
-                    'day': day,
-                    'month': month,
-                    'year': year,
-                    'result': result.strftime("%Y-%m-%d") if result else None
-                }
+                    "day": day,
+                    "month": month,
+                    "year": year,
+                    "result": result.strftime("%Y-%m-%d") if result else None,
+                },
             )
             return result
         else:
             logger.warning(
                 "[BINDER] _parse_absolute_date: Pattern1 matched but month not found",
-                extra={'month_name': month_name}
+                extra={"month_name": month_name},
             )
 
     # Pattern 2: "dec 15" or "december 15" or "jan 5" or "january 5" or "march the 3rd" or "march the 3 rd"
@@ -1185,12 +1250,12 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
     logger.warning(
         "[BINDER] _parse_absolute_date: Pattern2 check",
         extra={
-            'date_str': date_str,
-            'date_str_repr': repr(date_str),
-            'pattern2_matched': match is not None,
-            'match_groups': match.groups() if match else None,
-            'pattern2_regex': pattern2
-        }
+            "date_str": date_str,
+            "date_str_repr": repr(date_str),
+            "pattern2_matched": match is not None,
+            "match_groups": match.groups() if match else None,
+            "pattern2_regex": pattern2,
+        },
     )
     if match:
         month_name_raw = match.group(1).lower()
@@ -1199,7 +1264,7 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
         # Normalize month name to canonical form (jan -> january)
         month_names = _get_month_names()
         month_name = _normalize_month_name(month_name_raw)
-        
+
         # Fallback: If normalization failed and month_name is not in month_names,
         # try to find a matching month by checking if month_name_raw is a prefix
         # of any month name in month_names (e.g., "mar" matches "march")
@@ -1215,46 +1280,44 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
                         logger.info(
                             "[BINDER] _parse_absolute_date: Found month via prefix match (Pattern2)",
                             extra={
-                                'month_name_raw': month_name_raw,
-                                'matched_canonical': canonical_month
-                            }
+                                "month_name_raw": month_name_raw,
+                                "matched_canonical": canonical_month,
+                            },
                         )
                         break
-        
+
         month = month_names.get(month_name)
         if not month:
             logger.warning(
                 "[BINDER] _parse_absolute_date: Month lookup failed after all attempts (Pattern2)",
                 extra={
-                    'month_name_raw': month_name_raw,
-                    'month_name_normalized': month_name,
-                    'month_names_keys': list(month_names.keys()) if month_names else []
-                }
+                    "month_name_raw": month_name_raw,
+                    "month_name_normalized": month_name,
+                    "month_names_keys": list(month_names.keys()) if month_names else [],
+                },
             )
         logger.info(
             "[BINDER] _parse_absolute_date: Pattern2 matched, resolving",
             extra={
-                'day': day,
-                'month_name_raw': month_name_raw,
-                'month_name_normalized': month_name,
-                'month': month,
-                'year_str': year_str
-            }
+                "day": day,
+                "month_name_raw": month_name_raw,
+                "month_name_normalized": month_name,
+                "month": month,
+                "year_str": year_str,
+            },
         )
         if month:
             year = int(year_str) if year_str else None
             result = _resolve_year_month_day(year, month, day, now, tz)
             logger.info(
                 "[BINDER] _parse_absolute_date: Pattern2 result",
-                extra={
-                    'result': result.strftime("%Y-%m-%d") if result else None
-                }
+                extra={"result": result.strftime("%Y-%m-%d") if result else None},
             )
             return result
         else:
             logger.warning(
                 "[BINDER] _parse_absolute_date: Pattern2 matched but month not found",
-                extra={'month_name': month_name}
+                extra={"month_name": month_name},
             )
 
     # Pattern 3: "15/12" or "15/12/2025" or "15-12" or "15-12-2025"
@@ -1263,12 +1326,12 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
     logger.warning(
         "[BINDER] _parse_absolute_date: Pattern3 check",
         extra={
-            'date_str': date_str,
-            'date_str_repr': repr(date_str),
-            'pattern3_matched': match is not None,
-            'match_groups': match.groups() if match else None,
-            'pattern3_regex': pattern3
-        }
+            "date_str": date_str,
+            "date_str_repr": repr(date_str),
+            "pattern3_matched": match is not None,
+            "match_groups": match.groups() if match else None,
+            "pattern3_regex": pattern3,
+        },
     )
     if match:
         day = int(match.group(1))
@@ -1282,11 +1345,11 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
         logger.info(
             "[BINDER] _parse_absolute_date: Pattern3 result",
             extra={
-                'day': day,
-                'month': month,
-                'year': year,
-                'result': result.strftime("%Y-%m-%d") if result else None
-            }
+                "day": day,
+                "month": month,
+                "year": year,
+                "result": result.strftime("%Y-%m-%d") if result else None,
+            },
         )
         return result
 
@@ -1297,12 +1360,12 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
     logger.warning(
         "[BINDER] _parse_absolute_date: Pattern4 check (hyphen with month name)",
         extra={
-            'date_str': date_str,
-            'date_str_repr': repr(date_str),
-            'pattern4_matched': match is not None,
-            'match_groups': match.groups() if match else None,
-            'pattern4_regex': pattern4
-        }
+            "date_str": date_str,
+            "date_str_repr": repr(date_str),
+            "pattern4_matched": match is not None,
+            "match_groups": match.groups() if match else None,
+            "pattern4_regex": pattern4,
+        },
     )
     if match:
         day = int(match.group(1))
@@ -1310,7 +1373,7 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
         year_str = match.group(3)
         month_names = _get_month_names()
         month_name = _normalize_month_name(month_name_raw)
-        
+
         # Fallback: If normalization failed and month_name is not in month_names,
         # try to find a matching month by checking if month_name_raw is a prefix
         if month_name not in month_names:
@@ -1323,12 +1386,12 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
                         logger.info(
                             "[BINDER] _parse_absolute_date: Found month via prefix match (Pattern4)",
                             extra={
-                                'month_name_raw': month_name_raw,
-                                'matched_canonical': canonical_month
-                            }
+                                "month_name_raw": month_name_raw,
+                                "matched_canonical": canonical_month,
+                            },
                         )
                         break
-        
+
         month = month_names.get(month_name)
         if month:
             year = int(year_str) if year_str else None
@@ -1336,34 +1399,30 @@ def _parse_absolute_date(date_str: str, now: datetime, tz: Any) -> Optional[date
             logger.info(
                 "[BINDER] _parse_absolute_date: Pattern4 result",
                 extra={
-                    'day': day,
-                    'month': month,
-                    'year': year,
-                    'result': result.strftime("%Y-%m-%d") if result else None
-                }
+                    "day": day,
+                    "month": month,
+                    "year": year,
+                    "result": result.strftime("%Y-%m-%d") if result else None,
+                },
             )
             return result
 
     logger.warning(
         "[BINDER] _parse_absolute_date: No pattern matched",
         extra={
-            'date_str': date_str,
-            'date_str_repr': repr(date_str),
-            'pattern1_tried': True,
-            'pattern2_tried': True,
-            'pattern3_tried': True,
-            'pattern4_tried': True
-        }
+            "date_str": date_str,
+            "date_str_repr": repr(date_str),
+            "pattern1_tried": True,
+            "pattern2_tried": True,
+            "pattern3_tried": True,
+            "pattern4_tried": True,
+        },
     )
     return None
 
 
 def _resolve_year_month_day(
-    year: Optional[int],
-    month: int,
-    day: int,
-    now: datetime,
-    tz: Any
+    year: Optional[int], month: int, day: int, now: datetime, tz: Any
 ) -> Optional[datetime]:
     """
     Resolve year, month, day to a datetime.
@@ -1376,8 +1435,7 @@ def _resolve_year_month_day(
     if year is None:
         # Try this year first
         try:
-            candidate = _localize_datetime(
-                datetime(current_year, month, day), tz)
+            candidate = _localize_datetime(datetime(current_year, month, day), tz)
             if candidate >= now.replace(hour=0, minute=0, second=0, microsecond=0):
                 return candidate
         except ValueError:
@@ -1412,7 +1470,7 @@ def _time_in_window(time_hhmm: str, window_name: str) -> bool:
 
     window = time_window_bounds[window_name.lower()]
     window_start = window["start"]  # "HH:MM"
-    window_end = window["end"]      # "HH:MM"
+    window_end = window["end"]  # "HH:MM"
 
     # Convert to minutes for comparison
     def to_minutes(hhmm: str) -> int:
@@ -1431,7 +1489,7 @@ def bind_times(
     time_mode: str,
     now: datetime,
     tz: Any,
-    time_windows: Optional[list] = None
+    time_windows: Optional[list] = None,
 ) -> Optional[Dict[str, str]]:
     """
     Bind time references to actual times.
@@ -1484,40 +1542,47 @@ def bind_times(
                             time_window_bounds = _get_time_window_bounds()
                             if window_name in time_window_bounds:
                                 # SPECIAL CASE: If user said only "hour" (like "9") and there's a window, bias to window start
-                                if (':' not in time_str and '.' not in time_str and len(time_str.strip()) <= 2 and time_str.strip().isdigit()):
-                                    window_start = time_window_bounds[window_name]['start']
+                                if (
+                                    ":" not in time_str
+                                    and "." not in time_str
+                                    and len(time_str.strip()) <= 2
+                                    and time_str.strip().isdigit()
+                                ):
+                                    window_start = time_window_bounds[window_name][
+                                        "start"
+                                    ]
                                     time_hhmm = window_start
                                     break
                                 # (DEFAULT): Only apply bias if current time is NOT in window
                                 if not _time_in_window(time_hhmm, window_name):
                                     # Try shifting by 12 hours (AM ↔ PM)
-                                    hour, minute = map(
-                                        int, time_hhmm.split(":"))
+                                    hour, minute = map(int, time_hhmm.split(":"))
                                     shifted_hour = (hour + 12) % 24
-                                    shifted_time_hhmm = f"{shifted_hour:02d}:{minute:02d}"
+                                    shifted_time_hhmm = (
+                                        f"{shifted_hour:02d}:{minute:02d}"
+                                    )
                                     if _time_in_window(shifted_time_hhmm, window_name):
                                         time_hhmm = shifted_time_hhmm
                                         break
                     else:
                         # No window, no meridiem: hour-only → must mark as ambiguous
-                        if (':' not in time_str and '.' not in time_str and len(time_str.strip()) <= 2 and time_str.strip().isdigit()):
+                        if (
+                            ":" not in time_str
+                            and "." not in time_str
+                            and len(time_str.strip()) <= 2
+                            and time_str.strip().isdigit()
+                        ):
                             # Return with clarification needed (handled in ambiguity checks, maybe needs rewrite in caller)
                             return None
 
-                return {
-                    "start_time": time_hhmm,
-                    "end_time": time_hhmm
-                }
+                return {"start_time": time_hhmm, "end_time": time_hhmm}
 
     elif time_mode == TimeMode.WINDOW.value:
         window_name = time_refs[0].lower()
         time_window_bounds = _get_time_window_bounds()
         if window_name in time_window_bounds:
             bounds = time_window_bounds[window_name]
-            return {
-                "start_time": bounds["start"],
-                "end_time": bounds["end"]
-            }
+            return {"start_time": bounds["start"], "end_time": bounds["end"]}
 
     elif time_mode == TimeMode.RANGE.value:
         if len(time_refs) >= 2:
@@ -1530,7 +1595,7 @@ def bind_times(
                 if start_time and end_time:
                     return {
                         "start_time": start_time.strftime("%H:%M"),
-                        "end_time": end_time.strftime("%H:%M")
+                        "end_time": end_time.strftime("%H:%M"),
                     }
 
     return None
@@ -1556,11 +1621,11 @@ def _normalize_time_string(time_str: str) -> str:
 
     # Remove spaces around dots and colons
     # "5 . 30" → "5.30"
-    normalized = re.sub(r'\s*([.:])\s*', r'\1', normalized)
+    normalized = re.sub(r"\s*([.:])\s*", r"\1", normalized)
 
     # Handle "X pm" or "X am" where X is just hour
     # "4 pm" → "4:00 pm"
-    hour_only_pattern = r'^(\d{1,2})\s+(am|pm)$'
+    hour_only_pattern = r"^(\d{1,2})\s+(am|pm)$"
     match = re.match(hour_only_pattern, normalized)
     if match:
         hour = match.group(1)
@@ -1569,7 +1634,7 @@ def _normalize_time_string(time_str: str) -> str:
 
     # Handle "X.XX pm" or "X.XX am" (dot separator with meridiem)
     # "5.30 pm" → "5:30 pm"
-    dot_with_meridiem_pattern = r'^(\d{1,2})\.(\d{2})\s+(am|pm)$'
+    dot_with_meridiem_pattern = r"^(\d{1,2})\.(\d{2})\s+(am|pm)$"
     match = re.match(dot_with_meridiem_pattern, normalized)
     if match:
         hour = match.group(1)
@@ -1579,7 +1644,7 @@ def _normalize_time_string(time_str: str) -> str:
 
     # Handle "X.XX" (dot separator, no meridiem)
     # "5.30" → "5:30"
-    dot_no_meridiem_pattern = r'^(\d{1,2})\.(\d{2})$'
+    dot_no_meridiem_pattern = r"^(\d{1,2})\.(\d{2})$"
     match = re.match(dot_no_meridiem_pattern, normalized)
     if match:
         hour = match.group(1)
@@ -1612,7 +1677,7 @@ def _parse_time(time_str: str) -> tuple[Optional[datetime], bool]:
 
     # Remove remaining spaces for pattern matching (keep meridiem separate)
     # "5:30 pm" → "5:30pm" for pattern matching
-    time_str_for_pattern = re.sub(r'\s+', '', time_str_normalized)
+    time_str_for_pattern = re.sub(r"\s+", "", time_str_normalized)
 
     # Pattern 1: 12-hour format "9am" or "9:30am" or "5.30pm" (explicit AM/PM)
     # Handles both colon and dot separators
@@ -1674,7 +1739,7 @@ def combine_datetime_range(
     time_range: Optional[Dict[str, str]],
     now: datetime,
     tz: Any,
-    external_intent: Optional[str] = None
+    external_intent: Optional[str] = None,
 ) -> Optional[Dict[str, str]]:
     """
     Combine date range and time range into datetime range.
@@ -1708,31 +1773,24 @@ def combine_datetime_range(
     end_parts = _parse_time(time_range.get("end_time")) or start_parts
 
     if start_parts:
-        start_dt = _localize_datetime(start_date.replace(
-            hour=start_parts[0],
-            minute=start_parts[1]
-        ), tz)
+        start_dt = _localize_datetime(
+            start_date.replace(hour=start_parts[0], minute=start_parts[1]), tz
+        )
     else:
         return None
 
     if end_parts:
-        end_dt = _localize_datetime(end_date.replace(
-            hour=end_parts[0],
-            minute=end_parts[1]
-        ), tz)
+        end_dt = _localize_datetime(
+            end_date.replace(hour=end_parts[0], minute=end_parts[1]), tz
+        )
     else:
         return None
 
-    return {
-        "start": start_dt.isoformat(),
-        "end": end_dt.isoformat()
-    }
+    return {"start": start_dt.isoformat(), "end": end_dt.isoformat()}
 
 
 def _apply_duration(
-    datetime_range: Dict[str, str],
-    duration: Dict[str, Any],
-    tz: Any
+    datetime_range: Dict[str, str], duration: Dict[str, Any], tz: Any
 ) -> Dict[str, str]:
     """
     Apply duration to compute end time.
@@ -1759,10 +1817,7 @@ def _apply_duration(
         # If end is same as start (point in time), compute end
         if datetime_range["start"] == datetime_range.get("end"):
             end_dt = start_dt + timedelta(minutes=duration_minutes)
-            return {
-                "start": datetime_range["start"],
-                "end": end_dt.isoformat()
-            }
+            return {"start": datetime_range["start"], "end": end_dt.isoformat()}
 
     return datetime_range
 
@@ -1781,8 +1836,10 @@ def _parse_duration(duration_text: str) -> Optional[int]:
         (r"(\d+)\s*(?:minute|min|m)", lambda m: int(m.group(1))),
         (r"one\s+hour", lambda m: 60),
         (r"half\s+hour", lambda m: 30),
-        (r"(\d+)\s*(?:hour|hr|h)\s*(?:and\s+)?(\d+)\s*(?:minute|min|m)",
-         lambda m: int(m.group(1)) * 60 + int(m.group(2))),
+        (
+            r"(\d+)\s*(?:hour|hr|h)\s*(?:and\s+)?(\d+)\s*(?:minute|min|m)",
+            lambda m: int(m.group(1)) * 60 + int(m.group(2)),
+        ),
     ]
 
     for pattern, converter in patterns:
@@ -1798,7 +1855,7 @@ def _validate_ranges(
     time_range: Optional[Dict[str, str]],
     datetime_range: Optional[Dict[str, str]],
     semantic_result: Any,
-    duration: Optional[Dict[str, Any]] = None
+    duration: Optional[Dict[str, Any]] = None,
 ) -> tuple[bool, Optional[str]]:
     """
     Validate that ranges are valid (end >= start) and check for conflicts.
@@ -1850,8 +1907,7 @@ def _validate_ranges(
 
             # Allow start == end (point in time), but not end < start
             if end_dt < start_dt:
-                reasons.append(
-                    "End datetime must be after or equal to start datetime")
+                reasons.append("End datetime must be after or equal to start datetime")
         except (ValueError, AttributeError):
             reasons.append("Invalid datetime range format")
 
@@ -1866,8 +1922,7 @@ def _validate_ranges(
                 end_dt = datetime.strptime(end_date, "%Y-%m-%d")
 
                 if end_dt < start_dt:
-                    reasons.append(
-                        "End date must be after or equal to start date")
+                    reasons.append("End date must be after or equal to start date")
             except ValueError:
                 reasons.append("Invalid date range format")
 
@@ -1886,7 +1941,8 @@ def _validate_ranges(
                 if end_minutes < start_minutes:
                     # This is OK if it spans midnight, but we'll flag it
                     reasons.append(
-                        "Time range may span midnight - clarification needed")
+                        "Time range may span midnight - clarification needed"
+                    )
             except (ValueError, IndexError):
                 reasons.append("Invalid time range format")
 

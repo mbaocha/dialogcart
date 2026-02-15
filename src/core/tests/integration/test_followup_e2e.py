@@ -24,33 +24,35 @@ Usage:
 # Optional import: whatsapp_renderer may not exist in all environments
 try:
     from core.rendering.whatsapp_renderer import render_outcome_to_whatsapp
+
     HAS_WHATSAPP_RENDERER = True
 except ImportError:
     # whatsapp_renderer not available - skip rendering validation
     HAS_WHATSAPP_RENDERER = False
     render_outcome_to_whatsapp = None
-from core.orchestration.nlu import LumaClient
-from core.orchestration.clients.catalog_client import CatalogClient
-from core.orchestration.orchestrator import handle_message
-from core.routing.execution.test_backend import TestExecutionBackend
-from core.tests.integration.followup_scenarios import core_followup_scenarios
-from core.tests.integration.test_appointment_e2e import (
-    TestLumaClient,
-    TestCatalogClient,
-    _setup_test_org_domain,
-    get_customer_details,
-    _validate_rendered_response
-)
-from core.tests.integration.booking_scenarios import (
-    STATUS_EXECUTED,
-    STATUS_AWAITING_CONFIRMATION,
-    STATUS_NEEDS_CLARIFICATION
-)
 import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+from core.orchestration.clients.catalog_client import CatalogClient
+from core.orchestration.nlu import LumaClient
+from core.orchestration.orchestrator import handle_message
+from core.routing.execution.test_backend import TestExecutionBackend
+from core.tests.integration.booking_scenarios import (
+    STATUS_AWAITING_CONFIRMATION,
+    STATUS_EXECUTED,
+    STATUS_NEEDS_CLARIFICATION,
+)
+from core.tests.integration.followup_scenarios import core_followup_scenarios
+from core.tests.integration.test_appointment_e2e import (
+    TestCatalogClient,
+    TestLumaClient,
+    _setup_test_org_domain,
+    _validate_rendered_response,
+    get_customer_details,
+)
 
 # Set execution mode to test for deterministic E2E tests
 os.environ["CORE_EXECUTION_MODE"] = "test"
@@ -63,6 +65,7 @@ if str(src_path) not in sys.path:
 # Load environment variables (reuse logic from test_appointment_e2e.py)
 try:
     from dotenv import load_dotenv
+
     project_root = Path(__file__).parent.parent.parent.parent
     core_env_file = Path(__file__).parent.parent.parent / ".env"
     env_file = project_root / ".env"
@@ -81,13 +84,13 @@ except ImportError:
         if not env_path.exists():
             return
         try:
-            with open(env_path, 'r', encoding='utf-8') as f:
+            with open(env_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
-                    if not line or line.startswith('#'):
+                    if not line or line.startswith("#"):
                         continue
-                    if '=' in line:
-                        key, value = line.split('=', 1)
+                    if "=" in line:
+                        key, value = line.split("=", 1)
                         key = key.strip()
                         value = value.strip()
                         if value.startswith('"') and value.endswith('"'):
@@ -118,7 +121,7 @@ def run_followup_scenario_e2e(
     scenario: Dict[str, Any],
     scenario_index: int,
     customer_details: Dict[str, Optional[Any]],
-    verbose: bool = False
+    verbose: bool = False,
 ) -> Tuple[bool, Optional[str]]:
     """
     Test a multi-turn followup scenario end-to-end.
@@ -154,6 +157,7 @@ def run_followup_scenario_e2e(
 
     # Clear catalog cache to ensure fresh data from TestCatalogClient
     from core.orchestration.cache.catalog_cache import catalog_cache
+
     test_org_id = int(os.getenv("ORG_ID", "1"))
     catalog_cache._mem_cache.pop((test_org_id, domain), None)
 
@@ -184,12 +188,12 @@ def run_followup_scenario_e2e(
                 text=sentence,
                 domain=domain,
                 timezone="UTC",
-                phone_number=customer_details['phone_number'],
-                email=customer_details['email'],
-                customer_id=customer_details['customer_id'],
+                phone_number=customer_details["phone_number"],
+                email=customer_details["email"],
+                customer_id=customer_details["customer_id"],
                 luma_client=luma_client,
                 catalog_client=catalog_client,
-                verbose=verbose
+                verbose=verbose,
             )
 
             if verbose:
@@ -199,20 +203,27 @@ def run_followup_scenario_e2e(
             # Verify success
             if not result.get("success"):
                 error_msg = result.get("error", "Unknown error")
-                return False, f"Turn {turn_index + 1} failed: handle_message returned success=false: {error_msg}"
+                return (
+                    False,
+                    f"Turn {turn_index + 1} failed: handle_message returned success=false: {error_msg}",
+                )
 
             outcome = result.get("result", {})
             actual_status = outcome.get("status")
 
             # Extract intent from multiple possible sources
             actual_intent = (
-                outcome.get("intent_name") or
-                outcome.get("intent", {}).get("name") or
-                None
+                outcome.get("intent_name")
+                or outcome.get("intent", {}).get("name")
+                or None
             )
 
             # If intent not in outcome, try to get from Luma response
-            if not actual_intent and hasattr(luma_client, 'last_response') and luma_client.last_response:
+            if (
+                not actual_intent
+                and hasattr(luma_client, "last_response")
+                and luma_client.last_response
+            ):
                 luma_response = luma_client.last_response
                 if isinstance(luma_response, dict):
                     intent_obj = luma_response.get("intent", {})
@@ -223,44 +234,60 @@ def run_followup_scenario_e2e(
             if expected_intent:
                 if actual_intent:
                     if actual_intent != expected_intent:
-                        return False, f"Turn {turn_index + 1} intent mismatch: expected {expected_intent}, got {actual_intent}"
+                        return (
+                            False,
+                            f"Turn {turn_index + 1} intent mismatch: expected {expected_intent}, got {actual_intent}",
+                        )
                 elif expected_status != STATUS_NEEDS_CLARIFICATION:
-                    return False, f"Turn {turn_index + 1} intent not found in outcome (expected {expected_intent})"
+                    return (
+                        False,
+                        f"Turn {turn_index + 1} intent not found in outcome (expected {expected_intent})",
+                    )
 
             # Verify status matches expected (with flexible handling for EXECUTED/AWAITING_CONFIRMATION)
             if expected_status:
-                if expected_status == STATUS_EXECUTED and actual_status == "AWAITING_CONFIRMATION":
+                if (
+                    expected_status == STATUS_EXECUTED
+                    and actual_status == "AWAITING_CONFIRMATION"
+                ):
                     # If we expected EXECUTED but got AWAITING_CONFIRMATION, check if there's a next turn
                     is_last_turn = (turn_index + 1) >= len(turns)
                     if is_last_turn:
                         # Last turn - auto-confirm to get to EXECUTED
                         if verbose:
-                            print(f"Status is AWAITING_CONFIRMATION (expected EXECUTED), auto-confirming...")
-                        
+                            print(
+                                f"Status is AWAITING_CONFIRMATION (expected EXECUTED), auto-confirming..."
+                            )
+
                         # Validate rendered response before confirming
-                        success, error_msg = _validate_rendered_response(outcome, expected, verbose)
+                        success, error_msg = _validate_rendered_response(
+                            outcome, expected, verbose
+                        )
                         if not success:
                             return False, f"Turn {turn_index + 1} {error_msg}"
-                        
+
                         # Send confirmation
                         confirm_result = handle_message(
                             user_id=user_id,
                             text="yes, confirm it",
                             domain=domain,
                             timezone="UTC",
-                            phone_number=customer_details['phone_number'],
-                            email=customer_details['email'],
-                            customer_id=customer_details['customer_id'],
+                            phone_number=customer_details["phone_number"],
+                            email=customer_details["email"],
+                            customer_id=customer_details["customer_id"],
                             luma_client=luma_client,
-                            catalog_client=catalog_client
+                            catalog_client=catalog_client,
                         )
-                        
+
                         if not confirm_result.get("success"):
-                            return False, f"Turn {turn_index + 1} confirmation failed: {confirm_result.get('error', 'Unknown error')}"
-                        
+                            return (
+                                False,
+                                f"Turn {turn_index + 1} confirmation failed: {confirm_result.get('error', 'Unknown error')}",
+                            )
+
                         confirm_outcome = confirm_result.get("result", {})
                         confirm_status = confirm_outcome.get("status")
-                        
+
                         if confirm_status != "EXECUTED":
                             # Try repeating the original sentence
                             confirm_result = handle_message(
@@ -268,50 +295,77 @@ def run_followup_scenario_e2e(
                                 text=sentence,
                                 domain=domain,
                                 timezone="UTC",
-                                phone_number=customer_details['phone_number'],
-                                email=customer_details['email'],
-                                customer_id=customer_details['customer_id'],
+                                phone_number=customer_details["phone_number"],
+                                email=customer_details["email"],
+                                customer_id=customer_details["customer_id"],
                                 luma_client=luma_client,
-                                catalog_client=catalog_client
+                                catalog_client=catalog_client,
                             )
                             confirm_outcome = confirm_result.get("result", {})
                             confirm_status = confirm_outcome.get("status")
-                        
+
                         if confirm_status != "EXECUTED":
-                            return False, f"Turn {turn_index + 1} after confirmation, expected EXECUTED, got {confirm_status}"
-                        
+                            return (
+                                False,
+                                f"Turn {turn_index + 1} after confirmation, expected EXECUTED, got {confirm_status}",
+                            )
+
                         # Validate rendered response for executed outcome
-                        success, error_msg = _validate_rendered_response(confirm_outcome, expected, verbose)
+                        success, error_msg = _validate_rendered_response(
+                            confirm_outcome, expected, verbose
+                        )
                         if not success:
-                            return False, f"Turn {turn_index + 1} (after confirmation) {error_msg}"
-                        
+                            return (
+                                False,
+                                f"Turn {turn_index + 1} (after confirmation) {error_msg}",
+                            )
+
                         if verbose:
                             print(f"[OK] Confirmed and executed successfully")
                     else:
                         # Not last turn - accept AWAITING_CONFIRMATION (next turn will handle confirmation)
                         if verbose:
-                            print(f"Status is AWAITING_CONFIRMATION (expected EXECUTED), next turn will confirm")
+                            print(
+                                f"Status is AWAITING_CONFIRMATION (expected EXECUTED), next turn will confirm"
+                            )
                         # Validate rendered response for AWAITING_CONFIRMATION
-                        success, error_msg = _validate_rendered_response(outcome, expected, verbose)
+                        success, error_msg = _validate_rendered_response(
+                            outcome, expected, verbose
+                        )
                         if not success:
                             return False, f"Turn {turn_index + 1} {error_msg}"
                 elif expected_status == STATUS_AWAITING_CONFIRMATION:
                     # Expected AWAITING_CONFIRMATION - accept it
                     if actual_status != "AWAITING_CONFIRMATION":
-                        return False, f"Turn {turn_index + 1} status mismatch: expected {expected_status}, got {actual_status}"
+                        return (
+                            False,
+                            f"Turn {turn_index + 1} status mismatch: expected {expected_status}, got {actual_status}",
+                        )
                 elif actual_status != expected_status:
                     # Strict match for other statuses
-                    return False, f"Turn {turn_index + 1} status mismatch: expected {expected_status}, got {actual_status}"
+                    return (
+                        False,
+                        f"Turn {turn_index + 1} status mismatch: expected {expected_status}, got {actual_status}",
+                    )
 
             # Verify clarification reason if specified
             if expected_reason:
                 actual_reason = outcome.get("clarification_reason")
                 if actual_reason != expected_reason:
-                    return False, f"Turn {turn_index + 1} clarification_reason mismatch: expected {expected_reason}, got {actual_reason}"
+                    return (
+                        False,
+                        f"Turn {turn_index + 1} clarification_reason mismatch: expected {expected_reason}, got {actual_reason}",
+                    )
 
             # Validate rendered response for all outcomes (unless we already validated after confirmation)
-            if not (expected_status == STATUS_EXECUTED and actual_status == "AWAITING_CONFIRMATION" and (turn_index + 1) >= len(turns)):
-                success, error_msg = _validate_rendered_response(outcome, expected, verbose)
+            if not (
+                expected_status == STATUS_EXECUTED
+                and actual_status == "AWAITING_CONFIRMATION"
+                and (turn_index + 1) >= len(turns)
+            ):
+                success, error_msg = _validate_rendered_response(
+                    outcome, expected, verbose
+                )
                 if not success:
                     return False, f"Turn {turn_index + 1} {error_msg}"
 
@@ -325,7 +379,10 @@ def run_followup_scenario_e2e(
 
     except Exception as e:
         import traceback
-        error_msg = f"Exception in followup scenario: {str(e)}\n{traceback.format_exc()}"
+
+        error_msg = (
+            f"Exception in followup scenario: {str(e)}\n{traceback.format_exc()}"
+        )
         if verbose:
             print(f"❌ Exception: {error_msg}")
         return False, error_msg
@@ -335,7 +392,7 @@ def run_all_followup_scenarios(
     scenarios: List[Dict[str, Any]],
     customer_details: Dict[str, Optional[Any]],
     verbose: bool = False,
-    scenario_indices: Optional[List[int]] = None
+    scenario_indices: Optional[List[int]] = None,
 ) -> Tuple[int, int, int, List[Tuple[int, str]]]:
     """
     Run all followup scenarios and return statistics.
@@ -366,28 +423,36 @@ def run_all_followup_scenarios(
 
             scenario = core_followup_scenarios[original_idx]
             success, error_msg = run_followup_scenario_e2e(
-                scenario, original_idx, customer_details, verbose)
+                scenario, original_idx, customer_details, verbose
+            )
 
             if success:
                 passed += 1
                 if verbose:
-                    print(f"[OK] Scenario {original_idx}: {scenario.get('name', '')[:50]}...")
+                    print(
+                        f"[OK] Scenario {original_idx}: {scenario.get('name', '')[:50]}..."
+                    )
             else:
                 failed += 1
                 failures.append((original_idx, error_msg or "Unknown error"))
-                print(f"[FAIL] Scenario {original_idx}: {scenario.get('name', '')[:50]}...")
+                print(
+                    f"[FAIL] Scenario {original_idx}: {scenario.get('name', '')[:50]}..."
+                )
                 if error_msg:
                     print(f"  Error: {error_msg}")
     else:
         for list_idx in range(len(scenarios)):
             scenario = scenarios[list_idx]
             success, error_msg = run_followup_scenario_e2e(
-                scenario, list_idx, customer_details, verbose)
+                scenario, list_idx, customer_details, verbose
+            )
 
             if success:
                 passed += 1
                 if verbose:
-                    print(f"[OK] Scenario {list_idx}: {scenario.get('name', '')[:50]}...")
+                    print(
+                        f"[OK] Scenario {list_idx}: {scenario.get('name', '')[:50]}..."
+                    )
             else:
                 failed += 1
                 failures.append((list_idx, error_msg or "Unknown error"))
@@ -411,22 +476,34 @@ Examples:
   python -m core.tests.integration.test_followup_e2e 0
   python -m core.tests.integration.test_followup_e2e 0 --verbose
   python -m core.tests.integration.test_followup_e2e --range 0-5
-        """
+        """,
     )
-    parser.add_argument("scenario", type=int, nargs="?",
-                        help="Run specific scenario by index (positional argument)")
-    parser.add_argument("--scenario", type=int, dest="scenario_flag",
-                        help="Run specific scenario by index (alternative to positional)")
-    parser.add_argument("--range", type=str,
-                        help="Run scenarios in range (e.g., '0-5')")
-    parser.add_argument("--verbose", "-v",
-                        action="store_true", help="Verbose output")
+    parser.add_argument(
+        "scenario",
+        type=int,
+        nargs="?",
+        help="Run specific scenario by index (positional argument)",
+    )
+    parser.add_argument(
+        "--scenario",
+        type=int,
+        dest="scenario_flag",
+        help="Run specific scenario by index (alternative to positional)",
+    )
+    parser.add_argument(
+        "--range", type=str, help="Run scenarios in range (e.g., '0-5')"
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
     args = parser.parse_args()
 
     scenario_num = args.scenario if args.scenario is not None else args.scenario_flag
 
     customer_details = get_customer_details()
-    if not customer_details['customer_id'] and not customer_details['phone_number'] and not customer_details['email']:
+    if (
+        not customer_details["customer_id"]
+        and not customer_details["phone_number"]
+        and not customer_details["email"]
+    ):
         if args.verbose:
             print("WARNING: No customer_id, phone, or email found in environment")
             print("Test may fail if customer creation is required")
@@ -437,15 +514,21 @@ Examples:
 
     if scenario_num is not None:
         scenario_indices = [scenario_num]
-        scenarios_to_run = [core_followup_scenarios[scenario_num]
-                            ] if scenario_num < len(core_followup_scenarios) else []
+        scenarios_to_run = (
+            [core_followup_scenarios[scenario_num]]
+            if scenario_num < len(core_followup_scenarios)
+            else []
+        )
         if args.verbose:
             print(f"Running single scenario: {scenario_num}")
     elif args.range:
-        start, end = map(int, args.range.split('-'))
+        start, end = map(int, args.range.split("-"))
         scenario_indices = list(range(start, end + 1))
-        scenarios_to_run = [core_followup_scenarios[i]
-                            for i in scenario_indices if i < len(core_followup_scenarios)]
+        scenarios_to_run = [
+            core_followup_scenarios[i]
+            for i in scenario_indices
+            if i < len(core_followup_scenarios)
+        ]
         if args.verbose:
             print(f"Running scenarios: {args.range}")
 
@@ -453,15 +536,17 @@ Examples:
     if not args.verbose:
         scenarios_count = len(scenarios_to_run)
         print(
-            f"Running E2E followup scenarios test ({scenarios_count} scenario{'s' if scenarios_count != 1 else ''})...")
+            f"Running E2E followup scenarios test ({scenarios_count} scenario{'s' if scenarios_count != 1 else ''})..."
+        )
     else:
-        print("="*70)
+        print("=" * 70)
         print("E2E FOLLOWUP SCENARIOS TEST")
-        print("="*70)
+        print("=" * 70)
         print(f"Total scenarios: {len(core_followup_scenarios)}")
         if len(scenarios_to_run) != len(core_followup_scenarios):
             print(
-                f"Running: {len(scenarios_to_run)} scenario{'s' if len(scenarios_to_run) != 1 else ''}")
+                f"Running: {len(scenarios_to_run)} scenario{'s' if len(scenarios_to_run) != 1 else ''}"
+            )
 
     if not scenarios_to_run:
         print("No scenarios to run!")
@@ -472,30 +557,34 @@ Examples:
         scenarios_to_run,
         customer_details,
         verbose=args.verbose,
-        scenario_indices=scenario_indices
+        scenario_indices=scenario_indices,
     )
 
     # Print summary
     if args.verbose:
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("TEST SUMMARY")
-        print("="*70)
+        print("=" * 70)
     else:
         print()
 
     print(
-        f"Total: {len(scenarios_to_run)} | Passed: {passed} | Failed: {failed} | Skipped: {skipped}")
+        f"Total: {len(scenarios_to_run)} | Passed: {passed} | Failed: {failed} | Skipped: {skipped}"
+    )
 
     if failures:
         print("\nFailures:")
         for idx, error_msg in failures:
-            scenario = core_followup_scenarios[idx] if idx < len(
-                core_followup_scenarios) else {}
+            scenario = (
+                core_followup_scenarios[idx]
+                if idx < len(core_followup_scenarios)
+                else {}
+            )
             print(f"  Scenario {idx}: {scenario.get('name', 'N/A')}")
             print(f"    Error: {error_msg}")
 
     if args.verbose:
-        print("="*70)
+        print("=" * 70)
 
     if failed > 0:
         sys.exit(1)
@@ -505,4 +594,3 @@ Examples:
 
 if __name__ == "__main__":
     main()
-

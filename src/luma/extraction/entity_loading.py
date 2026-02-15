@@ -7,12 +7,13 @@ Handles:
 - Creating lookup maps for service grounding
 - Loading global noise set (not as entities)
 """
-import os
+
 import json
-import re
 import logging
-from typing import List, Dict, Any, Set
+import os
+import re
 from pathlib import Path
+from typing import Any, Dict, List, Set
 
 logger = logging.getLogger(__name__)
 
@@ -20,6 +21,7 @@ logger = logging.getLogger(__name__)
 try:
     import spacy
     from spacy.tokenizer import Tokenizer
+
     SPACY_AVAILABLE = True
 except ImportError:
     SPACY_AVAILABLE = False
@@ -39,45 +41,47 @@ def debug_print(*args):
 # Global JSON Path Resolution
 # -------------------------------------------------------------------
 
+
 def get_global_json_path(base_dir: Path = None) -> Path:
     """
     Get the path to the global normalization JSON file based on configured version.
-    
+
     The version is determined by config.GLOBAL_JSON_VERSION (default: "v3").
     If the file doesn't exist, raises FileNotFoundError.
-    
+
     Args:
         base_dir: Base directory to search in. If None, uses standard location
                   (luma/config/data relative to this file)
-    
+
     Returns:
         Path to global JSON file (e.g., global.v3.json)
-    
+
     Raises:
         FileNotFoundError: If the configured version file doesn't exist
     """
     from ..config import config
-    
+
     if base_dir is None:
         # Standard location: from entity_loading.py, go to luma/config/data/
         base_dir = Path(__file__).parent.parent / "config" / "data"
-    
+
     version = config.GLOBAL_JSON_VERSION
     json_path = base_dir / f"global.{version}.json"
-    
+
     if not json_path.exists():
         raise FileNotFoundError(
             f"Global JSON file not found: {json_path}\n"
             f"Configured version: {version}\n"
             f"Please ensure global.{version}.json exists in {base_dir}"
         )
-    
+
     return json_path
 
 
 # -------------------------------------------------------------------
 # Loading
 # -------------------------------------------------------------------
+
 
 def load_normalization_entities(json_path: Path) -> List[Dict[str, Any]]:
     """
@@ -91,7 +95,8 @@ def load_normalization_entities(json_path: Path) -> List[Dict[str, Any]]:
     # Tenant files are currently EMPTY and MUST NOT be used at runtime
     # Business categories are loaded from global JSON via load_global_business_categories()
     debug_print(
-        "[WARNING] load_normalization_entities() called - tenant files are unused")
+        "[WARNING] load_normalization_entities() called - tenant files are unused"
+    )
     _ = json_path  # Unused but kept for signature compatibility
     return []
 
@@ -109,8 +114,7 @@ def load_global_noise_set(global_json_path: Path) -> Set[str]:
         data = json.load(f)
 
     # New structure: normalization.noise.values
-    noise_values = data.get("normalization", {}).get(
-        "noise", {}).get("values", [])
+    noise_values = data.get("normalization", {}).get("noise", {}).get("values", [])
     return {token.lower() for token in noise_values}
 
 
@@ -154,13 +158,15 @@ def compile_orthography_map(raw_orthography: Dict[str, List[str]]) -> Dict[str, 
         canonical_lower = canonical.lower()
         if "_" in canonical_lower:
             debug_print(
-                f"[WARNING] Skipping orthography entry with canonical ID: {canonical}")
+                f"[WARNING] Skipping orthography entry with canonical ID: {canonical}"
+            )
             continue
 
         # Ensure variants is a list
         if not isinstance(variants, list):
             debug_print(
-                f"[WARNING] Skipping orthography entry with non-list variants: {canonical}")
+                f"[WARNING] Skipping orthography entry with non-list variants: {canonical}"
+            )
             continue
 
         # Map canonical to itself (no-op, but useful for consistency)
@@ -172,7 +178,8 @@ def compile_orthography_map(raw_orthography: Dict[str, List[str]]) -> Dict[str, 
             # Validate variant doesn't contain canonical IDs
             if "_" in variant_lower:
                 debug_print(
-                    f"[WARNING] Skipping variant with canonical ID: {variant} → {canonical}")
+                    f"[WARNING] Skipping variant with canonical ID: {variant} → {canonical}"
+                )
                 continue
             compiled_map[variant_lower] = canonical_lower
 
@@ -222,8 +229,7 @@ def compile_typo_map(raw_typos: Dict[str, Dict[str, List[str]]]) -> Dict[str, st
 
         # Validate category is a dictionary
         if not isinstance(canonicals, dict):
-            debug_print(
-                f"[WARNING] Skipping invalid typo category: {category}")
+            debug_print(f"[WARNING] Skipping invalid typo category: {category}")
             continue
 
         for canonical, variants in canonicals.items():
@@ -231,13 +237,15 @@ def compile_typo_map(raw_typos: Dict[str, Dict[str, List[str]]]) -> Dict[str, st
             canonical_lower = canonical.lower()
             if "_" in canonical_lower:
                 debug_print(
-                    f"[WARNING] Skipping typo entry with canonical ID: {canonical}")
+                    f"[WARNING] Skipping typo entry with canonical ID: {canonical}"
+                )
                 continue
 
             # Ensure variants is a list
             if not isinstance(variants, list):
                 debug_print(
-                    f"[WARNING] Skipping typo entry with non-list variants: {canonical}")
+                    f"[WARNING] Skipping typo entry with non-list variants: {canonical}"
+                )
                 continue
 
             # Map all variants to canonical
@@ -246,7 +254,8 @@ def compile_typo_map(raw_typos: Dict[str, Dict[str, List[str]]]) -> Dict[str, st
                 # Validate variant doesn't contain canonical IDs
                 if "_" in variant_lower:
                     debug_print(
-                        f"[WARNING] Skipping variant with canonical ID: {variant} → {canonical}")
+                        f"[WARNING] Skipping variant with canonical ID: {variant} → {canonical}"
+                    )
                     continue
                 compiled_map[variant_lower] = canonical_lower
 
@@ -254,9 +263,7 @@ def compile_typo_map(raw_typos: Dict[str, Dict[str, List[str]]]) -> Dict[str, st
 
 
 def _validate_typo_config(
-    typos: Dict[str, Any],
-    entity_types: Dict[str, Any],
-    vocabularies: Dict[str, Any]
+    typos: Dict[str, Any], entity_types: Dict[str, Any], vocabularies: Dict[str, Any]
 ) -> None:
     """
     Validate typo configuration against entity_types and vocabularies.
@@ -278,8 +285,9 @@ def _validate_typo_config(
     # Build sets of valid canonicals
     # New structure: vocabularies.weekdays is canonical-first (canonical -> [variants])
     weekdays_dict = vocabularies.get("weekdays", {})
-    valid_weekdays = set(weekdays_dict.keys()) if isinstance(
-        weekdays_dict, dict) else set()
+    valid_weekdays = (
+        set(weekdays_dict.keys()) if isinstance(weekdays_dict, dict) else set()
+    )
 
     # Build set of all weekday variants to check for duplicates
     all_weekday_variants: Dict[str, str] = {}  # variant -> canonical
@@ -300,8 +308,9 @@ def _validate_typo_config(
             all_weekday_variants[canonical_lower] = canonical
 
     # Validate that all weekdays in vocabularies exist in entity_types.date.weekday.to_number
-    weekday_to_number = entity_types.get("date", {}).get(
-        "weekday", {}).get("to_number", {})
+    weekday_to_number = (
+        entity_types.get("date", {}).get("weekday", {}).get("to_number", {})
+    )
     for weekday in valid_weekdays:
         if weekday.lower() not in weekday_to_number:
             errors.append(
@@ -311,8 +320,7 @@ def _validate_typo_config(
 
     # Build sets of valid month canonicals
     months_dict = vocabularies.get("months", {})
-    valid_months = set(months_dict.keys()) if isinstance(
-        months_dict, dict) else set()
+    valid_months = set(months_dict.keys()) if isinstance(months_dict, dict) else set()
 
     # Build set of all month variants to check for duplicates
     all_month_variants: Dict[str, str] = {}  # variant -> canonical
@@ -333,8 +341,7 @@ def _validate_typo_config(
             all_month_variants[canonical_lower] = canonical
 
     # Validate that all months in vocabularies exist in entity_types.date.month.to_number
-    month_to_number = entity_types.get("date", {}).get(
-        "month", {}).get("to_number", {})
+    month_to_number = entity_types.get("date", {}).get("month", {}).get("to_number", {})
     for month in valid_months:
         if month.lower() not in month_to_number:
             errors.append(
@@ -438,8 +445,9 @@ def _validate_typo_config(
                         )
 
     if errors:
-        error_msg = "Typo configuration validation failed:\n" + \
-            "\n".join(f"  - {e}" for e in errors)
+        error_msg = "Typo configuration validation failed:\n" + "\n".join(
+            f"  - {e}" for e in errors
+        )
         raise ValueError(error_msg)
 
 
@@ -583,7 +591,10 @@ def load_global_orthography_rules(global_json_path: Path) -> Dict[str, str]:
 # Service Families (GLOBAL)
 # -------------------------------------------------------------------
 
-def load_global_business_categories(global_json_path: Path) -> Dict[str, Dict[str, Any]]:
+
+def load_global_business_categories(
+    global_json_path: Path,
+) -> Dict[str, Dict[str, Any]]:
     """
     Load global business categories from global JSON.
 
@@ -621,19 +632,22 @@ def load_global_business_categories(global_json_path: Path) -> Dict[str, Dict[st
         data = json.load(f)
 
     # Support both new name (business_categories) and legacy name (service_families) for backward compatibility
-    business_categories = data.get("business_categories") or data.get("service_families", {})
+    business_categories = data.get("business_categories") or data.get(
+        "service_families", {}
+    )
 
     # Remove metadata keys
     if "_comment" in business_categories:
         business_categories = {
-            k: v for k, v in business_categories.items() if not k.startswith("_")}
+            k: v for k, v in business_categories.items() if not k.startswith("_")
+        }
 
     # Extract families from each category if using v3 structure
     result = {}
     for category, category_data in business_categories.items():
         if not isinstance(category_data, dict):
             continue
-        
+
         # Check if this is v3 structure (has "families" key)
         if "families" in category_data:
             # Extract the families dict
@@ -651,7 +665,9 @@ def load_global_service_families(global_json_path: Path) -> Dict[str, Dict[str, 
     return load_global_business_categories(global_json_path)
 
 
-def build_business_category_synonym_map(business_categories: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
+def build_business_category_synonym_map(
+    business_categories: Dict[str, Dict[str, Any]]
+) -> Dict[str, str]:
     """
     Build a map from business category synonyms to their canonical business category IDs.
 
@@ -698,12 +714,16 @@ def build_business_category_synonym_map(business_categories: Dict[str, Dict[str,
 
 
 # Backward compatibility alias
-def build_service_family_synonym_map(service_families: Dict[str, Dict[str, Any]]) -> Dict[str, str]:
+def build_service_family_synonym_map(
+    service_families: Dict[str, Dict[str, Any]]
+) -> Dict[str, str]:
     """Deprecated: Use build_business_category_synonym_map instead."""
     return build_business_category_synonym_map(service_families)
 
 
-def build_business_category_patterns(business_categories: Dict[str, Dict[str, Any]]) -> List[Dict[str, str]]:
+def build_business_category_patterns(
+    business_categories: Dict[str, Dict[str, Any]]
+) -> List[Dict[str, str]]:
     """
     Build spaCy EntityRuler patterns for business categories.
 
@@ -729,16 +749,17 @@ def build_business_category_patterns(business_categories: Dict[str, Dict[str, An
             # Create pattern for each synonym
             for synonym in synonyms:
                 if isinstance(synonym, str):
-                    patterns.append({
-                        "label": "SERVICE_FAMILY",
-                        "pattern": synonym.lower()
-                    })
+                    patterns.append(
+                        {"label": "SERVICE_FAMILY", "pattern": synonym.lower()}
+                    )
 
     return patterns
 
 
 # Backward compatibility alias
-def build_service_family_patterns(service_families: Dict[str, Dict[str, Any]]) -> List[Dict[str, str]]:
+def build_service_family_patterns(
+    service_families: Dict[str, Dict[str, Any]]
+) -> List[Dict[str, str]]:
     """Deprecated: Use build_business_category_patterns instead."""
     return build_business_category_patterns(service_families)
 
@@ -746,6 +767,7 @@ def build_service_family_patterns(service_families: Dict[str, Dict[str, Any]]) -
 # -------------------------------------------------------------------
 # Entity Types (GLOBAL)
 # -------------------------------------------------------------------
+
 
 def load_global_entity_types(global_json_path: Path) -> Dict[str, Any]:
     """
@@ -778,17 +800,11 @@ def build_date_patterns(entity_types: Dict[str, Any]) -> List[Dict[str, Any]]:
         if isinstance(rel_date, dict):
             value = rel_date.get("value", "")
             if value:
-                patterns.append({
-                    "label": "DATE",
-                    "pattern": value.lower()
-                })
+                patterns.append({"label": "DATE", "pattern": value.lower()})
 
     # Add weekday canonicals as DATE patterns (normalization maps variants to canonicals)
     for weekday in weekday_map.keys():
-        patterns.append({
-            "label": "DATE",
-            "pattern": weekday.lower()
-        })
+        patterns.append({"label": "DATE", "pattern": weekday.lower()})
 
     return patterns
 
@@ -823,122 +839,179 @@ def build_absolute_date_patterns(entity_types: Dict[str, Any]) -> List[Dict[str,
                 # Pattern: "15th dec", "15 dec", "15 december", "15th december 2025"
                 # After tokenization with digit-letter split: "15th dec" → ["15", "th", "dec"]
                 # Token pattern: number + optional ordinal suffix + month name + optional year
-                patterns.append({
-                    "label": "DATE_ABSOLUTE",
-                    "pattern": [
-                        {"TEXT": {"REGEX": "^\\d{1,2}$"}},
-                        {"OP": "?", "LOWER": {"IN": ["st", "nd", "rd", "th"]}},
-                        {"LOWER": {
-                            "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"}},
-                        {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
-                    ]
-                })
+                patterns.append(
+                    {
+                        "label": "DATE_ABSOLUTE",
+                        "pattern": [
+                            {"TEXT": {"REGEX": "^\\d{1,2}$"}},
+                            {"OP": "?", "LOWER": {"IN": ["st", "nd", "rd", "th"]}},
+                            {
+                                "LOWER": {
+                                    "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"
+                                }
+                            },
+                            {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}},
+                        ],
+                    }
+                )
                 # Also handle case where ordinal stays joined (if tokenizer doesn't split)
-                patterns.append({
-                    "label": "DATE_ABSOLUTE",
-                    "pattern": [
-                        {"TEXT": {"REGEX": "^\\d{1,2}(?:st|nd|rd|th)$"}},
-                        {"LOWER": {
-                            "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"}},
-                        {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
-                    ]
-                })
+                patterns.append(
+                    {
+                        "label": "DATE_ABSOLUTE",
+                        "pattern": [
+                            {"TEXT": {"REGEX": "^\\d{1,2}(?:st|nd|rd|th)$"}},
+                            {
+                                "LOWER": {
+                                    "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"
+                                }
+                            },
+                            {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}},
+                        ],
+                    }
+                )
                 # Pattern: "3rd of March" - day + ordinal + "of" + month
-                patterns.append({
-                    "label": "DATE_ABSOLUTE",
-                    "pattern": [
-                        {"TEXT": {"REGEX": "^\\d{1,2}$"}},
-                        {"OP": "?", "LOWER": {"IN": ["st", "nd", "rd", "th"]}},
-                        {"LOWER": "of"},
-                        {"LOWER": {
-                            "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"}},
-                        {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
-                    ]
-                })
+                patterns.append(
+                    {
+                        "label": "DATE_ABSOLUTE",
+                        "pattern": [
+                            {"TEXT": {"REGEX": "^\\d{1,2}$"}},
+                            {"OP": "?", "LOWER": {"IN": ["st", "nd", "rd", "th"]}},
+                            {"LOWER": "of"},
+                            {
+                                "LOWER": {
+                                    "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"
+                                }
+                            },
+                            {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}},
+                        ],
+                    }
+                )
                 # Pattern: "3rd of March" - day with joined ordinal + "of" + month
-                patterns.append({
-                    "label": "DATE_ABSOLUTE",
-                    "pattern": [
-                        {"TEXT": {"REGEX": "^\\d{1,2}(?:st|nd|rd|th)$"}},
-                        {"LOWER": "of"},
-                        {"LOWER": {
-                            "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"}},
-                        {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
-                    ]
-                })
+                patterns.append(
+                    {
+                        "label": "DATE_ABSOLUTE",
+                        "pattern": [
+                            {"TEXT": {"REGEX": "^\\d{1,2}(?:st|nd|rd|th)$"}},
+                            {"LOWER": "of"},
+                            {
+                                "LOWER": {
+                                    "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"
+                                }
+                            },
+                            {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}},
+                        ],
+                    }
+                )
                 # Pattern: "3-Mar" or "3-Mar-2026" - day + hyphen + month + optional hyphen + year
-                patterns.append({
-                    "label": "DATE_ABSOLUTE",
-                    "pattern": [
-                        {"TEXT": {"REGEX": "^\\d{1,2}$"}},
-                        {"TEXT": "-"},
-                        {"LOWER": {
-                            "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"}},
-                        {"OP": "?", "TEXT": "-"},
-                        {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
-                    ]
-                })
+                patterns.append(
+                    {
+                        "label": "DATE_ABSOLUTE",
+                        "pattern": [
+                            {"TEXT": {"REGEX": "^\\d{1,2}$"}},
+                            {"TEXT": "-"},
+                            {
+                                "LOWER": {
+                                    "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"
+                                }
+                            },
+                            {"OP": "?", "TEXT": "-"},
+                            {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}},
+                        ],
+                    }
+                )
             elif pattern_id == "month_day_text":
                 # Pattern: "dec 15", "dec 15th", "december 15", "dec 15th 2025"
                 # After tokenization with digit-letter split: "dec 15th" → ["dec", "15", "th"]
                 # Token pattern: month name + number + optional ordinal suffix + optional year
-                patterns.append({
-                    "label": "DATE_ABSOLUTE",
-                    "pattern": [
-                        {"LOWER": {
-                            "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"}},
-                        {"TEXT": {"REGEX": "^\\d{1,2}$"}},
-                        {"OP": "?", "LOWER": {"IN": ["st", "nd", "rd", "th"]}},
-                        {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
-                    ]
-                })
+                patterns.append(
+                    {
+                        "label": "DATE_ABSOLUTE",
+                        "pattern": [
+                            {
+                                "LOWER": {
+                                    "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"
+                                }
+                            },
+                            {"TEXT": {"REGEX": "^\\d{1,2}$"}},
+                            {"OP": "?", "LOWER": {"IN": ["st", "nd", "rd", "th"]}},
+                            {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}},
+                        ],
+                    }
+                )
                 # Also handle case where ordinal stays joined (if tokenizer doesn't split)
-                patterns.append({
-                    "label": "DATE_ABSOLUTE",
-                    "pattern": [
-                        {"LOWER": {
-                            "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"}},
-                        {"TEXT": {"REGEX": "^\\d{1,2}(?:st|nd|rd|th)$"}},
-                        {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
-                    ]
-                })
+                patterns.append(
+                    {
+                        "label": "DATE_ABSOLUTE",
+                        "pattern": [
+                            {
+                                "LOWER": {
+                                    "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"
+                                }
+                            },
+                            {"TEXT": {"REGEX": "^\\d{1,2}(?:st|nd|rd|th)$"}},
+                            {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}},
+                        ],
+                    }
+                )
                 # Pattern: "March the 3rd" - month + "the" + day + ordinal
-                patterns.append({
-                    "label": "DATE_ABSOLUTE",
-                    "pattern": [
-                        {"LOWER": {
-                            "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"}},
-                        {"LOWER": "the"},
-                        {"TEXT": {"REGEX": "^\\d{1,2}$"}},
-                        {"OP": "?", "LOWER": {"IN": ["st", "nd", "rd", "th"]}},
-                        {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
-                    ]
-                })
+                patterns.append(
+                    {
+                        "label": "DATE_ABSOLUTE",
+                        "pattern": [
+                            {
+                                "LOWER": {
+                                    "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"
+                                }
+                            },
+                            {"LOWER": "the"},
+                            {"TEXT": {"REGEX": "^\\d{1,2}$"}},
+                            {"OP": "?", "LOWER": {"IN": ["st", "nd", "rd", "th"]}},
+                            {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}},
+                        ],
+                    }
+                )
                 # Pattern: "March the 3rd" - month + "the" + day with joined ordinal
-                patterns.append({
-                    "label": "DATE_ABSOLUTE",
-                    "pattern": [
-                        {"LOWER": {
-                            "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"}},
-                        {"LOWER": "the"},
-                        {"TEXT": {"REGEX": "^\\d{1,2}(?:st|nd|rd|th)$"}},
-                        {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}}
-                    ]
-                })
+                patterns.append(
+                    {
+                        "label": "DATE_ABSOLUTE",
+                        "pattern": [
+                            {
+                                "LOWER": {
+                                    "REGEX": "^(jan|january|feb|february|mar|march|apr|april|may|jun|june|jul|july|aug|august|sep|september|oct|october|nov|november|dec|december)$"
+                                }
+                            },
+                            {"LOWER": "the"},
+                            {"TEXT": {"REGEX": "^\\d{1,2}(?:st|nd|rd|th)$"}},
+                            {"OP": "?", "TEXT": {"REGEX": "^\\d{4}$"}},
+                        ],
+                    }
+                )
             elif pattern_id == "numeric_date":
                 # Pattern: "15/12", "15/12/2025", "15-12-2025"
                 # After tokenization: "15/12" → ["15/12"] (single token with separator)
                 # Token pattern: single token with numeric date format
-                patterns.append({
-                    "label": "DATE_ABSOLUTE",
-                    "pattern": [{"TEXT": {"REGEX": "^\\d{1,2}[/-]\\d{1,2}(?:[/-]\\d{2,4})?$"}}]
-                })
+                patterns.append(
+                    {
+                        "label": "DATE_ABSOLUTE",
+                        "pattern": [
+                            {
+                                "TEXT": {
+                                    "REGEX": "^\\d{1,2}[/-]\\d{1,2}(?:[/-]\\d{2,4})?$"
+                                }
+                            }
+                        ],
+                    }
+                )
                 # Also handle hyphen-separated dates with month names: "3-Mar", "3-Mar-2026"
                 # These are tokenized as single tokens: ["3-Mar"], ["3-Mar-2026"]
-                patterns.append({
-                    "label": "DATE_ABSOLUTE",
-                    "pattern": [{"TEXT": {"REGEX": "^\\d{1,2}-[a-z]{3,9}(?:-\\d{2,4})?$"}}]
-                })
+                patterns.append(
+                    {
+                        "label": "DATE_ABSOLUTE",
+                        "pattern": [
+                            {"TEXT": {"REGEX": "^\\d{1,2}-[a-z]{3,9}(?:-\\d{2,4})?$"}}
+                        ],
+                    }
+                )
 
     return patterns
 
@@ -979,97 +1052,125 @@ def build_time_patterns(entity_types: Dict[str, Any]) -> List[Dict[str, Any]]:
                         {"TEXT": {"REGEX": "^(1[0-2]|0?[1-9])$"}},
                         {"OP": "?", "TEXT": {"REGEX": "^[:.][0-5][0-9]$"}},
                         {"OP": "?", "IS_SPACE": True},
-                        {"LOWER": {"REGEX": "^(am|pm)$"}}
-                    ]
+                        {"LOWER": {"REGEX": "^(am|pm)$"}},
+                    ],
                 }
                 logger.info(
-                    "[time-extract]: built pattern=\"time_12h_pattern_1\" (hour + optional minutes + optional space + am/pm)")
+                    '[time-extract]: built pattern="time_12h_pattern_1" (hour + optional minutes + optional space + am/pm)'
+                )
                 patterns.append(pattern_1)
                 # Pattern 2: Single-token, greedy match for everything (handles "5.30pm", "5:30pm"):
                 pattern_2 = {
                     "label": "TIME",
-                    "pattern": [{"TEXT": {"REGEX": "^(1[0-2]|0?[1-9])([:.][0-5][0-9])?(am|pm)$"}}]
+                    "pattern": [
+                        {
+                            "TEXT": {
+                                "REGEX": "^(1[0-2]|0?[1-9])([:.][0-5][0-9])?(am|pm)$"
+                            }
+                        }
+                    ],
                 }
                 logger.info(
-                    "[time-extract]: built pattern=\"time_12h_pattern_2\" (single token: hour + optional minutes + am/pm)")
+                    '[time-extract]: built pattern="time_12h_pattern_2" (single token: hour + optional minutes + am/pm)'
+                )
                 patterns.append(pattern_2)
                 # Pattern 2b: Multi-token with dot separator and pm attached (handles "5.30pm" tokenized as ["5", ".", "30pm"]):
-                patterns.append({
-                    "label": "TIME",
-                    "pattern": [
-                        {"TEXT": {"REGEX": "^(1[0-2]|0?[1-9])$"}},
-                        {"TEXT": {"REGEX": "^\\.$"}},
-                        {"TEXT": {"REGEX": "^[0-5][0-9](am|pm)$"}}
-                    ]
-                })
+                patterns.append(
+                    {
+                        "label": "TIME",
+                        "pattern": [
+                            {"TEXT": {"REGEX": "^(1[0-2]|0?[1-9])$"}},
+                            {"TEXT": {"REGEX": "^\\.$"}},
+                            {"TEXT": {"REGEX": "^[0-5][0-9](am|pm)$"}},
+                        ],
+                    }
+                )
                 # Pattern 3: Case with optional space between minutes and meridiem (greedy):
-                patterns.append({
-                    "label": "TIME",
-                    "pattern": [
-                        {"TEXT": {"REGEX": "^(1[0-2]|0?[1-9])$"}},
-                        {"OP": "?", "TEXT": {"REGEX": "^[:.][0-5][0-9]$"}},
-                        {"OP": "?", "IS_SPACE": True},
-                        {"TEXT": {"REGEX": "^(am|pm)$"}}
-                    ]
-                })
+                patterns.append(
+                    {
+                        "label": "TIME",
+                        "pattern": [
+                            {"TEXT": {"REGEX": "^(1[0-2]|0?[1-9])$"}},
+                            {"OP": "?", "TEXT": {"REGEX": "^[:.][0-5][0-9]$"}},
+                            {"OP": "?", "IS_SPACE": True},
+                            {"TEXT": {"REGEX": "^(am|pm)$"}},
+                        ],
+                    }
+                )
                 # Pattern 4: Multi-token with dot separator and space before pm (handles "5.30 pm"):
-                patterns.append({
-                    "label": "TIME",
-                    "pattern": [
-                        {"TEXT": {"REGEX": "^(1[0-2]|0?[1-9])$"}},
-                        {"TEXT": {"REGEX": "^\\.$"}},
-                        {"TEXT": {"REGEX": "^[0-5][0-9]$"}},
-                        {"OP": "?", "IS_SPACE": True},
-                        {"TEXT": {"REGEX": "^(am|pm)$"}}
-                    ]
-                })
+                patterns.append(
+                    {
+                        "label": "TIME",
+                        "pattern": [
+                            {"TEXT": {"REGEX": "^(1[0-2]|0?[1-9])$"}},
+                            {"TEXT": {"REGEX": "^\\.$"}},
+                            {"TEXT": {"REGEX": "^[0-5][0-9]$"}},
+                            {"OP": "?", "IS_SPACE": True},
+                            {"TEXT": {"REGEX": "^(am|pm)$"}},
+                        ],
+                    }
+                )
                 # Pattern 5: Multi-token with colon and spaces around it (handles "9 : 30 am", "12 : 00 pm"):
-                patterns.append({
-                    "label": "TIME",
-                    "pattern": [
-                        {"TEXT": {"REGEX": "^(1[0-2]|0?[1-9])$"}},
-                        {"OP": "?", "IS_SPACE": True},
-                        {"TEXT": {"REGEX": "^:$"}},
-                        {"OP": "?", "IS_SPACE": True},
-                        {"TEXT": {"REGEX": "^[0-5][0-9]$"}},
-                        {"OP": "?", "IS_SPACE": True},
-                        {"LOWER": {"REGEX": "^(am|pm)$"}}
-                    ]
-                })
+                patterns.append(
+                    {
+                        "label": "TIME",
+                        "pattern": [
+                            {"TEXT": {"REGEX": "^(1[0-2]|0?[1-9])$"}},
+                            {"OP": "?", "IS_SPACE": True},
+                            {"TEXT": {"REGEX": "^:$"}},
+                            {"OP": "?", "IS_SPACE": True},
+                            {"TEXT": {"REGEX": "^[0-5][0-9]$"}},
+                            {"OP": "?", "IS_SPACE": True},
+                            {"LOWER": {"REGEX": "^(am|pm)$"}},
+                        ],
+                    }
+                )
             elif pattern_id == "time_24h":
                 # Pattern: HH:MM format (single token) - handles "14:00", "18:30"
-                patterns.append({
-                    "label": "TIME",
-                    "pattern": [{"TEXT": {"REGEX": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$"}}]
-                })
+                patterns.append(
+                    {
+                        "label": "TIME",
+                        "pattern": [
+                            {"TEXT": {"REGEX": "^([01]?[0-9]|2[0-3]):[0-5][0-9]$"}}
+                        ],
+                    }
+                )
                 # Pattern: HH : MM format (multi-token with spaces around colon) - handles "14 : 00", "18 : 30"
                 # After tokenization, "14 : 00" becomes ["14", ":", "00"] or ["14", " ", ":", " ", "00"]
-                patterns.append({
-                    "label": "TIME",
-                    "pattern": [
-                        {"TEXT": {"REGEX": "^([01]?[0-9]|2[0-3])$"}},
-                        {"OP": "?", "IS_SPACE": True},
-                        {"TEXT": {"REGEX": "^:$"}},
-                        {"OP": "?", "IS_SPACE": True},
-                        {"TEXT": {"REGEX": "^[0-5][0-9]$"}}
-                    ]
-                })
+                patterns.append(
+                    {
+                        "label": "TIME",
+                        "pattern": [
+                            {"TEXT": {"REGEX": "^([01]?[0-9]|2[0-3])$"}},
+                            {"OP": "?", "IS_SPACE": True},
+                            {"TEXT": {"REGEX": "^:$"}},
+                            {"OP": "?", "IS_SPACE": True},
+                            {"TEXT": {"REGEX": "^[0-5][0-9]$"}},
+                        ],
+                    }
+                )
                 # Pattern: HH.MM format (dot separator, e.g., "10.30")
                 # This handles cases like "at 10.30" where dot is used instead of colon
-                patterns.append({
-                    "label": "TIME",
-                    "pattern": [{"TEXT": {"REGEX": "^([01]?[0-9]|2[0-3])\\.[0-5][0-9]$"}}]
-                })
+                patterns.append(
+                    {
+                        "label": "TIME",
+                        "pattern": [
+                            {"TEXT": {"REGEX": "^([01]?[0-9]|2[0-3])\\.[0-5][0-9]$"}}
+                        ],
+                    }
+                )
                 # Pattern: HH.MM format split into tokens (e.g., "10" "." "30")
                 # After tokenization, "10.30" might become ["10", ".", "30"]
-                patterns.append({
-                    "label": "TIME",
-                    "pattern": [
-                        {"TEXT": {"REGEX": "^([01]?[0-9]|2[0-3])$"}},
-                        {"TEXT": {"REGEX": "^\\.$"}},
-                        {"TEXT": {"REGEX": "^[0-5][0-9]$"}}
-                    ]
-                })
+                patterns.append(
+                    {
+                        "label": "TIME",
+                        "pattern": [
+                            {"TEXT": {"REGEX": "^([01]?[0-9]|2[0-3])$"}},
+                            {"TEXT": {"REGEX": "^\\.$"}},
+                            {"TEXT": {"REGEX": "^[0-5][0-9]$"}},
+                        ],
+                    }
+                )
             elif pattern_id == "time_bare_hour":
                 # Pattern for bare hours (e.g., "at 2", "at 9", "at 10") - hour only without am/pm
                 # Supports 24-hour format (0-23)
@@ -1081,11 +1182,12 @@ def build_time_patterns(entity_types: Dict[str, Any]) -> List[Dict[str, Any]]:
                         {"LOWER": {"IN": ["at", "around", "about"]}},
                         # 0-23 hour range
                         {"TEXT": {"REGEX": "^([01]?[0-9]|2[0-3])$"}},
-                        {"OP": "?", "TEXT": {"REGEX": "^(ish|'ish)$"}}
-                    ]
+                        {"OP": "?", "TEXT": {"REGEX": "^(ish|'ish)$"}},
+                    ],
                 }
                 logger.info(
-                    "[time-extract]: built pattern=\"time_bare_hour_pattern_1\" (at/around/about + hour 0-23 + optional ish)")
+                    '[time-extract]: built pattern="time_bare_hour_pattern_1" (at/around/about + hour 0-23 + optional ish)'
+                )
                 patterns.append(pattern_bare_1)
                 # Pattern 2: Standalone hour after "at" (in case "at" is not captured)
                 # Matches hour 0-23 without am/pm
@@ -1095,13 +1197,18 @@ def build_time_patterns(entity_types: Dict[str, Any]) -> List[Dict[str, Any]]:
                         # 0-23 hour range
                         {"TEXT": {"REGEX": "^([01]?[0-9]|2[0-3])$"}},
                         {"OP": "?", "TEXT": {"REGEX": "^(ish|'ish)$"}},
-                        {"OP": "?", "TEXT": {
-                            # Negative lookahead for am/pm
-                            "REGEX": "^(?!am|pm|a\\.m\\.|p\\.m\\.)"}}
-                    ]
+                        {
+                            "OP": "?",
+                            "TEXT": {
+                                # Negative lookahead for am/pm
+                                "REGEX": "^(?!am|pm|a\\.m\\.|p\\.m\\.)"
+                            },
+                        },
+                    ],
                 }
                 logger.info(
-                    "[time-extract]: built pattern=\"time_bare_hour_pattern_2\" (standalone hour 0-23 + optional ish + negative lookahead for am/pm)")
+                    '[time-extract]: built pattern="time_bare_hour_pattern_2" (standalone hour 0-23 + optional ish + negative lookahead for am/pm)'
+                )
                 patterns.append(pattern_bare_2)
 
     # Diagnostic: Log total patterns built
@@ -1130,10 +1237,7 @@ def build_time_window_patterns(entity_types: Dict[str, Any]) -> List[Dict[str, A
             granularity = keyword_def.get("granularity", "")
             # Only extract keywords marked as "window" granularity
             if value and granularity == "window":
-                patterns.append({
-                    "label": "TIME_WINDOW",
-                    "pattern": value.lower()
-                })
+                patterns.append({"label": "TIME_WINDOW", "pattern": value.lower()})
 
     return patterns
 
@@ -1159,21 +1263,25 @@ def build_duration_patterns(entity_types: Dict[str, Any]) -> List[Dict[str, Any]
                 # After tokenization: "30 mins" → ["30", "mins"]
                 # Convert to token pattern with REGEX for actual regex matching
                 if unit == "minutes":
-                    patterns.append({
-                        "label": "DURATION",
-                        "pattern": [
-                            {"TEXT": {"REGEX": "^\\d+$"}},
-                            {"LOWER": {"REGEX": "^(minutes|minute|mins|min)$"}}
-                        ]
-                    })
+                    patterns.append(
+                        {
+                            "label": "DURATION",
+                            "pattern": [
+                                {"TEXT": {"REGEX": "^\\d+$"}},
+                                {"LOWER": {"REGEX": "^(minutes|minute|mins|min)$"}},
+                            ],
+                        }
+                    )
                 elif unit == "hours":
-                    patterns.append({
-                        "label": "DURATION",
-                        "pattern": [
-                            {"TEXT": {"REGEX": "^\\d+$"}},
-                            {"LOWER": {"REGEX": "^(hours|hour|hrs|hr)$"}}
-                        ]
-                    })
+                    patterns.append(
+                        {
+                            "label": "DURATION",
+                            "pattern": [
+                                {"TEXT": {"REGEX": "^\\d+$"}},
+                                {"LOWER": {"REGEX": "^(hours|hour|hrs|hr)$"}},
+                            ],
+                        }
+                    )
 
     # Add keyword patterns (half hour, one hour, etc.) as simple string patterns
     duration_keywords = duration_config.get("keywords", [])
@@ -1181,10 +1289,7 @@ def build_duration_patterns(entity_types: Dict[str, Any]) -> List[Dict[str, Any]
         if isinstance(keyword_def, dict):
             value = keyword_def.get("value", "")
             if value:
-                patterns.append({
-                    "label": "DURATION",
-                    "pattern": value.lower()
-                })
+                patterns.append({"label": "DURATION", "pattern": value.lower()})
 
     return patterns
 
@@ -1192,6 +1297,7 @@ def build_duration_patterns(entity_types: Dict[str, Any]) -> List[Dict[str, Any]
 # -------------------------------------------------------------------
 # Patterns
 # -------------------------------------------------------------------
+
 
 def build_entity_patterns(entities: List[Dict[str, Any]]) -> List[Dict[str, str]]:
     """
@@ -1208,10 +1314,7 @@ def build_entity_patterns(entities: List[Dict[str, Any]]) -> List[Dict[str, str]
 
         label = "SERVICE"
         for phrase in sorted(ent["synonyms"], key=lambda x: -len(x.split())):
-            patterns.append({
-                "label": label,
-                "pattern": phrase.lower()
-            })
+            patterns.append({"label": label, "pattern": phrase.lower()})
 
     return patterns
 
@@ -1220,9 +1323,8 @@ def build_entity_patterns(entities: List[Dict[str, Any]]) -> List[Dict[str, str]
 # Support Maps
 # -------------------------------------------------------------------
 
-def build_support_maps(
-    entities: List[Dict[str, Any]]
-) -> Dict[str, str]:
+
+def build_support_maps(entities: List[Dict[str, Any]]) -> Dict[str, str]:
     """
     Build lookup map for service grounding.
 
@@ -1246,6 +1348,7 @@ def build_support_maps(
 # Tokenizer
 # -------------------------------------------------------------------
 
+
 def customize_tokenizer(nlp):
     """
     Custom tokenizer:
@@ -1256,8 +1359,8 @@ def customize_tokenizer(nlp):
         raise ImportError("spaCy required")
 
     infix_re = re.compile(r"(?<=\d)(?=[a-zA-Z])|(?<=[a-zA-Z])(?=\d)")
-    prefix_re = re.compile(r'''^[\[\("']''')
-    suffix_re = re.compile(r'''[\]\)"']$''')
+    prefix_re = re.compile(r"""^[\[\("']""")
+    suffix_re = re.compile(r"""[\]\)"']$""")
 
     return Tokenizer(
         nlp.vocab,
@@ -1265,13 +1368,14 @@ def customize_tokenizer(nlp):
         prefix_search=prefix_re.search,
         suffix_search=suffix_re.search,
         infix_finditer=infix_re.finditer,
-        token_match=None
+        token_match=None,
     )
 
 
 # -------------------------------------------------------------------
 # Init
 # -------------------------------------------------------------------
+
 
 def init_nlp_with_business_categories(global_json_path: Path):
     """
@@ -1323,8 +1427,7 @@ def init_nlp_with_business_categories(global_json_path: Path):
     # 5. Business category patterns (last - lowest priority)
     all_patterns.extend(build_business_category_patterns(business_categories))
 
-    ruler = nlp.add_pipe("entity_ruler", before="ner",
-                         config={"overwrite_ents": True})
+    ruler = nlp.add_pipe("entity_ruler", before="ner", config={"overwrite_ents": True})
     ruler.add_patterns(all_patterns)
 
     return nlp, business_categories
@@ -1355,8 +1458,7 @@ def init_nlp_with_entities(json_path: Path):
     entities = []
     patterns = []
 
-    ruler = nlp.add_pipe("entity_ruler", before="ner",
-                         config={"overwrite_ents": True})
+    ruler = nlp.add_pipe("entity_ruler", before="ner", config={"overwrite_ents": True})
     ruler.add_patterns(patterns)
 
     return nlp, entities
@@ -1384,8 +1486,7 @@ def load_relative_date_offsets(global_json_path: Path) -> Dict[str, int]:
     with open(global_json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    relative_dates = data.get("entity_types", {}).get(
-        "date", {}).get("relative", [])
+    relative_dates = data.get("entity_types", {}).get("date", {}).get("relative", [])
     offsets = {}
     for rel_date in relative_dates:
         value = rel_date.get("value", "")
@@ -1409,17 +1510,13 @@ def load_time_window_bounds(global_json_path: Path) -> Dict[str, Dict[str, str]]
     with open(global_json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    time_keywords = data.get("entity_types", {}).get(
-        "time", {}).get("keywords", [])
+    time_keywords = data.get("entity_types", {}).get("time", {}).get("keywords", [])
     bounds = {}
     for keyword in time_keywords:
         value = keyword.get("value", "")
         range_list = keyword.get("range", [])
         if value and len(range_list) >= 2:
-            bounds[value] = {
-                "start": range_list[0],
-                "end": range_list[1]
-            }
+            bounds[value] = {"start": range_list[0], "end": range_list[1]}
 
     return bounds
 
@@ -1438,7 +1535,7 @@ def load_booking_policy(global_json_path: Path) -> Dict[str, bool]:
     policy = data.get("booking_policy", {})
     return {
         "allow_time_windows": policy.get("allow_time_windows", True),
-        "allow_constraint_only_time": policy.get("allow_constraint_only_time", True)
+        "allow_constraint_only_time": policy.get("allow_constraint_only_time", True),
     }
 
 

@@ -10,6 +10,7 @@ from pathlib import Path
 # Load environment variables from .env files at startup
 try:
     from dotenv import load_dotenv
+
     # Try loading .env and .env.local from project root
     project_root = Path(__file__).parent.parent.parent.parent  # dialogcart/
     env_file = project_root / ".env"

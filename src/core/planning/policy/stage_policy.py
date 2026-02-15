@@ -14,9 +14,10 @@ PLANNING BOUNDARY:
 - Execution = intent_execution.yaml (dumb routing only)
 """
 
-import yaml
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
+import yaml
 
 
 def load_dialog_policy(config_path: Optional[str] = None) -> Dict[str, Any]:
@@ -49,29 +50,27 @@ def load_dialog_policy(config_path: Optional[str] = None) -> Dict[str, Any]:
 
 
 def get_dialog_instructions(
-    intent: str,
-    missing_slots: List[str],
-    policy: Optional[Dict[str, Any]] = None
+    intent: str, missing_slots: List[str], policy: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Get dialog instructions for a given intent and missing slots.
-    
+
     GUARD: This function is PURELY REACTIVE.
     - It accepts missing_slots as input (from planner)
     - It MUST NOT compute, infer, or assume missing slots
     - missing_slots MUST come from core.planning.policy.action_policy.plan_intent()
-    
+
     Returns structured JSON instructions, not plain text.
     The prompt is advisory and does not enforce order - users can provide
     missing slots in any order.
-    
+
     Args:
         intent: Intent name (e.g., "CREATE_APPOINTMENT", "MODIFY_BOOKING")
         missing_slots: List of missing slot names (e.g., ["date", "time"])
                        MUST be computed by planner from intent_planning.yaml
         policy: Optional dialog policy dictionary (from load_dialog_policy).
                 If None, loads policy automatically.
-    
+
     Returns:
         Dictionary with:
             - intent: The input intent name
@@ -79,7 +78,7 @@ def get_dialog_instructions(
             - prompt: Advisory prompt text (advisory, no order enforced)
             - prompt_type: "advisory" (indicating the prompt is advisory)
             - slot_order: null (indicating no order is enforced)
-    
+
     Example:
         >>> instructions = get_dialog_instructions("CREATE_APPOINTMENT", ["date", "time"])
         >>> instructions["prompt"]
@@ -95,19 +94,19 @@ def get_dialog_instructions(
         )
     if policy is None:
         policy = load_dialog_policy()
-    
+
     # Normalize intent name
     intent_upper = intent.upper() if intent else None
-    
+
     # Get intent-specific prompts (list of prompt mappings or dict with default)
     intent_config = policy.get(intent_upper, {}) if intent_upper else {}
-    
+
     # Normalize missing_slots to a set for comparison (order-independent)
     missing_slots_set = set(missing_slots)
-    
+
     # Try to find exact match for missing_slots combination
     prompt = None
-    
+
     # Handle dict format with prompts list and default
     if isinstance(intent_config, dict):
         # Check if it has a prompts list
@@ -130,7 +129,7 @@ def get_dialog_instructions(
                 if set(mapping_slots) == missing_slots_set:
                     prompt = prompt_mapping.get("prompt")
                     break
-    
+
     # Fallback to default intent prompt if no match found
     if not prompt:
         # Load full config to get default_intent_prompt
@@ -140,15 +139,17 @@ def get_dialog_instructions(
         if config_file.exists():
             with config_file.open(encoding="utf-8") as f:
                 full_config = yaml.safe_load(f) or {}
-                prompt = full_config.get("default_intent_prompt", "What information would you like to provide?")
+                prompt = full_config.get(
+                    "default_intent_prompt",
+                    "What information would you like to provide?",
+                )
         else:
             prompt = "What information would you like to provide?"
-    
+
     return {
         "intent": intent,
         "missing_slots": missing_slots,
         "prompt": prompt,
         "prompt_type": "advisory",
-        "slot_order": None  # No order enforced - users can provide slots in any order
+        "slot_order": None,  # No order enforced - users can provide slots in any order
     }
-

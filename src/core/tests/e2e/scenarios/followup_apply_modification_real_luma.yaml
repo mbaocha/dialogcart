@@ -224,7 +224,7 @@ scenarios:
       - sentence: "no"
         expect:
           status: NON_DURABLE_INTENT
-          # REJECT_OR_CHANGE is non-durable and interrupts the flow
+          # REJECT_ACTION is non-durable and interrupts the flow
           # Session is not preserved, flow is broken
           # This reflects current system behavior where "no" breaks durable intents
 

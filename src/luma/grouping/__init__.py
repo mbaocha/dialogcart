@@ -8,26 +8,25 @@ Resolves user intent using rule-based logic.
 """
 
 from luma.grouping.appointment_grouper import (
-    group_appointment,
     BOOK_APPOINTMENT_INTENT,
-    STATUS_OK,
     STATUS_NEEDS_CLARIFICATION,
+    STATUS_OK,
+    group_appointment,
 )
-
 from luma.grouping.reservation_intent_resolver import (
-    ReservationIntentResolver,
-    resolve_intent,
-    DISCOVERY,
-    DETAILS,
     AVAILABILITY,
+    BOOKING_INQUIRY,
+    CANCEL_BOOKING,
+    CREATE_BOOKING,
+    DETAILS,
+    DISCOVERY,
+    MODIFY_BOOKING,
+    PAYMENT,
     QUOTE,
     RECOMMENDATION,
-    CREATE_BOOKING,
-    BOOKING_INQUIRY,
-    MODIFY_BOOKING,
-    CANCEL_BOOKING,
-    PAYMENT,
     UNKNOWN,
+    ReservationIntentResolver,
+    resolve_intent,
 )
 
 __all__ = [
@@ -51,4 +50,3 @@ __all__ = [
     "PAYMENT",
     "UNKNOWN",
 ]
-

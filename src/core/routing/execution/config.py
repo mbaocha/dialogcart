@@ -17,7 +17,7 @@ ExecutionMode = Literal["production", "test"]
 def get_execution_mode() -> ExecutionMode:
     """
     Get the current execution mode.
-    
+
     Returns:
         "production" for real API execution, "test" for deterministic test execution.
         Defaults to "production" if CORE_EXECUTION_MODE is not set.
@@ -27,4 +27,3 @@ def get_execution_mode() -> ExecutionMode:
         # Default to production for invalid values
         return EXECUTION_MODE_PRODUCTION
     return mode  # type: ignore
-

@@ -20,9 +20,9 @@ Usage:
     python luma/cli/interactive.py
 """
 import sys
-from pathlib import Path
 from datetime import datetime
-from typing import Dict, Any
+from pathlib import Path
+from typing import Any, Dict
 
 # Add src/ to path if running directly
 if __name__ == "__main__":
@@ -31,12 +31,12 @@ if __name__ == "__main__":
         sys.path.insert(0, str(src_path))
 
 from luma.calendar.calendar_binder import bind_calendar
-from luma.resolution.semantic_resolver import resolve_semantics
-from luma.grouping.appointment_grouper import group_appointment
-from luma.structure.interpreter import interpret_structure
-from luma.grouping.reservation_intent_resolver import ReservationIntentResolver
-from luma.extraction.matcher import EntityMatcher
 from luma.clarification import render_clarification
+from luma.extraction.matcher import EntityMatcher
+from luma.grouping.appointment_grouper import group_appointment
+from luma.grouping.reservation_intent_resolver import ReservationIntentResolver
+from luma.resolution.semantic_resolver import resolve_semantics
+from luma.structure.interpreter import interpret_structure
 
 
 def find_normalization_dir():
@@ -63,6 +63,7 @@ def _localize_datetime(dt: datetime, timezone: str) -> datetime:
     """Localize datetime to timezone."""
     try:
         from zoneinfo import ZoneInfo
+
         tz = ZoneInfo(timezone)
         if dt.tzinfo is None:
             return dt.replace(tzinfo=tz)
@@ -70,6 +71,7 @@ def _localize_datetime(dt: datetime, timezone: str) -> datetime:
     except Exception:
         try:
             import pytz
+
             tz = pytz.timezone(timezone)
             if dt.tzinfo is None:
                 return tz.localize(dt)
@@ -149,12 +151,15 @@ def print_pipeline_result(result: Dict[str, Any], verbose: bool = False):
     psentence = extraction.get("psentence")
     if psentence:
         print(f"Psentence: {psentence}")
-    business_categories = extraction.get('business_categories') or extraction.get('service_families', [])
+    business_categories = extraction.get("business_categories") or extraction.get(
+        "service_families", []
+    )
     print(f"Services: {len(business_categories)}")
     for svc in business_categories:
         print(f"  - {svc.get('text')} ({svc.get('canonical')})")
     print(
-        f"Dates: {len(extraction.get('dates', [])) + len(extraction.get('dates_absolute', []))}")
+        f"Dates: {len(extraction.get('dates', [])) + len(extraction.get('dates_absolute', []))}"
+    )
     print(f"Times: {len(extraction.get('times', []))}")
     print(f"Time Windows: {len(extraction.get('time_windows', []))}")
 
@@ -209,9 +214,10 @@ def print_pipeline_result(result: Dict[str, Any], verbose: bool = False):
         if clarification:
             try:
                 from luma.clarification import Clarification, ClarificationReason
+
                 clar = Clarification(
                     reason=ClarificationReason(clarification["reason"]),
-                    data=clarification.get("data", {})
+                    data=clarification.get("data", {}),
                 )
                 message = render_clarification(clar)
                 print(f"⚠️  Clarification: {message}")
@@ -237,9 +243,10 @@ def print_pipeline_result(result: Dict[str, Any], verbose: bool = False):
         if clarification:
             try:
                 from luma.clarification import Clarification, ClarificationReason
+
                 clar = Clarification(
                     reason=ClarificationReason(clarification["reason"]),
-                    data=clarification.get("data", {})
+                    data=clarification.get("data", {}),
                 )
                 message = render_clarification(clar)
                 print(f"⚠️  Clarification: {message}")
@@ -247,7 +254,9 @@ def print_pipeline_result(result: Dict[str, Any], verbose: bool = False):
                 print(f"⚠️  Clarification: {clarification.get('reason')}")
 
 
-def run_pipeline(sentence: str, domain: str = "service", timezone: str = "UTC") -> Dict[str, Any]:
+def run_pipeline(
+    sentence: str, domain: str = "service", timezone: str = "UTC"
+) -> Dict[str, Any]:
     """
     Run the complete service/reservation booking pipeline.
 
@@ -273,9 +282,9 @@ def run_pipeline(sentence: str, domain: str = "service", timezone: str = "UTC") 
             "sentence": sentence,
             "domain": domain,
             "timezone": timezone,
-            "now": now.isoformat()
+            "now": now.isoformat(),
         },
-        "stages": {}
+        "stages": {},
     }
 
     # Stage 1: Entity Extraction
@@ -290,17 +299,15 @@ def run_pipeline(sentence: str, domain: str = "service", timezone: str = "UTC") 
     # Stage 2: Intent Resolution
     try:
         intent_resolver = ReservationIntentResolver()
-        intent, confidence = intent_resolver.resolve_intent(
-            sentence, extraction_result)
-        results["stages"]["intent"] = {
-            "intent": intent, "confidence": confidence}
+        intent, confidence = intent_resolver.resolve_intent(sentence, extraction_result)
+        results["stages"]["intent"] = {"intent": intent, "confidence": confidence}
     except Exception as e:
         results["stages"]["intent"] = {"error": str(e)}
         return results
 
     # Stage 3: Structural Interpretation
     try:
-        psentence = extraction_result.get('psentence', '')
+        psentence = extraction_result.get("psentence", "")
         structure = interpret_structure(psentence, extraction_result)
         results["stages"]["structure"] = structure.to_dict()["structure"]
     except Exception as e:
@@ -326,11 +333,7 @@ def run_pipeline(sentence: str, domain: str = "service", timezone: str = "UTC") 
     # Stage 6: Calendar Binding
     try:
         calendar_result = bind_calendar(
-            semantic_result,
-            now,
-            timezone,
-            intent=intent,
-            entities=extraction_result
+            semantic_result, now, timezone, intent=intent, entities=extraction_result
         )
         results["stages"]["calendar"] = calendar_result.to_dict()
     except Exception as e:
@@ -358,7 +361,7 @@ def interactive_main(verbose: bool = False):
             sentence = input("\n💬 Enter booking request: ").strip()
 
             # Check for exit commands
-            if not sentence or sentence.lower() in ['quit', 'exit', 'q']:
+            if not sentence or sentence.lower() in ["quit", "exit", "q"]:
                 print("\n👋 Goodbye!")
                 break
 
@@ -373,6 +376,7 @@ def interactive_main(verbose: bool = False):
             except Exception as e:
                 print(f"❌ Error during processing: {e}")
                 import traceback
+
                 traceback.print_exc()
 
             if verbose:
@@ -393,23 +397,21 @@ def main():
 
     parser = argparse.ArgumentParser(
         description="Luma Service/Reservation Booking - Interactive Mode",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        '--domain',
-        default='service',
-        choices=['service', 'reservation'],
-        help='Domain type (default: service)'
+        "--domain",
+        default="service",
+        choices=["service", "reservation"],
+        help="Domain type (default: service)",
     )
     parser.add_argument(
-        '--timezone',
-        default='UTC',
-        help='Timezone for calendar binding (default: UTC)'
+        "--timezone", default="UTC", help="Timezone for calendar binding (default: UTC)"
     )
     parser.add_argument(
-        '--verbose',
-        action='store_true',
-        help='Show detailed stage-by-stage output (default: show only final result)'
+        "--verbose",
+        action="store_true",
+        help="Show detailed stage-by-stage output (default: show only final result)",
     )
 
     args = parser.parse_args()
@@ -421,6 +423,7 @@ def main():
     except Exception as e:
         print(f"\n❌ Fatal error: {e}")
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
 

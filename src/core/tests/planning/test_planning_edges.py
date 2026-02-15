@@ -24,17 +24,14 @@ planning_edges_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
                     # date normalized from "friday" to ISO date
                     # "evening" is normalized to fuzzy time_constraint (does NOT satisfy time requirement)
-                    "slots": {"service_id": "haircut", "date": "2026-01-16"}
-                }
+                    "slots": {"service_id": "haircut", "date": "2026-01-16"},
+                },
             }
-        ]
+        ],
     },
     {
         "id": 22,
@@ -47,18 +44,14 @@ planning_edges_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     # Multiple dates from "next week" are not promoted to single date for service appointments
                     "missing_slots": ["date", "time"],
-                    "slots": {"service_id": "facial"}
-                }
+                    "slots": {"service_id": "facial"},
+                },
             }
-        ]
+        ],
     },
-
     # 2️⃣ Correction / Override Turns
     {
         "id": 23,
@@ -71,30 +64,23 @@ planning_edges_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "haircut", "date": "2026-01-16"}
-                }
+                    "slots": {"service_id": "haircut", "date": "2026-01-16"},
+                },
             },
             {
                 "sentence": "no saturday instead",
                 "expected": {
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
                     # service_id unchanged, date updated
-                    "slots": {"service_id": "haircut", "date": "2026-01-17"}
-                }
-            }
-        ]
+                    "slots": {"service_id": "haircut", "date": "2026-01-17"},
+                },
+            },
+        ],
     },
-
     # 3️⃣ Slot Conflict Resolution
     {
         "id": 24,
@@ -107,30 +93,23 @@ planning_edges_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "READY",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {"service_id": "haircut", "date": "2026-01-16"}
-                }
+                    "slots": {"service_id": "haircut", "date": "2026-01-16"},
+                },
             },
             {
                 "sentence": "make it 4pm",
                 "expected": {
                     "status": "READY",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
                     # time_constraint overridden
-                    "slots": {"service_id": "haircut", "date": "2026-01-16"}
-                }
-            }
-        ]
+                    "slots": {"service_id": "haircut", "date": "2026-01-16"},
+                },
+            },
+        ],
     },
-
     # 4️⃣ Cross-Intent Noise Immunity
     {
         "id": 25,
@@ -143,13 +122,10 @@ planning_edges_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date", "time"],
-                    "slots": {"service_id": "haircut"}
-                }
+                    "slots": {"service_id": "haircut"},
+                },
             },
             {
                 "sentence": "do you have parking?",
@@ -157,18 +133,14 @@ planning_edges_scenarios = [
                     # intent remains CREATE_APPOINTMENT (no intent change)
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     # slots preserved, missing_slots unchanged
                     "missing_slots": ["date", "time"],
-                    "slots": {"service_id": "haircut"}
-                }
-            }
-        ]
+                    "slots": {"service_id": "haircut"},
+                },
+            },
+        ],
     },
-
     # 5️⃣ Tenant Service Canonicalization Safety
     {
         "id": 26,
@@ -181,16 +153,13 @@ planning_edges_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date", "time"],
                     # returned service_id == raw tenant value
-                    "slots": {"service_id": "premium haircut"}
-                }
+                    "slots": {"service_id": "premium haircut"},
+                },
             }
-        ]
+        ],
     },
     {
         "id": 27,
@@ -203,18 +172,14 @@ planning_edges_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date", "time"],
                     # returned service_id == raw tenant value
-                    "slots": {"service_id": "presidential haircut"}
-                }
+                    "slots": {"service_id": "presidential haircut"},
+                },
             }
-        ]
+        ],
     },
-
     # 6️⃣ Empty / Weak Luma Response Recovery
     {
         "id": 28,
@@ -227,13 +192,10 @@ planning_edges_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date", "time"],
-                    "slots": {"service_id": "haircut"}
-                }
+                    "slots": {"service_id": "haircut"},
+                },
             },
             {
                 "sentence": "",
@@ -242,15 +204,12 @@ planning_edges_scenarios = [
                     # intent should not regress to UNKNOWN
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date", "time"],
-                    "slots": {"service_id": "haircut"}
-                }
-            }
-        ]
+                    "slots": {"service_id": "haircut"},
+                },
+            },
+        ],
     },
     {
         "id": 29,
@@ -263,13 +222,10 @@ planning_edges_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "haircut", "date": "2026-01-14"}
-                }
+                    "slots": {"service_id": "haircut", "date": "2026-01-14"},
+                },
             },
             {
                 "sentence": "?",
@@ -277,14 +233,11 @@ planning_edges_scenarios = [
                     # Weak/noisy input should preserve session state
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "haircut", "date": "2026-01-14"}
-                }
-            }
-        ]
-    }
+                    "slots": {"service_id": "haircut", "date": "2026-01-14"},
+                },
+            },
+        ],
+    },
 ]

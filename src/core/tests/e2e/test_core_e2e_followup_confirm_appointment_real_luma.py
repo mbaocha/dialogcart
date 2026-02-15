@@ -29,20 +29,21 @@ Note:
 """
 
 import os
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
+from unittest.mock import Mock
+
 import pytest
 import yaml
-import sys
-from pathlib import Path
-from unittest.mock import Mock
-from datetime import datetime, timezone
-from typing import Dict, Any, List, Optional
 
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.execution.clients.availability_client import AvailabilityClient
 from core.orchestration.execution.clients.booking_client import BookingClient
 from core.orchestration.orchestrator import handle_message
-from core.tests.mocks import mock_get_service_availability, mock_create_booking
 from core.tests.integration.test_appointment_e2e import TestLumaClient
+from core.tests.mocks import mock_create_booking, mock_get_service_availability
 from core.tests.planning.adapter import normalize_planning_outcome
 
 # Add src to path BEFORE importing core modules
@@ -53,14 +54,19 @@ if str(src_path) not in sys.path:
 
 # Skip entire test module if RUN_REAL_LUMA_E2E is not set
 if not os.getenv("RUN_REAL_LUMA_E2E"):
-    pytest.skip("Real Luma E2E tests disabled. Set RUN_REAL_LUMA_E2E=true to enable.",
-                allow_module_level=True)
+    pytest.skip(
+        "Real Luma E2E tests disabled. Set RUN_REAL_LUMA_E2E=true to enable.",
+        allow_module_level=True,
+    )
 
 
 def load_scenarios() -> List[Dict[str, Any]]:
     """Load test scenarios from YAML file."""
-    scenarios_file = Path(__file__).parent / "scenarios" / \
-        "followup_confirm_appointment_real_luma.yaml"
+    scenarios_file = (
+        Path(__file__).parent
+        / "scenarios"
+        / "followup_confirm_appointment_real_luma.yaml"
+    )
     if not scenarios_file.exists():
         pytest.skip(f"Scenarios file not found: {scenarios_file}")
 
@@ -83,23 +89,26 @@ def load_scenarios() -> List[Dict[str, Any]]:
                         selected_indices.append(index)
                     else:
                         print(
-                            f"\n[E2E_TEST] WARNING: Test index {index} is out of range (0-{len(scenarios)-1}). Skipping.\n")
+                            f"\n[E2E_TEST] WARNING: Test index {index} is out of range (0-{len(scenarios)-1}). Skipping.\n"
+                        )
 
             if selected_indices:
                 # Return only the selected scenarios (preserve order)
                 # Remove duplicates and sort
-                selected = [scenarios[i]
-                            for i in sorted(set(selected_indices))]
-                names = [s.get('name', 'unnamed') for s in selected]
+                selected = [scenarios[i] for i in sorted(set(selected_indices))]
+                names = [s.get("name", "unnamed") for s in selected]
                 print(
-                    f"\n[E2E_TEST] Running {len(selected)} test(s) at indices {sorted(set(selected_indices))}: {', '.join(names)}\n")
+                    f"\n[E2E_TEST] Running {len(selected)} test(s) at indices {sorted(set(selected_indices))}: {', '.join(names)}\n"
+                )
                 return selected
             else:
                 print(
-                    f"\n[E2E_TEST] WARNING: No valid test indices found. Running all tests.\n")
+                    f"\n[E2E_TEST] WARNING: No valid test indices found. Running all tests.\n"
+                )
         except ValueError as e:
             print(
-                f"\n[E2E_TEST] WARNING: Invalid E2E_TEST_INDEX value '{test_index_env}'. Must be comma-separated numbers. Running all tests.\n")
+                f"\n[E2E_TEST] WARNING: Invalid E2E_TEST_INDEX value '{test_index_env}'. Must be comma-separated numbers. Running all tests.\n"
+            )
 
     return scenarios
 
@@ -113,10 +122,17 @@ def create_mock_availability_client(frozen_time: Optional[datetime] = None) -> M
                     If provided, "tomorrow" will resolve to frozen_time + 1 day.
     """
     mock_availability_client = Mock(spec=AvailabilityClient)
+
     # Use mock_get_service_availability from tests.mocks to generate response
     # Wrap it to handle service_id type (mock expects int, but we may pass strings)
-    def mock_get_availability(organization_id=None, service_id=None, date=None,
-                              time_constraint=None, extra_params=None, **kwargs):
+    def mock_get_availability(
+        organization_id=None,
+        service_id=None,
+        date=None,
+        time_constraint=None,
+        extra_params=None,
+        **kwargs,
+    ):
         # Convert service_id to int if needed (mock expects int but doesn't use the value)
         service_id_int = 1  # Default
         if service_id is not None:
@@ -127,14 +143,16 @@ def create_mock_availability_client(frozen_time: Optional[datetime] = None) -> M
 
         # Resolve relative dates like "tomorrow" to actual dates
         from datetime import timedelta
+
         resolved_date = date
         if date and isinstance(date, str):
             date_lower = date.lower().strip()
             if date_lower == "tomorrow":
                 # Resolve "tomorrow" to frozen_time + 1 day (or default if no frozen_time)
                 if frozen_time:
-                    resolved_date = (
-                        frozen_time + timedelta(days=1)).strftime("%Y-%m-%d")
+                    resolved_date = (frozen_time + timedelta(days=1)).strftime(
+                        "%Y-%m-%d"
+                    )
                 else:
                     resolved_date = "2026-01-16"  # Default fallback
             elif date_lower in ("today", "now"):
@@ -144,22 +162,24 @@ def create_mock_availability_client(frozen_time: Optional[datetime] = None) -> M
                 else:
                     resolved_date = "2026-01-15"  # Default fallback
             # If date is already in YYYY-MM-DD format, use it as-is
-            elif len(date_lower) == 10 and date_lower[4] == "-" and date_lower[7] == "-":
+            elif (
+                len(date_lower) == 10 and date_lower[4] == "-" and date_lower[7] == "-"
+            ):
                 # Looks like YYYY-MM-DD format, use as-is
                 resolved_date = date
             # Otherwise, try to use frozen_time + 1 day or default
             else:
                 if frozen_time:
-                    resolved_date = (
-                        frozen_time + timedelta(days=1)).strftime("%Y-%m-%d")
+                    resolved_date = (frozen_time + timedelta(days=1)).strftime(
+                        "%Y-%m-%d"
+                    )
                 else:
                     resolved_date = "2026-01-16"
 
         # Default to frozen_time + 1 day if no date provided and frozen_time is available
         if not resolved_date:
             if frozen_time:
-                resolved_date = (frozen_time + timedelta(days=1)
-                                 ).strftime("%Y-%m-%d")
+                resolved_date = (frozen_time + timedelta(days=1)).strftime("%Y-%m-%d")
             else:
                 resolved_date = "2026-01-16"
 
@@ -169,18 +189,29 @@ def create_mock_availability_client(frozen_time: Optional[datetime] = None) -> M
             date=resolved_date,
             time_constraint=time_constraint,
             extra_params=extra_params,
-            **kwargs
+            **kwargs,
         )
-    mock_availability_client.get_service_availability.side_effect = mock_get_availability
+
+    mock_availability_client.get_service_availability.side_effect = (
+        mock_get_availability
+    )
     return mock_availability_client
 
 
 def create_mock_booking_client() -> Mock:
     """Create a mocked booking client using tests.mocks."""
     mock_booking_client = Mock(spec=BookingClient)
+
     # Use mock_create_booking from tests.mocks to generate response
-    def mock_booking(organization_id=None, customer_id=None, booking_type=None,
-                     item_id=None, start_time=None, end_time=None, **kwargs):
+    def mock_booking(
+        organization_id=None,
+        customer_id=None,
+        booking_type=None,
+        item_id=None,
+        start_time=None,
+        end_time=None,
+        **kwargs,
+    ):
         return mock_create_booking(
             organization_id=organization_id or 1,
             customer_id=customer_id or 1,
@@ -188,8 +219,9 @@ def create_mock_booking_client() -> Mock:
             item_id=item_id or 1,
             start_time=start_time,
             end_time=end_time,
-            **kwargs
+            **kwargs,
         )
+
     mock_booking_client.create_booking.side_effect = mock_booking
     return mock_booking_client
 
@@ -198,9 +230,7 @@ def create_mock_organization_client() -> Mock:
     """Create a mocked organization client."""
     mock_org_client = Mock(spec=OrganizationClient)
     mock_org_client.get_details.return_value = {
-        "organization": {
-            "businessCategoryId": 1  # Maps to "service" domain
-        }
+        "organization": {"businessCategoryId": 1}  # Maps to "service" domain
     }
     return mock_org_client
 
@@ -242,7 +272,7 @@ def assert_turn_expectations(
     result: Dict[str, Any],
     expectations: Dict[str, Any],
     turn_number: int,
-    scenario_name: str
+    scenario_name: str,
 ) -> None:
     """
     Assert turn expectations against Core result.
@@ -250,8 +280,9 @@ def assert_turn_expectations(
     Only asserts Core behavior, not Luma internals.
     """
     # Assert success
-    assert result.get("success") is True, \
-        f"[{scenario_name}] Turn {turn_number}: Expected success=True, got {result.get('success')} with error: {result.get('error')}"
+    assert (
+        result.get("success") is True
+    ), f"[{scenario_name}] Turn {turn_number}: Expected success=True, got {result.get('success')} with error: {result.get('error')}"
 
     # Normalize result using planning test adapter (same as planning tests)
     # This ensures we assert against the same contract as planning tests
@@ -265,32 +296,37 @@ def assert_turn_expectations(
 
     # Assert intent_name is non-empty (critical invariant)
     # Skip this assertion if allow_empty_intent=true (for pre-intent slot collection)
-    intent_name = normalized.get("intent") or plan.get(
-        "intent_name") or plan.get("intent")
+    intent_name = (
+        normalized.get("intent") or plan.get("intent_name") or plan.get("intent")
+    )
     if not expectations.get("allow_empty_intent", False):
-        assert intent_name and intent_name != "", \
-            f"[{scenario_name}] Turn {turn_number}: Expected non-empty intent_name, got {intent_name}"
+        assert (
+            intent_name and intent_name != ""
+        ), f"[{scenario_name}] Turn {turn_number}: Expected non-empty intent_name, got {intent_name}"
 
     # Assert expected status
     if "status" in expectations:
         expected_status = expectations["status"]
         actual_status = normalized.get("status")
-        assert actual_status == expected_status, \
-            f"[{scenario_name}] Turn {turn_number}: Expected status {expected_status}, got {actual_status}"
+        assert (
+            actual_status == expected_status
+        ), f"[{scenario_name}] Turn {turn_number}: Expected status {expected_status}, got {actual_status}"
 
     # Assert expected action (from plan.action, same as planning tests)
     if "action" in expectations:
         expected_action = expectations["action"]
         actual_action = plan.get("action")
-        assert actual_action == expected_action, \
-            f"[{scenario_name}] Turn {turn_number}: Expected action {expected_action}, got {actual_action}"
+        assert (
+            actual_action == expected_action
+        ), f"[{scenario_name}] Turn {turn_number}: Expected action {expected_action}, got {actual_action}"
 
     # Assert missing_slots
     if "missing_slots" in expectations:
         expected_missing = set(expectations["missing_slots"])
         actual_missing = set(normalized.get("missing_slots", []))
-        assert actual_missing == expected_missing, \
-            f"[{scenario_name}] Turn {turn_number}: Expected missing_slots {expected_missing}, got {actual_missing}"
+        assert (
+            actual_missing == expected_missing
+        ), f"[{scenario_name}] Turn {turn_number}: Expected missing_slots {expected_missing}, got {actual_missing}"
 
     # Assert intent preservation (if expected)
     if expectations.get("intent_preserved"):
@@ -314,8 +350,11 @@ _scenarios_for_parametrize = load_scenarios()
 def _scenario_id(scenario: Dict[str, Any]) -> str:
     """Generate test ID with index and name."""
     # Load all scenarios to get index
-    scenarios_file = Path(__file__).parent / "scenarios" / \
-        "followup_confirm_appointment_real_luma.yaml"
+    scenarios_file = (
+        Path(__file__).parent
+        / "scenarios"
+        / "followup_confirm_appointment_real_luma.yaml"
+    )
     if scenarios_file.exists():
         with open(scenarios_file, "r", encoding="utf-8") as f:
             data = yaml.safe_load(f)
@@ -324,8 +363,8 @@ def _scenario_id(scenario: Dict[str, Any]) -> str:
             idx = all_scenarios.index(scenario)
             return f"{idx}-{scenario.get('name', 'unnamed')}"
         except ValueError:
-            return scenario.get('name', 'unnamed')
-    return scenario.get('name', 'unnamed')
+            return scenario.get("name", "unnamed")
+    return scenario.get("name", "unnamed")
 
 
 @pytest.mark.parametrize("scenario", _scenarios_for_parametrize, ids=_scenario_id)
@@ -341,8 +380,7 @@ def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
 
     # Extract aliases from scenario (same pattern as planning tests)
     # Default to common service aliases if not specified
-    aliases = scenario.get(
-        "aliases", {"haircut": "haircut", "massage": "massage"})
+    aliases = scenario.get("aliases", {"haircut": "haircut", "massage": "massage"})
 
     # Frozen time: 2026-01-15 10:00:00 UTC
     # "tomorrow" should resolve to 2026-01-16
@@ -356,8 +394,7 @@ def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
     # Create mocked clients for execution
     mock_org_client = create_mock_organization_client()
     # Pass frozen_time to availability mock so it can resolve relative dates like "tomorrow"
-    mock_availability_client = create_mock_availability_client(
-        frozen_time=frozen_time)
+    mock_availability_client = create_mock_availability_client(frozen_time=frozen_time)
     mock_booking_client = create_mock_booking_client()
 
     # Create session store
@@ -382,7 +419,7 @@ def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
             # Only use session store after first turn
             session_store=session_store if turn_idx > 1 else None,
             frozen_time=frozen_time,
-            organization_id=1
+            organization_id=1,
         )
 
         # Assert turn expectations
@@ -390,8 +427,9 @@ def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
 
         # Extract intent from normalized result (same as assertion function)
         normalized = normalize_planning_outcome(result)
-        current_intent = normalized.get("intent") or normalized.get(
-            "plan", {}).get("intent_name")
+        current_intent = normalized.get("intent") or normalized.get("plan", {}).get(
+            "intent_name"
+        )
 
         # Skip intent tracking for turns with allow_empty_intent (pre-intent slot collection)
         if not expectations.get("allow_empty_intent", False):
@@ -399,14 +437,16 @@ def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
             if turn_idx > 1 and previous_intent:
                 if expectations.get("intent_switched"):
                     # Intent should have changed from previous turn
-                    assert current_intent != previous_intent, \
-                        f"[{scenario_name}] Turn {turn_idx}: Intent should have switched from turn {turn_idx - 1}. " \
+                    assert current_intent != previous_intent, (
+                        f"[{scenario_name}] Turn {turn_idx}: Intent should have switched from turn {turn_idx - 1}. "
                         f"Previous: {previous_intent}, Current: {current_intent} (expected different)"
+                    )
                 elif expectations.get("intent_preserved", False):
                     # Intent should be preserved from previous turn
-                    assert current_intent == previous_intent or current_intent != "", \
-                        f"[{scenario_name}] Turn {turn_idx}: Intent should be preserved from turn {turn_idx - 1}. " \
+                    assert current_intent == previous_intent or current_intent != "", (
+                        f"[{scenario_name}] Turn {turn_idx}: Intent should be preserved from turn {turn_idx - 1}. "
                         f"Previous: {previous_intent}, Current: {current_intent}"
+                    )
 
             # Update previous intent for next turn
             if current_intent and current_intent != "":
@@ -416,12 +456,14 @@ def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
         expected_action = expectations.get("action")
         if expected_action == "CONFIRM_APPOINTMENT":
             # Assert booking_client.create_booking was called exactly once
-            assert mock_booking_client.create_booking.called, \
-                f"[{scenario_name}] Turn {turn_idx}: Expected booking_client.create_booking to be called, but it was not"
+            assert (
+                mock_booking_client.create_booking.called
+            ), f"[{scenario_name}] Turn {turn_idx}: Expected booking_client.create_booking to be called, but it was not"
 
-            assert mock_booking_client.create_booking.call_count == 1, \
-                f"[{scenario_name}] Turn {turn_idx}: Expected booking_client.create_booking to be called exactly once, " \
+            assert mock_booking_client.create_booking.call_count == 1, (
+                f"[{scenario_name}] Turn {turn_idx}: Expected booking_client.create_booking to be called exactly once, "
                 f"but it was called {mock_booking_client.create_booking.call_count} times"
+            )
 
             # Assert returned result includes booking reference / outcome
             # Check execution result for booking data
@@ -429,15 +471,19 @@ def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
             if isinstance(execution_result, dict):
                 # Look for booking reference in various possible locations
                 booking_data = (
-                    execution_result.get("booking") or
-                    execution_result.get("booking_code") or
-                    execution_result.get("booking_id") or
-                    (execution_result.get("data", {}) if isinstance(
-                        execution_result.get("data"), dict) else {}).get("booking")
+                    execution_result.get("booking")
+                    or execution_result.get("booking_code")
+                    or execution_result.get("booking_id")
+                    or (
+                        execution_result.get("data", {})
+                        if isinstance(execution_result.get("data"), dict)
+                        else {}
+                    ).get("booking")
                 )
-                assert booking_data is not None, \
-                    f"[{scenario_name}] Turn {turn_idx}: Expected booking reference/outcome in result, " \
+                assert booking_data is not None, (
+                    f"[{scenario_name}] Turn {turn_idx}: Expected booking reference/outcome in result, "
                     f"but found none. Result keys: {list(execution_result.keys())}"
+                )
 
             # Assert session is cleared or marked RESOLVED after confirmation
             # Check if session was cleared (not saved for next turn)
@@ -478,22 +524,26 @@ def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
                 # Check if execution_result has availability_fingerprint (from SEARCH_AVAILABILITY)
                 if execution_result.get("availability_fingerprint"):
                     session_state["availability_fingerprint"] = execution_result.get(
-                        "availability_fingerprint")
+                        "availability_fingerprint"
+                    )
                 # Also check plan for fingerprint (attached by orchestrator for persistence)
                 elif plan_obj.get("availability_fingerprint"):
                     session_state["availability_fingerprint"] = plan_obj.get(
-                        "availability_fingerprint")
+                        "availability_fingerprint"
+                    )
 
                 # CRITICAL: Preserve resolved_datetime_range from execution result
                 # The orchestrator constructs and attaches it when SEARCH_AVAILABILITY succeeds
                 # This enables CONFIRM_APPOINTMENT to reuse the validated datetime range
                 if execution_result.get("resolved_datetime_range"):
                     session_state["resolved_datetime_range"] = execution_result.get(
-                        "resolved_datetime_range")
+                        "resolved_datetime_range"
+                    )
                 # Also check plan for resolved_datetime_range (attached by orchestrator for persistence)
                 elif plan_obj.get("resolved_datetime_range"):
                     session_state["resolved_datetime_range"] = plan_obj.get(
-                        "resolved_datetime_range")
+                        "resolved_datetime_range"
+                    )
 
             # Also preserve from previous session if present (cross-turn persistence)
             previous_session = session_store.get_session(user_id)
@@ -501,12 +551,14 @@ def test_real_luma_followup_confirm_scenario(scenario: Dict[str, Any]):
                 if previous_session.get("availability_fingerprint"):
                     # Only preserve if not already set from execution result
                     if "availability_fingerprint" not in session_state:
-                        session_state["availability_fingerprint"] = previous_session.get(
-                            "availability_fingerprint")
+                        session_state["availability_fingerprint"] = (
+                            previous_session.get("availability_fingerprint")
+                        )
                 if previous_session.get("resolved_datetime_range"):
                     # Only preserve if not already set from execution result
                     if "resolved_datetime_range" not in session_state:
                         session_state["resolved_datetime_range"] = previous_session.get(
-                            "resolved_datetime_range")
+                            "resolved_datetime_range"
+                        )
 
             session_store.save_session(user_id, session_state)

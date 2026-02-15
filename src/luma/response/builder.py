@@ -8,11 +8,11 @@ This module ensures response object construction is separated from orchestration
 """
 
 import logging
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
-from ..trace import log_field_removal
 from ..config import config
-from ..config.core import STATUS_READY, STATUS_NEEDS_CLARIFICATION
+from ..config.core import STATUS_NEEDS_CLARIFICATION, STATUS_READY
+from ..trace import log_field_removal
 
 logger = logging.getLogger(__name__)
 
@@ -33,21 +33,14 @@ def format_service_for_response(service: Dict[str, Any]) -> Dict[str, Any]:
     # If resolved_alias exists (from explicit tenant alias match), use it
     resolved_alias = service.get("resolved_alias")
     if resolved_alias:
-        return {
-            "text": resolved_alias,
-            "canonical": service.get("canonical", "")
-        }
+        return {"text": resolved_alias, "canonical": service.get("canonical", "")}
 
     # Otherwise, use existing text field
-    return {
-        "text": service.get("text", ""),
-        "canonical": service.get("canonical", "")
-    }
+    return {"text": service.get("text", ""), "canonical": service.get("canonical", "")}
 
 
 def build_issues(
-    missing_slots: List[str],
-    time_issues: Optional[List[Dict[str, Any]]] = None
+    missing_slots: List[str], time_issues: Optional[List[Dict[str, Any]]] = None
 ) -> Dict[str, Any]:
     """
     Build issues object from missing_slots and time_issues.
@@ -80,7 +73,7 @@ def build_issues(
                     "raw": issue.get("raw"),
                     "start_hour": issue.get("start_hour"),
                     "end_hour": issue.get("end_hour"),
-                    "candidates": issue.get("candidates", [])
+                    "candidates": issue.get("candidates", []),
                 }
 
     return issues
@@ -99,7 +92,7 @@ class ResponseBuilder:
         booking_payload: Dict[str, Any],
         intent_name: str,
         calendar_booking: Dict[str, Any],
-        request_id: Optional[str] = None
+        request_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Format booking payload for API response based on intent type.
@@ -107,7 +100,7 @@ class ResponseBuilder:
         Applies intent-specific field filtering and normalization:
         - CREATE_APPOINTMENT: only datetime_range, removes date/time/date_range/time_range
         - CREATE_RESERVATION: only date_range, removes datetime_range/date/time/time_range
-        
+
         HARD INVARIANT: MODIFY_BOOKING and CANCEL_BOOKING must NEVER produce booking_payload.
         This function should only be called for CREATE_APPOINTMENT and CREATE_RESERVATION.
 
@@ -124,9 +117,11 @@ class ResponseBuilder:
         if intent_name in {"MODIFY_BOOKING", "CANCEL_BOOKING"}:
             logger.error(
                 f"INVARIANT VIOLATION: format_booking_payload called for {intent_name}",
-                extra={'request_id': request_id, 'intent_name': intent_name}
+                extra={"request_id": request_id, "intent_name": intent_name},
             )
-            raise ValueError(f"format_booking_payload must not be called for {intent_name}")
+            raise ValueError(
+                f"format_booking_payload must not be called for {intent_name}"
+            )
         # Normalize services to public canonical form
         if booking_payload.get("services"):
             booking_payload["services"] = [
@@ -141,14 +136,21 @@ class ResponseBuilder:
         if intent_name == "CREATE_APPOINTMENT":
             # Always copy datetime_range from calendar_booking if present
             # This comes from calendar binding (authoritative for this request)
-            datetime_range_from_binder = calendar_booking.get(
-                "datetime_range") if calendar_booking else None
+            datetime_range_from_binder = (
+                calendar_booking.get("datetime_range") if calendar_booking else None
+            )
             if datetime_range_from_binder:
                 formatted["datetime_range"] = datetime_range_from_binder
 
             # Slot tracking: log field removals for CREATE_APPOINTMENT
-            fields_to_remove = ["date", "time", "date_range",
-                                "time_range", "start_date", "end_date"]
+            fields_to_remove = [
+                "date",
+                "time",
+                "date_range",
+                "time_range",
+                "start_date",
+                "end_date",
+            ]
             for field in fields_to_remove:
                 if field in formatted:
                     if config.LOG_SLOT_TRACKING:
@@ -158,7 +160,7 @@ class ResponseBuilder:
                             formatted.get(field),
                             context={"intent": "CREATE_APPOINTMENT"},
                             request_id=request_id,
-                            enabled=config.LOG_SLOT_TRACKING
+                            enabled=config.LOG_SLOT_TRACKING,
                         )
                     formatted.pop(field, None)
 
@@ -168,13 +170,19 @@ class ResponseBuilder:
             if "start_date" in calendar_booking and "end_date" in calendar_booking:
                 formatted["date_range"] = {
                     "start": calendar_booking["start_date"],
-                    "end": calendar_booking["end_date"]
+                    "end": calendar_booking["end_date"],
                 }
 
             # Clean up legacy fields
             # Slot tracking: log field removals for CREATE_RESERVATION
-            fields_to_remove = ["datetime_range", "date",
-                                "time", "time_range", "start_date", "end_date"]
+            fields_to_remove = [
+                "datetime_range",
+                "date",
+                "time",
+                "time_range",
+                "start_date",
+                "end_date",
+            ]
             for field in fields_to_remove:
                 if field in formatted:
                     if config.LOG_SLOT_TRACKING:
@@ -184,7 +192,7 @@ class ResponseBuilder:
                             formatted.get(field),
                             context={"intent": "CREATE_RESERVATION"},
                             request_id=request_id,
-                            enabled=config.LOG_SLOT_TRACKING
+                            enabled=config.LOG_SLOT_TRACKING,
                         )
                     formatted.pop(field, None)
 
@@ -197,7 +205,7 @@ class ResponseBuilder:
                     formatted.get("booking_state"),
                     context={"intent": intent_name},
                     request_id=request_id,
-                    enabled=config.LOG_SLOT_TRACKING
+                    enabled=config.LOG_SLOT_TRACKING,
                 )
             formatted.pop("booking_state", None)
 
@@ -207,15 +215,15 @@ class ResponseBuilder:
         self,
         intent_payload: Dict[str, Any],
         facts: Optional[Dict[str, Any]] = None,
-        debug_data: Optional[Dict[str, Any]] = None
+        debug_data: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Build the final API response body from extracted facts and intent only.
-        
+
         Response is built ONLY from:
         - intent (name + confidence)
         - facts (dates, times, date_time_pairs, service_id, booking_id)
-        
+
         Does NOT use:
         - status
         - issues

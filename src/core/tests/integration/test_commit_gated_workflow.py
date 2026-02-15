@@ -8,23 +8,26 @@ Tests the full commit-gated workflow:
 Traverses: orchestrator → router → renderer
 """
 
-import pytest
 from unittest.mock import Mock, call
 
+import pytest
+
 from core.orchestration.orchestrator import handle_message
+
 # Optional import: whatsapp_renderer may not exist in all environments
 try:
     from core.rendering.whatsapp_renderer import render_outcome_to_whatsapp
+
     HAS_WHATSAPP_RENDERER = True
 except ImportError:
     # whatsapp_renderer not available - skip rendering validation
     HAS_WHATSAPP_RENDERER = False
     render_outcome_to_whatsapp = None
-from core.orchestration.nlu import LumaClient
-from core.orchestration.execution.clients.booking_client import BookingClient
-from core.orchestration.clients.customer_client import CustomerClient
 from core.orchestration.clients.catalog_client import CatalogClient
+from core.orchestration.clients.customer_client import CustomerClient
 from core.orchestration.clients.organization_client import OrganizationClient
+from core.orchestration.execution.clients.booking_client import BookingClient
+from core.orchestration.nlu import LumaClient
 
 
 def test_commit_gated_workflow_pending_then_confirmed():
@@ -56,7 +59,7 @@ def test_commit_gated_workflow_pending_then_confirmed():
         "organization": {
             "id": 1,
             "businessCategoryId": 1,  # Valid service category ID
-            "domain": "service"
+            "domain": "service",
         }
     }
 
@@ -65,27 +68,27 @@ def test_commit_gated_workflow_pending_then_confirmed():
     mock_catalog_client.get_services.return_value = {
         "catalog_last_updated_at": "2024-01-01T00:00:00Z",
         "business_category_id": 1,  # Match businessCategoryId from organization
-        "services": [{"id": 1, "name": "Haircut", "canonical": "haircut", "is_active": True, "duration": 60}]
+        "services": [
+            {
+                "id": 1,
+                "name": "Haircut",
+                "canonical": "haircut",
+                "is_active": True,
+                "duration": 60,
+            }
+        ],
     }
-    mock_catalog_client.get_reservation.return_value = {
-        "room_types": [], "extras": []}
+    mock_catalog_client.get_reservation.return_value = {"room_types": [], "extras": []}
 
     # Mock customer response
-    mock_customer_client.get_customer.return_value = {
-        "customer_id": 100,
-        "id": 100
-    }
+    mock_customer_client.get_customer.return_value = {"customer_id": 100, "id": 100}
 
     # Mock booking creation response (for confirmed state)
     mock_booking_client.create_booking.return_value = {
         "booking_code": "ABC123",
         "code": "ABC123",
         "status": "pending",
-        "booking": {
-            "id": 1,
-            "booking_code": "ABC123",
-            "status": "pending"
-        }
+        "booking": {"id": 1, "booking_code": "ABC123", "status": "pending"},
     }
 
     # ============================================
@@ -98,14 +101,11 @@ def test_commit_gated_workflow_pending_then_confirmed():
     # facts_to_slots expects dates and times as lists, not singular
     luma_response_pending = {
         "success": True,
-        "intent": {
-            "name": "CREATE_APPOINTMENT",
-            "confidence": 0.95
-        },
+        "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
         "needs_clarification": False,
         "facts": {
             "service_id": "haircut",
-            "dates": ["2024-01-15"]
+            "dates": ["2024-01-15"],
             # time is missing
         },
         "booking": {
@@ -113,13 +113,11 @@ def test_commit_gated_workflow_pending_then_confirmed():
             "services": [{"text": "haircut", "canonical": "haircut", "id": 1}],
             "datetime_range": None,  # Missing time
             "confirmation_state": "pending",
-            "booking_state": "RESOLVED"
+            "booking_state": "RESOLVED",
         },
-        "issues": {
-            "time": "missing"
-        },
+        "issues": {"time": "missing"},
         "missing_slots": ["time"],
-        "context": {}
+        "context": {},
     }
 
     mock_luma_client.resolve.return_value = luma_response_pending
@@ -134,7 +132,7 @@ def test_commit_gated_workflow_pending_then_confirmed():
         booking_client=mock_booking_client,
         customer_client=mock_customer_client,
         catalog_client=mock_catalog_client,
-        organization_client=mock_org_client
+        organization_client=mock_org_client,
     )
 
     # Assert: No commit action executed (booking.create should NOT be called)
@@ -143,7 +141,7 @@ def test_commit_gated_workflow_pending_then_confirmed():
     # Assert: Plan structure is present
     assert result_pending["success"] is True
     plan = result_pending["result"]
-    
+
     # Note: When slots are missing, status is NEEDS_CLARIFICATION, not AWAITING_CONFIRMATION
     # The system prioritizes slot collection over confirmation when slots are missing
     # Assert: NEEDS_CLARIFICATION status (slots are missing: date, service_id, time)
@@ -171,15 +169,12 @@ def test_commit_gated_workflow_pending_then_confirmed():
     # CRITICAL: Must provide facts structure with slots for proper slot extraction
     luma_response_confirmed = {
         "success": True,
-        "intent": {
-            "name": "CREATE_APPOINTMENT",
-            "confidence": 0.95
-        },
+        "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
         "needs_clarification": False,
         "facts": {
             "service_id": "haircut",
             "dates": ["2024-01-15"],
-            "times": ["14:00:00"]
+            "times": ["14:00:00"],
         },
         "booking": {
             "booking_type": "service",
@@ -187,14 +182,14 @@ def test_commit_gated_workflow_pending_then_confirmed():
             "datetime_range": {
                 # Python 3.10 fromisoformat doesn't support 'Z', use '+00:00'
                 "start": "2024-01-15T14:00:00+00:00",
-                "end": "2024-01-15T15:00:00+00:00"
+                "end": "2024-01-15T15:00:00+00:00",
             },
             "confirmation_state": "confirmed",  # Now confirmed
-            "booking_state": "RESOLVED"
+            "booking_state": "RESOLVED",
         },
         "issues": {},
         "missing_slots": [],
-        "context": {}
+        "context": {},
     }
 
     mock_luma_client.resolve.return_value = luma_response_confirmed
@@ -209,7 +204,7 @@ def test_commit_gated_workflow_pending_then_confirmed():
         booking_client=mock_booking_client,
         customer_client=mock_customer_client,
         catalog_client=mock_catalog_client,
-        organization_client=mock_org_client
+        organization_client=mock_org_client,
     )
 
     # Note: handle_message does NOT support booking_client execution yet
@@ -220,7 +215,7 @@ def test_commit_gated_workflow_pending_then_confirmed():
     plan = result_confirmed["result"]
     assert plan["status"] == "READY"
     assert plan.get("missing_slots") == []
-    
+
     # Note: Booking execution would happen in a separate layer that supports booking_client
     # For now, handle_message only supports availability_client execution
     # mock_booking_client.create_booking.assert_not_called()  # Expected: not called by handle_message
@@ -245,7 +240,7 @@ def test_commit_gated_workflow_blocked_when_needs_clarification():
         "organization": {
             "id": 1,
             "businessCategoryId": 1,  # Valid service category ID
-            "domain": "service"
+            "domain": "service",
         }
     }
 
@@ -254,10 +249,7 @@ def test_commit_gated_workflow_blocked_when_needs_clarification():
     # CRITICAL: Must provide facts structure with slots for proper slot extraction
     luma_response = {
         "success": True,
-        "intent": {
-            "name": "CREATE_APPOINTMENT",
-            "confidence": 0.95
-        },
+        "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
         "needs_clarification": True,  # Clarification needed
         "clarification_reason": "MISSING_TIME",
         "facts": {
@@ -268,13 +260,11 @@ def test_commit_gated_workflow_blocked_when_needs_clarification():
             "booking_type": "service",
             "services": [{"text": "haircut", "canonical": "haircut"}],
             "confirmation_state": "confirmed",  # Confirmed but still needs clarification
-            "booking_state": "PARTIAL"
+            "booking_state": "PARTIAL",
         },
-        "issues": {
-            "time": "missing"
-        },
+        "issues": {"time": "missing"},
         "missing_slots": ["time"],
-        "context": {}
+        "context": {},
     }
 
     mock_luma_client.resolve.return_value = luma_response
@@ -286,7 +276,7 @@ def test_commit_gated_workflow_blocked_when_needs_clarification():
         domain="service",
         luma_client=mock_luma_client,
         booking_client=mock_booking_client,
-        organization_client=mock_org_client
+        organization_client=mock_org_client,
     )
 
     # Assert: No commit action executed
@@ -320,7 +310,7 @@ def test_commit_gated_workflow_fallback_actions_allowed():
         "organization": {
             "id": 1,
             "businessCategoryId": 1,  # Valid service category ID
-            "domain": "service"
+            "domain": "service",
         }
     }
 
@@ -330,28 +320,23 @@ def test_commit_gated_workflow_fallback_actions_allowed():
     # CRITICAL: Must provide facts structure with slots for proper slot extraction
     luma_response = {
         "success": True,
-        "intent": {
-            "name": "CREATE_APPOINTMENT",
-            "confidence": 0.95
-        },
+        "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
         "needs_clarification": False,
         "facts": {
             "service_id": "haircut",
-            "dates": ["2024-01-15"]
+            "dates": ["2024-01-15"],
             # time is missing
         },
         "booking": {
             "booking_type": "service",
             "services": [{"text": "haircut", "canonical": "haircut", "id": 1}],
             "confirmation_state": "pending",
-            "booking_state": "RESOLVED"
+            "booking_state": "RESOLVED",
         },
-        "issues": {
-            "time": "missing"
-        },
+        "issues": {"time": "missing"},
         # Missing time should trigger SEARCH_AVAILABILITY fallback
         "missing_slots": ["time"],
-        "context": {}
+        "context": {},
     }
 
     mock_luma_client.resolve.return_value = luma_response
@@ -363,7 +348,7 @@ def test_commit_gated_workflow_fallback_actions_allowed():
         domain="service",
         luma_client=mock_luma_client,
         booking_client=mock_booking_client,
-        organization_client=mock_org_client
+        organization_client=mock_org_client,
     )
 
     # Assert: No commit action executed (CONFIRM_APPOINTMENT blocked)
@@ -375,7 +360,7 @@ def test_commit_gated_workflow_fallback_actions_allowed():
     assert result["success"] is True
     plan = result["result"]
     assert plan["status"] == "NEEDS_CLARIFICATION"
-    
+
     # Assert: missing_slots is present in plan
     assert "missing_slots" in plan
     assert "time" in plan["missing_slots"]

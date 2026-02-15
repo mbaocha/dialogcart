@@ -32,10 +32,12 @@ def is_durable_intent(intent_name: str) -> bool:
 
     try:
         from core.policy.intent_policy import get_intent_durable
+
         return get_intent_durable(intent_name)
     except (ImportError, Exception) as e:
         # Fallback: log error and return False (safe default)
         import logging
+
         logger = logging.getLogger(__name__)
         logger.warning(
             f"Failed to check durable status for intent '{intent_name}': {e}. "

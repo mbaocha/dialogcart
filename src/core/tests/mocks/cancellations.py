@@ -5,8 +5,8 @@ Placeholder for cancellation endpoint mocks.
 Currently not required for CREATE_APPOINTMENT flow.
 """
 
-from typing import Dict, Any, Optional, Literal
 import logging
+from typing import Any, Dict, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +20,13 @@ def mock_cancel_booking(
     notes: Optional[str] = None,
     refund_method: Optional[str] = None,
     notify_customer: Optional[bool] = None,
-    **kwargs
+    **kwargs,
 ) -> Dict[str, Any]:
     """
     Mock POST /api/internal/bookings/{bookingCode}/cancel endpoint.
-    
+
     Placeholder implementation - not required for CREATE_APPOINTMENT flow.
-    
+
     Args:
         booking_code: Booking code identifier
         organization_id: Organization identifier
@@ -36,16 +36,16 @@ def mock_cancel_booking(
         refund_method: Refund method (optional)
         notify_customer: Whether to notify customer (optional)
         **kwargs: Additional parameters (ignored)
-    
+
     Returns:
         Mock cancellation response
     """
-    logger.debug(f"[MOCK] Cancelling booking: code={booking_code}, type={cancellation_type}")
-    
+    logger.debug(
+        f"[MOCK] Cancelling booking: code={booking_code}, type={cancellation_type}"
+    )
+
     return {
         "status": "cancelled",
         "booking_code": booking_code,
-        "cancellation_type": cancellation_type
+        "cancellation_type": cancellation_type,
     }
-
-

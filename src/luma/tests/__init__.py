@@ -2,15 +2,15 @@
 Test utilities and scenarios for luma package.
 """
 
-from .scenarios import booking_scenarios, other_scenarios, scenarios
 from .assertions import (
-    assert_no_partial_binding,
+    assert_booking_block_consistency,
     assert_clarification_has_missing_slots,
+    assert_invariants,
+    assert_no_partial_binding,
     assert_ready_has_required_bound_fields,
     assert_status_missing_slots_consistency,
-    assert_booking_block_consistency,
-    assert_invariants
 )
+from .scenarios import booking_scenarios, other_scenarios, scenarios
 
 __all__ = [
     "booking_scenarios",
@@ -21,5 +21,5 @@ __all__ = [
     "assert_ready_has_required_bound_fields",
     "assert_status_missing_slots_consistency",
     "assert_booking_block_consistency",
-    "assert_invariants"
+    "assert_invariants",
 ]

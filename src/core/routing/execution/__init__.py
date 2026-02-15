@@ -5,7 +5,7 @@ This package provides execution backends for different environments.
 Execution is environment-dependent, orchestration is not.
 """
 
-from .config import get_execution_mode, EXECUTION_MODE_PRODUCTION, EXECUTION_MODE_TEST
+from .config import EXECUTION_MODE_PRODUCTION, EXECUTION_MODE_TEST, get_execution_mode
 from .test_backend import TestExecutionBackend
 
 __all__ = [
@@ -14,4 +14,3 @@ __all__ = [
     "EXECUTION_MODE_TEST",
     "TestExecutionBackend",
 ]
-

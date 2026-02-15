@@ -24,26 +24,28 @@ Usage:
 # Optional import: whatsapp_renderer may not exist in all environments
 try:
     from core.rendering.whatsapp_renderer import render_outcome_to_whatsapp
+
     HAS_WHATSAPP_RENDERER = True
 except ImportError:
     # whatsapp_renderer not available - skip rendering validation
     HAS_WHATSAPP_RENDERER = False
     render_outcome_to_whatsapp = None
-from core.orchestration.nlu import LumaClient
-from core.orchestration.clients.catalog_client import CatalogClient
-from core.orchestration.orchestrator import handle_message
-from core.routing.execution.test_backend import TestExecutionBackend
-from core.tests.integration.booking_scenarios import (
-    core_booking_scenarios,
-    STATUS_EXECUTED,
-    STATUS_AWAITING_CONFIRMATION,
-    STATUS_NEEDS_CLARIFICATION
-)
 import json
 import os
 import sys
 from pathlib import Path
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
+
+from core.orchestration.clients.catalog_client import CatalogClient
+from core.orchestration.nlu import LumaClient
+from core.orchestration.orchestrator import handle_message
+from core.routing.execution.test_backend import TestExecutionBackend
+from core.tests.integration.booking_scenarios import (
+    STATUS_AWAITING_CONFIRMATION,
+    STATUS_EXECUTED,
+    STATUS_NEEDS_CLARIFICATION,
+    core_booking_scenarios,
+)
 
 # Set execution mode to test for deterministic E2E tests
 os.environ["CORE_EXECUTION_MODE"] = "test"
@@ -56,6 +58,7 @@ if str(src_path) not in sys.path:
 # Load environment variables (reuse logic from test_orchestrator_e2e.py)
 try:
     from dotenv import load_dotenv
+
     # Project root is two levels up from tests/integration/
     project_root = Path(__file__).parent.parent.parent.parent
     # Also check for .env in src/core/
@@ -78,15 +81,15 @@ except ImportError:
         if not env_path.exists():
             return
         try:
-            with open(env_path, 'r', encoding='utf-8') as f:
+            with open(env_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
                     # Skip empty lines and comments
-                    if not line or line.startswith('#'):
+                    if not line or line.startswith("#"):
                         continue
                     # Parse KEY=VALUE
-                    if '=' in line:
-                        key, value = line.split('=', 1)
+                    if "=" in line:
+                        key, value = line.split("=", 1)
                         key = key.strip()
                         value = value.strip()
                         # Remove quotes if present
@@ -124,11 +127,7 @@ def get_customer_details() -> Dict[str, Optional[Any]]:
     customer_id_str = os.getenv("TEST_CUSTOMER_ID")
     customer_id = int(customer_id_str) if customer_id_str else None
 
-    return {
-        "phone_number": phone_number,
-        "email": email,
-        "customer_id": customer_id
-    }
+    return {"phone_number": phone_number, "email": email, "customer_id": customer_id}
 
 
 class TestLumaClient(LumaClient):  # noqa: N801
@@ -147,7 +146,7 @@ class TestLumaClient(LumaClient):  # noqa: N801
         text: str,
         domain: str = "service",
         timezone: str = "UTC",
-        tenant_context: Optional[Dict[str, Any]] = None
+        tenant_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Override resolve to inject test aliases into tenant_context.
@@ -170,7 +169,9 @@ class TestCatalogClient(CatalogClient):  # noqa: N801
     __test__ = False  # Not a pytest test class
     """Custom CatalogClient that returns test aliases as catalog data."""
 
-    def __init__(self, test_aliases: Optional[Dict[str, str]] = None, domain: str = "service"):
+    def __init__(
+        self, test_aliases: Optional[Dict[str, str]] = None, domain: str = "service"
+    ):
         """
         Initialize with test aliases to return as catalog data.
 
@@ -186,33 +187,37 @@ class TestCatalogClient(CatalogClient):  # noqa: N801
         """Return test services matching test aliases."""
         services = []
         for alias_name, canonical_key in self.test_aliases.items():
-            services.append({
-                "name": alias_name,
-                "canonical": canonical_key,
-                "service_family_id": canonical_key,
-                "is_active": True
-            })
+            services.append(
+                {
+                    "name": alias_name,
+                    "canonical": canonical_key,
+                    "service_family_id": canonical_key,
+                    "is_active": True,
+                }
+            )
         return {
             "catalog_last_updated_at": "2026-01-01T00:00:00Z",
             "business_category_id": 1,
-            "services": services
+            "services": services,
         }
 
     def get_reservation(self, organization_id: int) -> Dict[str, Any]:
         """Return test rooms matching test aliases."""
         rooms = []
         for alias_name, canonical_key in self.test_aliases.items():
-            rooms.append({
-                "name": alias_name,
-                "canonical_key": canonical_key,
-                "canonical": canonical_key,
-                "is_active": True
-            })
+            rooms.append(
+                {
+                    "name": alias_name,
+                    "canonical_key": canonical_key,
+                    "canonical": canonical_key,
+                    "is_active": True,
+                }
+            )
         return {
             "catalog_last_updated_at": "2026-01-01T00:00:00Z",
             "business_category_id": 2,
             "room_types": rooms,  # catalog_cache will also add "rooms" alias
-            "extras": []
+            "extras": [],
         }
 
 
@@ -236,16 +241,13 @@ def _setup_test_org_domain(domain: str):
 
     # Pre-populate cache with test domain
     test_org_id = int(os.getenv("ORG_ID", "1"))
-    org_domain_cache._mem_set(test_org_id, {
-        "domain": domain,
-        "businessCategoryId": business_category_id
-    })
+    org_domain_cache._mem_set(
+        test_org_id, {"domain": domain, "businessCategoryId": business_category_id}
+    )
 
 
 def _validate_rendered_response(
-    outcome: Dict[str, Any],
-    expected: Dict[str, Any],
-    verbose: bool = False
+    outcome: Dict[str, Any], expected: Dict[str, Any], verbose: bool = False
 ) -> Tuple[bool, Optional[str]]:
     """
     Validate rendered response for an outcome.
@@ -261,7 +263,7 @@ def _validate_rendered_response(
     # Skip rendering validation if whatsapp_renderer is not available
     if not HAS_WHATSAPP_RENDERER:
         return True, None  # Skip rendering check
-    
+
     try:
         rendered = render_outcome_to_whatsapp(outcome)
         if not isinstance(rendered, dict):
@@ -276,7 +278,10 @@ def _validate_rendered_response(
         # Validate that all template variables were interpolated (no {{placeholders}})
         rendered_text = rendered.get("text", "")
         if "{{" in rendered_text or "}}" in rendered_text:
-            return False, f"Rendered text contains un-interpolated template variables: {rendered_text}"
+            return (
+                False,
+                f"Rendered text contains un-interpolated template variables: {rendered_text}",
+            )
 
         # Derive expected keywords from clarification reason if not explicitly provided
         def _derive_keywords_from_reason(reason: str) -> List[str]:
@@ -300,26 +305,35 @@ def _validate_rendered_response(
             contains_keywords = expected_rendered.get("contains_keywords")
             if not contains_keywords and expected_reason:
                 # Auto-derive keywords from clarification reason
-                contains_keywords = _derive_keywords_from_reason(
-                    expected_reason)
+                contains_keywords = _derive_keywords_from_reason(expected_reason)
 
             if contains_keywords:
                 rendered_lower = rendered_text.lower()
                 # Check if ANY keyword is present (not all)
                 found_keywords = [
-                    kw for kw in contains_keywords if kw.lower() in rendered_lower]
+                    kw for kw in contains_keywords if kw.lower() in rendered_lower
+                ]
                 if not found_keywords:
-                    return False, f"Rendered text missing expected keywords (none found): {contains_keywords}. Got: {rendered_text}"
+                    return (
+                        False,
+                        f"Rendered text missing expected keywords (none found): {contains_keywords}. Got: {rendered_text}",
+                    )
 
             # Check exact text match if provided (strict validation)
             expected_text = expected_rendered.get("text")
             if expected_text and rendered_text != expected_text:
-                return False, f"Rendered text mismatch: expected '{expected_text}', got '{rendered_text}'"
+                return (
+                    False,
+                    f"Rendered text mismatch: expected '{expected_text}', got '{rendered_text}'",
+                )
 
             # Check type
             expected_type = expected_rendered.get("type")
             if expected_type and rendered.get("type") != expected_type:
-                return False, f"Rendered type mismatch: expected '{expected_type}', got '{rendered.get('type')}'"
+                return (
+                    False,
+                    f"Rendered type mismatch: expected '{expected_type}', got '{rendered.get('type')}'",
+                )
         elif expected_reason:
             # No rendered_response specified, but we have a clarification reason
             # Auto-validate using derived keywords
@@ -328,13 +342,18 @@ def _validate_rendered_response(
                 rendered_lower = rendered_text.lower()
                 # Check if ANY keyword is present (not all)
                 found_keywords = [
-                    kw for kw in auto_keywords if kw.lower() in rendered_lower]
+                    kw for kw in auto_keywords if kw.lower() in rendered_lower
+                ]
                 if not found_keywords:
-                    return False, f"Rendered text missing expected keywords (auto-derived from {expected_reason}, none found): {auto_keywords}. Got: {rendered_text}"
+                    return (
+                        False,
+                        f"Rendered text missing expected keywords (auto-derived from {expected_reason}, none found): {auto_keywords}. Got: {rendered_text}",
+                    )
 
         if verbose:
             print(
-                f"[OK] Rendered response verified: {rendered.get('text', '')[:60]}...")
+                f"[OK] Rendered response verified: {rendered.get('text', '')[:60]}..."
+            )
         return True, None
     except Exception as render_error:
         return False, f"Rendering failed: {str(render_error)}"
@@ -344,7 +363,7 @@ def run_scenario_e2e(
     scenario: Dict[str, Any],
     scenario_index: int,
     customer_details: Dict[str, Optional[Any]],
-    verbose: bool = False
+    verbose: bool = False,
 ) -> Tuple[bool, Optional[str]]:
     """
     Test a single booking scenario end-to-end.
@@ -383,6 +402,7 @@ def run_scenario_e2e(
 
     # Clear catalog cache to ensure fresh data from TestCatalogClient
     from core.orchestration.cache.catalog_cache import catalog_cache
+
     test_org_id = int(os.getenv("ORG_ID", "1"))
     # Clear cache for this org/domain
     catalog_cache._mem_cache.pop((test_org_id, domain), None)
@@ -403,12 +423,12 @@ def run_scenario_e2e(
             text=sentence,
             domain=domain,  # Use core domain: "service" for appointments, "reservation" for reservations
             timezone="UTC",
-            phone_number=customer_details['phone_number'],
-            email=customer_details['email'],
-            customer_id=customer_details['customer_id'],
+            phone_number=customer_details["phone_number"],
+            email=customer_details["email"],
+            customer_id=customer_details["customer_id"],
             luma_client=luma_client,
             catalog_client=catalog_client,  # Pass test catalog client
-            verbose=verbose  # Pass verbose flag for detailed logging
+            verbose=verbose,  # Pass verbose flag for detailed logging
         )
 
         if verbose:
@@ -427,13 +447,15 @@ def run_scenario_e2e(
         # For clarification outcomes, intent might not be in outcome
         # Try to get it from Luma response if available
         actual_intent = (
-            outcome.get("intent_name") or
-            outcome.get("intent", {}).get("name") or
-            None
+            outcome.get("intent_name") or outcome.get("intent", {}).get("name") or None
         )
 
         # If intent not in outcome, try to get from Luma response
-        if not actual_intent and hasattr(luma_client, 'last_response') and luma_client.last_response:
+        if (
+            not actual_intent
+            and hasattr(luma_client, "last_response")
+            and luma_client.last_response
+        ):
             luma_response = luma_client.last_response
             if isinstance(luma_response, dict):
                 intent_obj = luma_response.get("intent", {})
@@ -446,14 +468,21 @@ def run_scenario_e2e(
         if expected_intent:
             if actual_intent:
                 if actual_intent != expected_intent:
-                    return False, f"Intent mismatch: expected {expected_intent}, got {actual_intent}"
+                    return (
+                        False,
+                        f"Intent mismatch: expected {expected_intent}, got {actual_intent}",
+                    )
             elif expected_status != STATUS_NEEDS_CLARIFICATION:
                 # For non-clarification outcomes, intent must be present
-                return False, f"Intent not found in outcome (expected {expected_intent})"
+                return (
+                    False,
+                    f"Intent not found in outcome (expected {expected_intent})",
+                )
             elif verbose:
                 # For clarification outcomes, intent might not be in outcome - this is OK
                 print(
-                    f"Note: Intent not found in outcome (expected {expected_intent}), but this is OK for NEEDS_CLARIFICATION")
+                    f"Note: Intent not found in outcome (expected {expected_intent}), but this is OK for NEEDS_CLARIFICATION"
+                )
 
         # Handle different expected statuses
         if expected_status == STATUS_NEEDS_CLARIFICATION:
@@ -466,11 +495,13 @@ def run_scenario_e2e(
             if expected_reason:
                 actual_reason = outcome.get("clarification_reason")
                 if actual_reason != expected_reason:
-                    return False, f"Clarification reason mismatch: expected {expected_reason}, got {actual_reason}"
+                    return (
+                        False,
+                        f"Clarification reason mismatch: expected {expected_reason}, got {actual_reason}",
+                    )
 
             # Second assertion: Test rendered response
-            success, error_msg = _validate_rendered_response(
-                outcome, expected, verbose)
+            success, error_msg = _validate_rendered_response(outcome, expected, verbose)
             if not success:
                 return False, error_msg
 
@@ -485,7 +516,8 @@ def run_scenario_e2e(
             if actual_status == "AWAITING_CONFIRMATION":
                 # Second assertion: Test rendered response for AWAITING_CONFIRMATION outcome
                 success, error_msg = _validate_rendered_response(
-                    outcome, expected, verbose)
+                    outcome, expected, verbose
+                )
                 if not success:
                     return False, error_msg
 
@@ -498,15 +530,18 @@ def run_scenario_e2e(
                     text="yes, confirm it",
                     domain=domain,
                     timezone="UTC",
-                    phone_number=customer_details['phone_number'],
-                    email=customer_details['email'],
-                    customer_id=customer_details['customer_id'],
+                    phone_number=customer_details["phone_number"],
+                    email=customer_details["email"],
+                    customer_id=customer_details["customer_id"],
                     luma_client=luma_client,
-                    catalog_client=catalog_client
+                    catalog_client=catalog_client,
                 )
 
                 if not confirm_result.get("success"):
-                    return False, f"Confirmation failed: {confirm_result.get('error', 'Unknown error')}"
+                    return (
+                        False,
+                        f"Confirmation failed: {confirm_result.get('error', 'Unknown error')}",
+                    )
 
                 confirm_outcome = confirm_result.get("result", {})
                 confirm_status = confirm_outcome.get("status")
@@ -518,27 +553,30 @@ def run_scenario_e2e(
                         text=sentence,
                         domain=domain,
                         timezone="UTC",
-                        phone_number=customer_details['phone_number'],
-                        email=customer_details['email'],
-                        customer_id=customer_details['customer_id'],
+                        phone_number=customer_details["phone_number"],
+                        email=customer_details["email"],
+                        customer_id=customer_details["customer_id"],
                         luma_client=luma_client,
-                        catalog_client=catalog_client
+                        catalog_client=catalog_client,
                     )
                     confirm_outcome = confirm_result.get("result", {})
                     confirm_status = confirm_outcome.get("status")
 
                 if confirm_status != "EXECUTED":
-                    return False, f"After confirmation, expected EXECUTED, got {confirm_status}"
+                    return (
+                        False,
+                        f"After confirmation, expected EXECUTED, got {confirm_status}",
+                    )
 
                 if verbose:
                     print(f"[OK] Confirmed and executed successfully")
                     if confirm_outcome.get("booking_code"):
-                        print(
-                            f"  Booking code: {confirm_outcome.get('booking_code')}")
+                        print(f"  Booking code: {confirm_outcome.get('booking_code')}")
 
                 # Second assertion: Test rendered response for confirmation outcome
                 success, error_msg = _validate_rendered_response(
-                    confirm_outcome, expected, verbose)
+                    confirm_outcome, expected, verbose
+                )
                 if not success:
                     return False, error_msg
 
@@ -555,7 +593,8 @@ def run_scenario_e2e(
 
                 # Second assertion: Test rendered response for executed outcome
                 success, error_msg = _validate_rendered_response(
-                    outcome, expected, verbose)
+                    outcome, expected, verbose
+                )
                 if not success:
                     return False, error_msg
 
@@ -569,6 +608,7 @@ def run_scenario_e2e(
 
     except Exception as e:
         import traceback
+
         error_msg = f"Exception in scenario: {str(e)}\n{traceback.format_exc()}"
         if verbose:
             print(f"❌ Exception: {error_msg}")
@@ -579,7 +619,7 @@ def run_all_scenarios(
     scenarios: List[Dict[str, Any]],
     customer_details: Dict[str, Optional[Any]],
     verbose: bool = False,
-    scenario_indices: Optional[List[int]] = None
+    scenario_indices: Optional[List[int]] = None,
 ) -> Tuple[int, int, int, List[Tuple[int, str]]]:
     """
     Run all booking scenarios and return statistics.
@@ -633,20 +673,23 @@ def run_all_scenarios(
                     continue
 
             success, error_msg = run_scenario_e2e(
-                scenario, display_idx, customer_details, verbose)
+                scenario, display_idx, customer_details, verbose
+            )
 
             if success:
                 passed += 1
                 # Only print passing scenarios in verbose mode
                 if verbose:
                     print(
-                        f"[OK] Scenario {display_idx}: {scenario.get('sentence', '')[:50]}...")
+                        f"[OK] Scenario {display_idx}: {scenario.get('sentence', '')[:50]}..."
+                    )
             else:
                 failed += 1
                 failures.append((display_idx, error_msg or "Unknown error"))
                 # Always print failures
                 print(
-                    f"[FAIL] Scenario {display_idx}: {scenario.get('sentence', '')[:50]}...")
+                    f"[FAIL] Scenario {display_idx}: {scenario.get('sentence', '')[:50]}..."
+                )
                 if error_msg:
                     print(f"  Error: {error_msg}")
     else:
@@ -661,20 +704,23 @@ def run_all_scenarios(
             scenario = scenarios[list_idx]
             # For sequential iteration, use list index as display index
             success, error_msg = run_scenario_e2e(
-                scenario, list_idx, customer_details, verbose)
+                scenario, list_idx, customer_details, verbose
+            )
 
             if success:
                 passed += 1
                 # Only print passing scenarios in verbose mode
                 if verbose:
                     print(
-                        f"[OK] Scenario {list_idx}: {scenario.get('sentence', '')[:50]}...")
+                        f"[OK] Scenario {list_idx}: {scenario.get('sentence', '')[:50]}..."
+                    )
             else:
                 failed += 1
                 failures.append((list_idx, error_msg or "Unknown error"))
                 # Always print failures
                 print(
-                    f"[FAIL] Scenario {list_idx}: {scenario.get('sentence', '')[:50]}...")
+                    f"[FAIL] Scenario {list_idx}: {scenario.get('sentence', '')[:50]}..."
+                )
                 if error_msg:
                     print(f"  Error: {error_msg}")
 
@@ -695,25 +741,40 @@ Examples:
   python -m core.tests.integration.test_appointment_e2e 1 --verbose
   python -m core.tests.integration.test_appointment_e2e --range 0-10
   python -m core.tests.integration.test_appointment_e2e --skip-needs-clarification
-        """
+        """,
     )
-    parser.add_argument("scenario", type=int, nargs="?",
-                        help="Run specific scenario by index (positional argument)")
-    parser.add_argument("--scenario", type=int, dest="scenario_flag",
-                        help="Run specific scenario by index (alternative to positional)")
-    parser.add_argument("--range", type=str,
-                        help="Run scenarios in range (e.g., '0-10')")
-    parser.add_argument("--verbose", "-v",
-                        action="store_true", help="Verbose output")
-    parser.add_argument("--skip-needs-clarification", action="store_true",
-                        help="Skip NEEDS_CLARIFICATION scenarios")
+    parser.add_argument(
+        "scenario",
+        type=int,
+        nargs="?",
+        help="Run specific scenario by index (positional argument)",
+    )
+    parser.add_argument(
+        "--scenario",
+        type=int,
+        dest="scenario_flag",
+        help="Run specific scenario by index (alternative to positional)",
+    )
+    parser.add_argument(
+        "--range", type=str, help="Run scenarios in range (e.g., '0-10')"
+    )
+    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    parser.add_argument(
+        "--skip-needs-clarification",
+        action="store_true",
+        help="Skip NEEDS_CLARIFICATION scenarios",
+    )
     args = parser.parse_args()
 
     # Use positional scenario if provided, otherwise use flag
     scenario_num = args.scenario if args.scenario is not None else args.scenario_flag
 
     customer_details = get_customer_details()
-    if not customer_details['customer_id'] and not customer_details['phone_number'] and not customer_details['email']:
+    if (
+        not customer_details["customer_id"]
+        and not customer_details["phone_number"]
+        and not customer_details["email"]
+    ):
         if args.verbose:
             print("WARNING: No customer_id, phone, or email found in environment")
             print("Test may fail if customer creation is required")
@@ -724,15 +785,21 @@ Examples:
 
     if scenario_num is not None:
         scenario_indices = [scenario_num]
-        scenarios_to_run = [core_booking_scenarios[scenario_num]
-                            ] if scenario_num < len(core_booking_scenarios) else []
+        scenarios_to_run = (
+            [core_booking_scenarios[scenario_num]]
+            if scenario_num < len(core_booking_scenarios)
+            else []
+        )
         if args.verbose:
             print(f"Running single scenario: {scenario_num}")
     elif args.range:
-        start, end = map(int, args.range.split('-'))
+        start, end = map(int, args.range.split("-"))
         scenario_indices = list(range(start, end + 1))
-        scenarios_to_run = [core_booking_scenarios[i]
-                            for i in scenario_indices if i < len(core_booking_scenarios)]
+        scenarios_to_run = [
+            core_booking_scenarios[i]
+            for i in scenario_indices
+            if i < len(core_booking_scenarios)
+        ]
         if args.verbose:
             print(f"Running scenarios: {args.range}")
     elif args.skip_needs_clarification:
@@ -748,22 +815,25 @@ Examples:
         scenario_indices = filtered_indices
         if args.verbose:
             print(
-                f"Running {len(scenarios_to_run)} scenarios (skipped NEEDS_CLARIFICATION)")
+                f"Running {len(scenarios_to_run)} scenarios (skipped NEEDS_CLARIFICATION)"
+            )
 
     # Print header after scenarios_to_run is determined
     if not args.verbose:
         # Minimal output header
         scenarios_count = len(scenarios_to_run)
         print(
-            f"Running E2E booking scenarios test ({scenarios_count} scenario{'s' if scenarios_count != 1 else ''})...")
+            f"Running E2E booking scenarios test ({scenarios_count} scenario{'s' if scenarios_count != 1 else ''})..."
+        )
     else:
-        print("="*70)
+        print("=" * 70)
         print("E2E BOOKING SCENARIOS TEST")
-        print("="*70)
+        print("=" * 70)
         print(f"Total scenarios: {len(core_booking_scenarios)}")
         if len(scenarios_to_run) != len(core_booking_scenarios):
             print(
-                f"Running: {len(scenarios_to_run)} scenario{'s' if len(scenarios_to_run) != 1 else ''}")
+                f"Running: {len(scenarios_to_run)} scenario{'s' if len(scenarios_to_run) != 1 else ''}"
+            )
 
     if not scenarios_to_run:
         print("No scenarios to run!")
@@ -774,30 +844,32 @@ Examples:
         scenarios_to_run,
         customer_details,
         verbose=args.verbose,
-        scenario_indices=scenario_indices
+        scenario_indices=scenario_indices,
     )
 
     # Print summary
     if args.verbose:
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("TEST SUMMARY")
-        print("="*70)
+        print("=" * 70)
     else:
         print()  # Just a newline
 
     print(
-        f"Total: {len(scenarios_to_run)} | Passed: {passed} | Failed: {failed} | Skipped: {skipped}")
+        f"Total: {len(scenarios_to_run)} | Passed: {passed} | Failed: {failed} | Skipped: {skipped}"
+    )
 
     if failures:
         print("\nFailures:")
         for idx, error_msg in failures:
-            scenario = core_booking_scenarios[idx] if idx < len(
-                core_booking_scenarios) else {}
+            scenario = (
+                core_booking_scenarios[idx] if idx < len(core_booking_scenarios) else {}
+            )
             print(f"  Scenario {idx}: {scenario.get('sentence', 'N/A')[:60]}")
             print(f"    Error: {error_msg}")
 
     if args.verbose:
-        print("="*70)
+        print("=" * 70)
 
     if failed > 0:
         sys.exit(1)

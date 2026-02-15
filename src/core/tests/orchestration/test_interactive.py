@@ -10,9 +10,6 @@ import os
 import sys
 from pathlib import Path
 
-import sys
-from pathlib import Path
-
 # Add src/ to Python path so we can import core modules
 # __file__ = src/core/tests/orchestration/test_interactive.py
 # parent.parent.parent.parent = src/
@@ -20,11 +17,11 @@ src_path = Path(__file__).parent.parent.parent.parent
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-from core.orchestration.orchestrator import handle_message
-from core.orchestration.clients.catalog_client import CatalogClient
 from core.orchestration.cache.catalog_cache import catalog_cache
-from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.cache.org_domain_cache import org_domain_cache
+from core.orchestration.clients.catalog_client import CatalogClient
+from core.orchestration.clients.organization_client import OrganizationClient
+from core.orchestration.orchestrator import handle_message
 
 
 def check_services():
@@ -32,12 +29,11 @@ def check_services():
     import httpx
 
     luma_url = os.getenv("LUMA_BASE_URL", "http://localhost:9001")
-    internal_api_url = os.getenv(
-        "INTERNAL_API_BASE_URL", "http://localhost:3000")
+    internal_api_url = os.getenv("INTERNAL_API_BASE_URL", "http://localhost:3000")
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Service Availability Check")
-    print("="*60)
+    print("=" * 60)
 
     # Check Luma
     try:
@@ -46,7 +42,8 @@ def check_services():
             print(f"✅ Luma service: {luma_url} - RUNNING")
         else:
             print(
-                f"⚠️  Luma service: {luma_url} - Responded with {response.status_code}")
+                f"⚠️  Luma service: {luma_url} - Responded with {response.status_code}"
+            )
     except Exception as e:
         print(f"❌ Luma service: {luma_url} - NOT RUNNING")
         print(f"   Error: {str(e)}")
@@ -58,7 +55,8 @@ def check_services():
             print(f"✅ Internal API: {internal_api_url} - RUNNING")
         else:
             print(
-                f"⚠️  Internal API: {internal_api_url} - Responded with {response.status_code}")
+                f"⚠️  Internal API: {internal_api_url} - Responded with {response.status_code}"
+            )
     except Exception:
         # Try a different endpoint
         try:
@@ -73,7 +71,7 @@ def check_services():
             print(f"   Error: Connection refused - service not available")
             print(f"   Make sure the booking service is started on port 3000")
 
-    print("="*60 + "\n")
+    print("=" * 60 + "\n")
 
 
 _CATALOG_CLIENT = CatalogClient()
@@ -92,25 +90,28 @@ def print_catalog_snapshot(org_id: int):
     """Fetch and display catalog snapshot via cache + CatalogClient."""
     try:
         data = catalog_cache.get_catalog(org_id, _CATALOG_CLIENT)
-        print("\n" + "="*60)
+        print("\n" + "=" * 60)
         print(f"Catalog Snapshot (org_id={org_id})")
-        print("="*60)
-        print(
-            f"catalog_last_updated_at: {data.get('catalog_last_updated_at')}")
+        print("=" * 60)
+        print(f"catalog_last_updated_at: {data.get('catalog_last_updated_at')}")
         services = [
-            s for s in data.get("services", [])
+            s
+            for s in data.get("services", [])
             if isinstance(s, dict) and s.get("is_active", True) is not False
         ]
         if services:
             print("Active services:")
             for svc in services:
                 name = svc.get("name")
-                fam = svc.get("service_family_id") or svc.get(
-                    "canonical") or svc.get("slug")
+                fam = (
+                    svc.get("service_family_id")
+                    or svc.get("canonical")
+                    or svc.get("slug")
+                )
                 print(f" - {name}  (service_family_id={fam})")
         else:
             print("Active services: none")
-        print("="*60 + "\n")
+        print("=" * 60 + "\n")
     except Exception as e:
         print("\n❌ Failed to fetch catalog snapshot")
         print(f"   Error: {type(e).__name__}: {e}\n")
@@ -119,15 +120,15 @@ def print_catalog_snapshot(org_id: int):
 def build_tenant_context(domain: str, org_id: int) -> dict | None:
     """Build tenant_context aliases similar to orchestrator for visibility."""
     try:
-        data = catalog_cache.get_catalog(
-            org_id, _CATALOG_CLIENT, domain=domain)
+        data = catalog_cache.get_catalog(org_id, _CATALOG_CLIENT, domain=domain)
     except Exception:
         return None
 
     alias_map = {}
     if domain == "service":
         services = [
-            s for s in data.get("services", [])
+            s
+            for s in data.get("services", [])
             if isinstance(s, dict) and s.get("is_active", True) is not False
         ]
         for svc in services:
@@ -144,27 +145,31 @@ def build_tenant_context(domain: str, org_id: int) -> dict | None:
                 alias_map[name.lower()] = canonical_key
     elif domain == "reservation":
         room_types = [
-            r for r in data.get("room_types", [])
+            r
+            for r in data.get("room_types", [])
             if isinstance(r, dict) and r.get("is_active", True) is not False
         ]
         extras = [
-            e for e in data.get("extras", [])
+            e
+            for e in data.get("extras", [])
             if isinstance(e, dict) and e.get("is_active", True) is not False
         ]
         for rt in room_types:
             name = rt.get("name")
             if not name:
                 continue
-            canonical_key = rt.get("canonical") or rt.get(
-                "slug") or name.lower().replace(" ", "_")
+            canonical_key = (
+                rt.get("canonical") or rt.get("slug") or name.lower().replace(" ", "_")
+            )
             if canonical_key:
                 alias_map[name.lower()] = canonical_key
         for ex in extras:
             name = ex.get("name")
             if not name:
                 continue
-            canonical_key = ex.get("canonical") or ex.get(
-                "slug") or name.lower().replace(" ", "_")
+            canonical_key = (
+                ex.get("canonical") or ex.get("slug") or name.lower().replace(" ", "_")
+            )
             if canonical_key:
                 alias_map[name.lower()] = canonical_key
 
@@ -174,14 +179,14 @@ def build_tenant_context(domain: str, org_id: int) -> dict | None:
 def get_derived_domain(org_id: int) -> str:
     """Derive domain from org details (cached, long TTL)."""
     org_client = OrganizationClient()
-    domain, _ = org_domain_cache.get_domain(
-        org_id, org_client, force_refresh=False)
+    domain, _ = org_domain_cache.get_domain(org_id, org_client, force_refresh=False)
     return domain
 
 
 # Load environment variables
 try:
     from dotenv import load_dotenv
+
     # Updated paths for new location: tests/orchestration/
     project_root = Path(__file__).parent.parent.parent.parent
     core_env_file = Path(__file__).parent.parent.parent / ".env"
@@ -200,13 +205,13 @@ except ImportError:
         if not env_path.exists():
             return
         try:
-            with open(env_path, 'r', encoding='utf-8') as f:
+            with open(env_path, "r", encoding="utf-8") as f:
                 for line in f:
                     line = line.strip()
-                    if not line or line.startswith('#'):
+                    if not line or line.startswith("#"):
                         continue
-                    if '=' in line:
-                        key, value = line.split('=', 1)
+                    if "=" in line:
+                        key, value = line.split("=", 1)
                         key = key.strip()
                         value = value.strip()
                         if value.startswith('"') and value.endswith('"'):
@@ -234,11 +239,11 @@ except ImportError:
 
 def print_result(result):
     """Pretty print the result."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("RESULT")
-    print("="*60)
+    print("=" * 60)
     print(json.dumps(result, indent=2))
-    print("="*60)
+    print("=" * 60)
 
     if result.get("success"):
         outcome = result.get("outcome", {})
@@ -256,9 +261,10 @@ def print_result(result):
             print("\n❓ CLARIFICATION NEEDED")
             print(f"   Template: {outcome.get('template_key', 'N/A')}")
             print(f"   Reason: {outcome.get('data', {}).get('reason', 'N/A')}")
-            if outcome.get('booking'):
+            if outcome.get("booking"):
                 print(
-                    f"   Partial Booking: {json.dumps(outcome.get('booking'), indent=6)}")
+                    f"   Partial Booking: {json.dumps(outcome.get('booking'), indent=6)}"
+                )
     else:
         error = result.get("error", "unknown")
         message = result.get("message", "No message")
@@ -268,9 +274,9 @@ def print_result(result):
 
 def interactive_test():
     """Interactive test loop."""
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Interactive Orchestrator Test")
-    print("="*60)
+    print("=" * 60)
     print("\nEnter booking requests to test the orchestrator.")
     print("Type 'quit' or 'exit' to stop.")
     print("Type 'check' to verify services are running.")
@@ -280,7 +286,9 @@ def interactive_test():
     print(f"Active organization_id: {org_id} (from ORG_ID env, default 1)")
     print(f"Derived domain for org: {org_domain}")
     print("Tip: Try: book me in for premium haircut tomorow by 9am")
-    print("     Expect: resolves to the Premium Haircut service without clarification.\n")
+    print(
+        "     Expect: resolves to the Premium Haircut service without clarification.\n"
+    )
 
     # Load customer details from environment (optional)
     phone_number = os.getenv("TEST_CUSTOMER_PHONE")
@@ -301,39 +309,35 @@ def interactive_test():
     while True:
         try:
             # Get user input
-            user_input = input(
-                "Enter booking request (or 'quit' to exit): ").strip()
+            user_input = input("Enter booking request (or 'quit' to exit): ").strip()
 
             if not user_input:
                 continue
 
-            if user_input.lower() in ('quit', 'exit', 'q'):
+            if user_input.lower() in ("quit", "exit", "q"):
                 print("\nGoodbye!")
                 break
 
-            if user_input.lower() == 'check':
+            if user_input.lower() == "check":
                 check_services()
                 continue
 
-            if user_input.lower() == 'catalog':
+            if user_input.lower() == "catalog":
                 print_catalog_snapshot(org_id)
                 continue
 
             # Optional: Get user_id
-            user_id = input(
-                "User ID (press Enter for default 'test_user'): ").strip()
+            user_id = input("User ID (press Enter for default 'test_user'): ").strip()
             if not user_id:
                 user_id = "test_user"
 
             # Optional: Get domain (will be overridden by derived org domain)
-            domain_input = input(
-                "Domain (press Enter for default 'service'): ").strip()
+            domain_input = input("Domain (press Enter for default 'service'): ").strip()
             if not domain_input:
                 domain_input = "service"
 
             # Optional: Get timezone
-            timezone = input(
-                "Timezone (press Enter for default 'UTC'): ").strip()
+            timezone = input("Timezone (press Enter for default 'UTC'): ").strip()
             if not timezone:
                 timezone = "UTC"
 
@@ -352,8 +356,7 @@ def interactive_test():
                 planned_payload["tenant_context"] = tenant_context
 
             print(f"\nProcessing: '{user_input}'")
-            print(
-                f"User ID: {user_id}, Domain: {domain}, Timezone: {timezone}")
+            print(f"User ID: {user_id}, Domain: {domain}, Timezone: {timezone}")
             print("\n[Planned Luma payload]")
             print(json.dumps(planned_payload, indent=2))
             print("\n[Flow] Resolving message (catalog → Luma → booking)...")
@@ -368,7 +371,7 @@ def interactive_test():
                     organization_id=org_id,
                     phone_number=phone_number,
                     email=email,
-                    customer_id=customer_id
+                    customer_id=customer_id,
                 )
 
                 # Print result
@@ -380,7 +383,8 @@ def interactive_test():
                     if error == "upstream_error":
                         print("\n💡 TROUBLESHOOTING:")
                         print(
-                            "   The orchestrator successfully called Luma, but failed when")
+                            "   The orchestrator successfully called Luma, but failed when"
+                        )
                         print("   calling the internal booking API.")
                         print("\n   Make sure the internal booking API is running:")
                         print("   - Default URL: http://localhost:3000")
@@ -396,6 +400,7 @@ def interactive_test():
             except Exception as e:
                 print(f"\n❌ EXCEPTION: {type(e).__name__}: {str(e)}")
                 import traceback
+
                 traceback.print_exc()
 
             print("\n")
@@ -406,17 +411,24 @@ def interactive_test():
         except Exception as e:
             print(f"\n❌ EXCEPTION: {type(e).__name__}: {str(e)}")
             import traceback
+
             traceback.print_exc()
             print()
 
 
-def quick_test(text: str, user_id: str = "test_user", domain: str = "service", timezone: str = "UTC"):
+def quick_test(
+    text: str,
+    user_id: str = "test_user",
+    domain: str = "service",
+    timezone: str = "UTC",
+):
     """Quick test with a single request."""
     org_id = _get_org_id()
     org_domain = get_derived_domain(org_id)
     print(f"\nProcessing: '{text}'")
     print(
-        f"User ID: {user_id}, Domain (requested): {domain}, Derived Domain: {org_domain}, Timezone: {timezone}")
+        f"User ID: {user_id}, Domain (requested): {domain}, Derived Domain: {org_domain}, Timezone: {timezone}"
+    )
     print(f"Active organization_id: {org_id} (from ORG_ID env, default 1)")
     tenant_context = build_tenant_context(org_domain, org_id)
     planned_payload = {
@@ -446,7 +458,7 @@ def quick_test(text: str, user_id: str = "test_user", domain: str = "service", t
             organization_id=org_id,
             phone_number=phone_number,
             email=email,
-            customer_id=customer_id
+            customer_id=customer_id,
         )
 
         print_result(result)
@@ -473,6 +485,7 @@ def quick_test(text: str, user_id: str = "test_user", domain: str = "service", t
     except Exception as e:
         print(f"\n❌ EXCEPTION: {type(e).__name__}: {str(e)}")
         import traceback
+
         traceback.print_exc()
         return None
 
@@ -481,26 +494,21 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Interactive integration test for orchestrator")
+        description="Interactive integration test for orchestrator"
+    )
     parser.add_argument(
-        "--text",
-        help="Booking request text (if provided, runs once and exits)")
+        "--text", help="Booking request text (if provided, runs once and exits)"
+    )
     parser.add_argument(
-        "--user-id",
-        default="test_user",
-        help="User ID (default: test_user)")
-    parser.add_argument(
-        "--domain",
-        default="service",
-        help="Domain (default: service)")
-    parser.add_argument(
-        "--timezone",
-        default="UTC",
-        help="Timezone (default: UTC)")
+        "--user-id", default="test_user", help="User ID (default: test_user)"
+    )
+    parser.add_argument("--domain", default="service", help="Domain (default: service)")
+    parser.add_argument("--timezone", default="UTC", help="Timezone (default: UTC)")
     parser.add_argument(
         "--check-services",
         action="store_true",
-        help="Check if required services are running before testing")
+        help="Check if required services are running before testing",
+    )
 
     args = parser.parse_args()
 

@@ -5,13 +5,14 @@ Entry point for running the dialogcart-core API server.
 """
 
 from fastapi import FastAPI
+
 from core.orchestration.api import message
 
 # Create FastAPI app
 app = FastAPI(
     title="Dialogcart Core API",
     description="Stateless orchestration service for dialogcart",
-    version="1.0.0"
+    version="1.0.0",
 )
 
 # Include routers
@@ -26,5 +27,5 @@ async def health():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
 
+    uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -12,16 +12,16 @@ Usage:
     assert normalized["missing_slots"] == ["date", "time"]
 """
 
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
 
 def normalize_planning_outcome(core_result: Dict[str, Any]) -> Dict[str, Any]:
     """
     Normalize CoreOutcome from handle_message into a stable planning view.
-    
+
     This function extracts planning-relevant data from the CoreOutcome structure
     and presents it in a stable, semantic format that planning tests can assert against.
-    
+
     The normalized structure contains ONLY planning data:
     - Intent name
     - Planning status (READY, NEEDS_CLARIFICATION, AWAITING_CONFIRMATION)
@@ -31,7 +31,7 @@ def normalize_planning_outcome(core_result: Dict[str, Any]) -> Dict[str, Any]:
     - Plan stage (e.g., AVAILABILITY, CONFIRM, IDENTIFY)
     - Plan action (e.g., SEARCH_AVAILABILITY, CONFIRM_APPOINTMENT)
     - Executable actions (if present)
-    
+
     Args:
         core_result: Result dictionary from handle_message with structure:
             {
@@ -41,7 +41,7 @@ def normalize_planning_outcome(core_result: Dict[str, Any]) -> Dict[str, Any]:
                 "outcome": outcome_dict,  # optional, legacy format
                 "_merged_luma_response": dict  # optional
             }
-    
+
     Returns:
         Normalized planning outcome dictionary:
         {
@@ -56,13 +56,13 @@ def normalize_planning_outcome(core_result: Dict[str, Any]) -> Dict[str, Any]:
                 "executable_actions": List[str]  # optional
             }
         }
-    
+
     Raises:
         ValueError: If core_result is invalid or missing required fields
     """
     if not isinstance(core_result, dict):
         raise ValueError(f"core_result must be a dict, got {type(core_result)}")
-    
+
     if not core_result.get("success", False):
         # Error case - return minimal structure
         error_msg = core_result.get("error", "Unknown error")
@@ -72,13 +72,10 @@ def normalize_planning_outcome(core_result: Dict[str, Any]) -> Dict[str, Any]:
             "required_slots": [],
             "missing_slots": [],
             "slots": {},
-            "plan": {
-                "stage": None,
-                "action": None
-            },
-            "error": error_msg
+            "plan": {"stage": None, "action": None},
+            "error": error_msg,
         }
-    
+
     # Extract plan from multiple possible locations
     # Priority: 1) result.get("plan") (if execution occurred), 2) result.get("result") (planning-only), 3) result.get("outcome") (legacy)
     # When execution occurs, "plan" contains the planning data, "result" contains execution result
@@ -88,17 +85,13 @@ def normalize_planning_outcome(core_result: Dict[str, Any]) -> Dict[str, Any]:
         plan_data = core_result.get("result")
     if plan_data is None:
         plan_data = core_result.get("outcome", {})
-    
+
     if not isinstance(plan_data, dict):
         plan_data = {}
-    
+
     # Extract intent - check multiple possible locations
-    intent_name = (
-        plan_data.get("intent_name") or
-        plan_data.get("intent") or
-        None
-    )
-    
+    intent_name = plan_data.get("intent_name") or plan_data.get("intent") or None
+
     # Extract status - from planning status, not execution status
     status = plan_data.get("status")
     if status is None:
@@ -108,7 +101,7 @@ def normalize_planning_outcome(core_result: Dict[str, Any]) -> Dict[str, Any]:
             status = "READY"
         else:
             status = "NEEDS_CLARIFICATION"
-    
+
     # Extract missing_slots - from planning logic only
     missing_slots = plan_data.get("missing_slots", [])
     if not isinstance(missing_slots, list):
@@ -118,7 +111,7 @@ def normalize_planning_outcome(core_result: Dict[str, Any]) -> Dict[str, Any]:
             missing_slots = facts.get("missing_slots", [])
         if not isinstance(missing_slots, list):
             missing_slots = []
-    
+
     # Extract slots - from planning logic only
     slots = plan_data.get("slots", {})
     if not isinstance(slots, dict):
@@ -128,25 +121,23 @@ def normalize_planning_outcome(core_result: Dict[str, Any]) -> Dict[str, Any]:
             slots = facts.get("slots", {})
         if not isinstance(slots, dict):
             slots = {}
-    
+
     # Derive required_slots from missing_slots + collected slots
     required_slots = list(set(list(slots.keys()) + missing_slots))
     required_slots.sort()  # Deterministic ordering
-    
+
     # Extract stage - check multiple locations
     stage = (
-        plan_data.get("stage") or
-        (plan_data.get("plan", {}) or {}).get("stage") or
-        None
+        plan_data.get("stage") or (plan_data.get("plan", {}) or {}).get("stage") or None
     )
-    
+
     # Extract action - check multiple locations
     action = (
-        plan_data.get("action") or
-        (plan_data.get("plan", {}) or {}).get("action") or
-        None
+        plan_data.get("action")
+        or (plan_data.get("plan", {}) or {}).get("action")
+        or None
     )
-    
+
     # Extract executable_actions - optional
     executable_actions = plan_data.get("executable_actions", [])
     if not isinstance(executable_actions, list):
@@ -155,7 +146,7 @@ def normalize_planning_outcome(core_result: Dict[str, Any]) -> Dict[str, Any]:
             executable_actions = plan_dict.get("executable_actions", [])
         if not isinstance(executable_actions, list):
             executable_actions = []
-    
+
     # Build normalized structure
     normalized = {
         "intent": intent_name,
@@ -163,63 +154,60 @@ def normalize_planning_outcome(core_result: Dict[str, Any]) -> Dict[str, Any]:
         "required_slots": required_slots,
         "missing_slots": sorted(missing_slots),  # Deterministic ordering
         "slots": slots,
-        "plan": {
-            "stage": stage,
-            "action": action
-        }
+        "plan": {"stage": stage, "action": action},
     }
-    
+
     # Add executable_actions if present
     if executable_actions:
         normalized["plan"]["executable_actions"] = sorted(executable_actions)
-    
+
     return normalized
 
 
 def normalize_for_assertion(
-    core_result: Dict[str, Any],
-    expected: Dict[str, Any]
+    core_result: Dict[str, Any], expected: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
     Normalize CoreOutcome and prepare for assertion against expected values.
-    
+
     This is a convenience wrapper that:
     1. Normalizes the core_result
     2. Extracts only the fields that are expected
     3. Returns a dict suitable for direct comparison
-    
+
     Args:
         core_result: Result from handle_message
         expected: Expected outcome dict with keys like "intent", "stage", "action", etc.
-    
+
     Returns:
         Dict with only the keys present in expected, normalized for comparison
     """
     normalized = normalize_planning_outcome(core_result)
-    
+
     # Build assertion dict with only expected keys
     assertion_dict = {}
-    
+
     if "intent" in expected:
         assertion_dict["intent"] = normalized["intent"]
-    
+
     if "status" in expected:
         assertion_dict["status"] = normalized["status"]
-    
+
     if "stage" in expected:
         assertion_dict["stage"] = normalized["plan"]["stage"]
-    
+
     if "action" in expected:
         assertion_dict["action"] = normalized["plan"]["action"]
-    
+
     if "missing_slots" in expected:
         assertion_dict["missing_slots"] = normalized["missing_slots"]
-    
+
     if "slots" in expected:
         assertion_dict["slots"] = normalized["slots"]
-    
-    if "executable_actions" in expected:
-        assertion_dict["executable_actions"] = normalized["plan"].get("executable_actions", [])
-    
-    return assertion_dict
 
+    if "executable_actions" in expected:
+        assertion_dict["executable_actions"] = normalized["plan"].get(
+            "executable_actions", []
+        )
+
+    return assertion_dict

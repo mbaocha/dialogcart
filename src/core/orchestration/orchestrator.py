@@ -28,23 +28,38 @@ Constraints:
 - NO execution logic - execution is handled by separate layer
 """
 
-import logging
-import json
-import os
 import copy
+import json
+import logging
+import os
 from datetime import datetime, timedelta, timezone
-from typing import Dict, Any, Optional, List
+from typing import Any, Dict, List, Optional
 
-from core.orchestration.nlu import LumaClient, assert_luma_contract, process_luma_response, build_clarify_outcome_from_reason
-from core.orchestration.errors import ContractViolation, UpstreamError, UnsupportedIntentError
-from core.orchestration.clients.catalog_client import CatalogClient
-from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.cache.catalog_cache import catalog_cache
 from core.orchestration.cache.org_domain_cache import org_domain_cache
+from core.orchestration.clients.catalog_client import CatalogClient
+from core.orchestration.clients.organization_client import OrganizationClient
+from core.orchestration.errors import (
+    ContractViolation,
+    UnsupportedIntentError,
+    UpstreamError,
+)
+from core.orchestration.nlu import (
+    LumaClient,
+    assert_luma_contract,
+    build_clarify_outcome_from_reason,
+    process_luma_response,
+)
 from core.orchestration.persistence.durable_intents import is_durable_intent
-from core.routing.workflows import get_workflow
+from core.rendering import (
+    render,
+    render_capability,
+    render_clarification,
+    render_outcome,
+    render_system,
+)
 from core.rendering.mapper.clarification_mapper import derive_clarification_reason
-from core.rendering import render_clarification, render
+from core.routing.workflows import get_workflow
 
 logger = logging.getLogger(__name__)
 # Dedicated turn-level logger (clean, minimal logs - ONE log per section)
@@ -66,7 +81,7 @@ def _build_planning_outcome(
     missing_slots: List[str],
     executable_actions: List[str],
     dialog_instruction: Optional[Dict[str, Any]] = None,
-    status: str = "READY"
+    status: str = "READY",
 ) -> Dict[str, Any]:
     """
     Build planning-only outcome structure.
@@ -88,7 +103,7 @@ def _build_planning_outcome(
         "intent": intent_name,
         "slots": slots,
         "missing_slots": missing_slots,
-        "executable_actions": executable_actions
+        "executable_actions": executable_actions,
     }
 
     if dialog_instruction:
@@ -127,16 +142,12 @@ def build_outcome_from_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "intent_name": "",
             "status": "NEEDS_CLARIFICATION",
-            "plan": {
-                "status": "NEEDS_CLARIFICATION",
-                "stage": None,
-                "action": None
-            },
+            "plan": {"status": "NEEDS_CLARIFICATION", "stage": None, "action": None},
             "slots": {},
             "missing_slots": [],
             "blocked_actions": [],
             "allowed_actions": [],
-            "facts": {}
+            "facts": {},
         }
 
     plan = decision.get("plan", {})
@@ -156,7 +167,7 @@ def build_outcome_from_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
     plan_obj = {
         "status": plan.get("status", "NEEDS_CLARIFICATION"),
         "stage": plan.get("stage"),
-        "action": plan.get("action")
+        "action": plan.get("action"),
     }
 
     outcome = {
@@ -173,7 +184,7 @@ def build_outcome_from_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
         "blocked_actions": plan.get("blocked_actions", []),
         "allowed_actions": plan.get("allowed_actions", []),
         "awaiting": plan.get("awaiting"),
-        "facts": facts
+        "facts": facts,
     }
 
     # Add active_capability if present in plan
@@ -183,12 +194,14 @@ def build_outcome_from_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
     return outcome
 
 
-def _render_clarification_text(decision: Dict[str, Any], slots: Dict[str, Any]) -> Optional[str]:
+def _render_clarification_text(
+    decision: Dict[str, Any], slots: Dict[str, Any]
+) -> Optional[str]:
     """
     Render clarification text from decision and slots (best-effort).
 
     Args:
-        decision: Decision/plan dictionary with status and missing_slots
+        decision: Decision/plan dictionary with status and missing_slots (optionally facts)
         slots: Dictionary of slot values for template interpolation
 
     Returns:
@@ -207,8 +220,22 @@ def _render_clarification_text(decision: Dict[str, Any], slots: Dict[str, Any]) 
             # No reason derived (shouldn't happen for NEEDS_CLARIFICATION, but be safe)
             return None
 
-        # Render with slots
-        render_spec = render_clarification(reason, slots)
+        # Extract slot_attempts if available in decision.facts
+        attempt_count = 0
+        facts = decision.get("facts", {})
+        if isinstance(facts, dict):
+            slot_attempts = facts.get("slot_attempts", {})
+            missing_slots = decision.get("missing_slots", [])
+            first_missing = (
+                missing_slots[0]
+                if isinstance(missing_slots, list) and missing_slots
+                else None
+            )
+            if first_missing and isinstance(slot_attempts, dict):
+                attempt_count = slot_attempts.get(first_missing, 0)
+
+        # Render with slots and attempt_count
+        render_spec = render_clarification(reason, slots, attempt_count)
         return render_spec.text
     except Exception as e:
         # Best-effort: log error and return None
@@ -219,12 +246,17 @@ def _render_clarification_text(decision: Dict[str, Any], slots: Dict[str, Any]) 
         return None
 
 
-def _inject_rendering_text(result: Dict[str, Any], decision: Dict[str, Any]) -> None:
+def _inject_rendering_text(
+    result: Dict[str, Any],
+    decision: Dict[str, Any],
+    session_state: Optional[Dict[str, Any]] = None,
+) -> None:
     """
     Inject rendered text into top-level response for clarification states.
 
     This is a pure post-processing step that:
     - Detects clarification state from decision
+    - Attaches session_state to decision for rendering
     - Calls rendering.render(decision)
     - Injects returned text into top-level response as 'text'
     - Falls back to generic template if rendering returns None
@@ -232,8 +264,23 @@ def _inject_rendering_text(result: Dict[str, Any], decision: Dict[str, Any]) -> 
     Args:
         result: Response dictionary to modify (mutated in place)
         decision: Decision dictionary with plan and facts
+        session_state: Optional session state dictionary to attach to decision
     """
     try:
+        # Attach session_state to decision for rendering (Phase 2: acknowledgement rendering)
+        decision["_session"] = session_state or {}
+
+        # Merge slot_attempts from session_state into decision for rendering
+        if session_state and isinstance(session_state, dict):
+            slot_attempts = session_state.get("slot_attempts")
+            if isinstance(slot_attempts, dict):
+                # Prefer top-level slot_attempts in decision (renderer checks this first)
+                decision["slot_attempts"] = slot_attempts
+                # Also ensure it's in facts as fallback
+                facts = decision.get("facts", {})
+                if isinstance(facts, dict):
+                    facts["slot_attempts"] = slot_attempts
+
         rendered_text = render(decision)
         if rendered_text:
             result["text"] = rendered_text
@@ -245,15 +292,76 @@ def _inject_rendering_text(result: Dict[str, Any], decision: Dict[str, Any]) -> 
         )
 
 
+def _inject_outcome_text(
+    result: Dict[str, Any], decision: Optional[Dict[str, Any]], outcome: Dict[str, Any]
+) -> None:
+    """
+    Inject rendered outcome text into result for EXECUTED or FAILED outcomes.
+
+    This is a pure post-processing step that:
+    - Only triggers for outcome.status in ("EXECUTED", "FAILED")
+    - Derives template key from decision + outcome
+    - Renders text using outcome templates
+    - Injects result["text"] = rendered_text
+
+    Args:
+        result: Response dictionary to modify (mutated in place)
+        decision: Decision dictionary (optional, for intent extraction)
+        outcome: Outcome dictionary with status, intent_name, etc.
+    """
+    # Only render for EXECUTED or FAILED status
+    outcome_status = outcome.get("status")
+    if outcome_status not in ("EXECUTED", "FAILED"):
+        return
+
+    try:
+        # Render outcome text
+        render_spec = render_outcome(decision, outcome)
+        if render_spec and render_spec.text:
+            result["text"] = render_spec.text
+    except Exception as e:
+        # Best-effort: log error and continue without text
+        logger.debug(
+            f"Failed to render outcome text: {e}. "
+            f"Rendering is best-effort and will be omitted."
+        )
+
+
+def _inject_system_text(result: Dict[str, Any], decision: Dict[str, Any]) -> None:
+    """
+    Inject rendered system text into result for greeting/welcome intents.
+
+    This is a pure post-processing step that:
+    - Only triggers for GREETING or WELCOME intents
+    - Renders text using system templates
+    - Injects result["text"] = rendered_text
+
+    Must NOT override:
+    - Clarification rendering
+    - Capability rendering
+    - Outcome rendering
+
+    Args:
+        result: Response dictionary to modify (mutated in place)
+        decision: Decision dictionary with intent_name
+    """
+    try:
+        intent_name = decision.get("intent_name")
+        render_spec = render_system(intent_name)
+        if render_spec and render_spec.text:
+            result["text"] = render_spec.text
+    except Exception:
+        # Best-effort: silently fail (don't break flow)
+        pass
+
+
 def _handle_non_core_intent(
-    luma_response: Dict[str, Any],
-    decision: Dict[str, Any],
-    user_id: str
+    luma_response: Dict[str, Any], decision: Dict[str, Any], user_id: str
 ) -> Dict[str, Any]:
     """
     Handle non-core intents by passing them through as non-orchestrated signals.
 
-    Non-core intents (e.g., PAYMENT, CONFIRM_BOOKING, BOOKING_INQUIRY) are not
+    Non-core intents (e.g., PAYMENT, CONFIRM_ACTION, BOOKING_INQUIRY) are not
     orchestrated by core but are passed through to preserve conversational continuity.
     This enables workflow extensions to handle these intents in future steps.
 
@@ -319,7 +427,7 @@ def _handle_non_core_intent(
             "status": "NON_CORE_INTENT",
             "intent_name": intent_name,
             "facts": facts,
-        }
+        },
     }
 
 
@@ -336,7 +444,9 @@ def _get_org_id_from_env() -> int:
         return 1
 
 
-def _invoke_workflow_after_execute(intent_name: str, outcome: Dict[str, Any]) -> Dict[str, Any]:
+def _invoke_workflow_after_execute(
+    intent_name: str, outcome: Dict[str, Any]
+) -> Dict[str, Any]:
     """
     Invoke workflow after_execute hook if a workflow is registered for the intent.
 
@@ -363,8 +473,7 @@ def _invoke_workflow_after_execute(intent_name: str, outcome: Dict[str, Any]) ->
                 )
                 return outcome
     except Exception as e:
-        logger.debug(
-            f"Error looking up workflow for intent '{intent_name}': {e}")
+        logger.debug(f"Error looking up workflow for intent '{intent_name}': {e}")
 
     return outcome
 
@@ -378,7 +487,7 @@ def handle_message(
     session_store: Optional[Any] = None,
     frozen_time: Optional[datetime] = None,
     organization_id: Optional[int] = None,
-    **kwargs  # Backward-compat shim: ignore unknown infra parameters (e.g., domain, customer_id)  # noqa: ARG001
+    **kwargs,  # Backward-compat shim: ignore unknown infra parameters (e.g., domain, customer_id)  # noqa: ARG001
 ) -> Dict[str, Any]:
     """
     Canonical Core entrypoint for handling user messages.
@@ -422,18 +531,16 @@ def handle_message(
 
     # LOG 1 — TURN INPUT (first line of handle_message)
     turn_logger.info(
-        json.dumps({
-            "turn": "INPUT",
-            "user_id": user_id,
-            "text": text
-        }, ensure_ascii=True)
+        json.dumps(
+            {"turn": "INPUT", "user_id": user_id, "text": text}, ensure_ascii=True
+        )
     )
 
     # Get session state if session_store provided
     session_state = None
     if session_store is not None:
         try:
-            if hasattr(session_store, 'get_session'):
+            if hasattr(session_store, "get_session"):
                 session_state = session_store.get_session(user_id)
             elif callable(session_store):
                 session_state = session_store(user_id)
@@ -451,6 +558,7 @@ def handle_message(
     if session_state is None:
         try:
             from core.orchestration.session.session_manager import get_session
+
             session_state = get_session(user_id)
             if session_state:
                 logger.debug(
@@ -460,14 +568,16 @@ def handle_message(
         except (ImportError, Exception) as e:
             # Session manager not available or load failed - continue without session
             logger.debug(
-                f"[SESSION_FALLBACK] Could not load from default session store: {e}")
+                f"[SESSION_FALLBACK] Could not load from default session store: {e}"
+            )
 
     # LOG 3 — SESSION READ (immediately after session_store.get_session)
     turn_logger.info(
-        json.dumps({
-            "turn": "SESSION_READ",
-            "session": session_state
-        }, ensure_ascii=True, default=str)
+        json.dumps(
+            {"turn": "SESSION_READ", "session": session_state},
+            ensure_ascii=True,
+            default=str,
+        )
     )
 
     # INVARIANT GUARD: Payment capability requires persisted facts
@@ -495,7 +605,7 @@ def handle_message(
         luma_client=luma_client,
         organization_client=organization_client,
         frozen_time=frozen_time,
-        organization_id=organization_id
+        organization_id=organization_id,
     )
 
     # Check if planning failed
@@ -504,7 +614,7 @@ def handle_message(
             "success": False,
             "error": plan.get("error", "planning_failed"),
             "message": plan.get("message", "Planning failed"),
-            "plan": plan
+            "plan": plan,
         }
 
     # POLICY-DRIVEN EXECUTION ELIGIBILITY
@@ -519,6 +629,7 @@ def handle_message(
 
     # Get execution steps from policy to check action-level requirements
     from core.policy.intent_policy import get_execution_steps
+
     steps = get_execution_steps(intent_name)
 
     # Check if the planned action or any executable action can execute
@@ -545,8 +656,7 @@ def handle_message(
                     can_execute = action_slots_satisfied
                 else:
                     # Committing actions require planning completeness
-                    can_execute = (
-                        plan_status == "READY" and action_slots_satisfied)
+                    can_execute = plan_status == "READY" and action_slots_satisfied
                 break
 
     # If plan_action can't execute, check executable_actions
@@ -588,7 +698,8 @@ def handle_message(
             # Fallback: construct minimal outcome when decision is missing
             # This should rarely happen if plan_message() is working correctly
             logger.warning(
-                "Decision not available in plan, using fallback construction")
+                "Decision not available in plan, using fallback construction"
+            )
             plan_slots = plan.get("slots", {})
             plan_missing_slots = plan.get("missing_slots", [])
             plan_obj = plan.get("plan", {})
@@ -596,22 +707,26 @@ def handle_message(
                 plan_obj = {}
             facts = {
                 "slots": plan_slots if isinstance(plan_slots, dict) else {},
-                "missing_slots": plan_missing_slots if isinstance(plan_missing_slots, list) else []
+                "missing_slots": (
+                    plan_missing_slots if isinstance(plan_missing_slots, list) else []
+                ),
             }
             outcome_dict = {
-                "status": plan.get("status") or plan_obj.get("status", "NEEDS_CLARIFICATION"),
+                "status": plan.get("status")
+                or plan_obj.get("status", "NEEDS_CLARIFICATION"),
                 "awaiting": plan.get("awaiting"),
                 "allowed_actions": plan.get("allowed_actions", []),
                 "blocked_actions": plan.get("blocked_actions", []),
                 "facts": facts,
                 "intent_name": plan.get("intent_name") or plan.get("intent", ""),
                 "plan": {
-                    "status": plan_obj.get("status") or plan.get("status", "NEEDS_CLARIFICATION"),
+                    "status": plan_obj.get("status")
+                    or plan.get("status", "NEEDS_CLARIFICATION"),
                     "stage": plan_obj.get("stage") or plan.get("stage"),
-                    "action": plan_obj.get("action") or plan.get("action")
+                    "action": plan_obj.get("action") or plan.get("action"),
                 },
                 "slots": plan_slots,
-                "missing_slots": plan_missing_slots
+                "missing_slots": plan_missing_slots,
             }
         # Add active_capability if present in plan
         if plan.get("active_capability"):
@@ -619,11 +734,12 @@ def handle_message(
         response = {
             "success": True,
             "result": outcome_dict,
-            "outcome": outcome_dict  # Alias for backward compatibility
+            "outcome": outcome_dict,  # Alias for backward compatibility
         }
         # Preserve rendered text if present in plan (from plan_message)
         if "text" in plan:
             response["text"] = plan["text"]
+        response.setdefault("ui_actions", [])
         return response
 
     logger.debug(
@@ -664,11 +780,13 @@ def handle_message(
             execution_client = kwargs.get("booking_client")
             if not execution_client:
                 logger.warning(
-                    f"Execution step {action} requires {client_name}, but it was not provided")
+                    f"Execution step {action} requires {client_name}, but it was not provided"
+                )
                 execution_step = None
         else:
             logger.warning(
-                f"Unknown client name '{client_name}' for execution step {action}")
+                f"Unknown client name '{client_name}' for execution step {action}"
+            )
             execution_step = None
 
         # Only proceed if we have the required client
@@ -686,7 +804,8 @@ def handle_message(
             else:
                 # Fallback: construct minimal outcome when decision is missing
                 logger.warning(
-                    "Decision not available in plan, using fallback construction")
+                    "Decision not available in plan, using fallback construction"
+                )
                 plan_slots = plan.get("slots", {})
                 plan_missing_slots = plan.get("missing_slots", [])
                 plan_obj = plan.get("plan", {})
@@ -694,35 +813,41 @@ def handle_message(
                     plan_obj = {}
                 facts = {
                     "slots": plan_slots if isinstance(plan_slots, dict) else {},
-                    "missing_slots": plan_missing_slots if isinstance(plan_missing_slots, list) else []
+                    "missing_slots": (
+                        plan_missing_slots
+                        if isinstance(plan_missing_slots, list)
+                        else []
+                    ),
                 }
                 outcome_dict = {
-                    "status": plan.get("status") or plan_obj.get("status", "NEEDS_CLARIFICATION"),
+                    "status": plan.get("status")
+                    or plan_obj.get("status", "NEEDS_CLARIFICATION"),
                     "awaiting": plan.get("awaiting"),
                     "allowed_actions": plan.get("allowed_actions", []),
                     "blocked_actions": plan.get("blocked_actions", []),
                     "facts": facts,
                     "intent_name": plan.get("intent_name") or plan.get("intent", ""),
                     "plan": {
-                        "status": plan_obj.get("status") or plan.get("status", "NEEDS_CLARIFICATION"),
+                        "status": plan_obj.get("status")
+                        or plan.get("status", "NEEDS_CLARIFICATION"),
                         "stage": plan_obj.get("stage") or plan.get("stage"),
-                        "action": plan_obj.get("action") or plan.get("action")
+                        "action": plan_obj.get("action") or plan.get("action"),
                     },
                     "slots": plan_slots,
-                    "missing_slots": plan_missing_slots
+                    "missing_slots": plan_missing_slots,
                 }
             # Add active_capability if present in plan
             if plan.get("active_capability"):
-                outcome_dict["active_capability"] = plan.get(
-                    "active_capability")
+                outcome_dict["active_capability"] = plan.get("active_capability")
             response = {
                 "success": True,
                 "result": outcome_dict,
-                "outcome": outcome_dict  # Alias for backward compatibility
+                "outcome": outcome_dict,  # Alias for backward compatibility
             }
             # Preserve rendered text if present in plan (from plan_message)
             if "text" in plan:
                 response["text"] = plan["text"]
+            response.setdefault("ui_actions", [])
             return response
 
         if execution_step and execution_client:
@@ -757,10 +882,12 @@ def handle_message(
                     if not plan_facts.get("org"):
                         try:
                             org_details = organization_client.get_details(
-                                organization_id)
+                                organization_id
+                            )
                             if isinstance(org_details, dict):
-                                org_data = org_details.get(
-                                    "organization") or org_details
+                                org_data = (
+                                    org_details.get("organization") or org_details
+                                )
                                 if org_data and isinstance(org_data, dict):
                                     if not plan_facts:
                                         plan_facts = {}
@@ -779,7 +906,9 @@ def handle_message(
             # Step 2: Inject resolved_datetime_range before CONFIRM_APPOINTMENT
             # If datetime_range is missing in slots, check session for resolved_datetime_range
             if action == "CONFIRM_APPOINTMENT":
-                if "datetime_range" not in slots or not isinstance(slots.get("datetime_range"), dict):
+                if "datetime_range" not in slots or not isinstance(
+                    slots.get("datetime_range"), dict
+                ):
                     # Try to get resolved_datetime_range from session
                     resolved_datetime_range = None
                     # Get session_state from outer scope - it's initialized at function start
@@ -794,27 +923,35 @@ def handle_message(
                     # Check session_state first
                     if isinstance(session_state_for_check, dict):
                         resolved_datetime_range = session_state.get(
-                            "resolved_datetime_range")
+                            "resolved_datetime_range"
+                        )
 
                     # Fallback to session_store if not in session_state
                     if not resolved_datetime_range and session_store is not None:
                         try:
-                            if hasattr(session_store, 'get_session'):
-                                current_session = session_store.get_session(
-                                    user_id) or current_session
+                            if hasattr(session_store, "get_session"):
+                                current_session = (
+                                    session_store.get_session(user_id)
+                                    or current_session
+                                )
                             elif callable(session_store):
-                                current_session = session_store(
-                                    user_id) or current_session
+                                current_session = (
+                                    session_store(user_id) or current_session
+                                )
 
                             if isinstance(current_session, dict):
                                 resolved_datetime_range = current_session.get(
-                                    "resolved_datetime_range")
+                                    "resolved_datetime_range"
+                                )
                         except Exception as e:
                             logger.debug(
-                                f"Failed to get resolved_datetime_range from session_store: {e}")
+                                f"Failed to get resolved_datetime_range from session_store: {e}"
+                            )
 
                     # Inject into slots if found
-                    if resolved_datetime_range and isinstance(resolved_datetime_range, dict):
+                    if resolved_datetime_range and isinstance(
+                        resolved_datetime_range, dict
+                    ):
                         slots["datetime_range"] = resolved_datetime_range
                         # Update plan with injected datetime_range
                         plan["slots"] = slots
@@ -830,22 +967,19 @@ def handle_message(
                     # For MODIFY_BOOKING, also pass booking_client to fetch service_id from booking
                     booking_client_for_execution = None
                     if intent_name == "MODIFY_BOOKING":
-                        booking_client_for_execution = kwargs.get(
-                            "booking_client")
+                        booking_client_for_execution = kwargs.get("booking_client")
                     execution_result = execute(
                         plan=plan,
                         availability_client=execution_client,
-                        booking_client=booking_client_for_execution
+                        booking_client=booking_client_for_execution,
                     )
                 elif client_name == "booking_client":
                     execution_result = execute(
-                        plan=plan,
-                        booking_client=execution_client
+                        plan=plan, booking_client=execution_client
                     )
                 else:
                     # Other clients not yet supported
-                    logger.warning(
-                        f"Execution for {client_name} not yet implemented")
+                    logger.warning(f"Execution for {client_name} not yet implemented")
                     # Build outcome from decision (canonical builder)
                     decision = plan.get("_decision")
                     if decision:
@@ -853,7 +987,8 @@ def handle_message(
                     else:
                         # Fallback: construct minimal outcome when decision is missing
                         logger.warning(
-                            "Decision not available in plan, using fallback construction")
+                            "Decision not available in plan, using fallback construction"
+                        )
                         plan_slots = plan.get("slots", {})
                         plan_missing_slots = plan.get("missing_slots", [])
                         plan_obj = plan.get("plan", {})
@@ -861,36 +996,47 @@ def handle_message(
                             plan_obj = {}
                         facts = {
                             "slots": plan_slots if isinstance(plan_slots, dict) else {},
-                            "missing_slots": plan_missing_slots if isinstance(plan_missing_slots, list) else []
+                            "missing_slots": (
+                                plan_missing_slots
+                                if isinstance(plan_missing_slots, list)
+                                else []
+                            ),
                         }
                         outcome_dict = {
-                            "status": plan.get("status") or plan_obj.get("status", "NEEDS_CLARIFICATION"),
+                            "status": plan.get("status")
+                            or plan_obj.get("status", "NEEDS_CLARIFICATION"),
                             "awaiting": plan.get("awaiting"),
                             "allowed_actions": plan.get("allowed_actions", []),
                             "blocked_actions": plan.get("blocked_actions", []),
                             "facts": facts,
-                            "intent_name": plan.get("intent_name") or plan.get("intent", ""),
+                            "intent_name": plan.get("intent_name")
+                            or plan.get("intent", ""),
                             "plan": {
-                                "status": plan_obj.get("status") or plan.get("status", "NEEDS_CLARIFICATION"),
+                                "status": plan_obj.get("status")
+                                or plan.get("status", "NEEDS_CLARIFICATION"),
                                 "stage": plan_obj.get("stage") or plan.get("stage"),
-                                "action": plan_obj.get("action") or plan.get("action")
+                                "action": plan_obj.get("action") or plan.get("action"),
                             },
                             "slots": plan_slots,
-                            "missing_slots": plan_missing_slots
+                            "missing_slots": plan_missing_slots,
                         }
                     # Add active_capability if present in plan
                     if plan.get("active_capability"):
                         outcome_dict["active_capability"] = plan.get(
-                            "active_capability")
+                            "active_capability"
+                        )
                     return {
                         "success": True,
                         "result": outcome_dict,
-                        "outcome": outcome_dict  # Alias for backward compatibility
+                        "outcome": outcome_dict,  # Alias for backward compatibility
                     }
 
                 # For CONFIRM_APPOINTMENT with EXECUTED status, preserve the action
                 # Do not override action - use plan.action directly
-                if execution_result.get("status") == "EXECUTED" and plan.get("action") == "CONFIRM_APPOINTMENT":
+                if (
+                    execution_result.get("status") == "EXECUTED"
+                    and plan.get("action") == "CONFIRM_APPOINTMENT"
+                ):
                     # Ensure plan action remains CONFIRM_APPOINTMENT (don't override)
                     plan["action"] = "CONFIRM_APPOINTMENT"
                     # Persist booking_id to slots for idempotency (prevent duplicate creation on next confirmation)
@@ -899,21 +1045,29 @@ def handle_message(
                         slots["booking_id"] = booking_id
                         plan["slots"] = slots
                         logger.debug(
-                            f"Persisted booking_id={booking_id} to slots for idempotency")
+                            f"Persisted booking_id={booking_id} to slots for idempotency"
+                        )
 
                 # For FETCH_BOOKING with EXECUTED status, persist booking_id to slots
                 # This enables subsequent actions (e.g., CONFIRM_CANCELLATION) to use the fetched booking_id
-                if execution_result.get("status") == "EXECUTED" and plan.get("action") == "FETCH_BOOKING":
+                if (
+                    execution_result.get("status") == "EXECUTED"
+                    and plan.get("action") == "FETCH_BOOKING"
+                ):
                     booking_id = execution_result.get("booking_id")
                     if booking_id:
                         slots["booking_id"] = booking_id
                         plan["slots"] = slots
                         logger.debug(
-                            f"Persisted booking_id={booking_id} to slots from FETCH_BOOKING")
+                            f"Persisted booking_id={booking_id} to slots from FETCH_BOOKING"
+                        )
 
                 # For CREATE_BOOKING_HOLD with EXECUTED status, persist booking_id and payment info to slots
                 # This enables capability evaluation to access booking_id before FINALIZE_RESERVATION
-                if execution_result.get("status") == "EXECUTED" and plan.get("action") == "CREATE_BOOKING_HOLD":
+                if (
+                    execution_result.get("status") == "EXECUTED"
+                    and plan.get("action") == "CREATE_BOOKING_HOLD"
+                ):
                     booking_id = execution_result.get("booking_id")
                     booking_code = execution_result.get("booking_code")
                     total_amount = execution_result.get("total_amount")
@@ -929,28 +1083,35 @@ def handle_message(
                         plan["slots"] = slots
                         logger.debug(
                             f"Persisted booking_id={booking_id}, booking_code={booking_code}, "
-                            f"total_amount={total_amount}, currency={currency} to slots from CREATE_BOOKING_HOLD")
+                            f"total_amount={total_amount}, currency={currency} to slots from CREATE_BOOKING_HOLD"
+                        )
 
                 # Persist availability fingerprint when SEARCH_AVAILABILITY succeeds
                 # This enables slot-fingerprint-based availability resolution
                 # CRITICAL: Always attach fingerprint to execution_result, even when session_store is None
                 # This allows build_session_state_from_outcome() to preserve it across turns
-                if (execution_result.get("type") == "availability"
-                        and execution_result.get("status") == "success"):
-                    from core.orchestration.availability_fingerprint import compute_availability_fingerprint
+                if (
+                    execution_result.get("type") == "availability"
+                    and execution_result.get("status") == "success"
+                ):
+                    from core.orchestration.availability_fingerprint import (
+                        compute_availability_fingerprint,
+                    )
 
                     # Get intent_name from plan for fingerprint computation
                     # CREATE_APPOINTMENT uses day-level fingerprint (service_id+date), others use exact (service_id+date+time)
-                    plan_intent_name = plan.get(
-                        "intent_name") or plan.get("intent")
+                    plan_intent_name = plan.get("intent_name") or plan.get("intent")
 
                     # Compute fingerprint from current slots with intent_name
                     availability_fingerprint = compute_availability_fingerprint(
-                        slots, intent_name=plan_intent_name)
+                        slots, intent_name=plan_intent_name
+                    )
 
                     if availability_fingerprint:
                         # Always attach fingerprint to execution_result for persistence via outcome
-                        execution_result["availability_fingerprint"] = availability_fingerprint
+                        execution_result["availability_fingerprint"] = (
+                            availability_fingerprint
+                        )
 
                         # Always attach fingerprint to current_session (independent of session_store presence)
                         # This ensures fingerprint is available for session rebuild logic
@@ -962,18 +1123,24 @@ def handle_message(
                         if session_store is not None:
                             # Try to get latest session from session_store
                             try:
-                                if hasattr(session_store, 'get_session'):
-                                    current_session = session_store.get_session(
-                                        user_id) or current_session
+                                if hasattr(session_store, "get_session"):
+                                    current_session = (
+                                        session_store.get_session(user_id)
+                                        or current_session
+                                    )
                                 elif callable(session_store):
-                                    current_session = session_store(
-                                        user_id) or current_session
+                                    current_session = (
+                                        session_store(user_id) or current_session
+                                    )
                             except Exception as e:
                                 logger.debug(
-                                    f"Failed to get session from session_store for fingerprint: {e}")
+                                    f"Failed to get session from session_store for fingerprint: {e}"
+                                )
 
                         # Always attach fingerprint to current_session
-                        current_session["availability_fingerprint"] = availability_fingerprint
+                        current_session["availability_fingerprint"] = (
+                            availability_fingerprint
+                        )
 
                         logger.debug(
                             f"[AVAILABILITY_FINGERPRINT] Attached fingerprint={availability_fingerprint} "
@@ -984,19 +1151,18 @@ def handle_message(
                         # Save to session_store if available (for immediate persistence)
                         if session_store is not None:
                             try:
-                                if hasattr(session_store, 'save_session'):
-                                    session_store.save_session(
-                                        user_id, current_session)
-                                elif hasattr(session_store, 'save'):
-                                    session_store.save(
-                                        user_id, current_session)
+                                if hasattr(session_store, "save_session"):
+                                    session_store.save_session(user_id, current_session)
+                                elif hasattr(session_store, "save"):
+                                    session_store.save(user_id, current_session)
 
                                 logger.debug(
                                     f"[AVAILABILITY_FINGERPRINT] Saved to session_store: {availability_fingerprint}"
                                 )
                             except Exception as e:
                                 logger.warning(
-                                    f"Failed to persist availability fingerprint to session_store: {e}")
+                                    f"Failed to persist availability fingerprint to session_store: {e}"
+                                )
 
                 # Step 1: Capture datetime_range when SEARCH_AVAILABILITY succeeds
                 # Construct datetime_range from date + time if not already present
@@ -1015,45 +1181,59 @@ def handle_message(
                     if date_str and time_str:
                         try:
                             from datetime import timedelta
+
                             dt = datetime
 
                             # Parse date (YYYY-MM-DD format)
                             date_obj = None
                             if isinstance(date_str, str):
-                                date_only = date_str.split(
-                                    "T")[0].split(" ")[0]
+                                date_only = date_str.split("T")[0].split(" ")[0]
                                 try:
-                                    date_obj = dt.strptime(
-                                        date_only, "%Y-%m-%d")
+                                    date_obj = dt.strptime(date_only, "%Y-%m-%d")
                                 except ValueError:
                                     try:
-                                        date_obj = dt.fromisoformat(
-                                            date_only)
+                                        date_obj = dt.fromisoformat(date_only)
                                     except (ValueError, AttributeError):
                                         pass
 
                             if date_obj:
                                 # Parse time string (handle formats like "2pm", "14:00", etc.)
-                                time_normalized = str(time_str).lower().replace(
-                                    "am", "").replace("pm", "").strip()
-                                time_parts = time_normalized.split(":") if ":" in time_normalized else [
-                                    time_normalized, "00"]
+                                time_normalized = (
+                                    str(time_str)
+                                    .lower()
+                                    .replace("am", "")
+                                    .replace("pm", "")
+                                    .strip()
+                                )
+                                time_parts = (
+                                    time_normalized.split(":")
+                                    if ":" in time_normalized
+                                    else [time_normalized, "00"]
+                                )
 
                                 if len(time_parts) >= 2:
                                     try:
                                         hour = int(time_parts[0])
-                                        minute = int(time_parts[1]) if len(
-                                            time_parts) > 1 else 0
+                                        minute = (
+                                            int(time_parts[1])
+                                            if len(time_parts) > 1
+                                            else 0
+                                        )
 
                                         # Handle AM/PM
                                         if "pm" in str(time_str).lower() and hour < 12:
                                             hour += 12
-                                        elif "am" in str(time_str).lower() and hour == 12:
+                                        elif (
+                                            "am" in str(time_str).lower() and hour == 12
+                                        ):
                                             hour = 0
 
                                         # Combine date and time
                                         start_datetime = date_obj.replace(
-                                            hour=hour, minute=minute, second=0, microsecond=0
+                                            hour=hour,
+                                            minute=minute,
+                                            second=0,
+                                            microsecond=0,
                                         )
 
                                         # Compute end_time from start + service duration
@@ -1061,32 +1241,47 @@ def handle_message(
                                         # Extract duration from first availability slot if available
                                         duration_minutes = 60  # Default
                                         availability_slots = execution_result.get(
-                                            "slots", [])
-                                        if availability_slots and isinstance(availability_slots, list):
+                                            "slots", []
+                                        )
+                                        if availability_slots and isinstance(
+                                            availability_slots, list
+                                        ):
                                             first_slot = availability_slots[0]
                                             if isinstance(first_slot, dict):
                                                 slot_start = first_slot.get(
-                                                    "starts_at") or first_slot.get("start")
+                                                    "starts_at"
+                                                ) or first_slot.get("start")
                                                 slot_end = first_slot.get(
-                                                    "ends_at") or first_slot.get("end")
+                                                    "ends_at"
+                                                ) or first_slot.get("end")
                                                 if slot_start and slot_end:
                                                     try:
                                                         start_dt = dt.fromisoformat(
-                                                            str(slot_start).replace("Z", "+00:00"))
+                                                            str(slot_start).replace(
+                                                                "Z", "+00:00"
+                                                            )
+                                                        )
                                                         end_dt = dt.fromisoformat(
-                                                            str(slot_end).replace("Z", "+00:00"))
+                                                            str(slot_end).replace(
+                                                                "Z", "+00:00"
+                                                            )
+                                                        )
                                                         duration_minutes = int(
-                                                            (end_dt - start_dt).total_seconds() / 60)
+                                                            (
+                                                                end_dt - start_dt
+                                                            ).total_seconds()
+                                                            / 60
+                                                        )
                                                     except (ValueError, AttributeError):
                                                         pass
 
-                                        end_datetime = start_datetime + \
-                                            timedelta(
-                                                minutes=duration_minutes)
+                                        end_datetime = start_datetime + timedelta(
+                                            minutes=duration_minutes
+                                        )
 
                                         resolved_datetime_range = {
                                             "start": start_datetime.isoformat(),
-                                            "end": end_datetime.isoformat()
+                                            "end": end_datetime.isoformat(),
                                         }
 
                                         logger.debug(
@@ -1103,7 +1298,8 @@ def handle_message(
                                         )
                         except Exception as e:
                             logger.warning(
-                                f"Error constructing datetime_range from availability result: {e}")
+                                f"Error constructing datetime_range from availability result: {e}"
+                            )
 
                 # Persist resolved_datetime_range to session
                 if resolved_datetime_range:
@@ -1116,15 +1312,19 @@ def handle_message(
                         current_session = {}
                     if session_store is not None:
                         try:
-                            if hasattr(session_store, 'get_session'):
-                                current_session = session_store.get_session(
-                                    user_id) or current_session
+                            if hasattr(session_store, "get_session"):
+                                current_session = (
+                                    session_store.get_session(user_id)
+                                    or current_session
+                                )
                             elif callable(session_store):
-                                current_session = session_store(
-                                    user_id) or current_session
+                                current_session = (
+                                    session_store(user_id) or current_session
+                                )
                         except Exception as e:
                             logger.debug(
-                                f"Failed to get session from session_store for datetime_range: {e}")
+                                f"Failed to get session from session_store for datetime_range: {e}"
+                            )
 
                     current_session["resolved_datetime_range"] = resolved_datetime_range
 
@@ -1137,19 +1337,20 @@ def handle_message(
                     # Save to session_store if available
                     if session_store is not None:
                         try:
-                            if hasattr(session_store, 'save_session'):
-                                session_store.save_session(
-                                    user_id, current_session)
-                            elif hasattr(session_store, 'save'):
-                                session_store.save(
-                                    user_id, current_session)
+                            if hasattr(session_store, "save_session"):
+                                session_store.save_session(user_id, current_session)
+                            elif hasattr(session_store, "save"):
+                                session_store.save(user_id, current_session)
                         except Exception as e:
                             logger.warning(
-                                f"Failed to persist resolved_datetime_range to session_store: {e}")
+                                f"Failed to persist resolved_datetime_range to session_store: {e}"
+                            )
 
                     # CRITICAL: Attach resolved_datetime_range to execution_result for persistence
                     # This enables test adapters and session rebuild logic to extract it
-                    execution_result["resolved_datetime_range"] = resolved_datetime_range
+                    execution_result["resolved_datetime_range"] = (
+                        resolved_datetime_range
+                    )
                     logger.debug(
                         f"[DATETIME_RANGE] Attached to execution_result: {resolved_datetime_range.get('start')}"
                     )
@@ -1158,12 +1359,15 @@ def handle_message(
                 # CRITICAL: Attach availability_fingerprint to plan for persistence
                 # This ensures fingerprint survives even when session_store is None
                 # and can be extracted by build_session_state_from_outcome() or test adapters
-                if (execution_result.get("type") == "availability"
-                        and execution_result.get("status") == "success"):
+                if (
+                    execution_result.get("type") == "availability"
+                    and execution_result.get("status") == "success"
+                ):
                     # Attach availability_fingerprint if present
                     if execution_result.get("availability_fingerprint"):
                         plan["availability_fingerprint"] = execution_result.get(
-                            "availability_fingerprint")
+                            "availability_fingerprint"
+                        )
                         logger.debug(
                             f"[AVAILABILITY_FINGERPRINT] Attached to plan: {execution_result.get('availability_fingerprint')}"
                         )
@@ -1171,7 +1375,8 @@ def handle_message(
                     # Also attach resolved_datetime_range to plan if present
                     if execution_result.get("resolved_datetime_range"):
                         plan["resolved_datetime_range"] = execution_result.get(
-                            "resolved_datetime_range")
+                            "resolved_datetime_range"
+                        )
                         logger.debug(
                             f"[DATETIME_RANGE] Attached to plan: {execution_result.get('resolved_datetime_range').get('start')}"
                         )
@@ -1181,20 +1386,24 @@ def handle_message(
                 decision = plan.get("_decision")
                 if decision:
                     # Use canonical builder to ensure plan structure is complete
-                    outcome_from_decision = build_outcome_from_decision(
-                        decision)
+                    outcome_from_decision = build_outcome_from_decision(decision)
                     # Merge plan structure into execution_result
                     if not isinstance(execution_result, dict):
                         execution_result = {}
-                    if "plan" not in execution_result or not isinstance(execution_result.get("plan"), dict):
+                    if "plan" not in execution_result or not isinstance(
+                        execution_result.get("plan"), dict
+                    ):
                         execution_result["plan"] = {}
                     # Ensure plan.status, plan.stage, plan.action are present
                     execution_result["plan"]["status"] = outcome_from_decision.get(
-                        "plan", {}).get("status")
+                        "plan", {}
+                    ).get("status")
                     execution_result["plan"]["stage"] = outcome_from_decision.get(
-                        "plan", {}).get("stage")
+                        "plan", {}
+                    ).get("stage")
                     execution_result["plan"]["action"] = outcome_from_decision.get(
-                        "plan", {}).get("action")
+                        "plan", {}
+                    ).get("action")
                 else:
                     # Fallback: extract from plan
                     plan_obj = plan.get("plan", {})
@@ -1202,28 +1411,41 @@ def handle_message(
                         plan_obj = {}
                     if not isinstance(execution_result, dict):
                         execution_result = {}
-                    if "plan" not in execution_result or not isinstance(execution_result.get("plan"), dict):
+                    if "plan" not in execution_result or not isinstance(
+                        execution_result.get("plan"), dict
+                    ):
                         execution_result["plan"] = {}
                     execution_result["plan"]["status"] = plan_obj.get(
-                        "status") or plan.get("status")
+                        "status"
+                    ) or plan.get("status")
                     execution_result["plan"]["stage"] = plan_obj.get(
-                        "stage") or plan.get("stage")
+                        "stage"
+                    ) or plan.get("stage")
                     execution_result["plan"]["action"] = plan_obj.get(
-                        "action") or plan.get("action")
+                        "action"
+                    ) or plan.get("action")
 
-                return {
+                result = {
                     "success": True,
                     "result": execution_result,
                     "outcome": execution_result,  # Alias for backward compatibility
-                    "plan": plan
+                    "plan": plan,
                 }
+                result.setdefault("ui_actions", [])
+
+                # Inject outcome rendering text (if EXECUTED)
+                decision = plan.get("_decision")
+                if decision:
+                    _inject_outcome_text(result, decision, execution_result)
+
+                return result
             except Exception as e:
                 logger.error(f"Execution failed for action {action}: {e}")
                 return {
                     "success": False,
                     "error": "execution_failed",
                     "message": str(e),
-                    "plan": plan
+                    "plan": plan,
                 }
 
     # No execution step selected by policy - return planning outcome
@@ -1233,8 +1455,7 @@ def handle_message(
         outcome_dict = build_outcome_from_decision(decision)
     else:
         # Fallback: construct minimal outcome when decision is missing
-        logger.warning(
-            "Decision not available in plan, using fallback construction")
+        logger.warning("Decision not available in plan, using fallback construction")
         plan_slots = plan.get("slots", {})
         plan_missing_slots = plan.get("missing_slots", [])
         plan_obj = plan.get("plan", {})
@@ -1242,31 +1463,37 @@ def handle_message(
             plan_obj = {}
         facts = {
             "slots": plan_slots if isinstance(plan_slots, dict) else {},
-            "missing_slots": plan_missing_slots if isinstance(plan_missing_slots, list) else []
+            "missing_slots": (
+                plan_missing_slots if isinstance(plan_missing_slots, list) else []
+            ),
         }
         outcome_dict = {
-            "status": plan.get("status") or plan_obj.get("status", "NEEDS_CLARIFICATION"),
+            "status": plan.get("status")
+            or plan_obj.get("status", "NEEDS_CLARIFICATION"),
             "awaiting": plan.get("awaiting"),
             "allowed_actions": plan.get("allowed_actions", []),
             "blocked_actions": plan.get("blocked_actions", []),
             "facts": facts,
             "intent_name": plan.get("intent_name") or plan.get("intent", ""),
             "plan": {
-                "status": plan_obj.get("status") or plan.get("status", "NEEDS_CLARIFICATION"),
+                "status": plan_obj.get("status")
+                or plan.get("status", "NEEDS_CLARIFICATION"),
                 "stage": plan_obj.get("stage") or plan.get("stage"),
-                "action": plan_obj.get("action") or plan.get("action")
+                "action": plan_obj.get("action") or plan.get("action"),
             },
             "slots": plan_slots,
-            "missing_slots": plan_missing_slots
+            "missing_slots": plan_missing_slots,
         }
     # Add active_capability if present in plan
     if plan.get("active_capability"):
         outcome_dict["active_capability"] = plan.get("active_capability")
-    return {
+    result = {
         "success": True,
         "result": outcome_dict,
-        "outcome": outcome_dict  # Alias for backward compatibility
+        "outcome": outcome_dict,  # Alias for backward compatibility
     }
+    result.setdefault("ui_actions", [])
+    return result
 
 
 def handle_message_legacy(
@@ -1284,7 +1511,7 @@ def handle_message_legacy(
     verbose: bool = False,
     session_state: Optional[Dict[str, Any]] = None,
     transaction_id: Optional[str] = None,
-    planning_only: bool = False
+    planning_only: bool = False,
 ) -> Dict[str, Any]:
     """
     [LEGACY] Handle a user message - stateless orchestration.
@@ -1306,7 +1533,7 @@ def handle_message_legacy(
         text: User message text
         domain: Domain (default: "service")
         timezone: Timezone (default: "UTC")
-        organization_id: Organization ID (optional, defaults to ORG_ID env or 1) 
+        organization_id: Organization ID (optional, defaults to ORG_ID env or 1)
         luma_client: Luma client instance (creates default if None)
         catalog_client: Catalog discovery client (creates default if None)
         organization_client: Organization client instance (creates default if None)
@@ -1333,8 +1560,11 @@ def handle_message_legacy(
         # Only import and initialize execution clients when not in planning-only mode
         # This avoids unnecessary imports and initialization for planning tests
         try:
-            from core.orchestration.execution.clients.booking_client import BookingClient
             from core.orchestration.clients.customer_client import CustomerClient
+            from core.orchestration.execution.clients.booking_client import (
+                BookingClient,
+            )
+
             booking_client = BookingClient()
             customer_client = CustomerClient()
         except (ImportError, AttributeError):
@@ -1343,7 +1573,9 @@ def handle_message_legacy(
             pass
 
     # TODO: Replace env-based organization_id with channel/auth-derived organization_id
-    resolved_org_id = organization_id if organization_id is not None else _get_org_id_from_env()
+    resolved_org_id = (
+        organization_id if organization_id is not None else _get_org_id_from_env()
+    )
 
     # Derive domain from organization details (cached, long TTL)
     derived_domain, _ = org_domain_cache.get_domain(
@@ -1357,19 +1589,27 @@ def handle_message_legacy(
         # Skip catalog access when planning_only=True to avoid network calls
         if not planning_only:
             catalog_data_for_alias = catalog_cache.get_catalog(
-                resolved_org_id, catalog_client, domain=derived_domain)
+                resolved_org_id, catalog_client, domain=derived_domain
+            )
             alias_map: Dict[str, Any] = {}
             if derived_domain == "service":
-                services_for_alias = catalog_data_for_alias.get(
-                    "services", []) if isinstance(catalog_data_for_alias, dict) else []
+                services_for_alias = (
+                    catalog_data_for_alias.get("services", [])
+                    if isinstance(catalog_data_for_alias, dict)
+                    else []
+                )
                 for svc in services_for_alias:
                     if not isinstance(svc, dict) or svc.get("is_active") is False:
                         continue
                     name = svc.get("name")
                     if not name:
                         continue
-                    canonical_key = svc.get("service_family_id") or svc.get(
-                        "canonical") or svc.get("slug") or name.lower().replace(" ", "_")
+                    canonical_key = (
+                        svc.get("service_family_id")
+                        or svc.get("canonical")
+                        or svc.get("slug")
+                        or name.lower().replace(" ", "_")
+                    )
                     if not canonical_key:
                         continue
                     # Construct full canonical path if it's a short form (no dot)
@@ -1379,29 +1619,42 @@ def handle_message_legacy(
                         canonical_key = f"beauty_and_wellness.{canonical_key}"
                     alias_map[name.lower()] = canonical_key
             else:
-                rooms_for_alias = catalog_data_for_alias.get(
-                    "rooms", []) if isinstance(catalog_data_for_alias, dict) else []
+                rooms_for_alias = (
+                    catalog_data_for_alias.get("rooms", [])
+                    if isinstance(catalog_data_for_alias, dict)
+                    else []
+                )
                 for rt in rooms_for_alias:
                     if not isinstance(rt, dict) or rt.get("is_active") is False:
                         continue
                     name = rt.get("name")
                     if not name:
                         continue
-                    canonical_key = rt.get("canonical_key") or rt.get("canonical") or rt.get(
-                        "slug") or name.lower().replace(" ", "_")
+                    canonical_key = (
+                        rt.get("canonical_key")
+                        or rt.get("canonical")
+                        or rt.get("slug")
+                        or name.lower().replace(" ", "_")
+                    )
                     if not canonical_key:
                         continue
                     alias_map[name.lower()] = canonical_key
-                extras_for_alias = catalog_data_for_alias.get(
-                    "extras", []) if isinstance(catalog_data_for_alias, dict) else []
+                extras_for_alias = (
+                    catalog_data_for_alias.get("extras", [])
+                    if isinstance(catalog_data_for_alias, dict)
+                    else []
+                )
                 for ex in extras_for_alias:
                     if not isinstance(ex, dict) or ex.get("is_active") is False:
                         continue
                     name = ex.get("name")
                     if not name:
                         continue
-                    canonical_key = ex.get("canonical") or ex.get(
-                        "slug") or name.lower().replace(" ", "_")
+                    canonical_key = (
+                        ex.get("canonical")
+                        or ex.get("slug")
+                        or name.lower().replace(" ", "_")
+                    )
                     if not canonical_key:
                         continue
                     alias_map[name.lower()] = canonical_key
@@ -1433,8 +1686,9 @@ def handle_message_legacy(
         )
 
     # Log sentence passed to Luma
-    logger.info("Luma request payload: %s", json.dumps(
-        luma_payload, ensure_ascii=False))
+    logger.info(
+        "Luma request payload: %s", json.dumps(luma_payload, ensure_ascii=False)
+    )
 
     # Store raw response for attachment to effective_response (must be accessible after try block)
     raw_luma_response_deep_copy = None
@@ -1446,7 +1700,7 @@ def handle_message_legacy(
             text=text,
             domain=derived_domain,
             timezone=timezone,
-            tenant_context=tenant_context
+            tenant_context=tenant_context,
         )
 
         # Store raw response for attachment to effective_response (must be accessible after try block)
@@ -1454,17 +1708,22 @@ def handle_message_legacy(
 
         # LOG 2 — LUMA OUTPUT (right after luma.resolve)
         luma_intent_obj = luma_response.get("intent", {})
-        luma_intent = luma_intent_obj.get(
-            "name", "") if isinstance(luma_intent_obj, dict) else ""
+        luma_intent = (
+            luma_intent_obj.get("name", "") if isinstance(luma_intent_obj, dict) else ""
+        )
         luma_slots = luma_response.get("slots", {})
         luma_missing_slots = luma_response.get("missing_slots", [])
         turn_logger.info(
-            json.dumps({
-                "turn": "LUMA",
-                "intent": luma_intent,
-                "slots": luma_slots,
-                "missing_slots": luma_missing_slots
-            }, ensure_ascii=True, default=str)
+            json.dumps(
+                {
+                    "turn": "LUMA",
+                    "intent": luma_intent,
+                    "slots": luma_slots,
+                    "missing_slots": luma_missing_slots,
+                },
+                ensure_ascii=True,
+                default=str,
+            )
         )
 
         # ARCHITECTURAL INVARIANT: Create authoritative slot view BEFORE any processing
@@ -1487,10 +1746,12 @@ def handle_message_legacy(
         # GUARD ASSERTION (test/debug only): If raw_luma_response.slots is non-empty but effective_turn_slots doesn't contain those slots → ERROR
         # This ensures raw Luma slots are never lost in the merge
         import os
-        if (os.getenv("PYTEST_CURRENT_TEST") or os.getenv("DEBUG_SLOT_MERGE") == "1"):
+
+        if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("DEBUG_SLOT_MERGE") == "1":
             if raw_luma_slots:
-                missing_slots = set(raw_luma_slots.keys()) - \
-                    set(effective_turn_slots.keys())
+                missing_slots = set(raw_luma_slots.keys()) - set(
+                    effective_turn_slots.keys()
+                )
                 if missing_slots:
                     error_msg = (
                         f"INVARIANT VIOLATION: raw_luma_response.slots contains slots that are missing from effective_turn_slots! "
@@ -1513,12 +1774,26 @@ def handle_message_legacy(
 
         # DEBUG: Print raw Luma response for weekday follow-ups (guarded by env var)
         import pprint
+
         if os.getenv("DEBUG_LUMA_WEEKDAY") == "1":
             # Only dump for suspected weekday messages
             text_l = (text or "").lower()
-            weekday_keywords = ["monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
-                                "next monday", "next tuesday", "next wednesday", "next thursday", "next friday",
-                                "next saturday", "next sunday"]
+            weekday_keywords = [
+                "monday",
+                "tuesday",
+                "wednesday",
+                "thursday",
+                "friday",
+                "saturday",
+                "sunday",
+                "next monday",
+                "next tuesday",
+                "next wednesday",
+                "next thursday",
+                "next friday",
+                "next saturday",
+                "next sunday",
+            ]
             if any(w in text_l for w in weekday_keywords):
                 print("\n=== DEBUG_LUMA_WEEKDAY RAW LUMA RESPONSE ===")
                 print(f"Input text: {text}")
@@ -1530,7 +1805,8 @@ def handle_message_legacy(
                 try:
                     # Print full response without truncation
                     response_str = json.dumps(
-                        luma_response, indent=2, default=str, ensure_ascii=False)
+                        luma_response, indent=2, default=str, ensure_ascii=False
+                    )
                     print(response_str)
                 except Exception as e:
                     print(f"JSON serialization failed: {e}")
@@ -1539,15 +1815,20 @@ def handle_message_legacy(
 
     except UpstreamError as e:
         logger.error(
-            f"[LUMA_ERROR_FALLBACK] Luma API error for user {user_id}: {str(e)}")
+            f"[LUMA_ERROR_FALLBACK] Luma API error for user {user_id}: {str(e)}"
+        )
         # SESSION LIFECYCLE RULE: For durable intents, reuse session state as-is on Luma error
         # Do not recompute slots or missing_slots - preserve session state exactly as-is
         if session_state:
             # CRITICAL: Check intent_name first, then fall back to intent
             session_intent_str = session_state.get("intent_name") or (
-                session_state.get("intent") if isinstance(session_state.get("intent"), str) else
-                (session_state.get("intent", {}).get("name", "")
-                 if isinstance(session_state.get("intent"), dict) else "")
+                session_state.get("intent")
+                if isinstance(session_state.get("intent"), str)
+                else (
+                    session_state.get("intent", {}).get("name", "")
+                    if isinstance(session_state.get("intent"), dict)
+                    else ""
+                )
             )
 
             # Check if session intent is durable
@@ -1557,7 +1838,8 @@ def handle_message_legacy(
                     is_durable = is_durable_intent(session_intent_str)
                 except (ImportError, Exception) as e:
                     logger.warning(
-                        f"[LUMA_ERROR_FALLBACK] Failed to check durable status: {e}")
+                        f"[LUMA_ERROR_FALLBACK] Failed to check durable status: {e}"
+                    )
 
             logger.error(
                 f"[LUMA_ERROR_FALLBACK] session_intent={session_intent_str}, is_durable={is_durable}, "
@@ -1579,11 +1861,12 @@ def handle_message_legacy(
                     session_action = "SEARCH_AVAILABILITY"
                 elif not session_action and session_stage == "CONFIRM":
                     session_action = "CONFIRM_APPOINTMENT"
-                session_status = session_state.get(
-                    "status", "NEEDS_CLARIFICATION")
+                session_status = session_state.get("status", "NEEDS_CLARIFICATION")
                 # CRITICAL: Status must be NEEDS_CLARIFICATION if there are missing slots
                 # Do NOT use session_status if it's READY but there are missing slots
-                final_status = "NEEDS_CLARIFICATION" if session_missing_slots else session_status
+                final_status = (
+                    "NEEDS_CLARIFICATION" if session_missing_slots else session_status
+                )
 
                 logger.error(
                     f"[LUMA_ERROR_FALLBACK] Final status={final_status} (session_status={session_status}, "
@@ -1605,18 +1888,17 @@ def handle_message_legacy(
                         "missing_slots": session_missing_slots,
                         "slots": session_slots,
                         "status": final_status,
-                        "executable_actions": [session_action] if session_action else []
+                        "executable_actions": (
+                            [session_action] if session_action else []
+                        ),
                     },
                     "facts": {
                         "slots": session_slots,
-                        "missing_slots": session_missing_slots
-                    }
+                        "missing_slots": session_missing_slots,
+                    },
                 }
 
-                return {
-                    "success": True,
-                    "outcome": outcome
-                }
+                return {"success": True, "outcome": outcome}
 
             # For other intents, preserve session and return planning response (existing behavior)
             if session_state.get("status") == "NEEDS_CLARIFICATION":
@@ -1626,9 +1908,15 @@ def handle_message_legacy(
                     session_slots = {}
 
                 # Compute missing_slots from session intent and slots
-                from core.planning.orchestration.missing_slots import compute_missing_slots
-                missing_slots = compute_missing_slots(
-                    session_intent_str, session_slots) if session_intent_str else []
+                from core.planning.orchestration.missing_slots import (
+                    compute_missing_slots,
+                )
+
+                missing_slots = (
+                    compute_missing_slots(session_intent_str, session_slots)
+                    if session_intent_str
+                    else []
+                )
 
                 # Extract stage/action from session state if available, otherwise use defaults
                 session_stage = session_state.get("stage", "AVAILABILITY")
@@ -1642,26 +1930,27 @@ def handle_message_legacy(
                         "action": session_action,
                         "slots": session_slots,
                         "missing_slots": missing_slots,
-                        "status": "NEEDS_CLARIFICATION" if missing_slots else "READY"
-                    }
+                        "status": "NEEDS_CLARIFICATION" if missing_slots else "READY",
+                    },
                 }
-        return {
-            "success": False,
-            "error": "upstream_error",
-            "message": str(e)
-        }
+        return {"success": False, "error": "upstream_error", "message": str(e)}
 
     # SESSION LIFECYCLE RULE: For durable intents, reuse session state as-is on empty/null Luma response
     # Do not recompute slots or missing_slots - preserve session state exactly as-is
     if not luma_response or not isinstance(luma_response, dict):
         logger.error(
-            f"[LUMA_ERROR_FALLBACK] Luma returned None or invalid response for user {user_id}")
+            f"[LUMA_ERROR_FALLBACK] Luma returned None or invalid response for user {user_id}"
+        )
         if session_state:
             # CRITICAL: Check intent_name first, then fall back to intent
             session_intent_str = session_state.get("intent_name") or (
-                session_state.get("intent") if isinstance(session_state.get("intent"), str) else
-                (session_state.get("intent", {}).get("name", "")
-                 if isinstance(session_state.get("intent"), dict) else "")
+                session_state.get("intent")
+                if isinstance(session_state.get("intent"), str)
+                else (
+                    session_state.get("intent", {}).get("name", "")
+                    if isinstance(session_state.get("intent"), dict)
+                    else ""
+                )
             )
 
             # Check if session intent is durable
@@ -1671,7 +1960,8 @@ def handle_message_legacy(
                     is_durable = is_durable_intent(session_intent_str)
                 except (ImportError, Exception) as e:
                     logger.warning(
-                        f"[LUMA_ERROR_FALLBACK] Failed to check durable status: {e}")
+                        f"[LUMA_ERROR_FALLBACK] Failed to check durable status: {e}"
+                    )
 
             logger.error(
                 f"[LUMA_ERROR_FALLBACK] session_intent={session_intent_str}, is_durable={is_durable}, "
@@ -1693,11 +1983,12 @@ def handle_message_legacy(
                     session_action = "SEARCH_AVAILABILITY"
                 elif not session_action and session_stage == "CONFIRM":
                     session_action = "CONFIRM_APPOINTMENT"
-                session_status = session_state.get(
-                    "status", "NEEDS_CLARIFICATION")
+                session_status = session_state.get("status", "NEEDS_CLARIFICATION")
                 # CRITICAL: Status must be NEEDS_CLARIFICATION if there are missing slots
                 # Do NOT use session_status if it's READY but there are missing slots
-                final_status = "NEEDS_CLARIFICATION" if session_missing_slots else session_status
+                final_status = (
+                    "NEEDS_CLARIFICATION" if session_missing_slots else session_status
+                )
 
                 logger.error(
                     f"[LUMA_ERROR_FALLBACK] Final status={final_status} (session_status={session_status}, "
@@ -1719,18 +2010,17 @@ def handle_message_legacy(
                         "missing_slots": session_missing_slots,
                         "slots": session_slots,
                         "status": final_status,
-                        "executable_actions": [session_action] if session_action else []
+                        "executable_actions": (
+                            [session_action] if session_action else []
+                        ),
                     },
                     "facts": {
                         "slots": session_slots,
-                        "missing_slots": session_missing_slots
-                    }
+                        "missing_slots": session_missing_slots,
+                    },
                 }
 
-                return {
-                    "success": True,
-                    "outcome": outcome
-                }
+                return {"success": True, "outcome": outcome}
 
             # For other intents, preserve session and return planning response (existing behavior)
             if session_state.get("status") == "NEEDS_CLARIFICATION":
@@ -1740,9 +2030,15 @@ def handle_message_legacy(
                     session_slots = {}
 
                 # Compute missing_slots from session intent and slots
-                from core.planning.orchestration.missing_slots import compute_missing_slots
-                missing_slots = compute_missing_slots(
-                    session_intent_str, session_slots) if session_intent_str else []
+                from core.planning.orchestration.missing_slots import (
+                    compute_missing_slots,
+                )
+
+                missing_slots = (
+                    compute_missing_slots(session_intent_str, session_slots)
+                    if session_intent_str
+                    else []
+                )
 
                 # Extract stage/action from session state if available, otherwise use defaults
                 session_stage = session_state.get("stage", "AVAILABILITY")
@@ -1756,13 +2052,13 @@ def handle_message_legacy(
                         "action": session_action,
                         "slots": session_slots,
                         "missing_slots": missing_slots,
-                        "status": "NEEDS_CLARIFICATION" if missing_slots else "READY"
-                    }
+                        "status": "NEEDS_CLARIFICATION" if missing_slots else "READY",
+                    },
                 }
         return {
             "success": False,
             "error": "upstream_error",
-            "message": "Luma returned empty response"
+            "message": "Luma returned empty response",
         }
 
     # Step 2: Assert contract (fact-only: only requires intent.name)
@@ -1772,15 +2068,20 @@ def handle_message_legacy(
         assert_luma_contract(luma_response)
     except ContractViolation as e:
         logger.error(
-            f"[LUMA_ERROR_FALLBACK] Contract violation for user {user_id}: {str(e)}")
+            f"[LUMA_ERROR_FALLBACK] Contract violation for user {user_id}: {str(e)}"
+        )
         # SESSION LIFECYCLE RULE: For durable intents, reuse session state as-is on contract violation
         # Do not recompute slots or missing_slots - preserve session state exactly as-is
         if session_state:
             # CRITICAL: Check intent_name first, then fall back to intent
             session_intent_str = session_state.get("intent_name") or (
-                session_state.get("intent") if isinstance(session_state.get("intent"), str) else
-                (session_state.get("intent", {}).get("name", "")
-                 if isinstance(session_state.get("intent"), dict) else "")
+                session_state.get("intent")
+                if isinstance(session_state.get("intent"), str)
+                else (
+                    session_state.get("intent", {}).get("name", "")
+                    if isinstance(session_state.get("intent"), dict)
+                    else ""
+                )
             )
 
             # Check if session intent is durable
@@ -1790,7 +2091,8 @@ def handle_message_legacy(
                     is_durable = is_durable_intent(session_intent_str)
                 except (ImportError, Exception) as e:
                     logger.warning(
-                        f"[LUMA_ERROR_FALLBACK] Failed to check durable status: {e}")
+                        f"[LUMA_ERROR_FALLBACK] Failed to check durable status: {e}"
+                    )
 
             logger.error(
                 f"[LUMA_ERROR_FALLBACK] session_intent={session_intent_str}, is_durable={is_durable}, "
@@ -1812,11 +2114,12 @@ def handle_message_legacy(
                     session_action = "SEARCH_AVAILABILITY"
                 elif not session_action and session_stage == "CONFIRM":
                     session_action = "CONFIRM_APPOINTMENT"
-                session_status = session_state.get(
-                    "status", "NEEDS_CLARIFICATION")
+                session_status = session_state.get("status", "NEEDS_CLARIFICATION")
                 # CRITICAL: Status must be NEEDS_CLARIFICATION if there are missing slots
                 # Do NOT use session_status if it's READY but there are missing slots
-                final_status = "NEEDS_CLARIFICATION" if session_missing_slots else session_status
+                final_status = (
+                    "NEEDS_CLARIFICATION" if session_missing_slots else session_status
+                )
 
                 logger.error(
                     f"[LUMA_ERROR_FALLBACK] Final status={final_status} (session_status={session_status}, "
@@ -1838,18 +2141,17 @@ def handle_message_legacy(
                         "missing_slots": session_missing_slots,
                         "slots": session_slots,
                         "status": final_status,
-                        "executable_actions": [session_action] if session_action else []
+                        "executable_actions": (
+                            [session_action] if session_action else []
+                        ),
                     },
                     "facts": {
                         "slots": session_slots,
-                        "missing_slots": session_missing_slots
-                    }
+                        "missing_slots": session_missing_slots,
+                    },
                 }
 
-                return {
-                    "success": True,
-                    "outcome": outcome
-                }
+                return {"success": True, "outcome": outcome}
 
             # For other intents, preserve session and return planning response (existing behavior)
             if session_state.get("status") == "NEEDS_CLARIFICATION":
@@ -1859,9 +2161,15 @@ def handle_message_legacy(
                     session_slots = {}
 
                 # Compute missing_slots from session intent and slots
-                from core.planning.orchestration.missing_slots import compute_missing_slots
-                missing_slots = compute_missing_slots(
-                    session_intent_str, session_slots) if session_intent_str else []
+                from core.planning.orchestration.missing_slots import (
+                    compute_missing_slots,
+                )
+
+                missing_slots = (
+                    compute_missing_slots(session_intent_str, session_slots)
+                    if session_intent_str
+                    else []
+                )
 
                 # Extract stage/action from session state if available, otherwise use defaults
                 session_stage = session_state.get("stage", "AVAILABILITY")
@@ -1875,14 +2183,10 @@ def handle_message_legacy(
                         "action": session_action,
                         "slots": session_slots,
                         "missing_slots": missing_slots,
-                        "status": "NEEDS_CLARIFICATION" if missing_slots else "READY"
-                    }
+                        "status": "NEEDS_CLARIFICATION" if missing_slots else "READY",
+                    },
                 }
-        return {
-            "success": False,
-            "error": "contract_violation",
-            "message": str(e)
-        }
+        return {"success": False, "error": "contract_violation", "message": str(e)}
 
     # FACT-ONLY CONTRACT: No success flag check
     # Planning proceeds as long as intent.name exists (validated by assert_luma_contract)
@@ -1895,28 +2199,28 @@ def handle_message_legacy(
     # Guard: Ensure luma_response is valid before proceeding
     if not luma_response or not isinstance(luma_response, dict):
         logger.error(
-            f"Invalid luma_response after error handling for user {user_id}: {luma_response}")
+            f"Invalid luma_response after error handling for user {user_id}: {luma_response}"
+        )
         return {
             "success": False,
             "error": "invalid_luma_response",
-            "message": "Luma response is None or invalid"
+            "message": "Luma response is None or invalid",
         }
 
     # Extract Luma intent for logging (before intent resolution)
     luma_intent_obj = luma_response.get("intent", {})
-    luma_intent_name = luma_intent_obj.get(
-        "name", "") if isinstance(luma_intent_obj, dict) else ""
+    luma_intent_name = (
+        luma_intent_obj.get("name", "") if isinstance(luma_intent_obj, dict) else ""
+    )
 
     # Resolve effective intent using new intent_resolution module
     from core.planning.orchestration.intent_resolution import resolve_effective_intent
+
     # CRITICAL: Preserve original session_state before intent resolution
     # This ensures session (with intent_name + slots) is available for merge_luma_with_session
     original_session_state = session_state
     effective_intent, session_reset_occurred = resolve_effective_intent(
-        luma_response,
-        session_state,
-        user_id,
-        transaction_id
+        luma_response, session_state, user_id, transaction_id
     )
 
     # Track the source of session_reset_occurred
@@ -1949,8 +2253,9 @@ def handle_message_legacy(
     if session_reset_occurred:
         # DEBUG: Log why session_state would be nulled (but we're NOT nulling it anymore)
         import traceback
+
         # Last 2 frames before this one
-        call_stack = ''.join(traceback.format_stack()[-3:-1])
+        call_stack = "".join(traceback.format_stack()[-3:-1])
         logger.error(
             f"[ORCHESTRATOR] SESSION_RESET_OCCURRED=True (but preserving session_state for capability reconciliation) "
             f"effective_intent={effective_intent} "
@@ -1966,14 +2271,23 @@ def handle_message_legacy(
     if not effective_intent or effective_intent == "UNKNOWN":
         # Fallback to durable session intent if available
         if session_state and not session_reset_occurred:
-            session_intent = session_state.get(
-                "intent_name") or session_state.get("intent")
-            session_intent_str = session_intent if isinstance(session_intent, str) else (
-                session_intent.get("name", "") if isinstance(session_intent, dict) else "")
+            session_intent = session_state.get("intent_name") or session_state.get(
+                "intent"
+            )
+            session_intent_str = (
+                session_intent
+                if isinstance(session_intent, str)
+                else (
+                    session_intent.get("name", "")
+                    if isinstance(session_intent, dict)
+                    else ""
+                )
+            )
             if session_intent_str:
                 # Check if session intent is durable
                 try:
                     from core.policy.intent_policy import get_intent_durable
+
                     if get_intent_durable(session_intent_str):
                         effective_intent = session_intent_str
                         logger.info(
@@ -2001,6 +2315,7 @@ def handle_message_legacy(
     if effective_intent and effective_intent != "UNKNOWN":
         try:
             from core.policy.intent_policy import get_intent_durable
+
             is_durable = get_intent_durable(effective_intent)
 
             if not is_durable:
@@ -2015,11 +2330,16 @@ def handle_message_legacy(
                 # Extract facts from Luma response for informational response
                 facts_obj = luma_response.get("facts", {})
                 from core.orchestration.luma_facts_adapter import facts_to_slots
-                slots = facts_to_slots(
-                    facts_obj,
-                    intent_name=effective_intent,
-                    source_text=text,
-                ) if isinstance(facts_obj, dict) else {}
+
+                slots = (
+                    facts_to_slots(
+                        facts_obj,
+                        intent_name=effective_intent,
+                        source_text=text,
+                    )
+                    if isinstance(facts_obj, dict)
+                    else {}
+                )
 
                 # Also check for slots in nested facts.facts.slots or top-level slots
                 if isinstance(facts_obj, dict) and "slots" in facts_obj:
@@ -2045,8 +2365,8 @@ def handle_message_legacy(
                             "slots": slots,
                             "missing_slots": [],
                             "context": luma_response.get("context", {}),
-                        }
-                    }
+                        },
+                    },
                 }
         except (ImportError, Exception) as e:
             # If durability check fails, log warning but continue (defensive)
@@ -2068,13 +2388,18 @@ def handle_message_legacy(
     # FACT-ONLY: Promote facts to slots BEFORE any other processing
     # This ensures facts.service_id, facts.times, etc. are available for planning
     from core.orchestration.luma_facts_adapter import facts_to_slots
+
     facts_obj = luma_response.get("facts", {})
     # Pass effective_intent for date_range promotion (CREATE_RESERVATION with 2+ dates)
-    promoted_slots = facts_to_slots(
-        facts_obj,
-        intent_name=effective_intent,
-        source_text=text,
-    ) if isinstance(facts_obj, dict) else {}
+    promoted_slots = (
+        facts_to_slots(
+            facts_obj,
+            intent_name=effective_intent,
+            source_text=text,
+        )
+        if isinstance(facts_obj, dict)
+        else {}
+    )
 
     # Extract slots from facts.facts.slots if present (nested format)
     # Otherwise fall back to legacy slots field
@@ -2100,13 +2425,18 @@ def handle_message_legacy(
 
     # Normalize service_id using tenant aliases (e.g., "suite" -> "room", "deluxe" -> "room")
     # CRITICAL: Preserve raw tenant value while storing canonical for planning
-    if tenant_context and "aliases" in tenant_context and "service_id" in effective_response["slots"]:
+    if (
+        tenant_context
+        and "aliases" in tenant_context
+        and "service_id" in effective_response["slots"]
+    ):
         aliases = tenant_context["aliases"]
         raw_service_id = effective_response["slots"]["service_id"]
         if isinstance(raw_service_id, str) and raw_service_id.lower() in aliases:
             canonical_service_id = aliases[raw_service_id.lower()]
             logger.info(
-                f"Normalized service_id: {raw_service_id} -> {canonical_service_id} (via tenant aliases)")
+                f"Normalized service_id: {raw_service_id} -> {canonical_service_id} (via tenant aliases)"
+            )
             # Store canonical for planning, preserve raw for outcome
             effective_response["slots"]["_canonical_service_id"] = canonical_service_id
             # Keep raw value in service_id slot (for outcome/dialog)
@@ -2133,7 +2463,8 @@ def handle_message_legacy(
     session_status_for_trace = None
     if original_session_state:
         session_intent_for_trace = original_session_state.get(
-            "intent_name") or original_session_state.get("intent")
+            "intent_name"
+        ) or original_session_state.get("intent")
         session_status_for_trace = original_session_state.get("status")
     logger.error(
         "[INTENT_TRACE_ORCHESTRATOR] BEFORE merge_luma_with_session: "
@@ -2149,7 +2480,10 @@ def handle_message_legacy(
     # Use ONLY effective_response (never the raw luma_response)
     # ARCHITECTURAL FIX: Always compute effective_collected_slots, even when there's no session
     # This ensures slots are persisted correctly on the first turn
-    from core.orchestration.api.session_merge import merge_luma_with_session, _compute_effective_collected_slots
+    from core.orchestration.api.session_merge import (
+        _compute_effective_collected_slots,
+        merge_luma_with_session,
+    )
 
     # Initialize prior_slots for logging (used later)
     prior_slots = []
@@ -2160,24 +2494,34 @@ def handle_message_legacy(
     # SESSION LIFECYCLE RULE: Merge for NEEDS_CLARIFICATION sessions OR READY sessions with durable intents
     # CRITICAL: Use original_session_state (preserved before reset) for merge decision and merge call
     # This ensures session (with intent_name + slots) is always available even if session_state was set to None
-    session_for_merge = original_session_state if original_session_state else session_state
-    session_status_for_merge = session_for_merge.get(
-        "status") if session_for_merge else None
+    session_for_merge = (
+        original_session_state if original_session_state else session_state
+    )
+    session_status_for_merge = (
+        session_for_merge.get("status") if session_for_merge else None
+    )
     # CRITICAL: Session stores intent_name, not intent. Check intent_name first, then fall back to intent.
-    session_intent_for_merge = session_for_merge.get(
-        "intent_name") if session_for_merge else None
+    session_intent_for_merge = (
+        session_for_merge.get("intent_name") if session_for_merge else None
+    )
     if not session_intent_for_merge and session_for_merge:
         # Fallback to intent (for backward compatibility)
         session_intent_for_merge = session_for_merge.get("intent")
-    session_intent_str_for_merge = session_intent_for_merge if isinstance(session_intent_for_merge, str) else (
-        session_intent_for_merge.get("name", "") if isinstance(session_intent_for_merge, dict) else "")
+    session_intent_str_for_merge = (
+        session_intent_for_merge
+        if isinstance(session_intent_for_merge, str)
+        else (
+            session_intent_for_merge.get("name", "")
+            if isinstance(session_intent_for_merge, dict)
+            else ""
+        )
+    )
 
     # Check if session intent is durable
     is_session_intent_durable = False
     if session_intent_str_for_merge:
         try:
-            is_session_intent_durable = is_durable_intent(
-                session_intent_str_for_merge)
+            is_session_intent_durable = is_durable_intent(session_intent_str_for_merge)
         except (ImportError, Exception) as e:
             logger.warning(
                 f"Failed to check durable status for '{session_intent_str_for_merge}': {e}. "
@@ -2192,10 +2536,12 @@ def handle_message_legacy(
     #    This ensures pre-intent slots (e.g., date from "tomorrow") are merged when intent materializes
 
     # DEBUG: Log merge decision inputs before computing should_merge_session
-    session_for_merge_intent = session_for_merge.get(
-        "intent_name") if session_for_merge else None
-    session_for_merge_slots = list(session_for_merge.get(
-        "slots", {}).keys()) if session_for_merge else []
+    session_for_merge_intent = (
+        session_for_merge.get("intent_name") if session_for_merge else None
+    )
+    session_for_merge_slots = (
+        list(session_for_merge.get("slots", {}).keys()) if session_for_merge else []
+    )
 
     # CRITICAL: Final check - who last set session_reset_occurred?
     logger.error(
@@ -2220,9 +2566,11 @@ def handle_message_legacy(
     )
 
     should_merge_session = (
-        session_for_merge and not session_reset_occurred and (
-            session_status_for_merge == "NEEDS_CLARIFICATION" or
-            (session_status_for_merge == "READY" and is_session_intent_durable)
+        session_for_merge
+        and not session_reset_occurred
+        and (
+            session_status_for_merge == "NEEDS_CLARIFICATION"
+            or (session_status_for_merge == "READY" and is_session_intent_durable)
         )
     )
 
@@ -2242,14 +2590,21 @@ def handle_message_legacy(
         prior_slots = list(session_for_merge.get("slots", {}).keys())
 
         effective_response = merge_luma_with_session(
-            effective_response, session_for_merge, planning_only=planning_only)
+            effective_response, session_for_merge, planning_only=planning_only
+        )
 
         # CRITICAL: If CONFIRM_* intent was treated as continuation of durable session intent,
         # set confirmation_state to "confirmed" in the booking object
         # NOTE: Use original luma_intent_name (from line 1446) BEFORE merge, not after merge
         # because merge_luma_with_session changes effective_response['intent']['name'] to session intent
-        if (luma_intent_name and luma_intent_name.startswith("CONFIRM_") and
-                effective_intent != luma_intent_name and is_session_intent_durable):
+        # HARDENED: Only set confirmation_state when session.status == "AWAITING_CONFIRMATION"
+        if (
+            luma_intent_name
+            and luma_intent_name.startswith("CONFIRM_")
+            and effective_intent != luma_intent_name
+            and is_session_intent_durable
+            and session_status_for_merge == "AWAITING_CONFIRMATION"
+        ):
             # CONFIRM_* was treated as continuation - set confirmation_state
             if "booking" not in effective_response:
                 effective_response["booking"] = {}
@@ -2258,18 +2613,19 @@ def handle_message_legacy(
             effective_response["booking"]["confirmation_state"] = "confirmed"
             logger.info(
                 f"[CONFIRM_CONTINUATION] Set confirmation_state=confirmed for CONFIRM_* continuation "
-                f"of durable intent {effective_intent}, user_id={user_id}"
+                f"of durable intent {effective_intent}, session.status={session_status_for_merge}, user_id={user_id}"
             )
 
         # AFTER_MERGE: Log right after session merge
         effective_collected_slots = effective_response.get(
-            "_effective_collected_slots", {})
+            "_effective_collected_slots", {}
+        )
         after_merge_log = {
             "trace": "AFTER_MERGE",
             "intent": effective_response.get("intent"),
             "slots": effective_response.get("slots"),
             "effective_collected_slots": effective_collected_slots,
-            "modification_context": effective_response.get("_modification_context")
+            "modification_context": effective_response.get("_modification_context"),
         }
     else:
         # No session merge (first turn or session reset or READY non-CREATE_APPOINTMENT)
@@ -2282,17 +2638,19 @@ def handle_message_legacy(
         # This ensures slots are persisted correctly on the first turn
         if effective_response and isinstance(effective_response, dict):
             effective_response = _compute_effective_collected_slots(
-                effective_response, planning_only=planning_only)
+                effective_response, planning_only=planning_only
+            )
 
             # AFTER_MERGE: Log right after computing effective_collected_slots (first turn)
             effective_collected_slots = effective_response.get(
-                "_effective_collected_slots", {})
+                "_effective_collected_slots", {}
+            )
             after_merge_log = {
                 "trace": "AFTER_MERGE",
                 "intent": effective_response.get("intent"),
                 "slots": effective_response.get("slots"),
                 "effective_collected_slots": effective_collected_slots,
-                "modification_context": effective_response.get("_modification_context")
+                "modification_context": effective_response.get("_modification_context"),
             }
             # INVARIANT CHECK: missing_slots must be computed for first turns
             if "missing_slots" not in effective_response:
@@ -2302,9 +2660,11 @@ def handle_message_legacy(
                     f"user_id={user_id}, effective_response_keys={list(effective_response.keys())}"
                 )
                 # Fail-safe: compute missing_slots now
-                from core.planning.orchestration.missing_slots import compute_missing_slots
-                intent_name = effective_response.get(
-                    "intent", {}).get("name", "")
+                from core.planning.orchestration.missing_slots import (
+                    compute_missing_slots,
+                )
+
+                intent_name = effective_response.get("intent", {}).get("name", "")
                 slots = effective_response.get("slots", {})
                 time_constraint = effective_response.get("time_constraint")
                 if intent_name:
@@ -2330,8 +2690,7 @@ def handle_message_legacy(
     merged_missing = effective_response.get("missing_slots", [])
     extracted_slots = [k for k in merged_slots.keys() if k not in prior_slots]
     remaining_missing = merged_missing
-    effective_intent_name = effective_response.get(
-        "intent", {}).get("name", "")
+    effective_intent_name = effective_response.get("intent", {}).get("name", "")
 
     logger.info(
         f"session_merged user_id={user_id}{log_transaction_id} "
@@ -2342,24 +2701,26 @@ def handle_message_legacy(
     # Verify intent before processing
     # Guard: effective_response must be a dict
     if not effective_response or not isinstance(effective_response, dict):
-        logger.error(
-            f"effective_response is None or not a dict: {effective_response}")
+        logger.error(f"effective_response is None or not a dict: {effective_response}")
         return {
             "success": False,
             "error": "internal_error",
-            "message": "Invalid effective_response"
+            "message": "Invalid effective_response",
         }
 
     final_intent_check = effective_response.get("intent", {}).get("name", "")
-    if final_intent_check == "UNKNOWN" and session_state and session_state.get("status") == "NEEDS_CLARIFICATION":
+    if (
+        final_intent_check == "UNKNOWN"
+        and session_state
+        and session_state.get("status") == "NEEDS_CLARIFICATION"
+    ):
         logger.error(
             f"INTENT_OVERRIDE_FAILED user_id={user_id}{log_transaction_id} "
             f"effective_response.intent={final_intent_check} session.intent={session_state.get('intent')}"
         )
         # Force override as last resort
         effective_response["intent"] = {"name": session_state.get("intent")}
-        final_intent_check = effective_response.get(
-            "intent", {}).get("name", "")
+        final_intent_check = effective_response.get("intent", {}).get("name", "")
 
     logger.info(
         f"calling_process_luma_response user_id={user_id}{log_transaction_id} "
@@ -2369,11 +2730,12 @@ def handle_message_legacy(
     # HARD INVARIANT: Planning must NEVER run with intent=UNKNOWN or empty when durable session intent exists
     # This ensures durable intents are preserved even if intent resolution failed or was overwritten
     planning_intent = effective_response.get("intent", {}).get("name", "")
-    effective_intent_for_planning = effective_response.get(
-        "_effective_intent", "")
+    effective_intent_for_planning = effective_response.get("_effective_intent", "")
 
     # If planning intent is UNKNOWN/empty but effective_intent exists, use effective_intent
-    if (not planning_intent or planning_intent == "UNKNOWN") and effective_intent_for_planning:
+    if (
+        not planning_intent or planning_intent == "UNKNOWN"
+    ) and effective_intent_for_planning:
         planning_intent = effective_intent_for_planning
         effective_response["intent"] = {"name": planning_intent}
         logger.info(
@@ -2382,14 +2744,26 @@ def handle_message_legacy(
         )
 
     # If still UNKNOWN/empty and session has durable intent, recover from session
-    if (not planning_intent or planning_intent == "UNKNOWN") and session_state and not session_reset_occurred:
+    if (
+        (not planning_intent or planning_intent == "UNKNOWN")
+        and session_state
+        and not session_reset_occurred
+    ):
         session_intent = session_state.get("intent")
-        session_intent_str = session_intent if isinstance(session_intent, str) else (
-            session_intent.get("name", "") if isinstance(session_intent, dict) else "")
+        session_intent_str = (
+            session_intent
+            if isinstance(session_intent, str)
+            else (
+                session_intent.get("name", "")
+                if isinstance(session_intent, dict)
+                else ""
+            )
+        )
         if session_intent_str:
             # Check if session intent is durable
             try:
                 from core.policy.intent_policy import get_intent_durable
+
                 if get_intent_durable(session_intent_str):
                     planning_intent = session_intent_str
                     effective_response["intent"] = {"name": planning_intent}
@@ -2412,13 +2786,25 @@ def handle_message_legacy(
                 )
 
     # SAFETY ASSERTION: Planning must NEVER run with invalid intent when durable session intent exists
-    if (not planning_intent or planning_intent == "UNKNOWN") and session_state and not session_reset_occurred:
+    if (
+        (not planning_intent or planning_intent == "UNKNOWN")
+        and session_state
+        and not session_reset_occurred
+    ):
         session_intent = session_state.get("intent")
-        session_intent_str = session_intent if isinstance(session_intent, str) else (
-            session_intent.get("name", "") if isinstance(session_intent, dict) else "")
+        session_intent_str = (
+            session_intent
+            if isinstance(session_intent, str)
+            else (
+                session_intent.get("name", "")
+                if isinstance(session_intent, dict)
+                else ""
+            )
+        )
         if session_intent_str:
             try:
                 from core.policy.intent_policy import get_intent_durable
+
                 if get_intent_durable(session_intent_str):
                     raise AssertionError(
                         f"Planning invoked without a valid intent when durable session intent exists. "
@@ -2442,7 +2828,8 @@ def handle_message_legacy(
     session_status_for_trace = None
     if session_state:
         session_intent_for_trace = session_state.get(
-            "intent_name") or session_state.get("intent")
+            "intent_name"
+        ) or session_state.get("intent")
         session_status_for_trace = session_state.get("status")
     logger.error(
         "[INTENT_TRACE_ORCHESTRATOR] BEFORE process_luma_response: "
@@ -2461,32 +2848,49 @@ def handle_message_legacy(
         f"missing_slots must be computed before planning! "
         f"user_id={user_id}, effective_response_keys={list(effective_response.keys())}"
     )
-    assert isinstance(missing_slots_before_plan, list), (
-        f"missing_slots must be a list before planning, got {type(missing_slots_before_plan)}: {missing_slots_before_plan}"
-    )
+    assert isinstance(
+        missing_slots_before_plan, list
+    ), f"missing_slots must be a list before planning, got {type(missing_slots_before_plan)}: {missing_slots_before_plan}"
 
     # LUMA_RAW: Log raw Luma response (facts, intent, source_text)
     raw_luma_response = effective_response.get("_raw_luma_response", {})
-    raw_luma_facts = raw_luma_response.get(
-        "facts", {}) if isinstance(raw_luma_response, dict) else {}
-    raw_luma_intent = raw_luma_response.get(
-        "intent", {}) if isinstance(raw_luma_response, dict) else {}
-    raw_luma_intent_name = raw_luma_intent.get(
-        "name", "") if isinstance(raw_luma_intent, dict) else ""
+    raw_luma_facts = (
+        raw_luma_response.get("facts", {})
+        if isinstance(raw_luma_response, dict)
+        else {}
+    )
+    raw_luma_intent = (
+        raw_luma_response.get("intent", {})
+        if isinstance(raw_luma_response, dict)
+        else {}
+    )
+    raw_luma_intent_name = (
+        raw_luma_intent.get("name", "") if isinstance(raw_luma_intent, dict) else ""
+    )
     source_text = effective_response.get("_source_text", text)
     # LUMA_RAW: Log raw Luma response (facts, intent, source_text)
     raw_luma_response = effective_response.get("_raw_luma_response", {})
-    raw_luma_facts = raw_luma_response.get(
-        "facts", {}) if isinstance(raw_luma_response, dict) else {}
-    raw_luma_intent = raw_luma_response.get(
-        "intent", {}) if isinstance(raw_luma_response, dict) else {}
-    raw_luma_intent_name = raw_luma_intent.get(
-        "name", "") if isinstance(raw_luma_intent, dict) else ""
+    raw_luma_facts = (
+        raw_luma_response.get("facts", {})
+        if isinstance(raw_luma_response, dict)
+        else {}
+    )
+    raw_luma_intent = (
+        raw_luma_response.get("intent", {})
+        if isinstance(raw_luma_response, dict)
+        else {}
+    )
+    raw_luma_intent_name = (
+        raw_luma_intent.get("name", "") if isinstance(raw_luma_intent, dict) else ""
+    )
     source_text = effective_response.get("_source_text", text)
-    logger.info("[LUMA_RAW] user_id=%s facts=%s intent=%s source_text=%s",
-                user_id, json.dumps(
-                    raw_luma_facts, default=str, ensure_ascii=True),
-                raw_luma_intent_name, source_text)
+    logger.info(
+        "[LUMA_RAW] user_id=%s facts=%s intent=%s source_text=%s",
+        user_id,
+        json.dumps(raw_luma_facts, default=str, ensure_ascii=True),
+        raw_luma_intent_name,
+        source_text,
+    )
 
     # Add organization data to facts for capability evaluation
     # This allows capability conditions to read org.payment_required, etc.
@@ -2508,16 +2912,17 @@ def handle_message_legacy(
             # If org fetch fails, log but don't crash
             # Capability evaluation will handle missing org data gracefully
             logger.debug(
-                f"Failed to fetch organization data for capability evaluation: {e}")
+                f"Failed to fetch organization data for capability evaluation: {e}"
+            )
 
     decision = process_luma_response(
-        effective_response, derived_domain, user_id, session_state=session_state)
+        effective_response, derived_domain, user_id, session_state=session_state
+    )
 
     # Guard: decision must be a dict
     # CRITICAL: Missing slots are NEVER an error - always return a planning response
     if not decision or not isinstance(decision, dict):
-        logger.error(
-            f"process_luma_response returned None or not a dict: {decision}")
+        logger.error(f"process_luma_response returned None or not a dict: {decision}")
         # Even on error, return a minimal planning response (not an error)
         # This ensures planning always proceeds, even if process_luma_response fails
         intent_name = effective_response.get("intent", {}).get("name", "")
@@ -2546,7 +2951,7 @@ def handle_message_legacy(
             "awaiting": None,
             "executable_actions": [],
             "stage": stage,
-            "action": action
+            "action": action,
         }
 
         # Build minimal decision
@@ -2556,11 +2961,12 @@ def handle_message_legacy(
             "facts": {
                 "slots": slots,
                 "missing_slots": missing_slots,
-                "context": effective_response.get("context", {})
-            }
+                "context": effective_response.get("context", {}),
+            },
         }
         logger.warning(
-            f"Created minimal decision due to process_luma_response failure: intent={intent_name}, missing_slots={missing_slots}")
+            f"Created minimal decision due to process_luma_response failure: intent={intent_name}, missing_slots={missing_slots}"
+        )
 
     # HYDRATE ORGANIZATION FACTS INTO DECISION (for capability gating)
     # This MUST happen BEFORE: capability gating, PLAN_FINAL, SESSION_SAVE
@@ -2611,20 +3017,21 @@ def handle_message_legacy(
                 try:
                     logger.info(
                         f"[ORG_HYDRATION] Fetching organization data for org_id={org_id_to_fetch} "
-                        f"(source={org_id_source})")
-                    org_details = organization_client.get_details(
-                        org_id_to_fetch)
+                        f"(source={org_id_source})"
+                    )
+                    org_details = organization_client.get_details(org_id_to_fetch)
                     if isinstance(org_details, dict):
                         # Organization data may be at top level or under "organization" key
-                        org_data = org_details.get(
-                            "organization") or org_details
+                        org_data = org_details.get("organization") or org_details
                         logger.info(
                             f"[ORG_HYDRATION] Successfully fetched organization data: "
-                            f"payment_required={org_data.get('payment_required') if isinstance(org_data, dict) else 'N/A'}")
+                            f"payment_required={org_data.get('payment_required') if isinstance(org_data, dict) else 'N/A'}"
+                        )
                 except Exception as e:
                     # If org fetch fails, log but don't crash
                     logger.warning(
-                        f"[ORG_HYDRATION] Failed to fetch organization data for org_id={org_id_to_fetch}: {e}")
+                        f"[ORG_HYDRATION] Failed to fetch organization data for org_id={org_id_to_fetch}: {e}"
+                    )
 
             # Inject org_data into decision.facts if we have it
             if org_data and isinstance(org_data, dict):
@@ -2632,11 +3039,13 @@ def handle_message_legacy(
                 logger.info(
                     f"[ORG_HYDRATION] Injected organization facts into decision.facts.org "
                     f"(org_id={org_id_to_fetch or 'from_effective_response'}, "
-                    f"payment_required={org_data.get('payment_required')})")
+                    f"payment_required={org_data.get('payment_required')})"
+                )
             else:
                 logger.debug(
                     f"[ORG_HYDRATION] No organization data available to inject "
-                    f"(org_id_to_fetch={org_id_to_fetch}, organization_client={organization_client is not None})")
+                    f"(org_id_to_fetch={org_id_to_fetch}, organization_client={organization_client is not None})"
+                )
 
     # Extract decision plan
     plan = decision.get("plan", {})
@@ -2668,15 +3077,17 @@ def handle_message_legacy(
             has_time = bool(slots.get("time"))
             has_date = bool(slots.get("date"))
             has_date_range = isinstance(slots.get("date_range"), dict) and bool(
-                slots.get("date_range", {}).get("start"))
+                slots.get("date_range", {}).get("start")
+            )
             has_datetime_range = isinstance(slots.get("datetime_range"), dict) and bool(
-                slots.get("datetime_range", {}).get("start"))
+                slots.get("datetime_range", {}).get("start")
+            )
 
             # Check if sufficient temporal information exists
             has_sufficient_temporal = (
-                (has_date and has_time) or  # date + time
-                (has_date_range and has_time) or  # date_range + time
-                has_datetime_range  # datetime_range
+                (has_date and has_time)
+                or (has_date_range and has_time)  # date + time
+                or has_datetime_range  # date_range + time  # datetime_range
             )
 
             if has_sufficient_temporal:
@@ -2691,7 +3102,8 @@ def handle_message_legacy(
                 # Update decision facts with has_datetime
                 decision["facts"] = facts
                 logger.debug(
-                    f"Set has_datetime=true in facts.slots (planning invariant: READY with temporal info)")
+                    f"Set has_datetime=true in facts.slots (planning invariant: READY with temporal info)"
+                )
 
     # PLANNING-ONLY SHORTCUT: Return planning outcome early if planning_only=True
     # This allows tests to validate planning logic without executing actions or mutating session
@@ -2726,7 +3138,10 @@ def handle_message_legacy(
 
         # 3. Fallback to effective_response (source before process_luma_response)
         # This is guaranteed to have missing_slots (asserted earlier)
-        if missing_slots is None and effective_response.get("missing_slots") is not None:
+        if (
+            missing_slots is None
+            and effective_response.get("missing_slots") is not None
+        ):
             missing_slots = effective_response.get("missing_slots")
         if slots is None and effective_response.get("slots") is not None:
             slots = effective_response.get("slots")
@@ -2754,8 +3169,7 @@ def handle_message_legacy(
         # Normalized values remain internal-only for execution paths
         # This applies ONLY to planning_only responses - execution paths still use normalized values
         if effective_response and isinstance(effective_response, dict):
-            raw_luma_response = effective_response.get(
-                "_raw_luma_response", {})
+            raw_luma_response = effective_response.get("_raw_luma_response", {})
             if isinstance(raw_luma_response, dict):
                 raw_luma_facts = raw_luma_response.get("facts", {})
                 if isinstance(raw_luma_facts, dict) and raw_luma_facts:
@@ -2767,7 +3181,8 @@ def handle_message_legacy(
                         raw_slots["service_id"] = raw_luma_facts["service_id"]
                     elif isinstance(effective_response.get("facts"), dict):
                         raw_facts_in_effective = effective_response.get(
-                            "facts", {}).get("service_id")
+                            "facts", {}
+                        ).get("service_id")
                         if raw_facts_in_effective:
                             raw_slots["service_id"] = raw_facts_in_effective
 
@@ -2798,7 +3213,7 @@ def handle_message_legacy(
             "status": plan_status,
             "executable_actions": plan.get("executable_actions", []),
             "allowed_actions": plan.get("allowed_actions", []),
-            "blocked_actions": plan.get("blocked_actions", [])
+            "blocked_actions": plan.get("blocked_actions", []),
         }
 
         # CAPABILITY GATING: Override plan status if payment is required but not satisfied
@@ -2809,7 +3224,11 @@ def handle_message_legacy(
         if decision and isinstance(decision.get("facts"), dict):
             org_data = decision["facts"].get("org")
         # Fall back to effective_response.facts.org (where org data is added before process_luma_response)
-        if not org_data and effective_response and isinstance(effective_response.get("facts"), dict):
+        if (
+            not org_data
+            and effective_response
+            and isinstance(effective_response.get("facts"), dict)
+        ):
             org_data = effective_response["facts"].get("org")
 
         payment_required = False
@@ -2825,25 +3244,31 @@ def handle_message_legacy(
         # Check decision.facts.payment_satisfied first
         if decision and isinstance(decision.get("facts"), dict):
             decision_facts_payment_satisfied = decision["facts"].get(
-                "payment_satisfied")
-            payment_satisfied = decision_facts_payment_satisfied if decision_facts_payment_satisfied else False
+                "payment_satisfied"
+            )
+            payment_satisfied = (
+                decision_facts_payment_satisfied
+                if decision_facts_payment_satisfied
+                else False
+            )
 
         # Check session_state.facts.payment_satisfied
         if session_state and isinstance(session_state.get("facts"), dict):
             session_facts_payment_satisfied = session_state["facts"].get(
-                "payment_satisfied")
+                "payment_satisfied"
+            )
 
         # Check effective_response.facts.payment_satisfied (for test scenarios)
         if effective_response and isinstance(effective_response.get("facts"), dict):
             outcome_facts_payment_satisfied = effective_response["facts"].get(
-                "payment_satisfied")
+                "payment_satisfied"
+            )
 
         # CRITICAL FIX: Session facts are authoritative for reconciliation
         # When session_state exists, use session_state["facts"] as the primary source
         # This ensures capability completion facts (payment_satisfied) from previous turns are respected
         if session_state and isinstance(session_state.get("facts"), dict):
-            session_payment_satisfied = session_state["facts"].get(
-                "payment_satisfied")
+            session_payment_satisfied = session_state["facts"].get("payment_satisfied")
             if session_payment_satisfied is not None:
                 payment_satisfied = session_payment_satisfied
                 logger.info(
@@ -2936,17 +3361,20 @@ def handle_message_legacy(
         if raw_service_id_for_outcome:
             outcome_slots["service_id"] = raw_service_id_for_outcome
             logger.debug(
-                f"Using raw service_id in outcome: {raw_service_id_for_outcome}")
+                f"Using raw service_id in outcome: {raw_service_id_for_outcome}"
+            )
         elif "service_id" in outcome_slots:
             # Keep existing service_id if no raw found (shouldn't happen but fail-safe)
             logger.debug(
-                f"Using existing service_id in outcome: {outcome_slots.get('service_id')}")
+                f"Using existing service_id in outcome: {outcome_slots.get('service_id')}"
+            )
 
         # Remove canonical from outcome slots (never expose canonical to tests/dialog)
         if "_canonical_service_id" in outcome_slots:
             del outcome_slots["_canonical_service_id"]
             logger.debug(
-                f"Removed _canonical_service_id from outcome, using raw service_id: {outcome_slots.get('service_id')}")
+                f"Removed _canonical_service_id from outcome, using raw service_id: {outcome_slots.get('service_id')}"
+            )
 
         # Construct flattened planning response with both structures:
         # 1. Flattened fields at outcome level (for test compatibility)
@@ -2964,7 +3392,7 @@ def handle_message_legacy(
             **decision_facts,
             "missing_slots": missing_slots,  # Overlay with computed missing_slots
             # Overlay with computed slots (use raw service_id only)
-            "slots": outcome_slots
+            "slots": outcome_slots,
         }
 
         result = {
@@ -2978,8 +3406,8 @@ def handle_message_legacy(
                 "status": plan_status,
                 "plan": populated_plan,  # Always include complete plan object
                 # Preserve decision facts (includes capability completion markers)
-                "facts": outcome_facts
-            }
+                "facts": outcome_facts,
+            },
         }
 
         # Add active_capability if present in populated_plan (from capability gating)
@@ -2995,13 +3423,21 @@ def handle_message_legacy(
 
         # DEBUG LOG: Finalization point (after all overrides, before PLAN_FINAL)
         # Track fingerprint-based availability resolution for debugging
-        stored_fp = session_state.get(
-            "availability_fingerprint") if session_state else None
-        last_exec_result = session_state.get(
-            "last_execution_result") if session_state else None
-        from core.orchestration.availability_fingerprint import compute_availability_fingerprint
-        current_fp = compute_availability_fingerprint(
-            slots, intent_name=intent_name) if slots else None
+        stored_fp = (
+            session_state.get("availability_fingerprint") if session_state else None
+        )
+        last_exec_result = (
+            session_state.get("last_execution_result") if session_state else None
+        )
+        from core.orchestration.availability_fingerprint import (
+            compute_availability_fingerprint,
+        )
+
+        current_fp = (
+            compute_availability_fingerprint(slots, intent_name=intent_name)
+            if slots
+            else None
+        )
         logger.error(
             f"[FINALIZATION_DECISION] BEFORE PLAN_FINAL (after all overrides): "
             f"intent={intent_name}, "
@@ -3022,8 +3458,10 @@ def handle_message_legacy(
         # GUARD LOG: Final plan values before return
         logger.error(
             "[PLAN_FINAL] stage=%s action=%s missing=%s slots=%s",
-            populated_plan["stage"], populated_plan["action"],
-            populated_plan["missing_slots"], populated_plan["slots"]
+            populated_plan["stage"],
+            populated_plan["action"],
+            populated_plan["missing_slots"],
+            populated_plan["slots"],
         )
 
         # CAPABILITY RUNNER INVOCATION: Invoke immediately when entering AWAITING_CAPABILITY
@@ -3045,8 +3483,7 @@ def handle_message_legacy(
                     if session_state:
                         session_slots.update(session_state.get("slots", {}))
                         if isinstance(session_state.get("facts"), dict):
-                            session_facts.update(
-                                session_state.get("facts", {}))
+                            session_facts.update(session_state.get("facts", {}))
 
                     # Merge outcome slots/facts (may have updated values from this turn)
                     outcome_slots = result.get("outcome", {}).get("slots", {})
@@ -3061,20 +3498,25 @@ def handle_message_legacy(
                     booking = decision.get("booking", {})
                     if isinstance(booking, dict):
                         # Extract booking_id, booking_code, total_amount, currency from booking
-                        if "booking_id" in booking and "booking_id" not in session_slots:
-                            session_slots["booking_id"] = booking.get(
-                                "booking_id")
-                        if "booking_code" in booking and "booking_code" not in session_slots:
-                            session_slots["booking_code"] = booking.get(
-                                "booking_code")
+                        if (
+                            "booking_id" in booking
+                            and "booking_id" not in session_slots
+                        ):
+                            session_slots["booking_id"] = booking.get("booking_id")
+                        if (
+                            "booking_code" in booking
+                            and "booking_code" not in session_slots
+                        ):
+                            session_slots["booking_code"] = booking.get("booking_code")
                         if "code" in booking and "booking_code" not in session_slots:
                             session_slots["booking_code"] = booking.get("code")
-                        if "total_amount" in booking and "total_amount" not in session_slots:
-                            session_slots["total_amount"] = booking.get(
-                                "total_amount")
+                        if (
+                            "total_amount" in booking
+                            and "total_amount" not in session_slots
+                        ):
+                            session_slots["total_amount"] = booking.get("total_amount")
                         if "amount" in booking and "total_amount" not in session_slots:
-                            session_slots["total_amount"] = booking.get(
-                                "amount")
+                            session_slots["total_amount"] = booking.get("amount")
                         if "currency" in booking and "currency" not in session_slots:
                             session_slots["currency"] = booking.get("currency")
 
@@ -3085,7 +3527,7 @@ def handle_message_legacy(
                         "domain": domain,
                         "timezone": timezone,
                         "organization_id": organization_id,
-                        "transaction_id": transaction_id
+                        "transaction_id": transaction_id,
                     }
 
                     # Initialize capability runner (idempotent - safe on re-entry)
@@ -3102,14 +3544,15 @@ def handle_message_legacy(
                         # First activation (no user input yet)
                         user_input=None,
                         core_outcome=core_outcome,
-                        context=context
+                        context=context,
                     )
 
                     # If adapter returned text, store it in outcome
                     if runner_result.text:
                         result["outcome"]["text"] = runner_result.text
                         booking_code = session_slots.get(
-                            "booking_code") or session_facts.get("booking_code")
+                            "booking_code"
+                        ) or session_facts.get("booking_code")
                         logger.info(
                             f"[CAPABILITY_LIFECYCLE] Capability '{active_capability_value}' invoked, side-effect executed. "
                             f"booking_code={booking_code}"
@@ -3145,17 +3588,20 @@ def handle_message_legacy(
                     # Log error but don't fail - capability execution is best-effort
                     logger.warning(
                         f"[CAPABILITY_LIFECYCLE] Failed to invoke capability '{active_capability_value}': {e}",
-                        exc_info=True
+                        exc_info=True,
                     )
 
         # ASSERTION: plan.intent_name must never be empty after successful planning
-        if not populated_plan.get("intent_name") or populated_plan.get("intent_name") == "":
+        if (
+            not populated_plan.get("intent_name")
+            or populated_plan.get("intent_name") == ""
+        ):
             logger.error(
                 "[PLANNING_ASSERTION] CRITICAL: plan.intent_name is empty after planning! "
                 "intent_name=%r, plan=%s, outcome.intent_name=%s",
                 intent_name,
                 json.dumps(populated_plan, default=str, ensure_ascii=True),
-                result.get("outcome", {}).get("intent_name")
+                result.get("outcome", {}).get("intent_name"),
             )
             # Fail-safe: Use intent_name from variable if plan doesn't have it
             if intent_name and intent_name not in ("", "UNKNOWN"):
@@ -3164,18 +3610,18 @@ def handle_message_legacy(
                 result["outcome"]["plan"]["intent_name"] = intent_name
                 logger.error(
                     "[PLANNING_ASSERTION] Recovered: Set plan.intent_name=%s from resolved intent_name",
-                    intent_name
+                    intent_name,
                 )
             else:
                 logger.error(
                     "[PLANNING_ASSERTION] FAILED: Cannot recover - intent_name is empty/invalid: %r",
-                    intent_name
+                    intent_name,
                 )
         else:
             # Log success to confirm intent_name is present
             logger.debug(
                 "[PLANNING_ASSERTION] SUCCESS: plan.intent_name=%s is present after planning",
-                populated_plan.get("intent_name")
+                populated_plan.get("intent_name"),
             )
 
         # PLANNING INVARIANT: Ephemeral intents must NOT leak into planning
@@ -3192,15 +3638,32 @@ def handle_message_legacy(
         outcome = result.get("outcome", {})
         outcome_slots = outcome.get("slots", {})
         outcome_missing_slots = outcome.get("missing_slots", [])
-        logger.info("[OUTCOME] user_id=%s intent=%s stage=%s action=%s missing_slots=%s slots=%s",
-                    user_id, intent_name, outcome.get(
-                        "stage"), outcome.get("action"),
-                    outcome_missing_slots, json.dumps(outcome_slots, default=str, ensure_ascii=True))
+        logger.info(
+            "[OUTCOME] user_id=%s intent=%s stage=%s action=%s missing_slots=%s slots=%s",
+            user_id,
+            intent_name,
+            outcome.get("stage"),
+            outcome.get("action"),
+            outcome_missing_slots,
+            json.dumps(outcome_slots, default=str, ensure_ascii=True),
+        )
 
-        # Inject rendering text for clarification states
-        _inject_rendering_text(result, decision)
+        # Inject system rendering text (greeting/welcome) BEFORE clarification injection
+        # Only if NOT NEEDS_CLARIFICATION, NOT AWAITING_CAPABILITY, NOT EXECUTED
+        if plan_status not in (
+            "NEEDS_CLARIFICATION",
+            "AWAITING_CAPABILITY",
+            "EXECUTED",
+        ):
+            _inject_system_text(result, decision)
 
-        return result
+        # Inject rendering text for clarification states (ONLY for NEEDS_CLARIFICATION)
+        if plan_status == "NEEDS_CLARIFICATION":
+            _inject_rendering_text(result, decision, session_state)
+
+        # Do NOT return early for AWAITING_* statuses - let the handler below process them
+        if plan_status not in ("AWAITING_CONFIRMATION", "AWAITING_CAPABILITY"):
+            return result
 
     # Handle AWAITING_* statuses (AWAITING_CONFIRMATION, AWAITING_CAPABILITY, etc.)
     # Generic handler that mirrors plan status and awaiting without special-casing
@@ -3239,10 +3702,7 @@ def handle_message_legacy(
             if active_capability:
                 outcome_dict["active_capability"] = active_capability
 
-        result = {
-            "success": True,
-            "outcome": outcome_dict
-        }
+        result = {"success": True, "outcome": outcome_dict}
         # Store effective Luma response for session building
         result["_merged_luma_response"] = effective_response
 
@@ -3274,8 +3734,7 @@ def handle_message_legacy(
                     if session_state:
                         session_slots.update(session_state.get("slots", {}))
                         if isinstance(session_state.get("facts"), dict):
-                            session_facts.update(
-                                session_state.get("facts", {}))
+                            session_facts.update(session_state.get("facts", {}))
 
                     # Merge outcome_dict slots/facts (may have updated values from this turn)
                     outcome_slots = outcome_dict.get("slots", {})
@@ -3290,20 +3749,25 @@ def handle_message_legacy(
                     booking = decision.get("booking", {})
                     if isinstance(booking, dict):
                         # Extract booking_id, booking_code, total_amount, currency from booking
-                        if "booking_id" in booking and "booking_id" not in session_slots:
-                            session_slots["booking_id"] = booking.get(
-                                "booking_id")
-                        if "booking_code" in booking and "booking_code" not in session_slots:
-                            session_slots["booking_code"] = booking.get(
-                                "booking_code")
+                        if (
+                            "booking_id" in booking
+                            and "booking_id" not in session_slots
+                        ):
+                            session_slots["booking_id"] = booking.get("booking_id")
+                        if (
+                            "booking_code" in booking
+                            and "booking_code" not in session_slots
+                        ):
+                            session_slots["booking_code"] = booking.get("booking_code")
                         if "code" in booking and "booking_code" not in session_slots:
                             session_slots["booking_code"] = booking.get("code")
-                        if "total_amount" in booking and "total_amount" not in session_slots:
-                            session_slots["total_amount"] = booking.get(
-                                "total_amount")
+                        if (
+                            "total_amount" in booking
+                            and "total_amount" not in session_slots
+                        ):
+                            session_slots["total_amount"] = booking.get("total_amount")
                         if "amount" in booking and "total_amount" not in session_slots:
-                            session_slots["total_amount"] = booking.get(
-                                "amount")
+                            session_slots["total_amount"] = booking.get("amount")
                         if "currency" in booking and "currency" not in session_slots:
                             session_slots["currency"] = booking.get("currency")
 
@@ -3314,7 +3778,7 @@ def handle_message_legacy(
                         "domain": domain,
                         "timezone": timezone,
                         "organization_id": organization_id,
-                        "transaction_id": transaction_id
+                        "transaction_id": transaction_id,
                     }
 
                     # Initialize capability runner (idempotent - safe on re-entry)
@@ -3324,7 +3788,9 @@ def handle_message_legacy(
                     # This ensures the runner correctly identifies the capability to invoke
                     core_outcome_for_runner = outcome_dict.copy()
                     core_outcome_for_runner["status"] = plan_status
-                    core_outcome_for_runner["active_capability"] = active_capability_for_runner
+                    core_outcome_for_runner["active_capability"] = (
+                        active_capability_for_runner
+                    )
 
                     # Invoke capability runner (first activation - creates capability side-effects)
                     # This MUST happen in the same turn, before returning the outcome
@@ -3334,27 +3800,79 @@ def handle_message_legacy(
                         # First activation (no user input yet - do NOT wait for user input)
                         user_input=None,
                         core_outcome=core_outcome_for_runner,
-                        context=context
+                        context=context,
                     )
 
                     # Ensure PaymentAdapter.start() was called and payment intent side-effects are persisted
                     # The runner.handle() above should have invoked adapter.start() which creates the payment intent
                     # Side-effects are persisted to the mock payment store during adapter.start()
+                    booking_code = session_slots.get(
+                        "booking_code"
+                    ) or session_facts.get("booking_code")
+                    logger.info(
+                        f"[CAPABILITY_LIFECYCLE] Capability '{active_capability_for_runner}' invoked, side-effect executed. "
+                        f"booking_code={booking_code}"
+                    )
 
-                    # If adapter returned text, store it in outcome
-                    if runner_result.text:
-                        outcome_dict["text"] = runner_result.text
-                        result["outcome"]["text"] = runner_result.text
-                        booking_code = session_slots.get(
-                            "booking_code") or session_facts.get("booking_code")
-                        logger.info(
-                            f"[CAPABILITY_LIFECYCLE] Capability '{active_capability_for_runner}' invoked, side-effect executed. "
-                            f"booking_code={booking_code}"
+                    # PHASE 2: Core is source of truth for capability presentation text
+                    # Render capability text using core renderer (replaces adapter text)
+                    try:
+                        # Get plan status and active_capability from plan (authoritative source)
+                        plan = decision.get("plan", {})
+                        if isinstance(plan, dict):
+                            plan_status_for_renderer = plan.get("status", plan_status)
+                            plan_active_capability = plan.get(
+                                "active_capability", active_capability_for_runner
+                            )
+                        else:
+                            plan_status_for_renderer = plan_status
+                            plan_active_capability = active_capability_for_runner
+
+                        # Call core capability renderer (single source of truth for capability UI)
+                        render_spec = render_capability(
+                            status=plan_status_for_renderer,
+                            active_capability=plan_active_capability,
+                            facts=outcome_dict.get("facts", {}),
+                            slots=outcome_dict.get("slots", {}),
+                            context=context,
                         )
-                    else:
-                        logger.warning(
-                            f"[CAPABILITY_LIFECYCLE] Capability '{active_capability_for_runner}' invoked but no text returned"
+
+                        # Populate text consistently if renderer returned text
+                        if render_spec is not None and render_spec.text:
+                            # Set in outcome (for backward compatibility)
+                            outcome_dict["text"] = render_spec.text
+                            result["outcome"]["text"] = render_spec.text
+                            # Set in top-level result (matching clarification behavior)
+                            result["text"] = render_spec.text
+
+                            logger.info(
+                                f"[CAPABILITY_RENDERER] Core rendered capability text for "
+                                f"status={plan_status_for_renderer}, active_capability={plan_active_capability}"
+                            )
+                        else:
+                            logger.warning(
+                                f"[CAPABILITY_RENDERER] Core renderer returned no text for "
+                                f"status={plan_status_for_renderer}, active_capability={plan_active_capability}"
+                            )
+
+                        # Store debug info
+                        outcome_dict.setdefault("debug", {})
+                        outcome_dict["debug"]["capability_renderer"] = {
+                            "text": (
+                                render_spec.text if render_spec is not None else None
+                            ),
+                            "active_capability": plan_active_capability,
+                            "status": plan_status_for_renderer,
+                        }
+                        result["outcome"]["debug"] = outcome_dict["debug"]
+
+                    except Exception as e:
+                        # Rendering errors should not break the flow, but log as error since this is now source of truth
+                        logger.error(
+                            f"[CAPABILITY_RENDERER] Failed to render capability text: {e}",
+                            exc_info=True,
                         )
+                        # Do not set text if rendering failed (adapter text is no longer used as fallback)
 
                     # CRITICAL: Merge capability completion facts into outcome
                     # This ensures capability facts (e.g., payment_satisfied) are persisted to session
@@ -3378,18 +3896,24 @@ def handle_message_legacy(
                     # This enforces the invariant that entering AWAITING_CAPABILITY guarantees capability side-effects have executed
                     if active_capability_for_runner == "payment":
                         booking_code_for_check = session_slots.get(
-                            "booking_code") or session_facts.get("booking_code")
+                            "booking_code"
+                        ) or session_facts.get("booking_code")
                         if booking_code_for_check:
                             try:
                                 # Try to access payment store to verify intent exists
                                 # This is a test-time assertion to catch missing payment intents
-                                from capabilities.clients.payment.mock_payment import _PAYMENT_STATE
+                                from capabilities.clients.payment.mock_payment import (
+                                    _PAYMENT_STATE,
+                                )
+
                                 if booking_code_for_check not in _PAYMENT_STATE:
                                     raise AssertionError(
                                         f"[CAPABILITY_GUARD] Payment capability invoked but payment intent not found for booking_code: {booking_code_for_check}. "
                                         f"PaymentAdapter.start() must create and persist payment intent before returning."
                                     )
-                                if not _PAYMENT_STATE[booking_code_for_check].get("intent_created"):
+                                if not _PAYMENT_STATE[booking_code_for_check].get(
+                                    "intent_created"
+                                ):
                                     raise AssertionError(
                                         f"[CAPABILITY_GUARD] Payment capability invoked but payment intent not created for booking_code: {booking_code_for_check}. "
                                         f"PaymentAdapter.start() must create and persist payment intent before returning."
@@ -3418,16 +3942,11 @@ def handle_message_legacy(
                     # Log error but don't fail - capability execution is best-effort
                     logger.warning(
                         f"[CAPABILITY_LIFECYCLE] Failed to invoke capability '{active_capability_for_runner}': {e}",
-                        exc_info=True
+                        exc_info=True,
                     )
 
-        # Inject rendering text for clarification states (AWAITING_* doesn't need clarification)
-        # Only inject if missing_slots is non-empty (clarification needed)
-        facts = decision.get("facts", {})
-        missing_slots = facts.get("missing_slots", [])
-        if isinstance(missing_slots, list) and len(missing_slots) > 0:
-            _inject_rendering_text(result, decision)
-
+        # AWAITING_* statuses must never render clarification text at top-level
+        # Capability/awaiting UI owns the text for these statuses
         return result
 
     # Handle NEEDS_CLARIFICATION status
@@ -3458,12 +3977,13 @@ def handle_message_legacy(
 
                 # CRITICAL: Ensure intent_name is set for NEEDS_CLARIFICATION
                 # NEEDS_CLARIFICATION must NEVER clear intent - preserve it for follow-up turns
-                if "intent_name" not in result["outcome"] or not result["outcome"].get("intent_name"):
+                if "intent_name" not in result["outcome"] or not result["outcome"].get(
+                    "intent_name"
+                ):
                     # Try to get intent_name from decision or effective_response
                     resolved_intent = decision.get("intent_name", "")
                     if not resolved_intent and effective_response:
-                        resolved_intent = effective_response.get(
-                            "_effective_intent")
+                        resolved_intent = effective_response.get("_effective_intent")
                     if not resolved_intent and effective_response:
                         intent_obj = effective_response.get("intent", {})
                         if isinstance(intent_obj, dict):
@@ -3471,11 +3991,13 @@ def handle_message_legacy(
                             # Skip UNKNOWN - use effective_intent instead
                             if resolved_intent == "UNKNOWN":
                                 resolved_intent = effective_response.get(
-                                    "_effective_intent", "")
+                                    "_effective_intent", ""
+                                )
                     # If still empty, preserve session intent
                     if not resolved_intent and session_state:
                         resolved_intent = session_state.get(
-                            "intent_name") or session_state.get("intent")
+                            "intent_name"
+                        ) or session_state.get("intent")
 
                     if resolved_intent:
                         result["outcome"]["intent_name"] = resolved_intent
@@ -3499,11 +4021,15 @@ def handle_message_legacy(
                 # Build decision dict for rendering
                 rendering_decision = {
                     "status": "NEEDS_CLARIFICATION",
-                    "missing_slots": facts_obj.get("missing_slots", outcome_obj.get("missing_slots", []))
+                    "missing_slots": facts_obj.get(
+                        "missing_slots", outcome_obj.get("missing_slots", [])
+                    ),
+                    "facts": facts_obj,  # Include facts for adaptive rendering
                 }
 
                 rendered_text = _render_clarification_text(
-                    rendering_decision, slots_for_rendering)
+                    rendering_decision, slots_for_rendering
+                )
                 if rendered_text:
                     outcome_obj["rendered_text"] = rendered_text
 
@@ -3516,7 +4042,7 @@ def handle_message_legacy(
             return {
                 "success": False,
                 "error": decision["error"],
-                "message": decision.get("message", "An error occurred")
+                "message": decision.get("message", "An error occurred"),
             }
 
         # Synthesize clarification outcome when Luma didn't provide one (follow-up turns)
@@ -3576,9 +4102,9 @@ def handle_message_legacy(
             missing_slots = []
 
         # INVARIANT CHECK: missing_slots must be a list
-        assert isinstance(missing_slots, list), (
-            f"missing_slots must be a list, got {type(missing_slots)}: {missing_slots}"
-        )
+        assert isinstance(
+            missing_slots, list
+        ), f"missing_slots must be a list, got {type(missing_slots)}: {missing_slots}"
 
         # DEBUG: Log why we're synthesizing clarification
         logger.info(
@@ -3593,14 +4119,18 @@ def handle_message_legacy(
 
         # Normalize missing_slots (especially for MODIFY_BOOKING) - safety check
         # Import here to avoid circular dependency
-        from core.orchestration.nlu.luma_response_processor import _normalize_modify_booking_missing_slots
+        from core.orchestration.nlu.luma_response_processor import (
+            _normalize_modify_booking_missing_slots,
+        )
+
         missing_slots = _normalize_modify_booking_missing_slots(
-            missing_slots, effective_response)
+            missing_slots, effective_response
+        )
 
         # INVARIANT CHECK: After normalization, missing_slots must still be a list
-        assert isinstance(missing_slots, list), (
-            f"missing_slots must be a list after normalization, got {type(missing_slots)}: {missing_slots}"
-        )
+        assert isinstance(
+            missing_slots, list
+        ), f"missing_slots must be a list after normalization, got {type(missing_slots)}: {missing_slots}"
 
         # CRITICAL: missing_slots = [] is VALID - it means all required slots are satisfied
         # If status is NEEDS_CLARIFICATION but missing_slots = [], this indicates a logic error
@@ -3620,11 +4150,14 @@ def handle_message_legacy(
 
         # Build clarification outcome using build_clarify_outcome_from_reason
         # (already imported at top of file, but import here for clarity)
-        from core.orchestration.nlu.luma_response_processor import _derive_clarification_reason_from_missing_slots
+        from core.orchestration.nlu.luma_response_processor import (
+            _derive_clarification_reason_from_missing_slots,
+        )
 
         # Derive clarification reason from missing slots
         clarification_reason = _derive_clarification_reason_from_missing_slots(
-            missing_slots)
+            missing_slots
+        )
 
         # Ensure facts has normalized missing_slots
         facts["missing_slots"] = missing_slots
@@ -3641,7 +4174,7 @@ def handle_message_legacy(
             issues=issues,
             booking=booking,
             domain=derived_domain,
-            facts=facts
+            facts=facts,
         )
 
         # CRITICAL: Always set intent_name in outcome for NEEDS_CLARIFICATION
@@ -3658,7 +4191,8 @@ def handle_message_legacy(
                 # No resolved intent - preserve session intent if available
                 if session_state:
                     session_intent = session_state.get(
-                        "intent_name") or session_state.get("intent")
+                        "intent_name"
+                    ) or session_state.get("intent")
                     if session_intent:
                         result["outcome"]["intent_name"] = session_intent
                         logger.info(
@@ -3697,11 +4231,13 @@ def handle_message_legacy(
             # Build decision dict for rendering
             rendering_decision = {
                 "status": "NEEDS_CLARIFICATION",
-                "missing_slots": missing_slots
+                "missing_slots": missing_slots,
+                "facts": facts_obj,  # Include facts for adaptive rendering
             }
 
             rendered_text = _render_clarification_text(
-                rendering_decision, slots_for_rendering)
+                rendering_decision, slots_for_rendering
+            )
             if rendered_text:
                 result["outcome"]["rendered_text"] = rendered_text
 
@@ -3740,7 +4276,7 @@ def handle_message_legacy(
             slots=slots,
             missing_slots=missing_slots,
             executable_actions=executable_actions,
-            status="READY"
+            status="READY",
         )
 
         # CRITICAL: Extract stage/action from plan for top-level promotion
@@ -3755,8 +4291,8 @@ def handle_message_legacy(
                 **planning_outcome,
                 "facts": facts,
                 # CRITICAL: Plan must be in outcome (tests check outcome.plan.stage/action)
-                "plan": plan
-            }
+                "plan": plan,
+            },
         }
 
         # Promote stage/action/missing_slots/slots to top-level outcome (required by tests)
@@ -3767,10 +4303,7 @@ def handle_message_legacy(
         result["outcome"]["missing_slots"] = missing_slots
         result["outcome"]["slots"] = slots
 
-        # Inject rendering text for clarification states (READY doesn't need clarification)
-        # Only inject if missing_slots is non-empty (clarification needed)
-        if isinstance(missing_slots, list) and len(missing_slots) > 0:
-            _inject_rendering_text(result, decision)
+        # READY must remain silent per phase 1 contract (no clarification rendering here)
 
         # Store effective Luma response for session building
         result["_merged_luma_response"] = effective_response
@@ -3781,7 +4314,7 @@ def handle_message_legacy(
     return {
         "success": False,
         "error": "internal_error",
-        "message": f"Unexpected plan status: {plan_status}"
+        "message": f"Unexpected plan status: {plan_status}",
     }
     # Priority: commit action if allowed, otherwise first allowed fallback
     action_to_execute = None
@@ -3792,17 +4325,22 @@ def handle_message_legacy(
     # Enforce core intent boundary: pass through non-core intents without orchestration
     if intent_name:
         from core.routing.intents.base_intents import is_core_intent
+
         if not is_core_intent(intent_name):
             # Pass through non-core intents as non-orchestrated signals
             # This preserves conversational continuity and enables workflow extensions
             return _handle_non_core_intent(effective_response, decision, user_id)
 
-    from core.orchestration.nlu.luma_response_processor import _load_intent_execution_config
+    from core.orchestration.nlu.luma_response_processor import (
+        _load_intent_execution_config,
+    )
+
     intent_configs = _load_intent_execution_config()
     intent_config = intent_configs.get(intent_name, {})
     commit_config = intent_config.get("commit", {})
-    commit_action = commit_config.get(
-        "action") if isinstance(commit_config, dict) else None
+    commit_action = (
+        commit_config.get("action") if isinstance(commit_config, dict) else None
+    )
 
     # Prefer commit action if it's allowed
     if commit_action and commit_action in allowed_actions:
@@ -3819,7 +4357,7 @@ def handle_message_legacy(
         return {
             "success": False,
             "error": "no_allowed_actions",
-            "message": "No actions are allowed to execute at this time"
+            "message": "No actions are allowed to execute at this time",
         }
 
     # Map action to handler
@@ -3834,7 +4372,7 @@ def handle_message_legacy(
             return {
                 "success": False,
                 "error": "unsupported_action",
-                "message": f"Action {action_to_execute} is not supported"
+                "message": f"Action {action_to_execute} is not supported",
             }
 
     # Verify action is allowed (safety check)
@@ -3845,7 +4383,7 @@ def handle_message_legacy(
         return {
             "success": False,
             "error": "action_blocked",
-            "message": f"Action {action_to_execute} is blocked"
+            "message": f"Action {action_to_execute} is blocked",
         }
 
     action_name = handler_action
@@ -3867,10 +4405,15 @@ def handle_message_legacy(
     def has_any_date(slots_dict: Dict[str, Any]) -> bool:
         """Check if slots contain any temporal structure (date, date_range, or datetime_range)."""
         return (
-            slots_dict.get("date") or
-            (isinstance(slots_dict.get("date_range"), dict) and slots_dict["date_range"].get("start")) or
-            (isinstance(slots_dict.get("datetime_range"), dict)
-             and slots_dict["datetime_range"].get("start"))
+            slots_dict.get("date")
+            or (
+                isinstance(slots_dict.get("date_range"), dict)
+                and slots_dict["date_range"].get("start")
+            )
+            or (
+                isinstance(slots_dict.get("datetime_range"), dict)
+                and slots_dict["datetime_range"].get("start")
+            )
         )
 
     # Extract service and datetime_range from facts.slots if missing in booking
@@ -3883,8 +4426,7 @@ def handle_message_legacy(
         if service_id:
             # Convert service_id string to services array format
             booking["services"] = [{"text": service_id}]
-            logger.info(
-                f"Extracted service from facts.slots.service_id: {service_id}")
+            logger.info(f"Extracted service from facts.slots.service_id: {service_id}")
 
     # For reservations, extract service_id as room identifier
     if not booking.get("services") and booking_type == "reservation":
@@ -3892,7 +4434,8 @@ def handle_message_legacy(
         if service_id:
             booking["services"] = [{"text": service_id}]
             logger.info(
-                f"Extracted room/service from facts.slots.service_id: {service_id}")
+                f"Extracted room/service from facts.slots.service_id: {service_id}"
+            )
 
     # Extract datetime_range from facts.slots if missing in booking
     if not booking.get("datetime_range"):
@@ -3902,28 +4445,27 @@ def handle_message_legacy(
             if datetime_range:
                 booking["datetime_range"] = datetime_range
                 logger.info(
-                    f"Extracted datetime_range from facts.slots: {datetime_range}")
+                    f"Extracted datetime_range from facts.slots: {datetime_range}"
+                )
         # Try date_range (with start_date/end_date) and convert to datetime_range format
         elif slots.get("date_range"):
             date_range = slots.get("date_range")
             if isinstance(date_range, dict):
-                start_date = date_range.get(
-                    "start_date") or date_range.get("start")
+                start_date = date_range.get("start_date") or date_range.get("start")
                 end_date = date_range.get("end_date") or date_range.get("end")
                 if start_date and end_date:
                     # Convert date_range to datetime_range format
                     # For reservations, dates are typically date-only, so we'll use them as-is
                     # and let the execution backend handle time if needed
-                    booking["datetime_range"] = {
-                        "start": start_date,
-                        "end": end_date
-                    }
+                    booking["datetime_range"] = {"start": start_date, "end": end_date}
                     logger.info(
-                        f"Converted date_range to datetime_range: start={start_date}, end={end_date}")
+                        f"Converted date_range to datetime_range: start={start_date}, end={end_date}"
+                    )
         # For service bookings: construct datetime_range from date/date_range + time
         # Use helper to check for any temporal structure (date, date_range, datetime_range) + time
         elif booking_type == "service" and has_any_date(slots) and slots.get("time"):
             from datetime import datetime as dt
+
             try:
                 # Extract date from any temporal structure
                 date_str = None
@@ -3932,8 +4474,9 @@ def handle_message_legacy(
                 elif isinstance(slots.get("date_range"), dict):
                     # For date_range, use the start date
                     date_range = slots.get("date_range")
-                    date_str = str(date_range.get("start")
-                                   or date_range.get("start_date"))
+                    date_str = str(
+                        date_range.get("start") or date_range.get("start_date")
+                    )
                 elif isinstance(slots.get("datetime_range"), dict):
                     # For datetime_range, extract date part from start
                     datetime_range = slots.get("datetime_range")
@@ -3963,7 +4506,9 @@ def handle_message_legacy(
                 # Parse time (assume HH:MM or HH:MM:SS format)
                 if date_obj:
                     # Normalize time string (remove spaces, handle formats like "11am", "11:00", etc.)
-                    time_normalized = time_str.lower().replace("am", "").replace("pm", "").strip()
+                    time_normalized = (
+                        time_str.lower().replace("am", "").replace("pm", "").strip()
+                    )
                     if ":" in time_normalized:
                         time_parts = time_normalized.split(":")
                     else:
@@ -3973,8 +4518,7 @@ def handle_message_legacy(
                     if len(time_parts) >= 2:
                         try:
                             hour = int(time_parts[0])
-                            minute = int(time_parts[1]) if len(
-                                time_parts) > 1 else 0
+                            minute = int(time_parts[1]) if len(time_parts) > 1 else 0
 
                             # Handle AM/PM
                             if "pm" in time_str.lower() and hour < 12:
@@ -3984,45 +4528,51 @@ def handle_message_legacy(
 
                             # Combine date and time
                             start_datetime = date_obj.replace(
-                                hour=hour, minute=minute, second=0, microsecond=0)
+                                hour=hour, minute=minute, second=0, microsecond=0
+                            )
                             # For service bookings, end time will be computed from duration
                             # For now, set end = start (duration will be added later if needed)
                             end_datetime = start_datetime
 
                             booking["datetime_range"] = {
                                 "start": start_datetime.isoformat(),
-                                "end": end_datetime.isoformat()
+                                "end": end_datetime.isoformat(),
                             }
                             logger.info(
-                                f"Constructed datetime_range from date+time: {booking['datetime_range']}")
+                                f"Constructed datetime_range from date+time: {booking['datetime_range']}"
+                            )
                         except (ValueError, IndexError, TypeError) as e:
                             # If parsing fails, construct as ISO string
                             booking["datetime_range"] = {
                                 "start": f"{date_str}T{time_str}:00",
-                                "end": f"{date_str}T{time_str}:00"
+                                "end": f"{date_str}T{time_str}:00",
                             }
                             logger.info(
-                                f"Constructed datetime_range from date+time (fallback): {booking['datetime_range']}")
+                                f"Constructed datetime_range from date+time (fallback): {booking['datetime_range']}"
+                            )
                     else:
                         # Time format not recognized, use date + time as string
                         booking["datetime_range"] = {
                             "start": f"{date_str}T{time_str}:00",
-                            "end": f"{date_str}T{time_str}:00"
+                            "end": f"{date_str}T{time_str}:00",
                         }
                         logger.info(
-                            f"Constructed datetime_range from date+time (string): {booking['datetime_range']}")
+                            f"Constructed datetime_range from date+time (string): {booking['datetime_range']}"
+                        )
                 else:
                     # Date parsing failed, use string concatenation
                     booking["datetime_range"] = {
                         "start": f"{date_str}T{time_str}:00",
-                        "end": f"{date_str}T{time_str}:00"
+                        "end": f"{date_str}T{time_str}:00",
                     }
                     logger.info(
-                        f"Constructed datetime_range from date+time (string fallback): {booking['datetime_range']}")
+                        f"Constructed datetime_range from date+time (string fallback): {booking['datetime_range']}"
+                    )
             except Exception as e:
                 logger.warning(
                     f"Failed to construct datetime_range from date+time: {e}. "
-                    f"slots={list(slots.keys())}, time={slots.get('time')}")
+                    f"slots={list(slots.keys())}, time={slots.get('time')}"
+                )
                 # Final fallback: construct as string concatenation
                 # Try to get date from any temporal structure
                 fallback_date = None
@@ -4030,8 +4580,9 @@ def handle_message_legacy(
                     fallback_date = str(slots.get("date"))
                 elif isinstance(slots.get("date_range"), dict):
                     date_range = slots.get("date_range")
-                    fallback_date = str(date_range.get(
-                        "start") or date_range.get("start_date"))
+                    fallback_date = str(
+                        date_range.get("start") or date_range.get("start_date")
+                    )
                 elif isinstance(slots.get("datetime_range"), dict):
                     datetime_range = slots.get("datetime_range")
                     start = datetime_range.get("start")
@@ -4041,7 +4592,7 @@ def handle_message_legacy(
                 if fallback_date and slots.get("time"):
                     booking["datetime_range"] = {
                         "start": f"{fallback_date}T{slots.get('time')}:00",
-                        "end": f"{fallback_date}T{slots.get('time')}:00"
+                        "end": f"{fallback_date}T{slots.get('time')}:00",
                     }
 
     # Set has_datetime in facts.slots when both date and time are present
@@ -4060,15 +4611,17 @@ def handle_message_legacy(
         # Merge accumulated slots into facts.slots to preserve service_id
         facts["slots"] = {**slots, **facts["slots"]}
         facts["slots"]["has_datetime"] = True
-        logger.info(
-            "Set has_datetime=true in facts.slots (date and time both present)")
+        logger.info("Set has_datetime=true in facts.slots (date and time both present)")
 
     # Log processed booking
-    logger.debug("Processed booking: %s", json.dumps(
-        booking, ensure_ascii=False, default=str))
+    logger.debug(
+        "Processed booking: %s", json.dumps(booking, ensure_ascii=False, default=str)
+    )
 
     # Resolve service item_id using catalog discovery (no org details scanning)
-    def _resolve_service_id(services_from_luma: list, catalog_services_list: list[Dict[str, Any]]) -> Dict[str, Any]:
+    def _resolve_service_id(
+        services_from_luma: list, catalog_services_list: list[Dict[str, Any]]
+    ) -> Dict[str, Any]:
         """
         Resolve service item_id deterministically.
 
@@ -4082,43 +4635,61 @@ def handle_message_legacy(
             return {"item_id": None, "clarification": True, "reason": "MISSING_SERVICE"}
 
         active_services = [
-            s for s in catalog_services_list
+            s
+            for s in catalog_services_list
             if isinstance(s, dict) and s.get("is_active", True) is not False
         ]
 
         if not services_from_luma:
             return {"item_id": None, "clarification": True, "reason": "MISSING_SERVICE"}
 
-        svc = services_from_luma[0] if isinstance(
-            services_from_luma, list) else services_from_luma
+        svc = (
+            services_from_luma[0]
+            if isinstance(services_from_luma, list)
+            else services_from_luma
+        )
         if not isinstance(svc, dict):
             return {"item_id": None, "clarification": True, "reason": "MISSING_SERVICE"}
 
         text_name = svc.get("text")
-        canonical = svc.get("canonical") or svc.get(
-            "service_family_id") or svc.get("slug")
+        canonical = (
+            svc.get("canonical") or svc.get("service_family_id") or svc.get("slug")
+        )
 
         # Name match
         if text_name:
             name_lower = str(text_name).lower()
-            matches = [s for s in active_services if str(
-                s.get("name", "")).lower() == name_lower]
+            matches = [
+                s
+                for s in active_services
+                if str(s.get("name", "")).lower() == name_lower
+            ]
             if len(matches) == 1:
                 return {"item_id": matches[0].get("id"), "clarification": False}
             if len(matches) > 1:
-                return {"item_id": None, "clarification": True, "reason": "SERVICE_VARIANT_AMBIGUITY"}
+                return {
+                    "item_id": None,
+                    "clarification": True,
+                    "reason": "SERVICE_VARIANT_AMBIGUITY",
+                }
 
         # Canonical match (only if exactly one)
         if canonical:
             canonical_lower = str(canonical).lower()
             matches = [
-                s for s in active_services
-                if str(s.get("canonical") or s.get("slug") or "").lower() == canonical_lower
+                s
+                for s in active_services
+                if str(s.get("canonical") or s.get("slug") or "").lower()
+                == canonical_lower
             ]
             if len(matches) == 1:
                 return {"item_id": matches[0].get("id"), "clarification": False}
             if len(matches) > 1:
-                return {"item_id": None, "clarification": True, "reason": "SERVICE_VARIANT_AMBIGUITY"}
+                return {
+                    "item_id": None,
+                    "clarification": True,
+                    "reason": "SERVICE_VARIANT_AMBIGUITY",
+                }
 
         return {"item_id": None, "clarification": True, "reason": "MISSING_SERVICE"}
 
@@ -4129,130 +4700,235 @@ def handle_message_legacy(
                 # Use cached catalog data to resolve ID
                 if catalog_data_for_alias is None:
                     catalog_data_for_alias = catalog_cache.get_catalog(
-                        resolved_org_id, catalog_client, domain="service")
-                catalog_services_for_resolution = catalog_data_for_alias.get(
-                    "services", []) if isinstance(catalog_data_for_alias, dict) else []
+                        resolved_org_id, catalog_client, domain="service"
+                    )
+                catalog_services_for_resolution = (
+                    catalog_data_for_alias.get("services", [])
+                    if isinstance(catalog_data_for_alias, dict)
+                    else []
+                )
                 booking_services = booking.get("services", [])
                 resolution = _resolve_service_id(
-                    booking_services, catalog_services_for_resolution)
+                    booking_services, catalog_services_for_resolution
+                )
                 if resolution.get("clarification"):
                     reason = resolution.get("reason", "MISSING_SERVICE")
                     return build_clarify_outcome_from_reason(
                         reason=reason,
                         issues={"service": "missing"},
                         booking=booking,
-                        domain=derived_domain
+                        domain=derived_domain,
                     )
                 resolved_item_id = resolution.get("item_id")
                 # Inject resolved id back into booking for downstream usage
                 services_list = booking.get("services")
-                if services_list and isinstance(services_list, list) and isinstance(services_list[0], dict):
+                if (
+                    services_list
+                    and isinstance(services_list, list)
+                    and isinstance(services_list[0], dict)
+                ):
                     services_list[0]["id"] = resolved_item_id
                 booking["_resolved_item_id"] = resolved_item_id
             elif booking_type == "reservation" or derived_domain == "reservation":
                 if catalog_data_for_alias is None:
                     catalog_data_for_alias = catalog_cache.get_catalog(
-                        resolved_org_id, catalog_client, domain="reservation")
-                rooms_catalog = catalog_data_for_alias.get(
-                    "rooms", []) if isinstance(catalog_data_for_alias, dict) else []
-                catalog_extras = catalog_data_for_alias.get(
-                    "extras", []) if isinstance(catalog_data_for_alias, dict) else []
+                        resolved_org_id, catalog_client, domain="reservation"
+                    )
+                rooms_catalog = (
+                    catalog_data_for_alias.get("rooms", [])
+                    if isinstance(catalog_data_for_alias, dict)
+                    else []
+                )
+                catalog_extras = (
+                    catalog_data_for_alias.get("extras", [])
+                    if isinstance(catalog_data_for_alias, dict)
+                    else []
+                )
 
-                def _resolve_room_type(room_from_luma: Dict[str, Any], rooms: list[Dict[str, Any]]) -> Dict[str, Any]:
+                def _resolve_room_type(
+                    room_from_luma: Dict[str, Any], rooms: list[Dict[str, Any]]
+                ) -> Dict[str, Any]:
                     if not rooms:
-                        return {"room_type_id": None, "clarification": True, "reason": "MISSING_ROOM_TYPE"}
-                    active_rooms = [r for r in rooms if isinstance(
-                        r, dict) and r.get("is_active", True) is not False]
+                        return {
+                            "room_type_id": None,
+                            "clarification": True,
+                            "reason": "MISSING_ROOM_TYPE",
+                        }
+                    active_rooms = [
+                        r
+                        for r in rooms
+                        if isinstance(r, dict) and r.get("is_active", True) is not False
+                    ]
                     if not room_from_luma or not isinstance(room_from_luma, dict):
-                        return {"room_type_id": None, "clarification": True, "reason": "MISSING_ROOM_TYPE"}
+                        return {
+                            "room_type_id": None,
+                            "clarification": True,
+                            "reason": "MISSING_ROOM_TYPE",
+                        }
                     text_name = room_from_luma.get("text")
-                    canonical = room_from_luma.get("canonical_key") or room_from_luma.get(
-                        "canonical") or room_from_luma.get("slug")
+                    canonical = (
+                        room_from_luma.get("canonical_key")
+                        or room_from_luma.get("canonical")
+                        or room_from_luma.get("slug")
+                    )
                     if text_name:
                         name_lower = str(text_name).lower()
-                        matches = [r for r in active_rooms if str(
-                            r.get("name", "")).lower() == name_lower]
+                        matches = [
+                            r
+                            for r in active_rooms
+                            if str(r.get("name", "")).lower() == name_lower
+                        ]
                         if len(matches) == 1:
-                            return {"room_type_id": matches[0].get("id"), "clarification": False}
+                            return {
+                                "room_type_id": matches[0].get("id"),
+                                "clarification": False,
+                            }
                         if len(matches) > 1:
-                            return {"room_type_id": None, "clarification": True, "reason": "ROOM_VARIANT_AMBIGUITY"}
+                            return {
+                                "room_type_id": None,
+                                "clarification": True,
+                                "reason": "ROOM_VARIANT_AMBIGUITY",
+                            }
                     if canonical:
                         canonical_lower = str(canonical).lower()
                         matches = [
-                            r for r in active_rooms
-                            if str(r.get("canonical_key") or r.get("canonical") or r.get("slug") or "").lower() == canonical_lower
+                            r
+                            for r in active_rooms
+                            if str(
+                                r.get("canonical_key")
+                                or r.get("canonical")
+                                or r.get("slug")
+                                or ""
+                            ).lower()
+                            == canonical_lower
                         ]
                         if len(matches) == 1:
-                            return {"room_type_id": matches[0].get("id"), "clarification": False}
+                            return {
+                                "room_type_id": matches[0].get("id"),
+                                "clarification": False,
+                            }
                         if len(matches) > 1:
-                            return {"room_type_id": None, "clarification": True, "reason": "ROOM_VARIANT_AMBIGUITY"}
-                    return {"room_type_id": None, "clarification": True, "reason": "MISSING_ROOM_TYPE"}
+                            return {
+                                "room_type_id": None,
+                                "clarification": True,
+                                "reason": "ROOM_VARIANT_AMBIGUITY",
+                            }
+                    return {
+                        "room_type_id": None,
+                        "clarification": True,
+                        "reason": "MISSING_ROOM_TYPE",
+                    }
 
-                def _resolve_extras(extras_from_luma: list, extras_catalog: list[Dict[str, Any]], room_type_id: Optional[int]) -> Dict[str, Any]:
+                def _resolve_extras(
+                    extras_from_luma: list,
+                    extras_catalog: list[Dict[str, Any]],
+                    room_type_id: Optional[int],
+                ) -> Dict[str, Any]:
                     if not extras_from_luma:
                         return {"extras": [], "clarification": False}
-                    active_extras = [e for e in extras_catalog if isinstance(
-                        e, dict) and e.get("is_active", True) is not False]
+                    active_extras = [
+                        e
+                        for e in extras_catalog
+                        if isinstance(e, dict) and e.get("is_active", True) is not False
+                    ]
                     resolved_extras = []
                     for ex in extras_from_luma:
                         if not isinstance(ex, dict):
-                            return {"extras": None, "clarification": True, "reason": "INVALID_EXTRA"}
+                            return {
+                                "extras": None,
+                                "clarification": True,
+                                "reason": "INVALID_EXTRA",
+                            }
                         text_name = ex.get("text")
                         canonical = ex.get("canonical") or ex.get("slug")
                         match = None
                         if text_name:
                             name_lower = str(text_name).lower()
-                            name_matches = [e for e in active_extras if str(
-                                e.get("name", "")).lower() == name_lower]
+                            name_matches = [
+                                e
+                                for e in active_extras
+                                if str(e.get("name", "")).lower() == name_lower
+                            ]
                             if len(name_matches) == 1:
                                 match = name_matches[0]
                             elif len(name_matches) > 1:
-                                return {"extras": None, "clarification": True, "reason": "EXTRA_VARIANT_AMBIGUITY"}
+                                return {
+                                    "extras": None,
+                                    "clarification": True,
+                                    "reason": "EXTRA_VARIANT_AMBIGUITY",
+                                }
                         if match is None and canonical:
                             canonical_lower = str(canonical).lower()
-                            canonical_matches = [e for e in active_extras if str(
-                                e.get("canonical") or e.get("slug") or "").lower() == canonical_lower]
+                            canonical_matches = [
+                                e
+                                for e in active_extras
+                                if str(
+                                    e.get("canonical") or e.get("slug") or ""
+                                ).lower()
+                                == canonical_lower
+                            ]
                             if len(canonical_matches) == 1:
                                 match = canonical_matches[0]
                             elif len(canonical_matches) > 1:
-                                return {"extras": None, "clarification": True, "reason": "EXTRA_VARIANT_AMBIGUITY"}
+                                return {
+                                    "extras": None,
+                                    "clarification": True,
+                                    "reason": "EXTRA_VARIANT_AMBIGUITY",
+                                }
                         if match is None:
-                            return {"extras": None, "clarification": True, "reason": "INVALID_EXTRA"}
+                            return {
+                                "extras": None,
+                                "clarification": True,
+                                "reason": "INVALID_EXTRA",
+                            }
 
                         applies_all = match.get("applies_to_all", False)
-                        applicable_room_types = match.get(
-                            "applicable_room_types") or match.get("room_types") or []
-                        if not applies_all and room_type_id is not None and applicable_room_types:
+                        applicable_room_types = (
+                            match.get("applicable_room_types")
+                            or match.get("room_types")
+                            or []
+                        )
+                        if (
+                            not applies_all
+                            and room_type_id is not None
+                            and applicable_room_types
+                        ):
                             if room_type_id not in applicable_room_types:
-                                return {"extras": None, "clarification": True, "reason": "EXTRA_NOT_APPLICABLE"}
+                                return {
+                                    "extras": None,
+                                    "clarification": True,
+                                    "reason": "EXTRA_NOT_APPLICABLE",
+                                }
                         resolved_extras.append({"id": match.get("id")})
                     return {"extras": resolved_extras, "clarification": False}
 
-                room_candidates = booking.get(
-                    "rooms") or booking.get("services") or []
-                room_svc = room_candidates[0] if isinstance(
-                    room_candidates, list) else room_candidates
-                room_resolution = _resolve_room_type(
-                    room_svc, rooms_catalog)
+                room_candidates = booking.get("rooms") or booking.get("services") or []
+                room_svc = (
+                    room_candidates[0]
+                    if isinstance(room_candidates, list)
+                    else room_candidates
+                )
+                room_resolution = _resolve_room_type(room_svc, rooms_catalog)
                 if room_resolution.get("clarification"):
                     reason = room_resolution.get("reason", "MISSING_ROOM_TYPE")
                     return build_clarify_outcome_from_reason(
                         reason=reason,
                         issues={"room_type": "missing"},
                         booking=booking,
-                        domain=derived_domain
+                        domain=derived_domain,
                     )
                 resolved_room_id = room_resolution.get("room_type_id")
                 booking["_resolved_room_type_id"] = resolved_room_id
-                extras_resolution = _resolve_extras(booking.get(
-                    "extras", []), catalog_extras, resolved_room_id)
+                extras_resolution = _resolve_extras(
+                    booking.get("extras", []), catalog_extras, resolved_room_id
+                )
                 if extras_resolution.get("clarification"):
                     reason = extras_resolution.get("reason", "INVALID_EXTRA")
                     return build_clarify_outcome_from_reason(
                         reason=reason,
                         issues={"extras": "missing"},
                         booking=booking,
-                        domain=derived_domain
+                        domain=derived_domain,
                     )
                 resolved_extras = extras_resolution.get("extras", [])
                 if resolved_extras is not None:
@@ -4261,7 +4937,8 @@ def handle_message_legacy(
                         for idx, ex in enumerate(booking["extras"]):
                             if isinstance(ex, dict) and idx < len(resolved_extras):
                                 booking["extras"][idx]["id"] = resolved_extras[idx].get(
-                                    "id")
+                                    "id"
+                                )
 
             # Execute full booking creation flow
             result = _execute_booking_creation(
@@ -4274,7 +4951,7 @@ def handle_message_legacy(
                 catalog_data=catalog_data_for_alias,
                 phone_number=phone_number,
                 email=email,
-                customer_id=customer_id
+                customer_id=customer_id,
             )
 
             logger.info(f"Successfully created booking for user {user_id}")
@@ -4284,16 +4961,23 @@ def handle_message_legacy(
                     resp.get("booking_code"),
                     resp.get("code"),
                 ]
-                booking_obj = resp.get("booking") if isinstance(
-                    resp.get("booking"), dict) else None
+                booking_obj = (
+                    resp.get("booking")
+                    if isinstance(resp.get("booking"), dict)
+                    else None
+                )
                 if booking_obj:
                     candidates.append(booking_obj.get("booking_code"))
                     candidates.append(booking_obj.get("code"))
-                data_obj = resp.get("data") if isinstance(
-                    resp.get("data"), dict) else None
+                data_obj = (
+                    resp.get("data") if isinstance(resp.get("data"), dict) else None
+                )
                 if data_obj:
-                    booking_data = data_obj.get("booking") if isinstance(
-                        data_obj.get("booking"), dict) else None
+                    booking_data = (
+                        data_obj.get("booking")
+                        if isinstance(data_obj.get("booking"), dict)
+                        else None
+                    )
                     if booking_data:
                         candidates.append(booking_data.get("booking_code"))
                         candidates.append(booking_data.get("code"))
@@ -4309,25 +4993,42 @@ def handle_message_legacy(
             booking_data = None
             if isinstance(result, dict):
                 booking_data = result.get("booking")
-                if isinstance(result.get("data"), dict) and isinstance(result["data"].get("booking"), dict):
+                if isinstance(result.get("data"), dict) and isinstance(
+                    result["data"].get("booking"), dict
+                ):
                     booking_data = result["data"]["booking"]
 
             status_extracted = (
                 result.get("status")
-                or (booking_data.get("status") if isinstance(booking_data, dict) else None)
+                or (
+                    booking_data.get("status")
+                    if isinstance(booking_data, dict)
+                    else None
+                )
                 or "pending"
             )
 
-            starts_at = booking_data.get("starts_at") if isinstance(
-                booking_data, dict) else None
-            ends_at = booking_data.get("ends_at") if isinstance(
-                booking_data, dict) else None
-            total_amount = booking_data.get("total_amount") if isinstance(
-                booking_data, dict) else None
-            reservation_fee = booking_data.get(
-                "reservation_fee") if isinstance(booking_data, dict) else None
-            booking_type_resp = booking_data.get(
-                "type") if isinstance(booking_data, dict) else None
+            starts_at = (
+                booking_data.get("starts_at")
+                if isinstance(booking_data, dict)
+                else None
+            )
+            ends_at = (
+                booking_data.get("ends_at") if isinstance(booking_data, dict) else None
+            )
+            total_amount = (
+                booking_data.get("total_amount")
+                if isinstance(booking_data, dict)
+                else None
+            )
+            reservation_fee = (
+                booking_data.get("reservation_fee")
+                if isinstance(booking_data, dict)
+                else None
+            )
+            booking_type_resp = (
+                booking_data.get("type") if isinstance(booking_data, dict) else None
+            )
 
             # Build outcome with facts if date+time were present (for has_datetime check)
             # Use helper function to check for any temporal structure AND time
@@ -4341,7 +5042,7 @@ def handle_message_legacy(
                     "slots": {
                         # Include all accumulated slots (service_id, date, time, etc.)
                         **slots,
-                        "has_datetime": True
+                        "has_datetime": True,
                     }
                 }
 
@@ -4356,7 +5057,7 @@ def handle_message_legacy(
                     "total_amount": total_amount,
                     "reservation_fee": reservation_fee,
                     "booking_type": booking_type_resp,
-                }
+                },
             }
 
             # Include facts if date+time were present
@@ -4374,7 +5075,7 @@ def handle_message_legacy(
                     result = luma_client.notify_execution(
                         user_id=user_id,
                         booking_id=booking_code_extracted,
-                        domain=derived_domain
+                        domain=derived_domain,
                     )
                     # Check if the endpoint doesn't exist (404 handled gracefully)
                     if result.get("error") == "endpoint_not_found":
@@ -4412,8 +5113,7 @@ def handle_message_legacy(
                     updates.setdefault("ends_at", end)
 
             if not updates:
-                raise ValueError(
-                    "No updates supplied for booking modification")
+                raise ValueError("No updates supplied for booking modification")
 
             # Route execution by mode
             execution_backend = _get_execution_backend(booking_client)
@@ -4424,12 +5124,18 @@ def handle_message_legacy(
             )
 
             booking_data = api_response.get("booking")
-            if isinstance(api_response.get("data"), dict) and isinstance(api_response["data"].get("booking"), dict):
+            if isinstance(api_response.get("data"), dict) and isinstance(
+                api_response["data"].get("booking"), dict
+            ):
                 booking_data = api_response["data"]["booking"]
 
             status_extracted = (
                 api_response.get("status")
-                or (booking_data.get("status") if isinstance(booking_data, dict) else None)
+                or (
+                    booking_data.get("status")
+                    if isinstance(booking_data, dict)
+                    else None
+                )
                 or "updated"
             )
 
@@ -4457,8 +5163,7 @@ def handle_message_legacy(
                 raise ValueError("booking_code is required for cancellation")
 
             # Extract cancellation details from booking payload
-            cancellation_type = booking.get(
-                "cancellation_type", "user_initiated")
+            cancellation_type = booking.get("cancellation_type", "user_initiated")
             reason = booking.get("reason")
             notes = booking.get("notes")
             refund_method = booking.get("refund_method")
@@ -4473,18 +5178,19 @@ def handle_message_legacy(
                 reason=reason,
                 notes=notes,
                 refund_method=refund_method,
-                notify_customer=notify_customer
+                notify_customer=notify_customer,
             )
 
             logger.info(
-                f"Successfully cancelled booking {booking_code} for user {user_id}")
+                f"Successfully cancelled booking {booking_code} for user {user_id}"
+            )
             outcome = {
                 "success": True,
                 "outcome": {
                     "status": "EXECUTED",
                     "booking_code": booking_code,
-                    "booking_status": api_response.get("status", "cancelled")
-                }
+                    "booking_status": api_response.get("status", "cancelled"),
+                },
             }
 
             # Invoke workflow after_execute hook if registered
@@ -4496,14 +5202,15 @@ def handle_message_legacy(
         elif action_name == "booking.inquiry":
             booking_code = booking.get("booking_code") or booking.get("code")
             if not booking_code:
-                raise ValueError(
-                    "booking_code is required for booking inquiry")
+                raise ValueError("booking_code is required for booking inquiry")
 
             # Route execution by mode
             execution_backend = _get_execution_backend(booking_client)
             api_response = execution_backend.get_booking(booking_code)
             booking_data = api_response.get("booking")
-            if isinstance(api_response.get("data"), dict) and isinstance(api_response["data"].get("booking"), dict):
+            if isinstance(api_response.get("data"), dict) and isinstance(
+                api_response["data"].get("booking"), dict
+            ):
                 booking_data = api_response["data"]["booking"]
 
             outcome = {
@@ -4522,27 +5229,24 @@ def handle_message_legacy(
 
             return outcome
         else:
-            raise UnsupportedIntentError(
-                f"Action {action_name} not implemented")
+            raise UnsupportedIntentError(f"Action {action_name} not implemented")
 
     except (UpstreamError, ValueError) as e:
-        error_type = "upstream_error" if isinstance(
-            e, UpstreamError) else "invalid_request"
+        error_type = (
+            "upstream_error" if isinstance(e, UpstreamError) else "invalid_request"
+        )
         logger.error(
-            f"Business API error for user {user_id} action {action_name}: {str(e)}")
+            f"Business API error for user {user_id} action {action_name}: {str(e)}"
+        )
         return {
             "success": False,
             "error": error_type,
             "message": str(e),
-            "action": action_name
+            "action": action_name,
         }
     except UnsupportedIntentError as e:
         logger.error(f"Unsupported action for user {user_id}: {str(e)}")
-        return {
-            "success": False,
-            "error": "unsupported_action",
-            "message": str(e)
-        }
+        return {"success": False, "error": "unsupported_action", "message": str(e)}
 
 
 def plan_message(
@@ -4552,7 +5256,7 @@ def plan_message(
     luma_client: Optional[LumaClient] = None,
     organization_client: Optional[OrganizationClient] = None,
     frozen_time: Optional[datetime] = None,
-    organization_id: Optional[int] = None
+    organization_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Extract planning result from handle_message without triggering execution logic.
@@ -4589,7 +5293,7 @@ def plan_message(
         luma_client=luma_client,
         organization_client=organization_client,
         organization_id=organization_id,
-        planning_only=True
+        planning_only=True,
     )
 
     # Extract planning result from outcome
@@ -4606,12 +5310,21 @@ def plan_message(
         outcome_plan = {}
 
     # Extract stage, action, and status from plan if available, otherwise from top-level
-    stage = outcome_plan.get("stage") if outcome_plan.get(
-        "stage") is not None else outcome.get("stage")
-    action = outcome_plan.get("action") if outcome_plan.get(
-        "action") is not None else outcome.get("action")
-    status = outcome_plan.get("status") if outcome_plan.get(
-        "status") is not None else outcome.get("status")
+    stage = (
+        outcome_plan.get("stage")
+        if outcome_plan.get("stage") is not None
+        else outcome.get("stage")
+    )
+    action = (
+        outcome_plan.get("action")
+        if outcome_plan.get("action") is not None
+        else outcome.get("action")
+    )
+    status = (
+        outcome_plan.get("status")
+        if outcome_plan.get("status") is not None
+        else outcome.get("status")
+    )
 
     # Build plan structure for tests that expect plan.status, plan.stage, and plan.action
     # Always build from outcome.plan (authoritative source) to ensure consistency
@@ -4634,7 +5347,7 @@ def plan_message(
         # Include plan structure for tests that expect plan.stage and plan.action
         "plan": plan_structure,
         # Include decision information for handle_message early returns
-        "_decision": result.get("_decision")
+        "_decision": result.get("_decision"),
     }
 
     # Extract time_constraint from multiple possible sources
@@ -4647,8 +5360,7 @@ def plan_message(
 
         # If not found, check raw_luma_response within effective_response
         if time_constraint is None:
-            raw_luma_response = merged_luma_response.get(
-                "_raw_luma_response", {})
+            raw_luma_response = merged_luma_response.get("_raw_luma_response", {})
             if isinstance(raw_luma_response, dict):
                 time_constraint = raw_luma_response.get("time_constraint")
 

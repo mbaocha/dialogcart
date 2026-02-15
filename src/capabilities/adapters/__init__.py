@@ -4,11 +4,10 @@ Capability Adapters Package
 Contains all capability adapter implementations.
 """
 
-from .payment import PaymentAdapter
 from .noop import NoopAdapter
+from .payment import PaymentAdapter
 
 __all__ = [
     "PaymentAdapter",
     "NoopAdapter",
 ]
-

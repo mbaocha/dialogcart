@@ -9,19 +9,23 @@ Verifies:
 - Templates load from JSON configuration
 """
 
-import pytest
 import json
 from pathlib import Path
-from .reasons import ClarificationReason
+
+import pytest
+
 from .models import Clarification
+from .reasons import ClarificationReason
 from .renderer import render_clarification
 
 
 def _load_templates_from_json() -> dict:
     """Helper to load templates from JSON for testing."""
     current_file = Path(__file__)
-    templates_path = current_file.parent.parent.parent.parent / \
-        "templates" / "clarification.json"
+    templates_path = (
+        current_file.parent.parent.parent / "core" /
+        "rendering" / "templates" / "clarification.json"
+    )
 
     with open(templates_path, "r", encoding="utf-8") as f:
         return json.load(f)
@@ -37,23 +41,22 @@ def test_every_reason_has_template():
             f"does not have a template in clarification.json"
         )
         template_config = templates[reason.value]
-        assert "template" in template_config, (
-            f"Template for {reason.value} missing 'template' key"
-        )
-        assert "required_fields" in template_config, (
-            f"Template for {reason.value} missing 'required_fields' key"
-        )
-        assert isinstance(template_config["required_fields"], list), (
-            f"Template for {reason.value} has 'required_fields' that is not a list"
-        )
+        assert (
+            "template" in template_config
+        ), f"Template for {reason.value} missing 'template' key"
+        assert (
+            "required_fields" in template_config
+        ), f"Template for {reason.value} missing 'required_fields' key"
+        assert isinstance(
+            template_config["required_fields"], list
+        ), f"Template for {reason.value} has 'required_fields' that is not a list"
 
 
 def test_missing_required_fields_raises_error():
     """Test that missing required fields raise ValueError."""
     # Test with AMBIGUOUS_TIME_NO_WINDOW which requires "time"
     clarification = Clarification(
-        reason=ClarificationReason.AMBIGUOUS_TIME_NO_WINDOW,
-        data={}  # Missing "time"
+        reason=ClarificationReason.AMBIGUOUS_TIME_NO_WINDOW, data={}  # Missing "time"
     )
 
     with pytest.raises(ValueError) as exc_info:
@@ -68,21 +71,21 @@ def test_missing_placeholder_in_data_raises_error():
     # Template has {{time}} but data doesn't have it
     clarification = Clarification(
         reason=ClarificationReason.AMBIGUOUS_TIME_NO_WINDOW,
-        data={"other_field": "value"}  # Missing "time"
+        data={"other_field": "value"},  # Missing "time"
     )
 
     with pytest.raises(ValueError) as exc_info:
         render_clarification(clarification)
 
-    assert "Placeholder" in str(
-        exc_info.value) or "Missing required fields" in str(exc_info.value)
+    assert "Placeholder" in str(exc_info.value) or "Missing required fields" in str(
+        exc_info.value
+    )
 
 
 def test_ambiguous_time_no_window_rendering():
     """Test AMBIGUOUS_TIME_NO_WINDOW template rendering."""
     clarification = Clarification(
-        reason=ClarificationReason.AMBIGUOUS_TIME_NO_WINDOW,
-        data={"time": "3"}
+        reason=ClarificationReason.AMBIGUOUS_TIME_NO_WINDOW, data={"time": "3"}
     )
 
     result = render_clarification(clarification)
@@ -92,8 +95,7 @@ def test_ambiguous_time_no_window_rendering():
 def test_missing_time_rendering():
     """Test MISSING_TIME template rendering."""
     clarification = Clarification(
-        reason=ClarificationReason.MISSING_TIME,
-        data={"service": "haircut"}
+        reason=ClarificationReason.MISSING_TIME, data={"service": "haircut"}
     )
 
     result = render_clarification(clarification)
@@ -103,8 +105,7 @@ def test_missing_time_rendering():
 def test_missing_date_rendering():
     """Test MISSING_DATE template rendering."""
     clarification = Clarification(
-        reason=ClarificationReason.MISSING_DATE,
-        data={"service": "massage"}
+        reason=ClarificationReason.MISSING_DATE, data={"service": "massage"}
     )
 
     result = render_clarification(clarification)
@@ -114,9 +115,7 @@ def test_missing_date_rendering():
 def test_missing_service_rendering():
     """Test MISSING_SERVICE template rendering."""
     clarification = Clarification(
-        reason=ClarificationReason.MISSING_SERVICE,
-        data={}
-    )
+        reason=ClarificationReason.MISSING_SERVICE, data={})
 
     result = render_clarification(clarification)
     assert result == "Which service would you like to book?"
@@ -125,8 +124,8 @@ def test_missing_service_rendering():
 def test_locale_ambiguous_date_rendering():
     """Test LOCALE_AMBIGUOUS_DATE template rendering."""
     clarification = Clarification(
-        reason=ClarificationReason.LOCALE_AMBIGUOUS_DATE,
-        data={"date_text": "07/12"}
+        reason=ClarificationReason.LOCALE_AMBIGUOUS_DATE, data={
+            "date_text": "07/12"}
     )
 
     result = render_clarification(clarification)
@@ -136,19 +135,20 @@ def test_locale_ambiguous_date_rendering():
 def test_vague_date_reference_rendering():
     """Test VAGUE_DATE_REFERENCE template rendering."""
     clarification = Clarification(
-        reason=ClarificationReason.VAGUE_DATE_REFERENCE,
-        data={}
+        reason=ClarificationReason.VAGUE_DATE_REFERENCE, data={}
     )
 
     result = render_clarification(clarification)
-    assert result == "Do you have a specific day in mind, or should I check availability for the whole period?"
+    assert (
+        result
+        == "Do you have a specific day in mind, or should I check availability for the whole period?"
+    )
 
 
 def test_ambiguous_plural_weekday_rendering():
     """Test AMBIGUOUS_PLURAL_WEEKDAY template rendering."""
     clarification = Clarification(
-        reason=ClarificationReason.AMBIGUOUS_PLURAL_WEEKDAY,
-        data={}
+        reason=ClarificationReason.AMBIGUOUS_PLURAL_WEEKDAY, data={}
     )
 
     result = render_clarification(clarification)
@@ -158,8 +158,7 @@ def test_ambiguous_plural_weekday_rendering():
 def test_conflicting_signals_rendering():
     """Test CONFLICTING_SIGNALS template rendering."""
     clarification = Clarification(
-        reason=ClarificationReason.CONFLICTING_SIGNALS,
-        data={}
+        reason=ClarificationReason.CONFLICTING_SIGNALS, data={}
     )
 
     result = render_clarification(clarification)
@@ -169,8 +168,7 @@ def test_conflicting_signals_rendering():
 def test_ambiguous_date_multiple_rendering():
     """Test AMBIGUOUS_DATE_MULTIPLE template rendering."""
     clarification = Clarification(
-        reason=ClarificationReason.AMBIGUOUS_DATE_MULTIPLE,
-        data={}
+        reason=ClarificationReason.AMBIGUOUS_DATE_MULTIPLE, data={}
     )
 
     result = render_clarification(clarification)
@@ -180,8 +178,7 @@ def test_ambiguous_date_multiple_rendering():
 def test_context_dependent_date_rendering():
     """Test CONTEXT_DEPENDENT_DATE template rendering."""
     clarification = Clarification(
-        reason=ClarificationReason.CONTEXT_DEPENDENT_DATE,
-        data={}
+        reason=ClarificationReason.CONTEXT_DEPENDENT_DATE, data={}
     )
 
     result = render_clarification(clarification)
@@ -190,14 +187,12 @@ def test_context_dependent_date_rendering():
 
 def test_unknown_reason_raises_error():
     """Test that unknown reason raises KeyError."""
+
     # Create a mock enum value that doesn't exist in templates
     class MockReason:
         value = "UNKNOWN_REASON"
 
-    clarification = Clarification(
-        reason=MockReason(),  # type: ignore
-        data={}
-    )
+    clarification = Clarification(reason=MockReason(), data={})  # type: ignore
 
     with pytest.raises(KeyError) as exc_info:
         render_clarification(clarification)
@@ -228,8 +223,8 @@ def test_templates_load_from_json():
 def test_template_placeholders_replaced_correctly():
     """Test that all placeholders in template are replaced."""
     clarification = Clarification(
-        reason=ClarificationReason.MISSING_TIME,
-        data={"service": "facial treatment"}
+        reason=ClarificationReason.MISSING_TIME, data={
+            "service": "facial treatment"}
     )
 
     result = render_clarification(clarification)
@@ -243,7 +238,7 @@ def test_data_values_are_stringified():
     """Test that non-string data values are converted to strings."""
     clarification = Clarification(
         reason=ClarificationReason.AMBIGUOUS_TIME_NO_WINDOW,
-        data={"time": 3}  # Integer instead of string
+        data={"time": 3},  # Integer instead of string
     )
 
     result = render_clarification(clarification)
@@ -253,9 +248,7 @@ def test_data_values_are_stringified():
 def test_deterministic_rendering():
     """Test that same input always produces same output."""
     clarification = Clarification(
-        reason=ClarificationReason.MISSING_SERVICE,
-        data={}
-    )
+        reason=ClarificationReason.MISSING_SERVICE, data={})
 
     result1 = render_clarification(clarification)
     result2 = render_clarification(clarification)

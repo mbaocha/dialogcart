@@ -20,10 +20,9 @@ This adapter promotes these into Core slots format:
 - date_time_pairs[0] -> slots["date"] and slots["time"]
 """
 
-from typing import Dict, Any, Optional
-import re
-
 import logging
+import re
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +109,7 @@ def facts_to_slots(
 ) -> Dict[str, Any]:
     """
     Convert Luma facts format to Core slots format.
-    
+
     FACT-ONLY CONTRACT: Luma returns facts at top level:
     {
       "intent": { "name": "CREATE_APPOINTMENT" },
@@ -120,52 +119,56 @@ def facts_to_slots(
         "dates": ["2024-01-15"]
       }
     }
-    
+
     This function extracts these facts and promotes them to slots:
     {
       "service_id": "haircut",
       "time": "15:00",
       "date": "2024-01-15"
     }
-    
+
     Special handling for CREATE_RESERVATION:
     - If dates list has 2+ elements, promote to date_range instead of single date
     - date_range format: {"start": dates[0], "end": dates[1]}
-    
+
     Rules:
     - Take first element from lists (times, dates, date_time_pairs) for appointments
     - For reservations with 2+ dates, promote to date_range
     - Deterministic: always use first element for single values
     - Do not overwrite existing slots (caller should merge)
-    
+
     Args:
         facts: Luma facts dict (may be empty or partial)
         intent_name: Optional intent name for special handling (e.g., CREATE_RESERVATION)
-        
+
     Returns:
         Dict of promoted slots (may be empty if no facts present)
     """
     if not isinstance(facts, dict):
         return {}
-    
+
     slots = {}
-    
+
     # Direct mappings
     if "service_id" in facts:
         slots["service_id"] = facts["service_id"]
-    
+
     if "booking_id" in facts:
         slots["booking_id"] = facts["booking_id"]
-    
+
     if "date_range" in facts:
         slots["date_range"] = facts["date_range"]
-    
+
     raw_date_range = _extract_raw_date_range(source_text)
     raw_date = _extract_raw_date(source_text)
     raw_time = _extract_raw_time(source_text)
 
     # Special handling for CREATE_RESERVATION: two dates -> date_range
-    if intent_name == "CREATE_RESERVATION" and "dates" in facts and isinstance(facts["dates"], list):
+    if (
+        intent_name == "CREATE_RESERVATION"
+        and "dates" in facts
+        and isinstance(facts["dates"], list)
+    ):
         dates_list = facts["dates"]
         if len(dates_list) >= 2:
             # Promote two dates to date_range
@@ -175,7 +178,9 @@ def facts_to_slots(
                 if raw_date_range
                 else {"start": dates_list[0], "end": dates_list[1]}
             )
-            logger.info(f"Promoted facts.dates (length={len(dates_list)}) to slots.date_range: {slots['date_range']}")
+            logger.info(
+                f"Promoted facts.dates (length={len(dates_list)}) to slots.date_range: {slots['date_range']}"
+            )
         elif len(dates_list) == 1:
             # Single date for reservation - do NOT promote to date
             logger.debug("Reservation with single date: skipping slots.date promotion")
@@ -187,7 +192,9 @@ def facts_to_slots(
                 # This ensures availability execution receives canonical dates (e.g., "2026-01-14")
                 # instead of raw natural-language values (e.g., "tomorrow")
                 slots["date"] = facts["dates"][0]
-                logger.debug(f"Promoted canonical date from facts.dates[0]={facts['dates'][0]} to slots.date (replacing raw_date={raw_date})")
+                logger.debug(
+                    f"Promoted canonical date from facts.dates[0]={facts['dates'][0]} to slots.date (replacing raw_date={raw_date})"
+                )
             elif len(facts["dates"]) >= 2:
                 # DATE RANGE RECOVERY: For appointments, date ranges (e.g., "next week") satisfy the date slot
                 # requirement. Promote to date_range to preserve the range information without forcing
@@ -208,16 +215,24 @@ def facts_to_slots(
                     f"for appointment date range recovery. date_range={slots['date_range']} (authoritative), "
                     f"date={slots['date']} (canonical, for planning compatibility)"
                 )
-    
+
     # List mappings (take first element)
-    if "times" in facts and isinstance(facts["times"], list) and len(facts["times"]) > 0:
+    if (
+        "times" in facts
+        and isinstance(facts["times"], list)
+        and len(facts["times"]) > 0
+    ):
         slots["time"] = raw_time or facts["times"][0]
         logger.debug(f"Promoted facts.times[0]={facts['times'][0]} to slots.time")
-    
+
     # Date-time pairs (take first pair)
     # CRITICAL: For CREATE_RESERVATION, do NOT create "date" slot from date_time_pairs
     # when date_range already exists (reservations use date_range, not single date)
-    if "date_time_pairs" in facts and isinstance(facts["date_time_pairs"], list) and len(facts["date_time_pairs"]) > 0:
+    if (
+        "date_time_pairs" in facts
+        and isinstance(facts["date_time_pairs"], list)
+        and len(facts["date_time_pairs"]) > 0
+    ):
         first_pair = facts["date_time_pairs"][0]
         if isinstance(first_pair, dict):
             # For CREATE_RESERVATION, skip "date" promotion if date_range exists
@@ -228,10 +243,13 @@ def facts_to_slots(
                     slots["date"] = first_pair["date"]
             if "time" in first_pair:
                 slots["time"] = raw_time or first_pair["time"]
-            logger.debug(f"Promoted facts.date_time_pairs[0] to slots.date={slots.get('date')} slots.time={slots.get('time')}")
-    
-    if slots:
-        logger.info(f"Promoted {len(slots)} slots from Luma facts: {list(slots.keys())}")
-    
-    return slots
+            logger.debug(
+                f"Promoted facts.date_time_pairs[0] to slots.date={slots.get('date')} slots.time={slots.get('time')}"
+            )
 
+    if slots:
+        logger.info(
+            f"Promoted {len(slots)} slots from Luma facts: {list(slots.keys())}"
+        )
+
+    return slots

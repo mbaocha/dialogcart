@@ -23,9 +23,10 @@ Endpoints:
     GET /health - Health check
     GET /info - API information
 """
-from luma.response.builder import build_issues, format_service_for_response
 import sys
 from pathlib import Path
+
+from luma.response.builder import build_issues, format_service_for_response
 
 # Add src/ to path if running directly
 if __name__ == "__main__":
@@ -34,34 +35,42 @@ if __name__ == "__main__":
         sys.path.insert(0, str(src_path))
 
 import time  # noqa: E402
-from typing import Dict, Any, Optional, List  # noqa: E402
-from datetime import datetime, timezone as dt_timezone  # noqa: E402
-from flask import Flask, request, jsonify, g  # noqa: E402
-from luma.calendar.calendar_binder import bind_calendar, CalendarBindingResult  # noqa: E402
-from luma.resolution.semantic_resolver import resolve_semantics  # noqa: E402
-from luma.grouping.appointment_grouper import group_appointment  # noqa: E402
-from luma.structure.interpreter import interpret_structure  # noqa: E402
-from luma.grouping.reservation_intent_resolver import ReservationIntentResolver  # noqa: E402
-from luma.extraction.matcher import EntityMatcher  # noqa: E402
+from datetime import datetime
+from datetime import timezone as dt_timezone  # noqa: E402
+from typing import Any, Dict, List, Optional  # noqa: E402
+
+from flask import Flask, g, jsonify, request  # noqa: E402
+
+from luma.app.resolve_service import resolve_message  # noqa: E402
+from luma.calendar.calendar_binder import (
+    CalendarBindingResult,  # noqa: E402
+    bind_calendar,
+)
+from luma.clarification import ClarificationReason  # noqa: E402
 from luma.config import config  # noqa: E402
+from luma.config.core import STATUS_NEEDS_CLARIFICATION, STATUS_READY  # noqa: E402
+from luma.config.intent_meta import validate_required_slots  # noqa: E402
+from luma.config.logging import generate_request_id, setup_logging  # noqa: E402
+from luma.config.temporal import (
+    APPOINTMENT_TEMPORAL_TYPE,  # noqa: E402
+    RESERVATION_TEMPORAL_TYPE,
+    TimeMode,
+)
+from luma.decision import decide_booking_status  # noqa: E402
+from luma.extraction.matcher import EntityMatcher  # noqa: E402
+from luma.grouping.appointment_grouper import group_appointment  # noqa: E402
+from luma.grouping.reservation_intent_resolver import (
+    ReservationIntentResolver,
+)  # noqa: E402
+from luma.perf import StageTimer  # noqa: E402
+from luma.pipeline import LumaPipeline  # noqa: E402
+from luma.resolution.semantic_resolver import resolve_semantics  # noqa: E402
+from luma.structure.interpreter import interpret_structure  # noqa: E402
+from luma.trace import TRACE_VERSION, validate_stable_fields  # noqa: E402
 
 # Enable slot tracking for debugging (can also use LOG_SLOT_TRACKING env var)
 # config.LOG_SLOT_TRACKING = True  # Uncomment to enable
 
-from luma.config.temporal import (  # noqa: E402
-    APPOINTMENT_TEMPORAL_TYPE,
-    RESERVATION_TEMPORAL_TYPE,
-    TimeMode,
-)
-from luma.config.intent_meta import validate_required_slots  # noqa: E402
-from luma.config.logging import setup_logging, generate_request_id  # noqa: E402
-from luma.decision import decide_booking_status  # noqa: E402
-from luma.clarification import ClarificationReason  # noqa: E402
-from luma.pipeline import LumaPipeline  # noqa: E402
-from luma.trace import validate_stable_fields, TRACE_VERSION  # noqa: E402
-from luma.perf import StageTimer  # noqa: E402
-from luma.config.core import STATUS_READY, STATUS_NEEDS_CLARIFICATION  # noqa: E402
-from luma.app.resolve_service import resolve_message  # noqa: E402
 
 # Check for required dependencies at startup
 
@@ -97,10 +106,10 @@ app = Flask(__name__)
 
 # Setup logging
 logger = setup_logging(
-    app_name='luma-api',
+    app_name="luma-api",
     log_level=config.LOG_LEVEL,
     log_format=config.LOG_FORMAT,
-    log_file=config.LOG_FILE
+    log_file=config.LOG_FILE,
 )
 
 # Global pipeline components
@@ -110,7 +119,16 @@ intent_resolver = None
 # Structured stage logger
 
 
-def _log_stage(logger, request_id: str, stage: str, input_data=None, output_data=None, notes=None, duration_ms=None, level="info"):
+def _log_stage(
+    logger,
+    request_id: str,
+    stage: str,
+    input_data=None,
+    output_data=None,
+    notes=None,
+    duration_ms=None,
+    level="info",
+):
     """Log a pipeline stage with structured format."""
     # Create a meaningful message for the log
     message = f"stage={stage}"
@@ -138,24 +156,24 @@ def _log_stage(logger, request_id: str, stage: str, input_data=None, output_data
 def before_request():
     """Track request start time and generate request ID."""
     g.start_time = time.perf_counter()
-    g.request_id = request.headers.get('X-Request-ID', generate_request_id())
+    g.request_id = request.headers.get("X-Request-ID", generate_request_id())
 
 
 @app.after_request
 def after_request(response):
     """Log request completion with timing and status."""
-    if hasattr(g, 'start_time') and config.ENABLE_REQUEST_LOGGING:
+    if hasattr(g, "start_time") and config.ENABLE_REQUEST_LOGGING:
         duration_ms = round((time.perf_counter() - g.start_time) * 1000, 2)
 
         # Create structured log
         log_record = logger.makeRecord(
             logger.name,
             20,  # INFO level
-            '',
+            "",
             0,
-            f'{request.method} {request.path} {response.status_code}',
+            f"{request.method} {request.path} {response.status_code}",
             (),
-            None
+            None,
         )
         log_record.request_id = g.request_id
         log_record.method = request.method
@@ -166,8 +184,8 @@ def after_request(response):
         logger.handle(log_record)
 
     # Add request ID to response headers
-    if hasattr(g, 'request_id'):
-        response.headers['X-Request-ID'] = g.request_id
+    if hasattr(g, "request_id"):
+        response.headers["X-Request-ID"] = g.request_id
 
     return response
 
@@ -217,12 +235,13 @@ def _get_business_categories(extraction_result: Dict[str, Any]) -> List[Dict[str
     Get business_categories from extraction result with backward compatibility.
     Supports both new 'business_categories' key and legacy 'service_families' key.
     """
-    return extraction_result.get("business_categories") or extraction_result.get("service_families", [])
+    return extraction_result.get("business_categories") or extraction_result.get(
+        "service_families", []
+    )
 
 
 def _count_mutable_slots_modified(
-    semantic_result: Any,  # noqa: ARG001
-    extraction_result: Dict[str, Any]
+    semantic_result: Any, extraction_result: Dict[str, Any]  # noqa: ARG001
 ) -> int:
     """
     Count how many mutable slots (date, time, duration) are modified in the input.
@@ -260,8 +279,15 @@ def _has_booking_verb(text: str) -> bool:
     """
     text_lower = text.lower()
     booking_verbs = {
-        "book", "schedule", "reserve", "appointment", "appoint",
-        "set", "arrange", "plan", "make"
+        "book",
+        "schedule",
+        "reserve",
+        "appointment",
+        "appoint",
+        "set",
+        "arrange",
+        "plan",
+        "make",
     }
     return any(verb in text_lower for verb in booking_verbs)
 
@@ -270,6 +296,7 @@ def _localize_datetime(dt: datetime, timezone: str) -> datetime:
     """Localize datetime to timezone."""
     try:
         from zoneinfo import ZoneInfo
+
         tz = ZoneInfo(timezone)
         if dt.tzinfo is None:
             return dt.replace(tzinfo=tz)
@@ -277,6 +304,7 @@ def _localize_datetime(dt: datetime, timezone: str) -> datetime:
     except Exception:
         try:
             import pytz
+
             tz = pytz.timezone(timezone)
             if dt.tzinfo is None:
                 return tz.localize(dt)
@@ -290,7 +318,7 @@ def plan_clarification(
     entities: Dict[str, Any],
     semantic_result: Optional[Any],
     decision_result: Optional[Any] = None,
-    decision_trace: Optional[Dict[str, Any]] = None
+    decision_trace: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Plan clarification payload based on resolver slots and semantic clarifications.
@@ -322,7 +350,7 @@ def plan_clarification(
                 intent_name = intent_name.get("name")
             elif not isinstance(intent_name, str):
                 intent_name = None
-            
+
             # For MODIFY_BOOKING: decision layer is authoritative for missing_slots
             # Decision layer handles generic vs specific wording correctly based on booking_mode
             # Use decision layer's missing_slots directly, only merge with intent resolver's if decision layer didn't provide any
@@ -334,19 +362,34 @@ def plan_clarification(
                     # Decision layer provided missing_slots - use those as authoritative
                     # Remove "change" from intent resolver's missing_slots if decision layer provided specific deltas
                     specific_deltas = {"date", "time", "start_date", "end_date"}
-                    decision_has_specific_deltas = any(slot in specific_deltas for slot in decision_missing)
+                    decision_has_specific_deltas = any(
+                        slot in specific_deltas for slot in decision_missing
+                    )
                     decision_has_change = "change" in decision_missing
-                    
+
                     if decision_has_specific_deltas:
                         # Decision layer returned specific deltas - use those, remove "change" from intent resolver's
-                        missing_slots = [s for s in missing_slots if s != "change"]  # Remove "change" if present
-                        missing_slots = list(set(missing_slots + decision_missing))  # Merge with decision deltas
+                        missing_slots = [
+                            s for s in missing_slots if s != "change"
+                        ]  # Remove "change" if present
+                        missing_slots = list(
+                            set(missing_slots + decision_missing)
+                        )  # Merge with decision deltas
                     elif decision_has_change:
                         # Decision layer returned ["change"] for generic wording - use that, remove specific deltas from intent resolver's
                         # Remove any specific deltas that might have been added by intent resolver
-                        intent_specific_deltas = {"date", "time", "start_date", "end_date"}
-                        missing_slots = [s for s in missing_slots if s not in intent_specific_deltas]
-                        missing_slots = list(set(missing_slots + decision_missing))  # Merge with decision ["change"]
+                        intent_specific_deltas = {
+                            "date",
+                            "time",
+                            "start_date",
+                            "end_date",
+                        }
+                        missing_slots = [
+                            s for s in missing_slots if s not in intent_specific_deltas
+                        ]
+                        missing_slots = list(
+                            set(missing_slots + decision_missing)
+                        )  # Merge with decision ["change"]
                     else:
                         # Decision layer provided other missing_slots (e.g., ["booking_id", "date", "time"])
                         # Merge with intent resolver's missing_slots
@@ -367,7 +410,7 @@ def plan_clarification(
             elif hasattr(reason, "value"):
                 # ClarificationReason enum
                 clarification_reason = reason.value
-            
+
             # Extract missing_slots from clarification data and merge
             # This ensures MISSING_DATE_RANGE properly normalizes missing slots
             clar_data = sem_clar.get("data", {})
@@ -375,7 +418,7 @@ def plan_clarification(
             if clar_missing_slots:
                 # Merge semantic clarification's missing_slots with intent resolver's
                 missing_slots = list(set(missing_slots + clar_missing_slots))
-            
+
             status = STATUS_NEEDS_CLARIFICATION
 
     # Check for ambiguous meridiem in time_issues FIRST (before decision layer)
@@ -393,7 +436,9 @@ def plan_clarification(
     # NOTE: We still check decision layer even if semantic clarification exists, to merge missing_slots
     if decision_result and decision_result.status == "NEEDS_CLARIFICATION":
         decision_reason = decision_result.reason
-        if decision_reason and not clarification_reason:  # Only use if no more specific reason set
+        if (
+            decision_reason and not clarification_reason
+        ):  # Only use if no more specific reason set
             # Map decision layer reasons to ClarificationReason enum values
             if decision_reason == "MISSING_TIME":
                 clarification_reason = ClarificationReason.MISSING_TIME.value
@@ -423,7 +468,7 @@ def plan_clarification(
             missing_slots.append("start_date")
         if "end_date" not in missing_slots:
             missing_slots.append("end_date")
-    
+
     # Fallback: map missing slots to reasons
     if not clarification_reason and missing_slots:
         # MODIFY_BOOKING delta semantics: "change" placeholder means booking_id exists but no deltas
@@ -436,13 +481,13 @@ def plan_clarification(
                 intent_name = intent_name.get("name")
             elif not isinstance(intent_name, str):
                 intent_name = None
-            
+
             if intent_name == "MODIFY_BOOKING":
                 # booking_id is present but no deltas - indicate clarification needed
                 # Use MISSING_CONTEXT since we're asking "what should be modified?" (not missing booking_id)
                 clarification_reason = ClarificationReason.MISSING_CONTEXT.value
                 # Keep "change" in missing_slots - it indicates what needs clarification
-        
+
         if not clarification_reason:
             if "time" in missing_slots:
                 clarification_reason = ClarificationReason.MISSING_TIME.value
@@ -451,7 +496,9 @@ def plan_clarification(
             elif "service_id" in missing_slots or "service" in missing_slots:
                 clarification_reason = ClarificationReason.MISSING_SERVICE.value
             elif "booking_id" in missing_slots:
-                clarification_reason = ClarificationReason.MISSING_BOOKING_REFERENCE.value
+                clarification_reason = (
+                    ClarificationReason.MISSING_BOOKING_REFERENCE.value
+                )
             elif "start_date" in missing_slots and "end_date" in missing_slots:
                 # If both start_date and end_date are missing, use MISSING_DATE_RANGE
                 clarification_reason = ClarificationReason.MISSING_DATE_RANGE.value
@@ -459,7 +506,7 @@ def plan_clarification(
     return {
         "status": status,
         "missing_slots": missing_slots,
-        "clarification_reason": clarification_reason
+        "clarification_reason": clarification_reason,
     }
 
 
@@ -476,6 +523,7 @@ def init_pipeline():
 
         # Pre-load vocabularies to avoid first-request latency
         from luma.resolution.semantic_resolver import initialize_vocabularies
+
         initialize_vocabularies()
         logger.info("Vocabularies pre-loaded successfully")
 
@@ -491,56 +539,59 @@ def init_pipeline():
 def health():
     """Health check endpoint."""
     if entity_matcher is None and intent_resolver is None:
-        return jsonify({
-            "status": "unhealthy",
-            "message": "Pipeline components not initialized"
-        }), 503
+        return (
+            jsonify(
+                {
+                    "status": "unhealthy",
+                    "message": "Pipeline components not initialized",
+                }
+            ),
+            503,
+        )
 
-    return jsonify({
-        "status": "healthy",
-        "components": {
-            "intent_resolver": intent_resolver is not None,
-            "entity_matcher": "lazy_initialized"
+    return jsonify(
+        {
+            "status": "healthy",
+            "components": {
+                "intent_resolver": intent_resolver is not None,
+                "entity_matcher": "lazy_initialized",
+            },
         }
-    })
+    )
 
 
 @app.route("/info", methods=["GET"])
 def info():
     """API information endpoint."""
-    return jsonify({
-        "name": "Luma Service/Reservation Booking API",
-        "version": "1.0.0",
-        "description": "Service and reservation booking processing with entity extraction, intent resolution, semantic resolution, and calendar binding",
-        "endpoints": {
-            "/resolve": {
-                "method": "POST",
-                "description": "Process conversational input and resolve intent/state",
-                "parameters": {
-                    "user_id": "string (required) - User identifier",
-                    "text": "string (required) - Conversational input text",
-                    "domain": "string (optional) - 'service' or 'reservation' (default: 'service')",
-                    "timezone": "string (optional) - Timezone for calendar binding (default: 'UTC')",
-                }
+    return jsonify(
+        {
+            "name": "Luma Service/Reservation Booking API",
+            "version": "1.0.0",
+            "description": "Service and reservation booking processing with entity extraction, intent resolution, semantic resolution, and calendar binding",
+            "endpoints": {
+                "/resolve": {
+                    "method": "POST",
+                    "description": "Process conversational input and resolve intent/state",
+                    "parameters": {
+                        "user_id": "string (required) - User identifier",
+                        "text": "string (required) - Conversational input text",
+                        "domain": "string (optional) - 'service' or 'reservation' (default: 'service')",
+                        "timezone": "string (optional) - Timezone for calendar binding (default: 'UTC')",
+                    },
+                },
+                "/book": {
+                    "method": "POST",
+                    "description": "Deprecated: Use /resolve instead",
+                    "deprecated": True,
+                },
+                "/health": {"method": "GET", "description": "Health check"},
+                "/info": {"method": "GET", "description": "API information"},
             },
-            "/book": {
-                "method": "POST",
-                "description": "Deprecated: Use /resolve instead",
-                "deprecated": True
+            "configuration": {
+                "port": PORT,
             },
-            "/health": {
-                "method": "GET",
-                "description": "Health check"
-            },
-            "/info": {
-                "method": "GET",
-                "description": "API information"
-            }
-        },
-        "configuration": {
-            "port": PORT,
         }
-    })
+    )
 
 
 @app.route("/resolve", methods=["POST"])
@@ -604,20 +655,27 @@ def book():
 @app.errorhandler(404)
 def not_found(error):  # noqa: ARG001, pylint: disable=unused-argument
     """Handle 404 errors."""
-    return jsonify({
-        "success": False,
-        "error": "Endpoint not found",
-        "available_endpoints": ["/resolve", "/book (deprecated)", "/health", "/info"]
-    }), 404
+    return (
+        jsonify(
+            {
+                "success": False,
+                "error": "Endpoint not found",
+                "available_endpoints": [
+                    "/resolve",
+                    "/book (deprecated)",
+                    "/health",
+                    "/info",
+                ],
+            }
+        ),
+        404,
+    )
 
 
 @app.errorhandler(500)
 def internal_error(error):  # noqa: ARG001, pylint: disable=unused-argument
     """Handle 500 errors."""
-    return jsonify({
-        "success": False,
-        "error": "Internal server error"
-    }), 500
+    return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 def main():
@@ -634,14 +692,11 @@ def main():
 
     logger.info(f"API ready! Listening on port {PORT}")
     logger.info(
-        f"Try: curl -X POST http://localhost:{PORT}/resolve -H 'Content-Type: application/json' -d '{{\"user_id\": \"user123\", \"text\": \"book haircut tomorrow at 2pm\"}}'")
+        f'Try: curl -X POST http://localhost:{PORT}/resolve -H \'Content-Type: application/json\' -d \'{{"user_id": "user123", "text": "book haircut tomorrow at 2pm"}}\''
+    )
 
     # Run Flask
-    app.run(
-        host="0.0.0.0",
-        port=PORT,
-        debug=False
-    )
+    app.run(host="0.0.0.0", port=PORT, debug=False)
 
 
 if __name__ == "__main__":

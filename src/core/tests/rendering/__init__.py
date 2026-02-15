@@ -6,4 +6,3 @@ Tests for rendering layer functionality:
 - Template tests
 - WhatsApp channel tests
 """
-

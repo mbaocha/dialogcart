@@ -13,13 +13,14 @@ Rules:
 - Always assert: correct payload sent to client, required fields, response normalization
 """
 
-from core.orchestration.execution.availability import search_availability
-from core.orchestration.execution.clients.availability_client import AvailabilityClient
 import os
 import sys
 from pathlib import Path
-from unittest.mock import Mock, patch, MagicMock
-from typing import Dict, Any
+from typing import Any, Dict
+from unittest.mock import MagicMock, Mock, patch
+
+from core.orchestration.execution.availability import search_availability
+from core.orchestration.execution.clients.availability_client import AvailabilityClient
 
 # Add src to path
 src_path = Path(__file__).parent.parent.parent.parent
@@ -67,7 +68,7 @@ def test_search_availability_happy_path_service():
             {
                 "start": "2026-01-16T15:00:00Z",
                 "end": "2026-01-16T15:30:00Z",
-                "staff_id": 5
+                "staff_id": 5,
             }
         ]
     }
@@ -78,11 +79,7 @@ def test_search_availability_happy_path_service():
         "organization_id": 1,
         "service_id": "haircut",
         "date": "2026-01-16",
-        "time_constraint": {
-            "mode": "exact",
-            "start": "15:00",
-            "end": "15:00"
-        }
+        "time_constraint": {"mode": "exact", "start": "15:00", "end": "15:00"},
     }
 
     # Test the client directly (since execution function is a placeholder)
@@ -91,7 +88,7 @@ def test_search_availability_happy_path_service():
         organization_id=1,
         service_id="haircut",
         date="2026-01-16",
-        extra_params={"time_constraint": slots["time_constraint"]}
+        extra_params={"time_constraint": slots["time_constraint"]},
     )
 
     # Assert client was called correctly
@@ -121,18 +118,14 @@ def test_search_availability_happy_path_service():
             {
                 "start_at": "2026-01-16T15:00:00Z",
                 "end_at": "2026-01-16T15:30:00Z",
-                "staff_id": 5
+                "staff_id": 5,
             }
-        ]
+        ],
     }
 
     # Verify normalization would produce correct structure
     normalized_slots = [
-        {
-            "start_at": s["start"],
-            "end_at": s["end"],
-            "staff_id": s.get("staff_id")
-        }
+        {"start_at": s["start"], "end_at": s["end"], "staff_id": s.get("staff_id")}
         for s in result["slots"]
     ]
 
@@ -152,23 +145,15 @@ def test_search_availability_no_availability():
     """
     # Create mock client
     mock_client = Mock(spec=AvailabilityClient)
-    mock_response = {
-        "slots": []
-    }
+    mock_response = {"slots": []}
     mock_client.get_service_availability.return_value = mock_response
 
     # Prepare input slots
-    slots = {
-        "organization_id": 1,
-        "service_id": "haircut",
-        "date": "2026-01-16"
-    }
+    slots = {"organization_id": 1, "service_id": "haircut", "date": "2026-01-16"}
 
     # Call client
     result = mock_client.get_service_availability(
-        organization_id=1,
-        service_id="haircut",
-        date="2026-01-16"
+        organization_id=1, service_id="haircut", date="2026-01-16"
     )
 
     # Assert client was called
@@ -182,16 +167,12 @@ def test_search_availability_no_availability():
     expected_core_result = {
         "type": "availability",
         "status": "success",
-        "available_slots": []
+        "available_slots": [],
     }
 
     # Verify normalization produces empty list
     normalized_slots = [
-        {
-            "start_at": s["start"],
-            "end_at": s["end"]
-        }
-        for s in result["slots"]
+        {"start_at": s["start"], "end_at": s["end"]} for s in result["slots"]
     ]
 
     assert normalized_slots == []
@@ -221,6 +202,7 @@ if __name__ == "__main__":
         print(f"[FAIL] Test failed: {e}")
         print("=" * 50)
         import traceback
+
         traceback.print_exc()
         sys.exit(1)
     except Exception as e:
@@ -229,5 +211,6 @@ if __name__ == "__main__":
         print(f"[ERROR] Error: {e}")
         print("=" * 50)
         import traceback
+
         traceback.print_exc()
         sys.exit(1)

@@ -6,5 +6,3 @@ Tests for planning functionality including:
 - Planning edge cases
 - Stage progression
 """
-
-

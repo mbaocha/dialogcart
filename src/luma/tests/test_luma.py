@@ -1,8 +1,10 @@
-import os
-import requests
-import random
-import json
 import argparse
+import json
+import os
+import random
+
+import requests
+
 from .scenarios import booking_scenarios, other_scenarios, scenarios
 
 API_BASE = "http://localhost:9001/resolve"
@@ -106,18 +108,25 @@ def assert_response(resp, expected):
     - start_date/end_date
     """
     # Assert intent
-    assert resp["intent"]["name"] == expected["intent"], (
-        f"Intent mismatch: got '{resp['intent']['name']}', expected '{expected['intent']}'"
-    )
+    assert (
+        resp["intent"]["name"] == expected["intent"]
+    ), f"Intent mismatch: got '{resp['intent']['name']}', expected '{expected['intent']}'"
 
     # Enforce invariant: semantic fields must NOT be present
     assert "status" not in resp, "Luma must not output 'status' (semantic field)"
-    assert "missing_slots" not in resp, "Luma must not output 'missing_slots' (semantic field)"
+    assert (
+        "missing_slots" not in resp
+    ), "Luma must not output 'missing_slots' (semantic field)"
     assert "issues" not in resp, "Luma must not output 'issues' (semantic field)"
-    assert "clarification_reason" not in resp, "Luma must not output 'clarification_reason' (semantic field)"
-    assert "clarification" not in resp, "Luma must not output 'clarification' (semantic field)"
-    assert "booking" not in resp or resp.get(
-        "booking") is None, "Luma must not output 'booking' block (semantic field)"
+    assert (
+        "clarification_reason" not in resp
+    ), "Luma must not output 'clarification_reason' (semantic field)"
+    assert (
+        "clarification" not in resp
+    ), "Luma must not output 'clarification' (semantic field)"
+    assert (
+        "booking" not in resp or resp.get("booking") is None
+    ), "Luma must not output 'booking' block (semantic field)"
 
     # Assert facts extraction
     expected_facts = expected.get("facts", {})
@@ -131,63 +140,68 @@ def assert_response(resp, expected):
         if fact_key == "dates":
             # dates[] array - order may matter for ranges
             assert isinstance(
-                actual_value, list), f"facts.dates must be a list, got {type(actual_value)}"
-            assert actual_value == expected_value, (
-                f"facts.dates mismatch: got {actual_value}, expected {expected_value}"
-            )
+                actual_value, list
+            ), f"facts.dates must be a list, got {type(actual_value)}"
+            assert (
+                actual_value == expected_value
+            ), f"facts.dates mismatch: got {actual_value}, expected {expected_value}"
         elif fact_key == "times":
             # times[] array
             assert isinstance(
-                actual_value, list), f"facts.times must be a list, got {type(actual_value)}"
-            assert actual_value == expected_value, (
-                f"facts.times mismatch: got {actual_value}, expected {expected_value}"
-            )
+                actual_value, list
+            ), f"facts.times must be a list, got {type(actual_value)}"
+            assert (
+                actual_value == expected_value
+            ), f"facts.times mismatch: got {actual_value}, expected {expected_value}"
         elif fact_key == "date_time_pairs":
             # date_time_pairs[] - only when linguistically explicit
             assert isinstance(
-                actual_value, list), f"facts.date_time_pairs must be a list, got {type(actual_value)}"
-            assert actual_value == expected_value, (
-                f"facts.date_time_pairs mismatch: got {actual_value}, expected {expected_value}"
-            )
+                actual_value, list
+            ), f"facts.date_time_pairs must be a list, got {type(actual_value)}"
+            assert (
+                actual_value == expected_value
+            ), f"facts.date_time_pairs mismatch: got {actual_value}, expected {expected_value}"
         else:
             # Direct value comparison for service_id, booking_id
-            assert actual_value == expected_value, (
-                f"facts.{fact_key} mismatch: got '{actual_value}', expected '{expected_value}'"
-            )
+            assert (
+                actual_value == expected_value
+            ), f"facts.{fact_key} mismatch: got '{actual_value}', expected '{expected_value}'"
 
     # STAGE 4: Assert time_constraint if present in expected (for fuzzy time cases)
     if "time_constraint" in expected:
         assert "time_constraint" in resp, "Missing time_constraint in response"
         expected_tc = expected["time_constraint"]
         actual_tc = resp["time_constraint"]
-        
+
         # Check mode
-        assert actual_tc.get("mode") == expected_tc.get("mode"), (
-            f"time_constraint.mode mismatch: got '{actual_tc.get('mode')}', expected '{expected_tc.get('mode')}'"
-        )
-        
+        assert actual_tc.get("mode") == expected_tc.get(
+            "mode"
+        ), f"time_constraint.mode mismatch: got '{actual_tc.get('mode')}', expected '{expected_tc.get('mode')}'"
+
         # Check label if present in expected
         if "label" in expected_tc:
-            assert actual_tc.get("label") == expected_tc.get("label"), (
-                f"time_constraint.label mismatch: got '{actual_tc.get('label')}', expected '{expected_tc.get('label')}'"
-            )
-        
+            assert actual_tc.get("label") == expected_tc.get(
+                "label"
+            ), f"time_constraint.label mismatch: got '{actual_tc.get('label')}', expected '{expected_tc.get('label')}'"
+
         # Check start/end if present in expected
         if "start" in expected_tc:
-            assert actual_tc.get("start") == expected_tc.get("start"), (
-                f"time_constraint.start mismatch: got '{actual_tc.get('start')}', expected '{expected_tc.get('start')}'"
-            )
+            assert actual_tc.get("start") == expected_tc.get(
+                "start"
+            ), f"time_constraint.start mismatch: got '{actual_tc.get('start')}', expected '{expected_tc.get('start')}'"
         if "end" in expected_tc:
-            assert actual_tc.get("end") == expected_tc.get("end"), (
-                f"time_constraint.end mismatch: got '{actual_tc.get('end')}', expected '{expected_tc.get('end')}'"
-            )
+            assert actual_tc.get("end") == expected_tc.get(
+                "end"
+            ), f"time_constraint.end mismatch: got '{actual_tc.get('end')}', expected '{expected_tc.get('end')}'"
 
     # For non-UNKNOWN intents, check confidence is present and reasonable
     if expected["intent"] != "UNKNOWN":
-        assert "confidence" in resp["intent"], "Intent should have confidence for non-UNKNOWN intents"
-        assert resp["intent"]["confidence"] >= 0.7, (
-            f"Low confidence: {resp['intent'].get('confidence')}"
-        )
+        assert (
+            "confidence" in resp["intent"]
+        ), "Intent should have confidence for non-UNKNOWN intents"
+        assert (
+            resp["intent"]["confidence"] >= 0.7
+        ), f"Low confidence: {resp['intent'].get('confidence')}"
 
 
 def test_cases(scenarios_to_run=None):
@@ -207,7 +221,11 @@ def test_cases(scenarios_to_run=None):
         # Get scenario-specific options if provided
         scenario_options = case.get("options", None)
         resp, resp_status, resp_raw = call_luma(
-            case["sentence"], case["booking_mode"], aliases=scenario_aliases, options=scenario_options)
+            case["sentence"],
+            case["booking_mode"],
+            aliases=scenario_aliases,
+            options=scenario_options,
+        )
         try:
             if resp_status != 200 or resp is None:
                 raise AssertionError(f"HTTP {resp_status}, body={resp_raw}")
@@ -230,8 +248,9 @@ def test_cases(scenarios_to_run=None):
                 print(f"  (could not dump actual json: {dump_err})")
             try:
                 print("  expected.scenario json:")
-                print(json.dumps(case.get("expected", {}),
-                      indent=2, ensure_ascii=False))
+                print(
+                    json.dumps(case.get("expected", {}), indent=2, ensure_ascii=False)
+                )
             except (TypeError, ValueError) as dump_err:
                 print(f"  (could not dump expected json: {dump_err})")
             failures.append((i, case, e))
@@ -253,9 +272,18 @@ def test_no_canonical_service_id_in_response():
     # Known canonical IDs that should never appear as service_id
     # These are canonical family names or full canonical IDs
     canonical_ids = [
-        "room", "haircut", "beard grooming", "massage", "facial", "suite",
-        "hospitality.room", "beauty_and_wellness.haircut", "beauty_and_wellness.beard_grooming",
-        "beauty_and_wellness.massage", "beauty_and_wellness.facial", "hospitality.suite"
+        "room",
+        "haircut",
+        "beard grooming",
+        "massage",
+        "facial",
+        "suite",
+        "hospitality.room",
+        "beauty_and_wellness.haircut",
+        "beauty_and_wellness.beard_grooming",
+        "beauty_and_wellness.massage",
+        "beauty_and_wellness.facial",
+        "hospitality.suite",
     ]
 
     # Test with a few scenarios to ensure no canonical IDs are returned
@@ -267,7 +295,9 @@ def test_no_canonical_service_id_in_response():
 
     for sentence, booking_mode in test_cases:
         resp, resp_status, resp_raw = call_luma(sentence, booking_mode)
-        assert resp_status == 200 and resp is not None, f"HTTP {resp_status}, body={resp_raw}"
+        assert (
+            resp_status == 200 and resp is not None
+        ), f"HTTP {resp_status}, body={resp_raw}"
 
         # Check facts.service_id if present
         service_id = resp.get("facts", {}).get("service_id")
@@ -287,7 +317,9 @@ def test_no_canonical_service_id_in_response():
                     f"Expected a tenant service key from tenant_context.aliases."
                 )
 
-    print("PASS Invariant test passed: No canonical service IDs returned in API responses")
+    print(
+        "PASS Invariant test passed: No canonical service IDs returned in API responses"
+    )
 
 
 def test_output_independent_of_previous_requests():
@@ -310,20 +342,23 @@ def test_output_independent_of_previous_requests():
     test_input_1 = "book haircut tomorrow at 3pm"
 
     # Make first request
-    resp1, status1, raw1 = call_luma(
-        test_input_1, "service", user_id=fixed_user_id)
-    assert status1 == 200 and resp1 is not None, f"First request failed: HTTP {status1}, body={raw1}"
+    resp1, status1, raw1 = call_luma(test_input_1, "service", user_id=fixed_user_id)
+    assert (
+        status1 == 200 and resp1 is not None
+    ), f"First request failed: HTTP {status1}, body={raw1}"
 
     # Make a different request with the same user_id
     test_input_2 = "what times are available"
-    resp2, status2, raw2 = call_luma(
-        test_input_2, "service", user_id=fixed_user_id)
-    assert status2 == 200 and resp2 is not None, f"Second request failed: HTTP {status2}, body={raw2}"
+    resp2, status2, raw2 = call_luma(test_input_2, "service", user_id=fixed_user_id)
+    assert (
+        status2 == 200 and resp2 is not None
+    ), f"Second request failed: HTTP {status2}, body={raw2}"
 
     # Make the same first request again - should produce identical output
-    resp3, status3, raw3 = call_luma(
-        test_input_1, "service", user_id=fixed_user_id)
-    assert status3 == 200 and resp3 is not None, f"Third request failed: HTTP {status3}, body={raw3}"
+    resp3, status3, raw3 = call_luma(test_input_1, "service", user_id=fixed_user_id)
+    assert (
+        status3 == 200 and resp3 is not None
+    ), f"Third request failed: HTTP {status3}, body={raw3}"
 
     # Assert that resp1 and resp3 are identical (same input = same output)
     assert resp1 == resp3, (
@@ -343,9 +378,10 @@ def test_output_independent_of_previous_requests():
     ]
 
     for fragment in fragmentary_inputs:
-        resp, status, raw = call_luma(
-            fragment, "service", user_id=fixed_user_id)
-        assert status == 200 and resp is not None, f"Request failed for '{fragment}': HTTP {status}, body={raw}"
+        resp, status, raw = call_luma(fragment, "service", user_id=fixed_user_id)
+        assert (
+            status == 200 and resp is not None
+        ), f"Request failed for '{fragment}': HTTP {status}, body={raw}"
 
         intent_name = resp.get("intent", {}).get("name", "")
         assert intent_name == "UNKNOWN", (
@@ -358,9 +394,10 @@ def test_output_independent_of_previous_requests():
     # Test 3: Explicit booking inputs should work regardless of prior fragmentary inputs
     # This ensures that prior UNKNOWN responses don't affect valid booking requests
     explicit_booking = "book haircut tomorrow at 3pm"
-    resp4, status4, raw4 = call_luma(
-        explicit_booking, "service", user_id=fixed_user_id)
-    assert status4 == 200 and resp4 is not None, f"Request failed for '{explicit_booking}': HTTP {status4}, body={raw4}"
+    resp4, status4, raw4 = call_luma(explicit_booking, "service", user_id=fixed_user_id)
+    assert (
+        status4 == 200 and resp4 is not None
+    ), f"Request failed for '{explicit_booking}': HTTP {status4}, body={raw4}"
 
     intent_name_4 = resp4.get("intent", {}).get("name", "")
     assert intent_name_4 == "CREATE_APPOINTMENT", (
@@ -370,7 +407,9 @@ def test_output_independent_of_previous_requests():
         f"Response: {json.dumps(resp4, indent=2)}"
     )
 
-    print("PASS Invariant test passed: Luma output is independent of previous requests (stateless)")
+    print(
+        "PASS Invariant test passed: Luma output is independent of previous requests (stateless)"
+    )
 
 
 if __name__ == "__main__":
@@ -389,22 +428,23 @@ Examples:
   python -m luma.tests.test_luma 100-105           # Run test cases 100, 101, 102, 103, 104, 105
   python -m luma.tests.test_luma --other 2          # Run test case 2 from other scenarios
   python -m luma.tests.test_luma 5 -v               # Run test case 5 with verbose output
-        """
+        """,
     )
     parser.add_argument(
         "--other",
         action="store_true",
-        help="Run other intent scenarios (MODIFY_BOOKING, CANCEL_BOOKING, etc.) instead of booking scenarios"
+        help="Run other intent scenarios (MODIFY_BOOKING, CANCEL_BOOKING, etc.) instead of booking scenarios",
     )
     parser.add_argument(
         "test_indices",
         nargs="*",
-        help="Optional test case indices to run (e.g., '62 63 64', '62,63,64', or '100-105'). Can be space-separated, comma-separated, or range syntax."
+        help="Optional test case indices to run (e.g., '62 63 64', '62,63,64', or '100-105'). Can be space-separated, comma-separated, or range syntax.",
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
-        help="Verbose output (show full response JSON)"
+        help="Verbose output (show full response JSON)",
     )
 
     args = parser.parse_args()
@@ -418,37 +458,42 @@ Examples:
     if args.test_indices:
         for arg in args.test_indices:
             # Check for range syntax (e.g., "100-105")
-            if '-' in arg and ',' not in arg:
+            if "-" in arg and "," not in arg:
                 try:
-                    parts = arg.split('-')
+                    parts = arg.split("-")
                     if len(parts) == 2:
                         start = int(parts[0].strip())
                         end = int(parts[1].strip())
                         if start > end:
                             print(
-                                f"Invalid range: '{arg}'. Start ({start}) must be <= end ({end}).")
+                                f"Invalid range: '{arg}'. Start ({start}) must be <= end ({end})."
+                            )
                             sys.exit(1)
                         # Expand range (inclusive on both ends)
                         test_indices.extend(range(start, end + 1))
                     else:
                         print(
-                            f"Invalid range syntax: '{arg}'. Expected format: 'start-end' (e.g., '100-105').")
+                            f"Invalid range syntax: '{arg}'. Expected format: 'start-end' (e.g., '100-105')."
+                        )
                         sys.exit(1)
                 except ValueError:
                     print(
-                        f"Invalid range: '{arg}'. Both start and end must be integers.")
+                        f"Invalid range: '{arg}'. Both start and end must be integers."
+                    )
                     sys.exit(1)
             # Split by comma if comma-separated
-            elif ',' in arg:
-                test_indices.extend([int(x.strip())
-                                    for x in arg.split(',') if x.strip()])
+            elif "," in arg:
+                test_indices.extend(
+                    [int(x.strip()) for x in arg.split(",") if x.strip()]
+                )
             else:
                 # Single integer
                 try:
                     test_indices.append(int(arg))
                 except ValueError:
                     print(
-                        f"Invalid test index: '{arg}'. Must be an integer, range (e.g., '100-105'), or comma-separated list.")
+                        f"Invalid test index: '{arg}'. Must be an integer, range (e.g., '100-105'), or comma-separated list."
+                    )
                     sys.exit(1)
 
     if test_indices:
@@ -467,11 +512,14 @@ Examples:
             # Get scenario-specific options if provided
             scenario_options = single_case.get("options", None)
             single_resp, single_status, single_raw = call_luma(
-                single_case["sentence"], single_case["booking_mode"], aliases=scenario_aliases, options=scenario_options)
+                single_case["sentence"],
+                single_case["booking_mode"],
+                aliases=scenario_aliases,
+                options=scenario_options,
+            )
             try:
                 if single_status != 200 or single_resp is None:
-                    raise AssertionError(
-                        f"HTTP {single_status}, body={single_raw}")
+                    raise AssertionError(f"HTTP {single_status}, body={single_raw}")
                 assert_response(single_resp, single_case["expected"])
                 print(f"PASS Test case {idx} ({scenario_type}) passed")
                 if args.verbose:

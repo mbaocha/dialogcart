@@ -39,39 +39,34 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date", "time"],
-                    "slots": {"service_id": "haircut"}
-                }
+                    "slots": {"service_id": "haircut"},
+                },
             },
             {
                 "sentence": "tomorrow",
                 "expected": {
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "haircut", "date": "2026-01-14"}
-                }
+                    "slots": {"service_id": "haircut", "date": "2026-01-14"},
+                },
             },
             {
                 "sentence": "11am",
                 "expected": {
                     "status": "READY",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {"service_id": "haircut", "date": "2026-01-14", "time": "11am"}
-                }
-            }
-        ]
+                    "slots": {
+                        "service_id": "haircut",
+                        "date": "2026-01-14",
+                        "time": "11am",
+                    },
+                },
+            },
+        ],
     },
     {
         "id": 2,
@@ -84,39 +79,34 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date", "time"],
-                    "slots": {"service_id": "massage"}
-                }
+                    "slots": {"service_id": "massage"},
+                },
             },
             {
                 "sentence": "this friday",
                 "expected": {
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "massage", "date": "2026-01-16"}
-                }
+                    "slots": {"service_id": "massage", "date": "2026-01-16"},
+                },
             },
             {
                 "sentence": "3pm",
                 "expected": {
                     "status": "READY",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {"service_id": "massage", "date": "2026-01-16", "time": "3pm"}
-                }
-            }
-        ]
+                    "slots": {
+                        "service_id": "massage",
+                        "date": "2026-01-16",
+                        "time": "3pm",
+                    },
+                },
+            },
+        ],
     },
     {
         "id": 3,
@@ -129,40 +119,35 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date", "time"],
                     # service_id present allows partial execution
-                    "slots": {"service_id": "facial"}
-                }
+                    "slots": {"service_id": "facial"},
+                },
             },
             {
                 "sentence": "next monday",
                 "expected": {
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "facial", "date": "2026-01-19"}
-                }
+                    "slots": {"service_id": "facial", "date": "2026-01-19"},
+                },
             },
             {
                 "sentence": "10am",
                 "expected": {
                     "status": "READY",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {"service_id": "facial", "date": "2026-01-19", "time": "10am"}
-                }
-            }
-        ]
+                    "slots": {
+                        "service_id": "facial",
+                        "date": "2026-01-19",
+                        "time": "10am",
+                    },
+                },
+            },
+        ],
     },
     # Multi-turn fact accumulation: service → time → date (IDs 11-15)
     # Tests that slots can be provided in any order
@@ -177,27 +162,21 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date"],
-                    "slots": {"service_id": "massage"}
-                }
+                    "slots": {"service_id": "massage"},
+                },
             },
             {
                 "sentence": "tomorrow",
                 "expected": {
                     "status": "READY",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {"service_id": "massage", "date": "2026-01-14"}
-                }
-            }
-        ]
+                    "slots": {"service_id": "massage", "date": "2026-01-14"},
+                },
+            },
+        ],
     },
     {
         "id": 12,
@@ -210,27 +189,21 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date"],
-                    "slots": {"service_id": "haircut"}
-                }
+                    "slots": {"service_id": "haircut"},
+                },
             },
             {
                 "sentence": "friday",
                 "expected": {
                     "status": "READY",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {"service_id": "haircut", "date": "2026-01-16"}
-                }
-            }
-        ]
+                    "slots": {"service_id": "haircut", "date": "2026-01-16"},
+                },
+            },
+        ],
     },
     # Test slots in different order: date → time (IDs 13-14)
     {
@@ -244,23 +217,17 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date", "time"],
                     # service_id present allows partial execution
-                    "slots": {"service_id": "facial"}
-                }
+                    "slots": {"service_id": "facial"},
+                },
             },
             {
                 "sentence": "next week",
                 "expected": {
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
                     # Date ranges (e.g., "next week") now satisfy the date slot for CREATE_APPOINTMENT.
                     # Core promotes date ranges to both date_range (authoritative) and date (for planning compatibility).
@@ -268,18 +235,15 @@ followup_scenarios = [
                     "slots": {
                         "service_id": "facial",
                         "date_range": {"start": "2026-01-19", "end": "2026-01-25"},
-                        "date": "2026-01-19"
-                    }
-                }
+                        "date": "2026-01-19",
+                    },
+                },
             },
             {
                 "sentence": "afternoon",
                 "expected": {
                     "status": "READY",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
                     # Bounded fuzzy times (e.g., "afternoon" with start and end) satisfy the time slot.
                     # Date range from turn 2 persists in session and satisfies the date slot.
@@ -288,11 +252,11 @@ followup_scenarios = [
                         "service_id": "facial",
                         "date_range": {"start": "2026-01-19", "end": "2026-01-25"},
                         "date": "2026-01-19",
-                        "time": "afternoon"
-                    }
-                }
-            }
-        ]
+                        "time": "afternoon",
+                    },
+                },
+            },
+        ],
     },
     # Test all slots provided in one turn (ID 14)
     {
@@ -306,15 +270,12 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "READY",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {"service_id": "massage", "date": "2026-01-14"}
-                }
+                    "slots": {"service_id": "massage", "date": "2026-01-14"},
+                },
             }
-        ]
+        ],
     },
     # Multi-turn fact accumulation: reservation check-in → check-out (IDs 21-30)
     # NOTE: Core requires explicit start_date and end_date slots (no inference from date).
@@ -329,39 +290,30 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date_range"],
-                    "slots": {"service_id": "room"}
-                }
+                    "slots": {"service_id": "room"},
+                },
             },
             {
                 "sentence": "from october 5th",
                 "expected": {
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date_range"],
-                    "slots": {"service_id": "room"}
-                }
+                    "slots": {"service_id": "room"},
+                },
             },
             {
                 "sentence": "to october 9th",
                 "expected": {
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date_range"],
-                    "slots": {"service_id": "room"}
-                }
-            }
-        ]
+                    "slots": {"service_id": "room"},
+                },
+            },
+        ],
     },
     {
         "id": 26,
@@ -374,27 +326,21 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date_range"],
-                    "slots": {"service_id": "room"}
-                }
+                    "slots": {"service_id": "room"},
+                },
             },
             {
                 "sentence": "march 10 to 15",
                 "expected": {
                     "status": "READY",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {"service_id": "room", "date_range": "march 10 to 15"}
-                }
-            }
-        ]
+                    "slots": {"service_id": "room", "date_range": "march 10 to 15"},
+                },
+            },
+        ],
     },
     # Intent switching resets context (IDs 31-35)
     {
@@ -408,28 +354,22 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date", "time"],
-                    "slots": {"service_id": "haircut"}
-                }
+                    "slots": {"service_id": "haircut"},
+                },
             },
             {
                 "sentence": "cancel my booking",
                 "expected": {
                     "intent": "CANCEL_BOOKING",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "IDENTIFY",
-                        "action": "FETCH_BOOKING"
-                    },
+                    "plan": {"stage": "IDENTIFY", "action": "FETCH_BOOKING"},
                     "missing_slots": ["booking_id"],
-                    "slots": {}
-                }
-            }
-        ]
+                    "slots": {},
+                },
+            },
+        ],
     },
     {
         "id": 32,
@@ -442,28 +382,22 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date", "time"],
-                    "slots": {"service_id": "facial"}
-                }
+                    "slots": {"service_id": "facial"},
+                },
             },
             {
                 "sentence": "nevermind cancel",
                 "expected": {
                     "intent": "CANCEL_BOOKING",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "IDENTIFY",
-                        "action": "FETCH_BOOKING"
-                    },
+                    "plan": {"stage": "IDENTIFY", "action": "FETCH_BOOKING"},
                     "missing_slots": ["booking_id"],
-                    "slots": {}
-                }
-            }
-        ]
+                    "slots": {},
+                },
+            },
+        ],
     },
     {
         "id": 33,
@@ -476,28 +410,22 @@ followup_scenarios = [
                 "expected": {
                     "intent": "MODIFY_BOOKING",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "IDENTIFY",
-                        "action": "FETCH_BOOKING"
-                    },
+                    "plan": {"stage": "IDENTIFY", "action": "FETCH_BOOKING"},
                     "missing_slots": ["booking_id"],
-                    "slots": {}
-                }
+                    "slots": {},
+                },
             },
             {
                 "sentence": "actually cancel it",
                 "expected": {
                     "intent": "CANCEL_BOOKING",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "IDENTIFY",
-                        "action": "FETCH_BOOKING"
-                    },
+                    "plan": {"stage": "IDENTIFY", "action": "FETCH_BOOKING"},
                     "missing_slots": ["booking_id"],
-                    "slots": {}
-                }
-            }
-        ]
+                    "slots": {},
+                },
+            },
+        ],
     },
     # No slot inference guarantees (IDs 36-45)
     {
@@ -511,27 +439,21 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CANCEL_BOOKING",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "IDENTIFY",
-                        "action": "FETCH_BOOKING"
-                    },
+                    "plan": {"stage": "IDENTIFY", "action": "FETCH_BOOKING"},
                     "missing_slots": ["booking_id"],
-                    "slots": {}
-                }
+                    "slots": {},
+                },
             },
             {
                 "sentence": "booking abc123",
                 "expected": {
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "IDENTIFY",
-                        "action": "FETCH_BOOKING"
-                    },
+                    "plan": {"stage": "IDENTIFY", "action": "FETCH_BOOKING"},
                     "missing_slots": ["booking_id"],
-                    "slots": {}
-                }
-            }
-        ]
+                    "slots": {},
+                },
+            },
+        ],
     },
     {
         "id": 37,
@@ -544,39 +466,30 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date_range"],
-                    "slots": {"service_id": "suite"}
-                }
+                    "slots": {"service_id": "suite"},
+                },
             },
             {
                 "sentence": "from nov 1st",
                 "expected": {
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date_range"],
-                    "slots": {"service_id": "suite"}
-                }
+                    "slots": {"service_id": "suite"},
+                },
             },
             {
                 "sentence": "nov 5th",
                 "expected": {
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date_range"],
-                    "slots": {"service_id": "suite"}
-                }
-            }
-        ]
+                    "slots": {"service_id": "suite"},
+                },
+            },
+        ],
     },
     {
         "id": 38,
@@ -589,27 +502,21 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date_range"],
-                    "slots": {"service_id": "deluxe"}
-                }
+                    "slots": {"service_id": "deluxe"},
+                },
             },
             {
                 "sentence": "jan 5th",
                 "expected": {
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date_range"],
-                    "slots": {"service_id": "deluxe"}
-                }
-            }
-        ]
+                    "slots": {"service_id": "deluxe"},
+                },
+            },
+        ],
     },
     # Domain isolation: service vs reservation (IDs 46-50)
     {
@@ -623,27 +530,21 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date_range"],
-                    "slots": {"service_id": "room"}
-                }
+                    "slots": {"service_id": "room"},
+                },
             },
             {
                 "sentence": "tomorrow at 3pm",
                 "expected": {
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date_range"],
-                    "slots": {"service_id": "room"}
-                }
-            }
-        ]
+                    "slots": {"service_id": "room"},
+                },
+            },
+        ],
     },
     {
         "id": 47,
@@ -656,22 +557,16 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date", "time"],
-                    "slots": {"service_id": "haircut"}
-                }
+                    "slots": {"service_id": "haircut"},
+                },
             },
             {
                 "sentence": "from nov 1st to nov 5th",
                 "expected": {
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
                     # Date ranges (e.g., "from nov 1st to nov 5th") now satisfy the date slot for CREATE_APPOINTMENT.
                     # Core promotes date ranges to both date_range (authoritative) and date (for planning compatibility).
@@ -679,11 +574,11 @@ followup_scenarios = [
                     "slots": {
                         "service_id": "haircut",
                         "date_range": {"start": "2026-11-01", "end": "2026-11-05"},
-                        "date": "2026-11-01"
-                    }
-                }
-            }
-        ]
+                        "date": "2026-11-01",
+                    },
+                },
+            },
+        ],
     },
     {
         "id": 48,
@@ -696,15 +591,12 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date"],
-                    "slots": {"service_id": "massage"}
-                }
+                    "slots": {"service_id": "massage"},
+                },
             }
-        ]
+        ],
     },
     {
         "id": 49,
@@ -717,15 +609,12 @@ followup_scenarios = [
                 "expected": {
                     "intent": "CREATE_RESERVATION",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "AVAILABILITY",
-                        "action": "SEARCH_AVAILABILITY"
-                    },
+                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date_range"],
-                    "slots": {"service_id": "room"}
-                }
+                    "slots": {"service_id": "room"},
+                },
             }
-        ]
+        ],
     },
     {
         "id": 50,
@@ -738,14 +627,11 @@ followup_scenarios = [
                 "expected": {
                     "intent": "MODIFY_BOOKING",
                     "status": "NEEDS_CLARIFICATION",
-                    "plan": {
-                        "stage": "IDENTIFY",
-                        "action": "FETCH_BOOKING"
-                    },
+                    "plan": {"stage": "IDENTIFY", "action": "FETCH_BOOKING"},
                     "missing_slots": ["booking_id"],
-                    "slots": {}
-                }
+                    "slots": {},
+                },
             }
-        ]
-    }
+        ],
+    },
 ]

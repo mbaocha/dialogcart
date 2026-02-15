@@ -11,7 +11,7 @@ Endpoints mocked:
 """
 
 from .availability import mock_get_service_availability
-from .bookings import mock_create_booking, mock_confirm_booking, reset_booking_counter
+from .bookings import mock_confirm_booking, mock_create_booking, reset_booking_counter
 from .cancellations import mock_cancel_booking
 from .discovery import mock_discovery_endpoints
 
@@ -23,4 +23,3 @@ __all__ = [
     "mock_discovery_endpoints",
     "reset_booking_counter",
 ]
-

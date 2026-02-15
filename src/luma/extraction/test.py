@@ -5,10 +5,10 @@ Interactive test script for EntityMatcher.
 Allows interactive testing of service and reservation entity extraction.
 """
 
-import sys
 import json
+import sys
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
 
 # Add src directory to path for imports FIRST, before any luma imports
 # test.py is in: dialogcart/src/luma/extraction/test.py
@@ -43,35 +43,40 @@ def print_result(result: Dict[str, Any], domain: str):
         print(f"\n✂️  Services ({len(services)}):")
         for i, svc in enumerate(services, 1):
             print(
-                f"   {i}. {svc.get('text', 'N/A')} (pos: {svc.get('position', 'N/A')}, len: {svc.get('length', 'N/A')})")
+                f"   {i}. {svc.get('text', 'N/A')} (pos: {svc.get('position', 'N/A')}, len: {svc.get('length', 'N/A')})"
+            )
 
     elif domain == "reservation":
         room_types = result.get("room_types", [])
         print(f"\n🏨 Room Types ({len(room_types)}):")
         for i, rt in enumerate(room_types, 1):
             print(
-                f"   {i}. {rt.get('text', 'N/A')} (pos: {rt.get('position', 'N/A')}, len: {rt.get('length', 'N/A')})")
+                f"   {i}. {rt.get('text', 'N/A')} (pos: {rt.get('position', 'N/A')}, len: {rt.get('length', 'N/A')})"
+            )
 
         amenities = result.get("amenities", [])
         if amenities:
             print(f"\n✨ Amenities ({len(amenities)}):")
             for i, am in enumerate(amenities, 1):
                 print(
-                    f"   {i}. {am.get('text', 'N/A')} (pos: {am.get('position', 'N/A')}, len: {am.get('length', 'N/A')})")
+                    f"   {i}. {am.get('text', 'N/A')} (pos: {am.get('position', 'N/A')}, len: {am.get('length', 'N/A')})"
+                )
 
     dates = result.get("dates", [])
     if dates:
         print(f"\n📅 Dates ({len(dates)}):")
         for i, date in enumerate(dates, 1):
             print(
-                f"   {i}. {date.get('text', 'N/A')} (pos: {date.get('position', 'N/A')}, len: {date.get('length', 'N/A')})")
+                f"   {i}. {date.get('text', 'N/A')} (pos: {date.get('position', 'N/A')}, len: {date.get('length', 'N/A')})"
+            )
 
     times = result.get("times", [])
     if times:
         print(f"\n⏰ Times ({len(times)}):")
         for i, time in enumerate(times, 1):
             print(
-                f"   {i}. {time.get('text', 'N/A')} (pos: {time.get('position', 'N/A')}, len: {time.get('length', 'N/A')})")
+                f"   {i}. {time.get('text', 'N/A')} (pos: {time.get('position', 'N/A')}, len: {time.get('length', 'N/A')})"
+            )
 
     print("\n" + "=" * 60)
     print("\n📊 Full JSON Output:")
@@ -84,10 +89,10 @@ def find_entity_file() -> Path:
     # Try to find normalization files relative to this script
     current_dir = Path(__file__).parent
     config_data_dir = current_dir.parent / "config" / "data"
-    
+
     # Fallback to old location for backward compatibility
     store_dir = current_dir.parent / "store" / "normalization"
-    
+
     # Use config/data if it exists, otherwise try store/normalization
     if config_data_dir.exists():
         store_dir = config_data_dir
@@ -98,8 +103,7 @@ def find_entity_file() -> Path:
     if store_dir.exists():
         # Look for tenant JSON files (e.g., 101.v1.json)
         json_files = list(store_dir.glob("*.v1.json"))
-        tenant_files = [f for f in json_files if f.stem.split(".")[
-            0].isdigit()]
+        tenant_files = [f for f in json_files if f.stem.split(".")[0].isdigit()]
 
         if tenant_files:
             return tenant_files[0]
@@ -131,8 +135,9 @@ def interactive_mode():
     # Domain selection
     domain = None
     while domain not in ["service", "reservation"]:
-        domain_input = input(
-            "Select domain (service/reservation) [service]: ").strip().lower()
+        domain_input = (
+            input("Select domain (service/reservation) [service]: ").strip().lower()
+        )
         if not domain_input:
             domain = "service"
         elif domain_input in ["service", "reservation"]:
@@ -143,8 +148,7 @@ def interactive_mode():
     # Initialize matcher
     try:
         if entity_file:
-            entity_matcher = EntityMatcher(
-                domain=domain, entity_file=str(entity_file))
+            entity_matcher = EntityMatcher(domain=domain, entity_file=str(entity_file))
         else:
             print("⚠ Cannot initialize without entity file. Exiting.")
             return
@@ -158,8 +162,7 @@ def interactive_mode():
     # Test loop
     while True:
         try:
-            user_input = input(
-                "Enter text to extract (or 'quit'/'help'): ").strip()
+            user_input = input("Enter text to extract (or 'quit'/'help'): ").strip()
 
             if not user_input:
                 continue
@@ -184,7 +187,8 @@ def interactive_mode():
 
             # Extract entities
             result = entity_matcher.extract_with_parameterization(
-                user_input, debug_units=True)
+                user_input, debug_units=True
+            )
             print_result(result, domain)
 
         except KeyboardInterrupt:
@@ -193,6 +197,7 @@ def interactive_mode():
         except Exception as e:
             print(f"\n❌ Error: {e}")
             import traceback
+
             traceback.print_exc()
             print()
 
@@ -210,15 +215,47 @@ def test_examples():
 
     test_cases = [
         # Classic and AM/PM-guarded scenarios: must always produce single timetoken!
-        {"domain": "service", "text": "hair cut booking for today 5.30pm", "description": "Service booking with exact 12h time (pm, dot format)"},
-        {"domain": "service", "text": "hair cut booking for today 5.30 pm", "description": "Service booking with exact 12h time (pm, spaced)"},
-        {"domain": "service", "text": "hair cut booking for today 5pm", "description": "Service booking with exact 12h time (no minutes)"},
-        {"domain": "service", "text": "hair cut booking for today 5 pm", "description": "Service booking with exact 12h time (no minutes, spaced)"},
-        {"domain": "service", "text": "hair cut booking for today 5:30pm", "description": "Service booking with exact 12h time (colon format)"},
-        {"domain": "service", "text": "hair cut booking for today 5:30 pm", "description": "Service booking with exact 12h time (colon, spaced)"},
+        {
+            "domain": "service",
+            "text": "hair cut booking for today 5.30pm",
+            "description": "Service booking with exact 12h time (pm, dot format)",
+        },
+        {
+            "domain": "service",
+            "text": "hair cut booking for today 5.30 pm",
+            "description": "Service booking with exact 12h time (pm, spaced)",
+        },
+        {
+            "domain": "service",
+            "text": "hair cut booking for today 5pm",
+            "description": "Service booking with exact 12h time (no minutes)",
+        },
+        {
+            "domain": "service",
+            "text": "hair cut booking for today 5 pm",
+            "description": "Service booking with exact 12h time (no minutes, spaced)",
+        },
+        {
+            "domain": "service",
+            "text": "hair cut booking for today 5:30pm",
+            "description": "Service booking with exact 12h time (colon format)",
+        },
+        {
+            "domain": "service",
+            "text": "hair cut booking for today 5:30 pm",
+            "description": "Service booking with exact 12h time (colon, spaced)",
+        },
         # Control: No false "pm" left behind
-        {"domain": "service", "text": "hair cut booking for today 10am", "description": "Service with AM"},
-        {"domain": "service", "text": "hair cut booking for today 10 am", "description": "Service with AM (spaced)"},
+        {
+            "domain": "service",
+            "text": "hair cut booking for today 10am",
+            "description": "Service with AM",
+        },
+        {
+            "domain": "service",
+            "text": "hair cut booking for today 10 am",
+            "description": "Service with AM (spaced)",
+        },
     ]
 
     for i, test_case in enumerate(test_cases, 1):
@@ -230,21 +267,22 @@ def test_examples():
 
         try:
             entity_matcher = EntityMatcher(
-                domain=test_case['domain'],
-                entity_file=str(entity_file)
+                domain=test_case["domain"], entity_file=str(entity_file)
             )
-            result = entity_matcher.extract_with_parameterization(
-                test_case['text'])
-            print_result(result, test_case['domain'])
+            result = entity_matcher.extract_with_parameterization(test_case["text"])
+            print_result(result, test_case["domain"])
             # Assert that "psentence" never contains a lone "am" or "pm" token
             ps = result.get("psentence", "")
-            assert not any(tok == "pm" or tok == "am" for tok in ps.split()), f"FAIL: Standalone AM/PM found in psentence for: {test_case['text']} => {ps}"
+            assert not any(
+                tok == "pm" or tok == "am" for tok in ps.split()
+            ), f"FAIL: Standalone AM/PM found in psentence for: {test_case['text']} => {ps}"
             print("[OK]: No stray am/pm token detected (✓)")
         except AssertionError as aserr:
             print("❌ AssertionError:", aserr)
         except Exception as e:
             print(f"❌ Error: {e}")
             import traceback
+
             traceback.print_exc()
 
 

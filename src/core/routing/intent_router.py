@@ -34,4 +34,3 @@ def get_action_name(intent_name: str) -> Optional[str]:
         Action name string (e.g., "booking.create") or None if unsupported
     """
     return INTENT_ACTIONS.get(intent_name)
-

@@ -144,7 +144,7 @@ scenarios:
         expect:
           status: READY
           action: CONFIRM_APPOINTMENT
-          # REJECT_OR_CHANGE continues the flow (treated as confirmation)
+          # REJECT_ACTION continues the flow (treated as confirmation)
 
       - sentence: "book a haircut tomorrow at 3pm"
         expect:

@@ -13,8 +13,8 @@ Responsibilities:
 from .luma_client import LumaClient
 from .luma_contracts import assert_luma_contract
 from .luma_response_processor import (
+    build_clarify_outcome_from_reason,
     process_luma_response,
-    build_clarify_outcome_from_reason
 )
 
 __all__ = [
@@ -23,4 +23,3 @@ __all__ = [
     "process_luma_response",
     "build_clarify_outcome_from_reason",
 ]
-

@@ -3,6 +3,7 @@ Temporal parsing rules configuration.
 
 Controls how time parsing handles ambiguous cases like missing AM/PM.
 """
+
 from dataclasses import dataclass
 
 
@@ -19,6 +20,7 @@ class TemporalRules:
             Example: "tomorrow morning between 2 and 5" → "2am and 5am" (both become timetoken)
             Uses time window words (morning→AM, afternoon/evening/night→PM) to infer missing meridiem
     """
+
     require_explicit_meridiem: bool = True
     allow_partial_meridiem_propagation: bool = False
     allow_time_of_day_inference: bool = False

@@ -19,14 +19,21 @@ class StaffClient(BaseClient):
             default_url="http://localhost:3000",
         )
 
-    def list_staff(self, organization_id: int, extra_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def list_staff(
+        self, organization_id: int, extra_params: Optional[Dict[str, Any]] = None
+    ) -> Dict[str, Any]:
         params: Dict[str, Any] = {"organization_id": organization_id}
         if extra_params:
             params.update(extra_params)
         path = f"/api/internal/organizations/{organization_id}/staff"
         return self._request("GET", path, params=params)
 
-    def get_staff(self, staff_id: int, organization_id: Optional[int] = None, extra_params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def get_staff(
+        self,
+        staff_id: int,
+        organization_id: Optional[int] = None,
+        extra_params: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         params: Dict[str, Any] = {}
         if organization_id is not None:
             params["organization_id"] = organization_id
@@ -34,6 +41,3 @@ class StaffClient(BaseClient):
             params.update(extra_params)
         path = f"/api/internal/staff/{staff_id}"
         return self._request("GET", path, params=params)
-
-
-

@@ -4,14 +4,15 @@ Test cases for calendar binder.
 
 Tests calendar binding for various date/time scenarios.
 """
-import sys
 import importlib.util
-from pathlib import Path
+import sys
 from datetime import datetime
+from pathlib import Path
 
 # Try zoneinfo first (Python 3.9+), fallback to pytz
 try:
     from zoneinfo import ZoneInfo
+
     try:
         _ = ZoneInfo("UTC")  # Test if tzdata is available
         ZONEINFO_AVAILABLE = True
@@ -22,6 +23,7 @@ except ImportError:
 
 try:
     import pytz
+
     PYTZ_AVAILABLE = True
 except ImportError:
     PYTZ_AVAILABLE = False
@@ -36,12 +38,14 @@ def _localize_datetime(dt: datetime, tz_str: str) -> datetime:
             return dt.replace(tzinfo=tz)
         except Exception:
             from datetime import timezone
+
             return dt.replace(tzinfo=timezone.utc)
     elif PYTZ_AVAILABLE:
         tz = pytz.timezone(tz_str)
         return tz.localize(dt)
     else:
         from datetime import timezone
+
         return dt.replace(tzinfo=timezone.utc)
 
 
@@ -49,17 +53,16 @@ def _localize_datetime(dt: datetime, tz_str: str) -> datetime:
 script_dir = Path(__file__).parent.resolve()
 
 # Mock luma.config before importing
-mock_config = type('MockConfig', (), {
-    'DEBUG_ENABLED': False
-})()
-sys.modules['luma'] = type('MockLuma', (), {})()
-sys.modules['luma.config'] = mock_config
+mock_config = type("MockConfig", (), {"DEBUG_ENABLED": False})()
+sys.modules["luma"] = type("MockLuma", (), {})()
+sys.modules["luma.config"] = mock_config
 
 # Load semantic_resolver to get SemanticResolutionResult
 resolution_dir = script_dir.parent / "resolution"
 semantic_resolver_path = resolution_dir / "semantic_resolver.py"
 spec_semantic = importlib.util.spec_from_file_location(
-    "luma.resolution.semantic_resolver", semantic_resolver_path)
+    "luma.resolution.semantic_resolver", semantic_resolver_path
+)
 semantic_module = importlib.util.module_from_spec(spec_semantic)
 semantic_module.__package__ = "luma.resolution"
 semantic_module.__name__ = "luma.resolution.semantic_resolver"
@@ -71,7 +74,8 @@ SemanticResolutionResult = semantic_module.SemanticResolutionResult
 # Load calendar_binder module
 binder_path = script_dir / "calendar_binder.py"
 spec_binder = importlib.util.spec_from_file_location(
-    "luma.calendar.calendar_binder", binder_path)
+    "luma.calendar.calendar_binder", binder_path
+)
 binder_module = importlib.util.module_from_spec(spec_binder)
 binder_module.__package__ = "luma.calendar"
 binder_module.__name__ = "luma.calendar.calendar_binder"
@@ -92,18 +96,17 @@ def test_tomorrow_exact_time():
             "date_refs": ["tomorrow"],
             "time_mode": "exact",
             "time_refs": ["9am"],
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
     # Set now to a known date (2025-12-16 10:00:00)
     now = datetime(2025, 12, 16, 10, 0, 0)
     now = _localize_datetime(now, "UTC")
 
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING")
+    result = bind_calendar(semantic_result, now, "UTC", intent="CREATE_BOOKING")
 
     assert result.calendar_booking["date_range"] is not None
     assert result.calendar_booking["date_range"]["start_date"] == "2025-12-17"
@@ -113,8 +116,11 @@ def test_tomorrow_exact_time():
     assert "2025-12-17T09:00" in result.calendar_booking["datetime_range"]["start"]
     if result.needs_clarification:
         print(
-            f"  [DEBUG] Clarification reason: {result.clarification.reason.value if result.clarification else 'None'}")
-    assert not result.needs_clarification, f"Should not need clarification, but got: {result.clarification.reason.value if result.clarification else 'None'}"
+            f"  [DEBUG] Clarification reason: {result.clarification.reason.value if result.clarification else 'None'}"
+        )
+    assert (
+        not result.needs_clarification
+    ), f"Should not need clarification, but got: {result.clarification.reason.value if result.clarification else 'None'}"
 
     print("  [OK] Tomorrow + exact time: PASSED")
 
@@ -128,15 +134,14 @@ def test_tomorrow_window():
             "date_refs": ["tomorrow"],
             "time_mode": "window",
             "time_refs": ["morning"],
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
     now = _localize_datetime(datetime(2025, 12, 16, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING")
+    result = bind_calendar(semantic_result, now, "UTC", intent="CREATE_BOOKING")
 
     assert result.calendar_booking["date_range"]["start_date"] == "2025-12-17"
     assert result.calendar_booking["time_range"]["start_time"] == "08:00"
@@ -155,16 +160,15 @@ def test_absolute_date_future():
             "date_refs": ["15th dec"],
             "time_mode": "exact",
             "time_refs": ["9am"],
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
     # Set now to Dec 10, 2025 - "15th dec" should resolve to Dec 15, 2025 (future)
     now = _localize_datetime(datetime(2025, 12, 10, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING")
+    result = bind_calendar(semantic_result, now, "UTC", intent="CREATE_BOOKING")
 
     assert result.calendar_booking["date_range"]["start_date"] == "2025-12-15"
     assert not result.needs_clarification
@@ -181,16 +185,15 @@ def test_absolute_date_past_this_year():
             "date_refs": ["15th dec"],
             "time_mode": "exact",
             "time_refs": ["9am"],
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
     # Set now to Dec 20, 2025 - "15th dec" has passed, should use 2026
     now = _localize_datetime(datetime(2025, 12, 20, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING")
+    result = bind_calendar(semantic_result, now, "UTC", intent="CREATE_BOOKING")
 
     assert result.calendar_booking["date_range"]["start_date"] == "2026-12-15"
     assert not result.needs_clarification
@@ -207,15 +210,14 @@ def test_date_range_time_range():
             "date_refs": ["8th dec", "15th dec"],
             "time_mode": "range",
             "time_refs": ["9am", "5pm"],
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
     now = _localize_datetime(datetime(2025, 12, 1, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING")
+    result = bind_calendar(semantic_result, now, "UTC", intent="CREATE_BOOKING")
 
     assert result.calendar_booking["date_range"]["start_date"] == "2025-12-08"
     assert result.calendar_booking["date_range"]["end_date"] == "2025-12-15"
@@ -237,15 +239,14 @@ def test_duration_based_end_time():
             "date_refs": ["tomorrow"],
             "time_mode": "exact",
             "time_refs": ["9am"],
-            "duration": {"text": "one hour"}
+            "duration": {"text": "one hour"},
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
     now = _localize_datetime(datetime(2025, 12, 16, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING")
+    result = bind_calendar(semantic_result, now, "UTC", intent="CREATE_BOOKING")
 
     assert result.calendar_booking["datetime_range"] is not None
     start_str = result.calendar_booking["datetime_range"]["start"]
@@ -270,10 +271,10 @@ def test_timezone_handling():
             "date_refs": ["tomorrow"],
             "time_mode": "exact",
             "time_refs": ["9am"],
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
     now = _localize_datetime(datetime(2025, 12, 16, 10, 0, 0), "UTC")
@@ -281,7 +282,10 @@ def test_timezone_handling():
 
     assert result.calendar_booking["datetime_range"] is not None
     # Should contain timezone info
-    assert "+" in result.calendar_booking["datetime_range"]["start"] or "T" in result.calendar_booking["datetime_range"]["start"]
+    assert (
+        "+" in result.calendar_booking["datetime_range"]["start"]
+        or "T" in result.calendar_booking["datetime_range"]["start"]
+    )
 
     print("  [OK] Timezone handling: PASSED")
 
@@ -295,15 +299,14 @@ def test_invalid_ranges_clarification():
             "date_refs": ["15th dec", "10th dec"],  # End before start
             "time_mode": "exact",
             "time_refs": ["9am"],
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
     now = _localize_datetime(datetime(2025, 12, 1, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING")
+    result = bind_calendar(semantic_result, now, "UTC", intent="CREATE_BOOKING")
 
     # Should detect invalid range
     assert result.needs_clarification is True
@@ -311,11 +314,15 @@ def test_invalid_ranges_clarification():
     assert result.clarification.reason is not None
     # Check that clarification is for invalid date range
     from ..clarification import render_clarification
-    msg = render_clarification(
-        result.clarification) if result.clarification else ""
+
+    msg = render_clarification(result.clarification) if result.clarification else ""
     data_str = str(result.clarification.data) if result.clarification else ""
-    assert "invalid" in msg.lower() or "validation" in msg.lower(
-    ) or "end" in data_str.lower() or "after" in data_str.lower()
+    assert (
+        "invalid" in msg.lower()
+        or "validation" in msg.lower()
+        or "end" in data_str.lower()
+        or "after" in data_str.lower()
+    )
 
     print("  [OK] Invalid ranges clarification: PASSED")
 
@@ -329,15 +336,14 @@ def test_window_plus_exact_time_binding():
             "date_refs": ["tomorrow"],
             "time_mode": "exact",
             "time_refs": ["9am", "morning"],  # Both preserved
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
     now = _localize_datetime(datetime(2025, 12, 16, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING")
+    result = bind_calendar(semantic_result, now, "UTC", intent="CREATE_BOOKING")
 
     # Exact time should be used, window is contextual
     assert result.calendar_booking["time_range"]["start_time"] == "09:00"
@@ -356,14 +362,13 @@ def test_flexible_date_no_time():
             "date_refs": [],
             "time_mode": "none",
             "time_refs": [],
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
     now = _localize_datetime(datetime(2025, 12, 16, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING")
+    result = bind_calendar(semantic_result, now, "UTC", intent="CREATE_BOOKING")
     assert result.calendar_booking["date_range"] is None
     assert result.calendar_booking["time_range"] is None
     assert result.calendar_booking["datetime_range"] is None
@@ -376,18 +381,21 @@ def test_flexible_date_no_time():
             "date_refs": [],
             "time_mode": "none",
             "time_refs": [],
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
     result_missing_service = bind_calendar(
-        semantic_result_missing_service, now, "UTC", intent="CREATE_BOOKING")
+        semantic_result_missing_service, now, "UTC", intent="CREATE_BOOKING"
+    )
     assert result_missing_service.calendar_booking["date_range"] is None
     assert result_missing_service.calendar_booking["time_range"] is None
     assert result_missing_service.calendar_booking["datetime_range"] is None
 
-    print("  [OK] Flexible date no time (with/without service): PASSED  [Guardrail: vague time stays flexible]")
+    print(
+        "  [OK] Flexible date no time (with/without service): PASSED  [Guardrail: vague time stays flexible]"
+    )
     #
     # ---- Conservation of vague/approximate times (never expand e.g., '6ish' to a range): ----
     # The binder does not guess or create hard windows for vague times. This block preserves backward-compatibility and safety.
@@ -403,10 +411,10 @@ def test_intent_guarded_no_binding():
             "date_refs": ["tomorrow"],
             "time_mode": "exact",
             "time_refs": ["9am"],
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
     now = _localize_datetime(datetime(2025, 12, 16, 10, 0, 0), "UTC")
@@ -424,8 +432,7 @@ def test_intent_guarded_no_binding():
     assert result.calendar_booking is not None
 
     # Test with booking intent - should bind
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING")
+    result = bind_calendar(semantic_result, now, "UTC", intent="CREATE_BOOKING")
     assert result.calendar_booking is not None
 
     print("  [OK] Intent-guarded no binding: PASSED")
@@ -440,15 +447,14 @@ def test_ambiguous_relative_dates():
             "date_refs": ["friday"],
             "time_mode": "window",
             "time_refs": ["morning"],
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
     now = _localize_datetime(datetime(2025, 12, 16, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING")
+    result = bind_calendar(semantic_result, now, "UTC", intent="CREATE_BOOKING")
 
     # Should flag ambiguity
     assert result.needs_clarification is True
@@ -456,10 +462,13 @@ def test_ambiguous_relative_dates():
     assert result.clarification.reason is not None
     # Check that the clarification reason or message relates to ambiguous date
     from ..clarification import render_clarification
-    msg = render_clarification(
-        result.clarification) if result.clarification else ""
-    assert "date" in msg.lower() or "ambiguous" in msg.lower(
-    ) or "friday" in str(result.clarification.data).lower()
+
+    msg = render_clarification(result.clarification) if result.clarification else ""
+    assert (
+        "date" in msg.lower()
+        or "ambiguous" in msg.lower()
+        or "friday" in str(result.clarification.data).lower()
+    )
 
     print("  [OK] Ambiguous relative dates: PASSED")
 
@@ -473,15 +482,14 @@ def test_duration_date_range_conflict():
             "date_refs": ["8th dec", "15th dec"],
             "time_mode": "exact",
             "time_refs": ["9am"],
-            "duration": {"text": "one hour"}
+            "duration": {"text": "one hour"},
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
     now = _localize_datetime(datetime(2025, 12, 1, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING")
+    result = bind_calendar(semantic_result, now, "UTC", intent="CREATE_BOOKING")
 
     # Should flag conflict
     assert result.needs_clarification is True
@@ -489,11 +497,14 @@ def test_duration_date_range_conflict():
     assert result.clarification.reason is not None
     # Check for clarification message or data indicating duration conflict
     from ..clarification import render_clarification
-    msg = render_clarification(
-        result.clarification) if result.clarification else ""
+
+    msg = render_clarification(result.clarification) if result.clarification else ""
     data_str = str(result.clarification.data) if result.clarification else ""
-    assert "duration" in msg.lower() or "duration" in data_str.lower(
-    ) or "multi" in data_str.lower()
+    assert (
+        "duration" in msg.lower()
+        or "duration" in data_str.lower()
+        or "multi" in data_str.lower()
+    )
 
     print("  [OK] Duration + date range conflict: PASSED")
 
@@ -508,15 +519,14 @@ def test_exact_time_with_dot_separator():
             "date_refs": ["tomorrow"],
             "time_mode": "exact",  # Exact time mode (window discarded)
             "time_refs": ["10.30"],  # Only exact time, no window
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
     now = _localize_datetime(datetime(2025, 12, 16, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING")
+    result = bind_calendar(semantic_result, now, "UTC", intent="CREATE_BOOKING")
 
     # Should NOT need clarification
     assert result.needs_clarification is False
@@ -547,15 +557,14 @@ def test_exact_time_with_spaced_dot_separator():
             "date_refs": ["tomorrow"],
             "time_mode": "exact",
             "time_refs": ["10 . 30"],  # Spaced version from tokenizer
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
     now = _localize_datetime(datetime(2025, 12, 16, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING")
+    result = bind_calendar(semantic_result, now, "UTC", intent="CREATE_BOOKING")
 
     # Should NOT need clarification
     assert result.needs_clarification is False
@@ -584,20 +593,19 @@ def test_time_window_bias_night():
             "date_refs": ["tomorrow"],
             "time_mode": "exact",
             "time_refs": ["10.30"],  # Ambiguous (no AM/PM)
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
     # Pass entities with time_windows for bias rule
-    entities = {
-        "time_windows": [{"text": "night"}]
-    }
+    entities = {"time_windows": [{"text": "night"}]}
 
     now = _localize_datetime(datetime(2025, 12, 16, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING", entities=entities)
+    result = bind_calendar(
+        semantic_result, now, "UTC", intent="CREATE_BOOKING", entities=entities
+    )
 
     # Should bind to PM (22:30), not AM (10:30)
     assert result.calendar_booking["time_range"]["start_time"] == "22:30"
@@ -617,19 +625,18 @@ def test_time_window_bias_morning():
             "date_refs": ["tomorrow"],
             "time_mode": "exact",
             "time_refs": ["9.30"],  # Ambiguous (no AM/PM)
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
-    entities = {
-        "time_windows": [{"text": "morning"}]
-    }
+    entities = {"time_windows": [{"text": "morning"}]}
 
     now = _localize_datetime(datetime(2025, 12, 16, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING", entities=entities)
+    result = bind_calendar(
+        semantic_result, now, "UTC", intent="CREATE_BOOKING", entities=entities
+    )
 
     # Should bind to AM (09:30), not PM (21:30)
     assert result.calendar_booking["time_range"]["start_time"] == "09:30"
@@ -649,19 +656,18 @@ def test_time_window_bias_no_window():
             "date_refs": ["tomorrow"],
             "time_mode": "exact",
             "time_refs": ["10.30"],  # Ambiguous (no AM/PM)
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
-    entities = {
-        "time_windows": []  # No window
-    }
+    entities = {"time_windows": []}  # No window
 
     now = _localize_datetime(datetime(2025, 12, 16, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING", entities=entities)
+    result = bind_calendar(
+        semantic_result, now, "UTC", intent="CREATE_BOOKING", entities=entities
+    )
 
     # Should bind to default (10:30 AM), no bias applied
     assert result.calendar_booking["time_range"]["start_time"] == "10:30"
@@ -681,19 +687,18 @@ def test_time_window_bias_explicit_pm():
             "date_refs": ["tomorrow"],
             "time_mode": "exact",
             "time_refs": ["10pm"],  # Explicit PM
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
-    entities = {
-        "time_windows": [{"text": "night"}]
-    }
+    entities = {"time_windows": [{"text": "night"}]}
 
     now = _localize_datetime(datetime(2025, 12, 16, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING", entities=entities)
+    result = bind_calendar(
+        semantic_result, now, "UTC", intent="CREATE_BOOKING", entities=entities
+    )
 
     # Should bind to explicit PM (22:00), bias rule should NOT apply
     assert result.calendar_booking["time_range"]["start_time"] == "22:00"
@@ -713,19 +718,18 @@ def test_time_window_bias_explicit_am():
             "date_refs": ["tomorrow"],
             "time_mode": "exact",
             "time_refs": ["9am"],  # Explicit AM
-            "duration": None
+            "duration": None,
         },
         needs_clarification=False,
-        clarification=None
+        clarification=None,
     )
 
-    entities = {
-        "time_windows": [{"text": "morning"}]
-    }
+    entities = {"time_windows": [{"text": "morning"}]}
 
     now = _localize_datetime(datetime(2025, 12, 16, 10, 0, 0), "UTC")
-    result = bind_calendar(semantic_result, now, "UTC",
-                           intent="CREATE_BOOKING", entities=entities)
+    result = bind_calendar(
+        semantic_result, now, "UTC", intent="CREATE_BOOKING", entities=entities
+    )
 
     # Should bind to explicit AM (09:00), bias rule should NOT apply
     assert result.calendar_booking["time_range"]["start_time"] == "09:00"
