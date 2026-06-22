@@ -106,6 +106,7 @@ def facts_to_slots(
     facts: Dict[str, Any],
     intent_name: Optional[str] = None,
     source_text: Optional[str] = None,
+    time_constraint: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Convert Luma facts format to Core slots format.
@@ -136,10 +137,14 @@ def facts_to_slots(
     - For reservations with 2+ dates, promote to date_range
     - Deterministic: always use first element for single values
     - Do not overwrite existing slots (caller should merge)
+    - Fuzzy time windows (morning/evening): facts.times is empty but time_constraint
+      carries the label; promote label to slots.time so planning sees it as satisfied.
 
     Args:
         facts: Luma facts dict (may be empty or partial)
         intent_name: Optional intent name for special handling (e.g., CREATE_RESERVATION)
+        source_text: Optional raw user text for fallback raw-value extraction
+        time_constraint: Optional top-level time_constraint from NLU response
 
     Returns:
         Dict of promoted slots (may be empty if no facts present)
@@ -224,6 +229,15 @@ def facts_to_slots(
     ):
         slots["time"] = raw_time or facts["times"][0]
         logger.debug(f"Promoted facts.times[0]={facts['times'][0]} to slots.time")
+    elif (
+        "time" not in slots
+        and isinstance(time_constraint, dict)
+        and time_constraint.get("mode") == "fuzzy"
+    ):
+        label = time_constraint.get("label")
+        if label:
+            slots["time"] = label
+            logger.debug(f"Promoted fuzzy time_constraint.label={label!r} to slots.time")
 
     # Date-time pairs (take first pair)
     # CRITICAL: For CREATE_RESERVATION, do NOT create "date" slot from date_time_pairs

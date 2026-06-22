@@ -1,0 +1,1 @@
+GLOBAL_JSON_VERSION = "v3"

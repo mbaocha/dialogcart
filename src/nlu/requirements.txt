@@ -1,0 +1,21 @@
+# Core
+flask==3.0.0
+gunicorn==21.2.0
+
+# Anthropic SDK (Haiku SLM extraction)
+anthropic>=0.40.0
+
+# Environment variable loading
+python-dotenv>=1.0.0
+
+# Data validation
+pydantic==2.5.0
+
+# Config parsing
+pyyaml>=6.0
+
+# Redis (for future session support)
+redis==5.0.1
+
+# Test runner dependency
+requests>=2.31.0

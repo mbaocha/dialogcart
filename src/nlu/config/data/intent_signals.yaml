@@ -1,0 +1,9 @@
+# Intent temporal shapes.
+# The only field the NLU pipeline reads: temporal_shape controls which intents
+# the calendar binder runs for (via _get_binding_intents() in calendar_binder.py).
+
+CREATE_APPOINTMENT:
+  temporal_shape: datetime_range
+
+CREATE_RESERVATION:
+  temporal_shape: date_range

@@ -2336,6 +2336,7 @@ def handle_message_legacy(
                         facts_obj,
                         intent_name=effective_intent,
                         source_text=text,
+                        time_constraint=luma_response.get("time_constraint"),
                     )
                     if isinstance(facts_obj, dict)
                     else {}
@@ -2396,6 +2397,7 @@ def handle_message_legacy(
             facts_obj,
             intent_name=effective_intent,
             source_text=text,
+            time_constraint=luma_response.get("time_constraint"),
         )
         if isinstance(facts_obj, dict)
         else {}
