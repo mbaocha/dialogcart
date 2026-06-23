@@ -422,7 +422,7 @@ followup_scenarios = [
                     "intent": "MODIFY_BOOKING",
                     "status": "NEEDS_CLARIFICATION",
                     "plan": {"stage": "IDENTIFY", "action": "FETCH_BOOKING"},
-                    "missing_slots": ["booking_id"],
+                    "missing_slots": ["booking_id", "date"],
                     "slots": {},
                 },
             },
@@ -637,7 +637,7 @@ followup_scenarios = [
                     "intent": "MODIFY_BOOKING",
                     "status": "NEEDS_CLARIFICATION",
                     "plan": {"stage": "IDENTIFY", "action": "FETCH_BOOKING"},
-                    "missing_slots": ["booking_id"],
+                    "missing_slots": ["booking_id", "date"],
                     "slots": {},
                 },
             }

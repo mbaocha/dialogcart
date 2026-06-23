@@ -3,8 +3,8 @@
 # SOURCE OF TRUTH: This file defines BOTH planning completeness and execution sequencing
 # for intents. It serves as the future authoritative policy for intent behavior.
 #
-# STATUS: Documentation/Preparation - Not yet loaded or used in runtime.
-# This file exists as a clearly defined, future-proof policy specification.
+# STATUS: Active runtime policy. Loaded by core/policy/intent_policy.py via
+# _load_unified_policy(). All planning and execution behavior is driven from this file.
 #
 # Structure:
 # - metadata: Intent metadata (durable: true/false)
@@ -99,12 +99,12 @@ intents:
     planning:
       required_slots:
         - booking_id
-      optional_slots:
         - date
+      optional_slots:
         - time
         - date_range
       executable_with:
-        # Can preview modifications with just booking_id
+        # Can start execution (FETCH_BOOKING / SEARCH_AVAILABILITY) with just booking_id
         - booking_id
     execution:
       FETCH_BOOKING:

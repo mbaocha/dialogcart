@@ -194,6 +194,13 @@ def expand_slots_for_planning(
     ):
         expanded["time"] = time_constraint["start"]
 
+    # Infer date from date_range.start when date is absent.
+    # Ensures date_range in slots satisfies a "date" planning requirement (e.g. MODIFY_BOOKING).
+    if not expanded.get("date") and isinstance(expanded.get("date_range"), dict):
+        start = expanded["date_range"].get("start")
+        if start:
+            expanded["date"] = start
+
     return expanded
 
 

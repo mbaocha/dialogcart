@@ -158,41 +158,23 @@ def finalize_turn_state(
 
     # Always recompute missing_slots from current slots + proposals.
     # Stale missing_slots from session carry-over must not skip the planner.
-    if intent_name == "MODIFY_BOOKING":
-        from core.planning.orchestration.missing_slots import compute_missing_slots
+    from core.orchestration.temporal_proposal import expand_slots_for_planning
 
-        missing_slots = compute_missing_slots(
-            intent_name=intent_name,
-            collected_slots=merged_session_slots,
-            modification_context=None,
-            session_state=None,
-            time_constraint=None,
-        )
-        collected_slot_names = set(
-            slot_name
-            for slot_name, slot_value in merged_session_slots.items()
-            if slot_value is not None
-        )
-    else:
-        # For other intents, use plan_intent with proposal-expanded slot view
-        from core.orchestration.temporal_proposal import expand_slots_for_planning
+    policy = _get_planning_policy()
+    pc = planning_context or {}
+    planning_slots = expand_slots_for_planning(
+        merged_session_slots,
+        date_proposal=pc.get("date_proposal"),
+        time_proposal=pc.get("time_proposal"),
+        date_constraint=pc.get("date_constraint"),
+        nlu_facts=pc.get("nlu_facts"),
+        time_constraint=pc.get("time_constraint"),
+        intent_name=intent_name,
+    )
+    plan = plan_intent(intent_name, planning_slots, policy)
 
-        policy = _get_planning_policy()
-        pc = planning_context or {}
-        planning_slots = expand_slots_for_planning(
-            merged_session_slots,
-            date_proposal=pc.get("date_proposal"),
-            time_proposal=pc.get("time_proposal"),
-            date_constraint=pc.get("date_constraint"),
-            nlu_facts=pc.get("nlu_facts"),
-            time_constraint=pc.get("time_constraint"),
-            intent_name=intent_name,
-        )
-        plan = plan_intent(intent_name, planning_slots, policy)
-
-        # Extract results from planner
-        collected_slot_names = set(plan["collected_slots"])
-        missing_slots = plan["missing_slots"]
+    collected_slot_names = set(plan["collected_slots"])
+    missing_slots = plan["missing_slots"]
 
     if existing_missing_slots is not None and existing_missing_slots != missing_slots:
         logger.info(
@@ -223,59 +205,13 @@ def finalize_turn_state(
         if slot_value is not None
     }
 
-    # CRITICAL PLANNING INVARIANT: UNKNOWN intent ALWAYS requires clarification
-    # UNKNOWN means we don't know what the user wants, so we must clarify regardless of missing_slots
-    # This prevents UNKNOWN from being marked as READY even when missing_slots is empty
+    # INVARIANT: READY only if missing_slots empty (and intent is not UNKNOWN)
+    # UNKNOWN means we don't know what the user wants — clarify regardless of missing_slots
     if intent_name == "UNKNOWN":
         status = "NEEDS_CLARIFICATION"
         logger.info(
             f"[FINALIZE_TURN_STATE] UNKNOWN intent - forcing NEEDS_CLARIFICATION regardless of missing_slots"
         )
-    # MODIFY_BOOKING guard: Prevent premature READY when only booking_id is present
-    # Policy: required_slots = ['booking_id'], but date/time/date_range are optional
-    # If only booking_id is present, must clarify target datetime (NEEDS_CLARIFICATION)
-    # If only date is present (without time), must still clarify time (NEEDS_CLARIFICATION)
-    elif intent_name == "MODIFY_BOOKING":
-        has_booking_id = (
-            "booking_id" in effective_collected_slots
-            and effective_collected_slots.get("booking_id") is not None
-        )
-        has_date_range = (
-            "date_range" in effective_collected_slots
-            and effective_collected_slots.get("date_range") is not None
-        )
-        has_date = (
-            "date" in effective_collected_slots
-            and effective_collected_slots.get("date") is not None
-        )
-        has_time = (
-            "time" in effective_collected_slots
-            and effective_collected_slots.get("time") is not None
-        )
-        # For MODIFY_BOOKING, need either date_range OR both date AND time
-        has_complete_datetime = has_date_range or (has_date and has_time)
-
-        if has_booking_id and not has_complete_datetime:
-            # Only booking_id present, or date without time - must clarify target datetime
-            status = "NEEDS_CLARIFICATION"
-            # Override missing_slots to include date/time for clarification
-            if has_date and not has_time:
-                missing_slots = ["time"]  # Only time missing
-            else:
-                missing_slots = ["date", "time"]  # Both missing (or neither)
-            logger.info(
-                f"[FINALIZE_TURN_STATE] MODIFY_BOOKING: Incomplete datetime info - forcing NEEDS_CLARIFICATION "
-                f"(has_booking_id={has_booking_id}, has_date={has_date}, has_time={has_time}, has_date_range={has_date_range}) "
-                f"with missing_slots={missing_slots}"
-            )
-        elif len(missing_slots) > 0:
-            # Missing slots exist - must be NEEDS_CLARIFICATION
-            status = "NEEDS_CLARIFICATION"
-        else:
-            # booking_id + complete datetime (date_range OR date+time) present - can be READY
-            status = "READY"
-    # Determine status based on missing_slots
-    # INVARIANT: READY only if missing_slots empty (and intent is not UNKNOWN)
     elif len(missing_slots) > 0:
         # Missing slots exist - must be NEEDS_CLARIFICATION
         status = "NEEDS_CLARIFICATION"
