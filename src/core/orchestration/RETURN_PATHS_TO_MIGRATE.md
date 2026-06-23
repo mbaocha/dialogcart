@@ -1,5 +1,10 @@
 # Return Paths Migration: Route Through `_build_api_response()`
 
+> **Status (2026-06):** NOT implemented. `_build_api_response()` and `normalize_response()`
+> do not exist in code. Orchestrator was split into `orchestrator.py` + `turn_planner.py`;
+> line numbers below are stale. Next step: add `build_api_response()` in
+> `core/orchestration/api/response.py`.
+
 ## Objective
 Replace all `return result` paths in `handle_message()` to route through `_build_api_response()`.
 

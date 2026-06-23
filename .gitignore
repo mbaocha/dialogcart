@@ -74,6 +74,9 @@ review_output.txt
 .env.local
 .env.*.local
 
+# NLU dev cache (Haiku responses, never commit)
+.haiku_cache.json
+
 # OS specific
 .DS_Store
 Thumbs.db

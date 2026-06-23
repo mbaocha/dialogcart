@@ -1,5 +1,10 @@
 # Session Persistence Audit: Control-Plane Fields
 
+> **Status (2026-06):** Implementation moved to `core/session/persist.py`. Session merge
+> re-exports from `core/orchestration/api/session_merge.py`. Note: persist collapses
+> `AWAITING_CAPABILITY` and `AWAITING_CONFIRMATION` into session `NEEDS_CLARIFICATION`
+> (see `persist.py` status mapping). Line references below are stale.
+
 ## Overview
 
 This document audits `build_session_state_from_outcome()` to ensure control-plane fields from the outcome are correctly handled during session persistence. It identifies which fields may legally be read from outcome and which are intentionally not persisted.

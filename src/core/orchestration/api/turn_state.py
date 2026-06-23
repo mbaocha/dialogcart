@@ -201,14 +201,13 @@ def finalize_turn_state(
             f"missing_slots={missing_slots}"
         )
 
-    # INVESTIGATION: Log initial missing_slots computation from planner
     from core.planning.orchestration.missing_slots import (
         get_planning_required_slots_for_intent,
     )
 
     try:
         required_slots = get_planning_required_slots_for_intent(intent_name)
-    except (ImportError, Exception):
+    except Exception:
         required_slots = []
 
     logger.debug(

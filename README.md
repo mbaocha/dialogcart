@@ -238,16 +238,27 @@ curl -X POST http://localhost:9001/book \
 
 ---
 
-### Capabilities
+### Extensions
 
-**Location:** `src/capabilities/`
+**Location:** `src/extensions/`
 
-**Capabilities** are external integrations (payment, KYC, consent, etc.) that are invoked when Core emits `AWAITING_CAPABILITY`. Capabilities are implemented as **adapters** that follow a standard interface.
+Non-core behavior lives outside the booking kernel in two subpackages:
 
-#### Adapter Interface
+| Subpackage | Hook | Purpose |
+|------------|------|---------|
+| `extensions/capabilities` | `AWAITING_CAPABILITY` | Multi-turn capability gates (payment, KYC) |
+| `extensions/handlers` | `HANDLER_DELEGATED` | Single-shot intent handlers (RAG) |
+
+**See `src/extensions/README.md` for overview.**
+
+#### capabilities (capability adapters)
+
+**Location:** `src/extensions/capabilities/`
+
+Gate adapters are invoked when Core emits `AWAITING_CAPABILITY`. They pause booking until a gate fact is satisfied (e.g. `payment_satisfied: True`).
 
 ```python
-from capabilities.base import CapabilityAdapter, AdapterResponse
+from extensions.capabilities.base import CapabilityAdapter, AdapterResponse
 
 class PaymentAdapter(CapabilityAdapter):
     def start(self, context: Dict[str, Any]) -> AdapterResponse:
@@ -308,7 +319,19 @@ class PaymentAdapter(CapabilityAdapter):
 - **NoOp Adapter** (`adapters/noop.py`): Test adapter that always completes
 - **Payment Adapter** (`adapters/payment.py`): Payment processing integration
 
-**See `src/capabilities/README.md` for detailed documentation.**
+**See `src/extensions/capabilities/README.md` for detailed documentation.**
+
+#### Handlers (intent handlers)
+
+**Location:** `src/extensions/handlers/`
+
+Single-shot handlers answer non-booking intents (RAG) when Core emits `HANDLER_DELEGATED`.
+
+```python
+from extensions.handlers.base import IntentHandler, HandlerResponse
+```
+
+Config: `core/config/intent_handlers.yaml`
 
 ---
 

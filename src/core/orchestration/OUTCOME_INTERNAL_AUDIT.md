@@ -1,5 +1,10 @@
 # Outcome Internal Audit: Fields Written and API Expectations
 
+> **Status (2026-06):** Partially implemented. `build_outcome_from_decision()` exists in
+> `orchestrator.py`. Public API still exposes `outcome` in `MessageResponse`. Capability
+> runner consolidated to `core/orchestration/api/capability_boundary.py` (invoked from
+> `message.py` only). Line references below predate orchestrator/turn_planner split.
+
 ## Objective
 Identify all places where:
 1. Fields are written to `outcome` during planning/rendering

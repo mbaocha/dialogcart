@@ -21,85 +21,10 @@ This adapter promotes these into Core slots format:
 """
 
 import logging
-import re
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-
-_MONTH_PATTERN = (
-    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|"
-    r"jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|"
-    r"nov(?:ember)?|dec(?:ember)?)"
-)
-_DAY_PATTERN = r"\d{1,2}(?:st|nd|rd|th)?"
-_DATE_RANGE_RE = re.compile(
-    rf"\b(?:from\s+)?{_MONTH_PATTERN}\s+{_DAY_PATTERN}\s+(?:to|-)\s+{_DAY_PATTERN}\b",
-    re.IGNORECASE,
-)
-_DATE_SINGLE_RE = re.compile(
-    rf"\b{_MONTH_PATTERN}\s+{_DAY_PATTERN}\b",
-    re.IGNORECASE,
-)
-_TIME_RE = re.compile(
-    r"\b\d{1,2}(?::\d{2})?\s?(?:am|pm)\b",
-    re.IGNORECASE,
-)
-_RELATIVE_DATE_PHRASES = (
-    "today",
-    "tomorrow",
-    "next week",
-    "this friday",
-    "next friday",
-    "this monday",
-    "next monday",
-    "this tuesday",
-    "next tuesday",
-    "this wednesday",
-    "next wednesday",
-    "this thursday",
-    "next thursday",
-    "this saturday",
-    "next saturday",
-    "this sunday",
-    "next sunday",
-)
-_TIME_WORDS = ("morning", "afternoon", "evening", "noon", "night", "tonight")
-
-
-def _extract_raw_date_range(source_text: Optional[str]) -> Optional[str]:
-    if not source_text:
-        return None
-    match = _DATE_RANGE_RE.search(source_text)
-    if match:
-        return match.group(0).strip().lower()
-    return None
-
-
-def _extract_raw_date(source_text: Optional[str]) -> Optional[str]:
-    if not source_text:
-        return None
-    lowered = source_text.lower()
-    for phrase in _RELATIVE_DATE_PHRASES:
-        if phrase in lowered:
-            return phrase
-    match = _DATE_SINGLE_RE.search(lowered)
-    if match:
-        return match.group(0).strip().lower()
-    return None
-
-
-def _extract_raw_time(source_text: Optional[str]) -> Optional[str]:
-    if not source_text:
-        return None
-    lowered = source_text.lower()
-    match = _TIME_RE.search(lowered)
-    if match:
-        return match.group(0).strip().lower()
-    for word in _TIME_WORDS:
-        if word in lowered:
-            return word
-    return None
 
 
 def is_flexible_combined_utterance(

@@ -31,6 +31,7 @@ from extensions.capabilities.clients.payment import (
 )
 from extensions.capabilities.registry import clear_registry, register_adapter
 from extensions.capabilities.runner import CapabilityRunner
+from core.orchestration.api.capability_boundary import apply_capability_to_result
 from core.orchestration.api.session_merge import build_session_state_from_outcome
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.nlu import LumaClient
@@ -89,57 +90,28 @@ def _simulate_post_message(
         organization_client=organization_client,
     )
 
-    # Handle capability activation (if core emits AWAITING_CAPABILITY)
+    # Capability boundary (same module as message.py post_message)
     outcome = result.get("outcome")
     if (
         outcome
         and isinstance(outcome, dict)
         and outcome.get("status") == "AWAITING_CAPABILITY"
     ):
-        # Build context for adapter
-        context = {
-            "user_id": user_id,
-            "session_slots": session_state.get("slots", {}) if session_state else {},
-            "session_facts": outcome.get("facts", {}),
-            "domain": domain,
-            "timezone": timezone,
-            "organization_id": organization_id,
-            "transaction_id": transaction_id,
-        }
-
-        # Route to capability runner
         runner = CapabilityRunner()
-        runner_result = runner.handle(
-            user_input=text, core_outcome=outcome, context=context
+        early = apply_capability_to_result(
+            result,
+            runner,
+            user_id=user_id,
+            user_text=text,
+            session_state=session_state,
+            domain=domain,
+            timezone=timezone,
+            organization_id=organization_id,
+            transaction_id=transaction_id,
         )
-
-        if not runner_result.passthrough:
-            # Adapter is active → return adapter prompt
-            return {
-                "success": True,
-                "outcome": {
-                    "status": "AWAITING_CAPABILITY",
-                    "text": runner_result.text,
-                    "active_capability": runner_result.active_capability,
-                    "awaiting": "CAPABILITY",
-                },
-            }
-
-        # Adapter completed → merge facts into outcome
-        if runner_result.facts:
-            if "facts" not in outcome:
-                outcome["facts"] = {}
-            if not isinstance(outcome["facts"], dict):
-                outcome["facts"] = {}
-
-            # Merge adapter facts
-            outcome["facts"].update(runner_result.facts)
-
-            # Clear active_capability from outcome
-            outcome["active_capability"] = None
-
-            # Update result with merged outcome
-            result["outcome"] = outcome
+        if early is not None:
+            return early
+        outcome = result.get("outcome")
 
     # Handle session persistence
     if outcome and isinstance(outcome, dict):

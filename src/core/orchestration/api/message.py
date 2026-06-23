@@ -18,6 +18,7 @@ from pydantic import BaseModel
 # Ensure environment variables are loaded at startup
 # Import app module which loads .env files
 import core.app  # noqa: F401
+from core.orchestration.api.capability_boundary import apply_capability_to_result
 from core.orchestration.api.session_merge import build_session_state_from_outcome
 from core.orchestration.errors import ContractViolation, UpstreamError
 from core.orchestration.orchestrator import handle_message
@@ -150,75 +151,23 @@ async def post_message(request: MessageRequest):
             transaction_id=transaction_id,
         )
 
-        # Handle capability activation (if core emits AWAITING_CAPABILITY)
+        # Capability boundary (single owner: API layer, not turn_planner)
         outcome = result.get("outcome")
-        if (
-            outcome
-            and isinstance(outcome, dict)
-            and outcome.get("status") == "AWAITING_CAPABILITY"
-        ):
-            if _capability_runner_available and _capability_runner:
-                # Build context for adapter (read-only access to session)
-                context = {
-                    "user_id": request.user_id,
-                    "session_slots": (
-                        session_state.get("slots", {}) if session_state else {}
-                    ),
-                    "session_facts": outcome.get("facts", {}),
-                    "domain": request.domain,
-                    "timezone": request.timezone,
-                    "organization_id": request.organization_id,
-                    "transaction_id": transaction_id,
-                }
-
-                # Route to capability runner
-                runner_result = _capability_runner.handle(
-                    user_input=request.text, core_outcome=outcome, context=context
-                )
-
-                if not runner_result.passthrough:
-                    # Adapter is active → return adapter prompt
-                    # Do not proceed to session persistence or core execution
-                    return MessageResponse(
-                        success=True,
-                        outcome={
-                            "status": "AWAITING_CAPABILITY",
-                            "text": runner_result.text,
-                            "active_capability": runner_result.active_capability,
-                            "awaiting": "CAPABILITY",
-                        },
-                    )
-
-                # Adapter completed → merge facts into session
-                if runner_result.facts:
-                    # Merge adapter facts into outcome.facts
-                    if "facts" not in outcome:
-                        outcome["facts"] = {}
-                    if not isinstance(outcome["facts"], dict):
-                        outcome["facts"] = {}
-
-                    # Merge adapter facts (e.g., payment_satisfied: True)
-                    outcome["facts"].update(runner_result.facts)
-
-                    # Clear active_capability (adapter completed)
-                    outcome["active_capability"] = None
-
-                    # Update status to allow core to proceed on next turn
-                    # Status will be re-evaluated by core with merged facts
-                    outcome["status"] = "READY"
-                    outcome["awaiting"] = None
-
-                    # Update result with merged outcome
-                    result["outcome"] = outcome
-
-                    logger.info(
-                        f"[capability] Adapter completed, merged facts: {list(runner_result.facts.keys())} "
-                        f"user_id={request.user_id} transaction_id={transaction_id}"
-                    )
-
-                    # Re-enter core normally on next turn
-                    # Facts are merged into outcome.facts, which will be available
-                    # when core runs again (via session merge or direct outcome)
+        if _capability_runner_available and _capability_runner and outcome:
+            early = apply_capability_to_result(
+                result,
+                _capability_runner,
+                user_id=request.user_id,
+                user_text=request.text,
+                session_state=session_state,
+                domain=request.domain,
+                timezone=request.timezone,
+                organization_id=request.organization_id,
+                transaction_id=transaction_id,
+            )
+            if early is not None:
+                return MessageResponse(**early)
+            outcome = result.get("outcome")
 
         # Handle HANDLER_DELEGATED — invoke registered intent handler (e.g. RAG)
         if (

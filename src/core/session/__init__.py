@@ -1,8 +1,4 @@
-"""
-Session Merge Helper (backward-compatible re-exports).
-
-Implementation lives in core.session.* modules.
-"""
+"""Session merge and persistence modules."""
 
 from core.session.effective_slots import (
     _compute_effective_collected_slots,
