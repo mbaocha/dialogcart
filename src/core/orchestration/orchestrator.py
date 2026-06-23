@@ -443,6 +443,41 @@ def _get_org_id_from_env() -> int:
         return 1
 
 
+def _persist_to_session(
+    session_store: Optional[Any],
+    user_id: str,
+    current_session: Dict[str, Any],
+    key: str,
+    value: Any,
+) -> Dict[str, Any]:
+    """Write key=value into current_session and save to store if available.
+
+    Refreshes current_session from the store first so we don't clobber
+    concurrent writes.  Returns the (possibly refreshed) session dict.
+    """
+    if session_store is not None:
+        try:
+            if hasattr(session_store, "get_session"):
+                current_session = session_store.get_session(user_id) or current_session
+            elif callable(session_store):
+                current_session = session_store(user_id) or current_session
+        except Exception as e:
+            logger.debug("Failed to refresh session before persisting %s: %s", key, e)
+
+    current_session[key] = value
+
+    if session_store is not None:
+        try:
+            if hasattr(session_store, "save_session"):
+                session_store.save_session(user_id, current_session)
+            elif hasattr(session_store, "save"):
+                session_store.save(user_id, current_session)
+        except Exception as e:
+            logger.warning("Failed to persist %s to session_store: %s", key, e)
+
+    return current_session
+
+
 def _invoke_workflow_after_execute(
     intent_name: str, outcome: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -934,24 +969,14 @@ def handle_message(
                 if "datetime_range" not in slots or not isinstance(
                     slots.get("datetime_range"), dict
                 ):
-                    # Try to get resolved_datetime_range from session
                     resolved_datetime_range = None
-                    # Get session_state from outer scope - it's initialized at function start
-                    try:
-                        current_session = session_state or {}
-                        session_state_for_check = session_state
-                    except NameError:
-                        # Fallback if session_state is not in scope (shouldn't happen, but defensive)
-                        current_session = {}
-                        session_state_for_check = None
+                    current_session = session_state or {}
 
-                    # Check session_state first
-                    if isinstance(session_state_for_check, dict):
+                    if isinstance(session_state, dict):
                         resolved_datetime_range = session_state.get(
                             "resolved_datetime_range"
                         )
 
-                    # Fallback to session_store if not in session_state
                     if not resolved_datetime_range and session_store is not None:
                         try:
                             if hasattr(session_store, "get_session"):
@@ -960,9 +985,7 @@ def handle_message(
                                     or current_session
                                 )
                             elif callable(session_store):
-                                current_session = (
-                                    session_store(user_id) or current_session
-                                )
+                                current_session = session_store(user_id) or current_session
 
                             if isinstance(current_session, dict):
                                 resolved_datetime_range = current_session.get(
@@ -970,7 +993,7 @@ def handle_message(
                                 )
                         except Exception as e:
                             logger.debug(
-                                f"Failed to get resolved_datetime_range from session_store: {e}"
+                                "Failed to get resolved_datetime_range from session_store: %s", e
                             )
 
                     # Inject into slots if found
@@ -1133,61 +1156,16 @@ def handle_message(
                     )
 
                     if availability_fingerprint:
-                        # Always attach fingerprint to execution_result for persistence via outcome
-                        execution_result["availability_fingerprint"] = (
-                            availability_fingerprint
+                        execution_result["availability_fingerprint"] = availability_fingerprint
+                        _persist_to_session(
+                            session_store, user_id, session_state or {},
+                            "availability_fingerprint", availability_fingerprint,
                         )
-
-                        # Always attach fingerprint to current_session (independent of session_store presence)
-                        # This ensures fingerprint is available for session rebuild logic
-                        try:
-                            current_session = session_state or {}
-                        except NameError:
-                            # Fallback if session_state is not in scope (shouldn't happen, but defensive)
-                            current_session = {}
-                        if session_store is not None:
-                            # Try to get latest session from session_store
-                            try:
-                                if hasattr(session_store, "get_session"):
-                                    current_session = (
-                                        session_store.get_session(user_id)
-                                        or current_session
-                                    )
-                                elif callable(session_store):
-                                    current_session = (
-                                        session_store(user_id) or current_session
-                                    )
-                            except Exception as e:
-                                logger.debug(
-                                    f"Failed to get session from session_store for fingerprint: {e}"
-                                )
-
-                        # Always attach fingerprint to current_session
-                        current_session["availability_fingerprint"] = (
-                            availability_fingerprint
-                        )
-
                         logger.debug(
-                            f"[AVAILABILITY_FINGERPRINT] Attached fingerprint={availability_fingerprint} "
-                            f"to current_session for slots service_id={slots.get('service_id')}, "
-                            f"date={slots.get('date')}, time={slots.get('time')}"
+                            "[AVAILABILITY_FINGERPRINT] fingerprint=%s service_id=%s date=%s time=%s",
+                            availability_fingerprint,
+                            slots.get("service_id"), slots.get("date"), slots.get("time"),
                         )
-
-                        # Save to session_store if available (for immediate persistence)
-                        if session_store is not None:
-                            try:
-                                if hasattr(session_store, "save_session"):
-                                    session_store.save_session(user_id, current_session)
-                                elif hasattr(session_store, "save"):
-                                    session_store.save(user_id, current_session)
-
-                                logger.debug(
-                                    f"[AVAILABILITY_FINGERPRINT] Saved to session_store: {availability_fingerprint}"
-                                )
-                            except Exception as e:
-                                logger.warning(
-                                    f"Failed to persist availability fingerprint to session_store: {e}"
-                                )
 
                     from core.orchestration.temporal_proposal import (
                         apply_confirmed_datetime,
@@ -1204,195 +1182,26 @@ def handle_message(
                     slots.update(confirmed_slots)
                     plan["slots"] = confirmed_slots
 
-                # Step 1: Capture datetime_range when SEARCH_AVAILABILITY succeeds
-                # Construct datetime_range from date + time if not already present
-                # This enables CONFIRM_APPOINTMENT to reuse the validated datetime range
-                # NOTE: This runs at the same level as availability_fingerprint (not nested)
-                resolved_datetime_range = None
+                # Capture datetime_range when SEARCH_AVAILABILITY succeeds so
+                # CONFIRM_APPOINTMENT can reuse the validated range next turn.
+                from core.orchestration.temporal_proposal import (
+                    build_datetime_range_from_slots,
+                )
 
-                # Check if datetime_range already exists in slots
-                if isinstance(slots.get("datetime_range"), dict):
-                    resolved_datetime_range = slots.get("datetime_range")
-                else:
-                    # Construct from date + time using service duration
-                    date_str = slots.get("date")
-                    time_str = slots.get("time")
+                resolved_datetime_range = build_datetime_range_from_slots(
+                    slots, execution_result
+                )
 
-                    if date_str and time_str:
-                        try:
-                            from datetime import timedelta
-
-                            dt = datetime
-
-                            # Parse date (YYYY-MM-DD format)
-                            date_obj = None
-                            if isinstance(date_str, str):
-                                date_only = date_str.split("T")[0].split(" ")[0]
-                                try:
-                                    date_obj = dt.strptime(date_only, "%Y-%m-%d")
-                                except ValueError:
-                                    try:
-                                        date_obj = dt.fromisoformat(date_only)
-                                    except (ValueError, AttributeError):
-                                        pass
-
-                            if date_obj:
-                                # Parse time string (handle formats like "2pm", "14:00", etc.)
-                                time_normalized = (
-                                    str(time_str)
-                                    .lower()
-                                    .replace("am", "")
-                                    .replace("pm", "")
-                                    .strip()
-                                )
-                                time_parts = (
-                                    time_normalized.split(":")
-                                    if ":" in time_normalized
-                                    else [time_normalized, "00"]
-                                )
-
-                                if len(time_parts) >= 2:
-                                    try:
-                                        hour = int(time_parts[0])
-                                        minute = (
-                                            int(time_parts[1])
-                                            if len(time_parts) > 1
-                                            else 0
-                                        )
-
-                                        # Handle AM/PM
-                                        if "pm" in str(time_str).lower() and hour < 12:
-                                            hour += 12
-                                        elif (
-                                            "am" in str(time_str).lower() and hour == 12
-                                        ):
-                                            hour = 0
-
-                                        # Combine date and time
-                                        start_datetime = date_obj.replace(
-                                            hour=hour,
-                                            minute=minute,
-                                            second=0,
-                                            microsecond=0,
-                                        )
-
-                                        # Compute end_time from start + service duration
-                                        # Duration comes from availability response or default (60 min)
-                                        # Extract duration from first availability slot if available
-                                        duration_minutes = 60  # Default
-                                        availability_slots = execution_result.get(
-                                            "slots", []
-                                        )
-                                        if availability_slots and isinstance(
-                                            availability_slots, list
-                                        ):
-                                            first_slot = availability_slots[0]
-                                            if isinstance(first_slot, dict):
-                                                slot_start = first_slot.get(
-                                                    "starts_at"
-                                                ) or first_slot.get("start")
-                                                slot_end = first_slot.get(
-                                                    "ends_at"
-                                                ) or first_slot.get("end")
-                                                if slot_start and slot_end:
-                                                    try:
-                                                        start_dt = dt.fromisoformat(
-                                                            str(slot_start).replace(
-                                                                "Z", "+00:00"
-                                                            )
-                                                        )
-                                                        end_dt = dt.fromisoformat(
-                                                            str(slot_end).replace(
-                                                                "Z", "+00:00"
-                                                            )
-                                                        )
-                                                        duration_minutes = int(
-                                                            (
-                                                                end_dt - start_dt
-                                                            ).total_seconds()
-                                                            / 60
-                                                        )
-                                                    except (ValueError, AttributeError):
-                                                        pass
-
-                                        end_datetime = start_datetime + timedelta(
-                                            minutes=duration_minutes
-                                        )
-
-                                        resolved_datetime_range = {
-                                            "start": start_datetime.isoformat(),
-                                            "end": end_datetime.isoformat(),
-                                        }
-
-                                        logger.debug(
-                                            f"[DATETIME_RANGE] Constructed from date+time: "
-                                            f"date={date_str}, time={time_str}, "
-                                            f"start={resolved_datetime_range['start']}, "
-                                            f"end={resolved_datetime_range['end']}, "
-                                            f"duration={duration_minutes}min"
-                                        )
-                                    except (ValueError, IndexError, TypeError) as e:
-                                        logger.warning(
-                                            f"Failed to construct datetime_range from date+time: {e}. "
-                                            f"date={date_str}, time={time_str}"
-                                        )
-                        except Exception as e:
-                            logger.warning(
-                                f"Error constructing datetime_range from availability result: {e}"
-                            )
-
-                # Persist resolved_datetime_range to session
                 if resolved_datetime_range:
-                    # Attach to current_session for persistence
-                    # Get session_state from outer scope - it's initialized at function start
-                    try:
-                        current_session = session_state or {}
-                    except NameError:
-                        # Fallback if session_state is not in scope (shouldn't happen, but defensive)
-                        current_session = {}
-                    if session_store is not None:
-                        try:
-                            if hasattr(session_store, "get_session"):
-                                current_session = (
-                                    session_store.get_session(user_id)
-                                    or current_session
-                                )
-                            elif callable(session_store):
-                                current_session = (
-                                    session_store(user_id) or current_session
-                                )
-                        except Exception as e:
-                            logger.debug(
-                                f"Failed to get session from session_store for datetime_range: {e}"
-                            )
-
-                    current_session["resolved_datetime_range"] = resolved_datetime_range
-
-                    logger.debug(
-                        f"[DATETIME_RANGE] Persisting resolved_datetime_range to session: "
-                        f"start={resolved_datetime_range['start']}, "
-                        f"end={resolved_datetime_range['end']}"
+                    _persist_to_session(
+                        session_store, user_id, session_state or {},
+                        "resolved_datetime_range", resolved_datetime_range,
                     )
-
-                    # Save to session_store if available
-                    if session_store is not None:
-                        try:
-                            if hasattr(session_store, "save_session"):
-                                session_store.save_session(user_id, current_session)
-                            elif hasattr(session_store, "save"):
-                                session_store.save(user_id, current_session)
-                        except Exception as e:
-                            logger.warning(
-                                f"Failed to persist resolved_datetime_range to session_store: {e}"
-                            )
-
-                    # CRITICAL: Attach resolved_datetime_range to execution_result for persistence
-                    # This enables test adapters and session rebuild logic to extract it
-                    execution_result["resolved_datetime_range"] = (
-                        resolved_datetime_range
-                    )
+                    execution_result["resolved_datetime_range"] = resolved_datetime_range
                     logger.debug(
-                        f"[DATETIME_RANGE] Attached to execution_result: {resolved_datetime_range.get('start')}"
+                        "[DATETIME_RANGE] start=%s end=%s",
+                        resolved_datetime_range.get("start"),
+                        resolved_datetime_range.get("end"),
                     )
 
                 # Return execution result

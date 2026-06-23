@@ -270,6 +270,75 @@ def resolve_execution_proposals(
     return {"date_proposal": date_proposal, "time_proposal": time_proposal}
 
 
+def build_datetime_range_from_slots(
+    slots: Dict[str, Any],
+    execution_result: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Construct a datetime_range from slots.date + slots.time.
+
+    Returns the existing datetime_range if already present.
+    Duration is read from the first availability slot when execution_result is provided;
+    falls back to 60 minutes.
+    Returns None when date/time are missing or unparseable.
+    """
+    if isinstance(slots.get("datetime_range"), dict):
+        return slots["datetime_range"]
+
+    date_str = slots.get("date")
+    time_str = slots.get("time")
+    if not date_str or not time_str:
+        return None
+
+    from datetime import datetime as _dt, timedelta as _td
+
+    date_obj = None
+    if isinstance(date_str, str):
+        date_only = date_str.split("T")[0].split(" ")[0]
+        try:
+            date_obj = _dt.strptime(date_only, "%Y-%m-%d")
+        except ValueError:
+            try:
+                date_obj = _dt.fromisoformat(date_only)
+            except (ValueError, AttributeError):
+                pass
+    if not date_obj:
+        return None
+
+    time_lower = str(time_str).lower()
+    is_pm = "pm" in time_lower
+    is_am = "am" in time_lower
+    time_clean = time_lower.replace("am", "").replace("pm", "").strip()
+    parts = time_clean.split(":") if ":" in time_clean else [time_clean, "00"]
+    try:
+        hour = int(parts[0])
+        minute = int(parts[1]) if len(parts) > 1 else 0
+        if is_pm and hour < 12:
+            hour += 12
+        elif is_am and hour == 12:
+            hour = 0
+        start_dt = date_obj.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    except (ValueError, IndexError, TypeError):
+        return None
+
+    duration_minutes = 60
+    avail_slots = (execution_result or {}).get("slots", [])
+    if isinstance(avail_slots, list) and avail_slots:
+        first = avail_slots[0]
+        if isinstance(first, dict):
+            s_raw = first.get("starts_at") or first.get("start")
+            e_raw = first.get("ends_at") or first.get("end")
+            if s_raw and e_raw:
+                try:
+                    s = _dt.fromisoformat(str(s_raw).replace("Z", "+00:00"))
+                    e = _dt.fromisoformat(str(e_raw).replace("Z", "+00:00"))
+                    duration_minutes = int((e - s).total_seconds() / 60)
+                except (ValueError, AttributeError):
+                    pass
+
+    end_dt = start_dt + _td(minutes=duration_minutes)
+    return {"start": start_dt.isoformat(), "end": end_dt.isoformat()}
+
+
 def slots_for_availability_search(
     slots: Dict[str, Any],
     date_proposal: Optional[Dict[str, Any]] = None,
