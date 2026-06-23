@@ -59,6 +59,24 @@ booking_scenarios = [
             "facts": {"service_id": "delux", "dates": ["2026-11-05", "2026-11-07"]},
         },
     },
+    {
+        "sentence": "book room",
+        "booking_mode": "reservation",
+        "aliases": {"room": "room"},
+        "expected": {
+            "intent": "CREATE_RESERVATION",
+            "facts": {"service_id": "room", "dates": []},
+        },
+    },
+    {
+        "sentence": "reserve deluxe",
+        "booking_mode": "reservation",
+        "aliases": {"deluxe": "room"},
+        "expected": {
+            "intent": "CREATE_RESERVATION",
+            "facts": {"service_id": "deluxe", "dates": []},
+        },
+    },
     # ────────────────
     # CREATE_APPOINTMENT — Date and time extraction
     # ────────────────
@@ -103,6 +121,36 @@ booking_scenarios = [
                 "mode": "exact",
                 "start": "10:00",
                 "end": "10:00",
+                "label": None,
+            },
+        },
+    },
+    {
+        "sentence": "book haircut at 10am",
+        "booking_mode": "service",
+        "aliases": {"haircut": "haircut"},
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "facts": {"service_id": "haircut", "dates": []},
+            "time_constraint": {
+                "mode": "exact",
+                "start": "10:00",
+                "end": "10:00",
+                "label": None,
+            },
+        },
+    },
+    {
+        "sentence": "book massage at 3pm",
+        "booking_mode": "service",
+        "aliases": {"massage": "massage"},
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "facts": {"service_id": "massage", "dates": []},
+            "time_constraint": {
+                "mode": "exact",
+                "start": "15:00",
+                "end": "15:00",
                 "label": None,
             },
         },
@@ -979,6 +1027,70 @@ booking_scenarios = [
                 "booking_id": None,
             },
             "search_query": "haircut price",
+        },
+    },
+    # ────────────────
+    # CONVERSATION CONTEXT — Follow-up resolution via prior turns
+    # ────────────────
+    {
+        # 89 — GENERAL_INQUIRY follow-up: merge prior topic with new angle
+        "sentence": "and for group bookings?",
+        "booking_mode": "service",
+        "conversation_context": {
+            "last_intent": "GENERAL_INQUIRY",
+            "last_search_query": "cancellation policy",
+            "turns": [
+                {
+                    "user": "what is your cancellation policy?",
+                    "assistant": "You can cancel up to 24 hours before your appointment.",
+                    "intent": "GENERAL_INQUIRY",
+                    "search_query": "cancellation policy",
+                }
+            ],
+        },
+        "expected": {
+            "intent": "GENERAL_INQUIRY",
+            "facts": {
+                "dates": [],
+                "times": [],
+                "date_time_pairs": [],
+                "service_id": None,
+                "booking_id": None,
+            },
+            "search_query": "cancellation policy group bookings",
+        },
+    },
+    {
+        # 90 — DETAILS follow-up: pronoun "it" resolved from prior search_query;
+        # service_id extracted from context even though user said only "it"
+        "sentence": "how long is it?",
+        "booking_mode": "service",
+        "aliases": {
+            "deep tissue massage": "wellness.deep_tissue",
+            "swedish massage": "wellness.swedish",
+        },
+        "conversation_context": {
+            "last_intent": "DETAILS",
+            "last_search_query": "deep tissue massage",
+            "turns": [
+                {
+                    "user": "tell me about deep tissue massage",
+                    "assistant": "Deep tissue massage targets deeper muscle layers.",
+                    "intent": "DETAILS",
+                    "search_query": "deep tissue massage",
+                }
+            ],
+        },
+        "expected": {
+            "intent": "DETAILS",
+            "facts": {
+                "dates": [],
+                "times": [],
+                "date_time_pairs": [],
+                "service_id": "deep tissue massage",
+                "booking_id": None,
+            },
+            "search_query": "deep tissue massage duration",
         },
     },
 ]

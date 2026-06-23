@@ -23,14 +23,14 @@ import os
 import uuid
 from unittest.mock import Mock
 
-from capabilities.adapters.payment import PaymentAdapter
-from capabilities.clients.payment import (
+from extensions.capabilities.adapters.payment import PaymentAdapter
+from extensions.capabilities.clients.payment import (
     MockPaymentClient,
     mark_payment_as_paid,
     reset_payment_store,
 )
-from capabilities.registry import clear_registry, register_adapter
-from capabilities.runner import CapabilityRunner
+from extensions.capabilities.registry import clear_registry, register_adapter
+from extensions.capabilities.runner import CapabilityRunner
 from core.orchestration.api.session_merge import build_session_state_from_outcome
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.nlu import LumaClient

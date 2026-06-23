@@ -147,6 +147,7 @@ class TestLumaClient(LumaClient):  # noqa: N801
         domain: str = "service",
         timezone: str = "UTC",
         tenant_context: Optional[Dict[str, Any]] = None,
+        conversation_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Override resolve to inject test aliases into tenant_context.
@@ -160,7 +161,14 @@ class TestLumaClient(LumaClient):  # noqa: N801
             # Merge aliases, but preserve other fields like booking_mode
             tenant_context = {**tenant_context, "aliases": self.test_aliases}
 
-        response = super().resolve(user_id, text, domain, timezone, tenant_context)
+        response = super().resolve(
+            user_id,
+            text,
+            domain,
+            timezone,
+            tenant_context,
+            conversation_context=conversation_context,
+        )
         self.last_response = response  # Store for test access
         return response
 

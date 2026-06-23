@@ -40,7 +40,7 @@ def register_default_adapters(*, organization_id: Optional[int] = None) -> None:
 
     Example:
         # At application startup
-        from capabilities.bootstrap import register_default_adapters
+        from extensions.capabilities.bootstrap import register_default_adapters
         register_default_adapters(organization_id=1)
     """
     if PaymentAdapter is None or HttpPaymentClient is None or register_adapter is None:

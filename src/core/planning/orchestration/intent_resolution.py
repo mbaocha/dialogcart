@@ -402,6 +402,7 @@ def resolve_effective_intent(
                 informational_intents = {
                     "DETAILS",
                     "FAQ",
+                    "GENERAL_INQUIRY",
                     "HELP",
                     "AVAILABILITY",
                     "QUOTE",

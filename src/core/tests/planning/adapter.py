@@ -122,6 +122,15 @@ def normalize_planning_outcome(core_result: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(slots, dict):
             slots = {}
 
+    date_proposal = plan_data.get("date_proposal")
+    time_proposal = plan_data.get("time_proposal")
+    facts_obj = plan_data.get("facts", {})
+    if isinstance(facts_obj, dict):
+        if date_proposal is None:
+            date_proposal = facts_obj.get("date_proposal")
+        if time_proposal is None:
+            time_proposal = facts_obj.get("time_proposal")
+
     # Derive required_slots from missing_slots + collected slots
     required_slots = list(set(list(slots.keys()) + missing_slots))
     required_slots.sort()  # Deterministic ordering
@@ -156,6 +165,10 @@ def normalize_planning_outcome(core_result: Dict[str, Any]) -> Dict[str, Any]:
         "slots": slots,
         "plan": {"stage": stage, "action": action},
     }
+    if date_proposal is not None:
+        normalized["date_proposal"] = date_proposal
+    if time_proposal is not None:
+        normalized["time_proposal"] = time_proposal
 
     # Add executable_actions if present
     if executable_actions:

@@ -116,7 +116,10 @@ _TOOL = {
                     },
                     "booking_id": {
                         "type": ["string", "null"],
-                        "description": "Booking reference ID if mentioned, else null.",
+                        "description": (
+                            "Booking reference ID when the user states one that matches the "
+                            "platform ID format (e.g. ABC123). Null if absent or ambiguous."
+                        ),
                     },
                 },
                 "required": ["dates", "times", "date_time_pairs", "service_id", "booking_id"],
@@ -176,12 +179,121 @@ def _format_search_query_intents() -> str:
     return ", ".join(sorted(_RAG_INTENTS))
 
 
-def _system_prompt(now: str, aliases: Dict[str, str]) -> str:
+def _format_conversation_context(ctx: Dict[str, Any]) -> str:
+    """Format conversation_context into a prompt block. Returns empty string when ctx is empty or has no useful data."""
+    if not ctx:
+        return ""
+    has_data = (
+        ctx.get("last_intent")
+        or ctx.get("last_search_query")
+        or (ctx.get("turns") or [])
+    )
+    if not has_data:
+        return ""
+
+    lines = [
+        "════════════════════════════════════════",
+        "CONVERSATION CONTEXT",
+        "════════════════════════════════════════",
+    ]
+    last_intent = ctx.get("last_intent")
+    last_sq = ctx.get("last_search_query")
+    if last_intent:
+        lines.append(f"Last intent: {last_intent}")
+    if last_sq:
+        lines.append(f'Last search query: "{last_sq}"')
+
+    turns = (ctx.get("turns") or [])[-3:]
+    if turns:
+        lines.append("")
+        lines.append("Prior turns (oldest first):")
+        for t in turns:
+            lines.append(f"  User: {t.get('user', '')}")
+            asst = t.get("assistant", "")
+            if asst:
+                lines.append(f"  Assistant: {asst}")
+            meta = f"  → intent={t.get('intent', '')}"
+            if t.get("search_query"):
+                meta += f', search_query="{t["search_query"]}"'
+            lines.append(meta)
+
+    lines += [
+        "",
+        "Context rules:",
+        "- Resolve follow-up references ('it', 'that', 'how long') using prior turns and last_search_query.",
+        "- For RAG intents, merge/refine search_query with the prior topic:",
+        '  last="cancellation policy" + "and for group bookings?" → "cancellation policy group bookings"',
+        '  last="deep tissue massage" + "how long is it?" → "deep tissue massage duration"',
+        "- Do NOT invent booking slots (dates, times, services) on FAQ detours.",
+    ]
+    return "\n".join(lines)
+
+
+def _format_booking_mode_section(booking_mode: str) -> str:
+    if booking_mode == "reservation":
+        return """BOOKING MODE: reservation (accommodation / multi-night stays)
+
+Intent disambiguation for reservation mode:
+- "book room", "reserve a room/suite", "book accommodation" → CREATE_RESERVATION (never UNKNOWN)
+- Timed clock times (3pm, 10am) are irrelevant unless paired with an explicit date range
+- Required slots are date_range (check-in → check-out), not single date + time
+
+Examples (booking_mode=reservation):
+  "book room"           → CREATE_RESERVATION, service_id=room (if alias exists), dates=[]
+  "reserve deluxe"      → CREATE_RESERVATION, service_id=deluxe, dates=[]
+  "book room march 5-10"→ CREATE_RESERVATION, dates=[start,end ISO]"""
+    return """BOOKING MODE: service (timed appointments)
+
+Intent disambiguation for service mode:
+- "book haircut", "schedule massage" → CREATE_APPOINTMENT (never CREATE_RESERVATION)
+- Appointments need service + date + time; do not treat as multi-night reservations
+
+Examples (booking_mode=service):
+  "book haircut at 10am" → CREATE_APPOINTMENT, dates=[], times=["10:00"] — NO date invented
+  "book massage at 3pm"  → CREATE_APPOINTMENT, dates=[], times=["15:00"] — NO date invented
+  "book haircut tomorrow at 3pm" → CREATE_APPOINTMENT, dates=["tomorrow"], times=["15:00"]"""
+
+
+def _format_booking_id_section(tenant_context: Dict[str, Any]) -> str:
+    from ..config.booking_id import DEFAULT_BOOKING_ID_PATTERN, get_booking_id_settings
+
+    _, _, examples = get_booking_id_settings(tenant_context)
+    raw = (tenant_context or {}).get("booking_id") or {}
+    pattern = raw.get("pattern") or DEFAULT_BOOKING_ID_PATTERN
+
+    lines = [
+        "── BOOKING ID RULES ────────────────────────────────────────────────────────",
+        "Populate facts.booking_id only for clear booking reference tokens — never dates, times, or services.",
+        f"Default ID shape (validated in pipeline, case-insensitive): {pattern}  (e.g. ABC123 — 2+ letters + 3+ digits).",
+        "Do NOT set booking_id from vague phrases like \"my booking\" with no reference token.",
+        "DO set booking_id when the user gives a standalone ID, an explicit anchor (#ABC123, \"booking id: …\", \"ref: …\"),",
+        '  or "booking/reservation <ID>" when <ID> matches the format.',
+        "When unsure, leave booking_id null — the pipeline regex is authoritative.",
+    ]
+    if examples:
+        ex = ", ".join(examples)
+        lines.append(f"Tenant booking ID examples (hints only): {ex}")
+    return "\n".join(lines)
+
+
+def _system_prompt(
+    now: str,
+    aliases: Dict[str, str],
+    booking_mode: str = "service",
+    conversation_context: Optional[Dict[str, Any]] = None,
+    tenant_context: Optional[Dict[str, Any]] = None,
+) -> str:
     keys = ", ".join(f'"{k}"' for k in aliases) if aliases else "none provided"
+    ctx_block = _format_conversation_context(conversation_context or {})
+    ctx_section = f"\n{ctx_block}\n" if ctx_block else ""
+    mode_section = _format_booking_mode_section(booking_mode)
+    booking_id_section = _format_booking_id_section(tenant_context or {})
     return f"""You are a booking entity extractor. Your job has TWO independent steps:
 STEP 1 — Classify intent. STEP 2 — Extract all entities. Always do BOTH, even for fragmentary input.
 
 Current date/time: {now}
+{ctx_section}
+{mode_section}
 
 KNOWN SERVICE ALIASES (pick the closest key for service_id): {keys}
 
@@ -202,6 +314,11 @@ STEP 2 — ENTITY EXTRACTION (ALWAYS do this, even for UNKNOWN intent)
 ════════════════════════════════════════
 
 ── DATE RULES ──────────────────────────────────────────────────────────────
+CRITICAL: Only extract dates the user explicitly mentions. Never default to today/current date.
+  "book haircut at 10am"  → dates=[], date_time_pairs=[]  (time only — date is NOT mentioned)
+  "book massage at 3pm"   → dates=[], date_time_pairs=[]  (same rule)
+  "at 3pm"                → dates=[], times=["15:00"]
+date_time_pairs: ONLY when BOTH date AND time appear in the same utterance (e.g. "tomorrow at 3pm").
 Named-month dates (no year): month > current → current year; month == current → current year; month < current → next year.
 Example (today=2026-01-13): "march 3"→2026-03-03, "jan 10"→2026-01-10, "dec 1"→2026-12-01.
 Resolve named-month dates to ISO YYYY-MM-DD. For weekday/relative terms, preserve the user's exact words — do NOT add modifiers: bare "friday" stays "friday" (not "next friday"), "next monday" stays "next monday", "tomorrow" stays "tomorrow".
@@ -221,6 +338,8 @@ Match to nearest key in KNOWN SERVICE ALIASES (case-insensitive, typo-tolerant).
 If the user's service term unambiguously maps to one alias key, return that key.
 If the user's term is a generic word that matches multiple alias keys equally well (e.g. "massage" when both "swedish massage" and "deep tissue massage" exist), return null — do NOT guess.
 ALWAYS extract service even for UNKNOWN intent.
+
+{booking_id_section}
 
 ── SEARCH QUERY RULES ──────────────────────────────────────────────────────
 Populate search_query ONLY for: {_format_search_query_intents()}.
@@ -270,8 +389,9 @@ def _empty() -> Dict[str, Any]:
 # Request cache
 # ---------------------------------------------------------------------------
 # Enabled by default; set NLU_CACHE=0 to bypass (e.g. when testing prompt changes).
-# Cache key = SHA-256(system_prompt + "\n---\n" + text), so any prompt edit
-# automatically invalidates all prior entries.
+# Cache key = SHA-256(system_prompt + text). system_prompt already embeds the
+# formatted conversation_context, so any change to context, prompt, or text
+# automatically produces a different key.
 # ---------------------------------------------------------------------------
 
 _NLU_CACHE: bool = os.environ.get("NLU_CACHE", "1") != "0"
@@ -317,16 +437,32 @@ class HaikuExtractor:
     def __init__(self):
         self._client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
-    def extract(self, text: str, tenant_context: Dict[str, Any], now: str) -> Dict[str, Any]:
+    def extract(
+        self,
+        text: str,
+        tenant_context: Dict[str, Any],
+        now: str,
+        conversation_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
         aliases = tenant_context.get("aliases", {})
-        system = _system_prompt(now, aliases)
+        booking_mode = tenant_context.get("booking_mode", "service")
+        system = _system_prompt(
+            now,
+            aliases,
+            booking_mode=booking_mode,
+            conversation_context=conversation_context,
+            tenant_context=tenant_context,
+        )
 
+        # system already contains the formatted context — no need to hash it separately.
         key = _cache_key(text, system)
         cached = _cache_get(key)
         if cached is not None:
             logger.debug("Cache hit for text=%r", text)
             return cached
 
+        ctx_block = _format_conversation_context(conversation_context or {})
+        user_content = f"CURRENT USER MESSAGE:\n{text}" if ctx_block else text
         try:
             response = self._client.messages.create(
                 model=_MODEL,
@@ -334,7 +470,7 @@ class HaikuExtractor:
                 system=system,
                 tools=[_TOOL],
                 tool_choice={"type": "any"},
-                messages=[{"role": "user", "content": text}],
+                messages=[{"role": "user", "content": user_content}],
             )
         except Exception:
             logger.exception("Haiku extraction failed for text=%r", text)

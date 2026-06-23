@@ -18,7 +18,7 @@ from .clarification_renderer import RenderSpec
 
 # Import at module level for test patching
 try:
-    from capabilities.registry import get_adapter
+    from extensions.capabilities.registry import get_adapter
 except ImportError:
     # Graceful handling if capabilities module not available
     get_adapter = None

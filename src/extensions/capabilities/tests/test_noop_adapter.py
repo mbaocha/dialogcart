@@ -9,9 +9,9 @@ import os
 import sys
 from pathlib import Path
 
-from capabilities.adapters.noop import NoopAdapter
-from capabilities.registry import clear_registry, get_adapter, register_adapter
-from capabilities.runner import CapabilityRunner
+from extensions.capabilities.adapters.noop import NoopAdapter
+from extensions.capabilities.registry import clear_registry, get_adapter, register_adapter
+from extensions.capabilities.runner import CapabilityRunner
 
 # Add src/ to Python path (test is in src/capabilities/tests/)
 # Go up to src/ directory

@@ -241,6 +241,7 @@ class MockLumaClientForTests(LumaClient):
         domain: str = "service",
         timezone: str = "UTC",
         tenant_context: Optional[Dict[str, Any]] = None,
+        conversation_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Override resolve to inject test aliases into tenant_context.
@@ -251,7 +252,14 @@ class MockLumaClientForTests(LumaClient):
         if self.test_aliases:
             tenant_context = {"aliases": self.test_aliases}
 
-        return super().resolve(user_id, text, domain, timezone, tenant_context)
+        return super().resolve(
+            user_id,
+            text,
+            domain,
+            timezone,
+            tenant_context,
+            conversation_context=conversation_context,
+        )
 
 
 def run_example(

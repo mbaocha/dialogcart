@@ -954,7 +954,10 @@ def process_luma_response(
 
     # FACT-ONLY: Promote facts to slots BEFORE any processing
     # This ensures facts.service_id, facts.times, etc. are available for planning
-    from core.orchestration.luma_facts_adapter import facts_to_slots
+    from core.orchestration.luma_facts_adapter import (
+        facts_to_slots,
+        merge_promoted_luma_slots,
+    )
 
     facts_obj = luma_response.get("facts", {})
     # CRITICAL: Use resolved intent_name (not raw Luma intent) for slot promotion
@@ -963,7 +966,6 @@ def process_luma_response(
     promoted_slots_from_facts = (
         facts_to_slots(
             facts_obj,
-            # Use resolved intent_name (preserves effective_intent for UNKNOWN)
             intent_name=intent_name,
             source_text=luma_response.get("_source_text"),
         )
@@ -983,13 +985,13 @@ def process_luma_response(
 
     # Merge promoted slots (from facts.service_id, facts.times, etc.) with nested slots
     # Promoted slots take precedence (they are the source of truth)
-    raw_slots = {**nested_slots, **promoted_slots_from_facts}
-    if (
-        isinstance(nested_slots, dict)
-        and "service_id" in nested_slots
-        and "service_id" in promoted_slots_from_facts
-    ):
-        raw_slots["service_id"] = nested_slots["service_id"]
+    raw_slots = merge_promoted_luma_slots(
+        nested_slots,
+        promoted_slots_from_facts,
+        luma_response.get("date_constraint"),
+        facts_obj if isinstance(facts_obj, dict) else None,
+        prefer_nested_service_id=True,
+    )
 
     # Capture slot states for turn outcome snapshot (before normalization)
     # These represent the states after merge/promotion but before normalization
@@ -1025,22 +1027,23 @@ def process_luma_response(
         },
     }
 
-    # Finalize turn state: compute effective_slots, missing_slots, and base status
-    # CRITICAL: If missing_slots already exists in luma_response, use it verbatim to prevent duplicate recomputation
+    # finalize_turn_state always recomputes missing_slots from proposals + slots;
+    # existing_missing_slots is passed only for the stale-value debug log inside it.
     existing_missing_slots = luma_response.get("missing_slots")
-    if existing_missing_slots is not None and isinstance(existing_missing_slots, list):
-        logger.info(
-            f"[MISSING_SLOTS_TRACE] process_luma_response: Using existing missing_slots from luma_response, "
-            f"intent={intent_name}, missing_slots={existing_missing_slots}"
-        )
 
     turn_state = finalize_turn_state(
         intent_name=intent_name,
-        # Use normalized slots (after time normalization)
         merged_session_slots=slots_for_filtering,
         existing_missing_slots=(
             existing_missing_slots if isinstance(existing_missing_slots, list) else None
         ),
+        planning_context={
+            "date_proposal": luma_response.get("date_proposal"),
+            "time_proposal": luma_response.get("time_proposal"),
+            "date_constraint": luma_response.get("date_constraint"),
+            "time_constraint": luma_response.get("time_constraint"),
+            "nlu_facts": facts_obj if isinstance(facts_obj, dict) else None,
+        },
     )
 
     effective_collected_slots = turn_state["effective_slots"]
@@ -1063,20 +1066,10 @@ def process_luma_response(
     # This is the merged slots (session + current turn)
     session_slots = slots_for_filtering
 
-    logger.error(
-        f"[MISSING_SLOTS_TRACE] process_luma_response: AFTER finalize_turn_state, BEFORE time_constraint logic, "
-        f"intent={intent_name}, user_id={user_id}, "
-        f"required_slots={required_slots}, "
-        f"effective_collected_slots_keys={sorted(effective_collected_slots.keys())}, "
-        f"effective_collected_slots={effective_collected_slots}, "
-        f"session_slots_keys={sorted(session_slots.keys()) if isinstance(session_slots, dict) else []}, "
-        f"session_slots={session_slots}, "
-        f"slots_for_filtering_keys={sorted(slots_for_filtering.keys())}, "
-        f"missing_slots={missing_slots}, "
-        f"missing_slots_length={len(missing_slots)}, "
-        f"has_time_in_effective={('time' in effective_collected_slots)}, "
-        f"has_time_in_session={('time' in session_slots if isinstance(session_slots, dict) else False)}, "
-        f"has_time_in_slots_for_filtering={('time' in slots_for_filtering)}"
+    logger.debug(
+        f"[MISSING_SLOTS_TRACE] process_luma_response: intent={intent_name} "
+        f"required={required_slots} effective_keys={sorted(effective_collected_slots.keys())} "
+        f"missing={missing_slots}"
     )
 
     # APPOINTMENT INTENT RULE: Bounded time_constraint (with both start and end) satisfies the time requirement
@@ -1617,6 +1610,10 @@ def process_luma_response(
         "missing_slots": missing_slots,  # Overlay with computed missing_slots
         "context": effective_context,  # Overlay with computed context
     }
+    if luma_response.get("date_proposal") is not None:
+        facts["date_proposal"] = luma_response["date_proposal"]
+    if luma_response.get("time_proposal") is not None:
+        facts["time_proposal"] = luma_response["time_proposal"]
 
     # DIAGNOSTIC: Log facts structure before returning
     logger.error("[FLOW_TRACE] process_luma_response building facts:")

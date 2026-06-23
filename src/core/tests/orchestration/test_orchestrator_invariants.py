@@ -17,9 +17,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from capabilities.adapters.payment import PaymentAdapter
-from capabilities.clients.payment import MockPaymentClient, reset_payment_store
-from capabilities.registry import clear_registry, register_adapter
+from extensions.capabilities.adapters.payment import PaymentAdapter
+from extensions.capabilities.clients.payment import MockPaymentClient, reset_payment_store
+from extensions.capabilities.registry import clear_registry, register_adapter
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.nlu import LumaClient
 from core.orchestration.orchestrator import handle_message

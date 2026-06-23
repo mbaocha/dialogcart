@@ -23,12 +23,17 @@ planning_edges_scenarios = [
                 "sentence": "book haircut friday evening",
                 "expected": {
                     "intent": "CREATE_APPOINTMENT",
-                    "status": "NEEDS_CLARIFICATION",
+                    "status": "READY",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
-                    "missing_slots": ["time"],
-                    # date normalized from "friday" to ISO date
-                    # "evening" is normalized to fuzzy time_constraint (does NOT satisfy time requirement)
-                    "slots": {"service_id": "haircut", "date": "2026-01-16"},
+                    "missing_slots": [],
+                    "slots": {"service_id": "haircut"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-16"},
+                    "time_proposal": {
+                        "mode": "fuzzy",
+                        "label": "evening",
+                        "start": "17:00",
+                        "end": "21:59",
+                    },
                 },
             }
         ],
@@ -66,7 +71,8 @@ planning_edges_scenarios = [
                     "status": "NEEDS_CLARIFICATION",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "haircut", "date": "2026-01-16"},
+                    "slots": {"service_id": "haircut"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-16"},
                 },
             },
             {
@@ -75,8 +81,8 @@ planning_edges_scenarios = [
                     "status": "NEEDS_CLARIFICATION",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
-                    # service_id unchanged, date updated
-                    "slots": {"service_id": "haircut", "date": "2026-01-17"},
+                    "slots": {"service_id": "haircut"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-17"},
                 },
             },
         ],
@@ -95,7 +101,9 @@ planning_edges_scenarios = [
                     "status": "READY",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {"service_id": "haircut", "date": "2026-01-16"},
+                    "slots": {"service_id": "haircut"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-16"},
+                    "time_proposal": {"mode": "exact", "value": "15:00"},
                 },
             },
             {
@@ -104,8 +112,9 @@ planning_edges_scenarios = [
                     "status": "READY",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    # time_constraint overridden
-                    "slots": {"service_id": "haircut", "date": "2026-01-16"},
+                    "slots": {"service_id": "haircut"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-16"},
+                    "time_proposal": {"mode": "exact", "value": "16:00"},
                 },
             },
         ],
@@ -130,13 +139,10 @@ planning_edges_scenarios = [
             {
                 "sentence": "do you have parking?",
                 "expected": {
-                    # intent remains CREATE_APPOINTMENT (no intent change)
-                    "intent": "CREATE_APPOINTMENT",
-                    "status": "NEEDS_CLARIFICATION",
-                    "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
-                    # slots preserved, missing_slots unchanged
-                    "missing_slots": ["date", "time"],
-                    "slots": {"service_id": "haircut"},
+                    # Informational detour → RAG handler; booking session unchanged (not persisted)
+                    "intent": "GENERAL_INQUIRY",
+                    "status": "HANDLER_DELEGATED",
+                    "missing_slots": [],
                 },
             },
         ],
@@ -224,7 +230,8 @@ planning_edges_scenarios = [
                     "status": "NEEDS_CLARIFICATION",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "haircut", "date": "2026-01-14"},
+                    "slots": {"service_id": "haircut"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-14"},
                 },
             },
             {
@@ -235,7 +242,8 @@ planning_edges_scenarios = [
                     "status": "NEEDS_CLARIFICATION",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "haircut", "date": "2026-01-14"},
+                    "slots": {"service_id": "haircut"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-14"},
                 },
             },
         ],

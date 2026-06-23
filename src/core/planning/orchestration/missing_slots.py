@@ -91,9 +91,13 @@ def compute_missing_slots(
         intent_name, collected_slots, modification_context
     )
 
-    # Compute missing slots: required_slots - collected_slots
+    # Compute missing slots: required_slots - collected_slots (non-None values only)
     required_slots = set(required_slots_list)
-    collected_slot_keys = set(collected_slots.keys()) if collected_slots else set()
+    collected_slot_keys = set(
+        slot_name
+        for slot_name, slot_value in (collected_slots or {}).items()
+        if slot_value is not None
+    )
 
     missing = required_slots - collected_slot_keys
     missing_slots = sorted(missing)

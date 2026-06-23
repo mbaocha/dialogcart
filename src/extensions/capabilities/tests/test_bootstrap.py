@@ -14,10 +14,10 @@ import pytest
 src_path = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(src_path))
 
-from capabilities.adapters.payment import PaymentAdapter
-from capabilities.bootstrap import register_default_adapters
-from capabilities.clients.payment import HttpPaymentClient
-from capabilities.registry import clear_registry, get_adapter, list_adapters
+from extensions.capabilities.adapters.payment import PaymentAdapter
+from extensions.capabilities.bootstrap import register_default_adapters
+from extensions.capabilities.clients.payment import HttpPaymentClient
+from extensions.capabilities.registry import clear_registry, get_adapter, list_adapters
 
 
 def test_register_default_adapters_registers_payment():

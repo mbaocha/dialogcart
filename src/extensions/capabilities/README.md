@@ -1,10 +1,11 @@
 # Capabilities Module
 
+**Location:** `src/extensions/capabilities/` (part of `src/extensions/`)
+
 ## Overview
 
-The capabilities module provides an adapter interface for external capabilities
-(payment, KYC, consent, verification, etc.) that integrate with DialogCart core
-via the capability gate mechanism.
+Gate adapters provide multi-turn integrations (payment, KYC, consent, verification, etc.)
+that plug into DialogCart core via the `AWAITING_CAPABILITY` status mechanism.
 
 ## Architecture
 

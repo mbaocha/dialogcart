@@ -152,7 +152,10 @@ def merge_luma_with_session(
 
     # STEP 1.5: Extract slots from Luma to check if continuation is valid
     # Extract slots early to determine if UNKNOWN intent should be overridden
-    from core.orchestration.luma_facts_adapter import facts_to_slots
+    from core.orchestration.luma_facts_adapter import (
+        facts_to_slots,
+        merge_promoted_luma_slots,
+    )
 
     facts_obj_temp = merged.get("facts", {})
     # Use session intent for slot extraction if Luma intent is UNKNOWN (for proper slot extraction)
@@ -302,7 +305,10 @@ def merge_luma_with_session(
     # STEP 3: Extract slots from Luma response
     # FACT-ONLY: Promote facts to slots BEFORE merging with session
     # This ensures facts.service_id, facts.times, etc. are available for planning
-    from core.orchestration.luma_facts_adapter import facts_to_slots
+    from core.orchestration.luma_facts_adapter import (
+        facts_to_slots,
+        merge_promoted_luma_slots,
+    )
 
     facts_obj = merged.get("facts", {})
     # Get intent for date_range promotion (CREATE_RESERVATION with 2+ dates)
@@ -329,9 +335,13 @@ def merge_luma_with_session(
         # Legacy format: slots at top level
         nested_slots = merged.get("slots", {})
 
-    # Merge promoted slots (from facts.service_id, facts.times, etc.) with nested slots
-    # Promoted slots take precedence (they are the source of truth)
-    raw_luma_slots = {**nested_slots, **promoted_slots_from_facts}
+    # Merge promoted slots; strip date keys when Fix 4 applies (flexible + same-turn service)
+    raw_luma_slots = merge_promoted_luma_slots(
+        nested_slots,
+        promoted_slots_from_facts,
+        merged.get("date_constraint"),
+        facts_obj if isinstance(facts_obj, dict) else None,
+    )
 
     # CRITICAL: Preserve raw service_id from raw Luma facts if present
     # If raw Luma facts have service_id, use that as the raw tenant value
@@ -1097,6 +1107,22 @@ def merge_luma_with_session(
     # Slots are merged additively - no special routing needed
     merged["slots"] = merged_slots
 
+    from core.orchestration.temporal_proposal import (
+        extract_nlu_proposals,
+        merge_session_proposals,
+    )
+
+    _nlu_proposals = extract_nlu_proposals(merged)
+    _merged_proposals = merge_session_proposals(
+        session_state,
+        _nlu_proposals["date_proposal"],
+        _nlu_proposals["time_proposal"],
+    )
+    if _merged_proposals["date_proposal"] is not None:
+        merged["date_proposal"] = _merged_proposals["date_proposal"]
+    if _merged_proposals["time_proposal"] is not None:
+        merged["time_proposal"] = _merged_proposals["time_proposal"]
+
     # Assertion: All session slots must be preserved in merged slots
     # ARCHITECTURAL INVARIANT: Slots are durable facts - they must never be lost
     if session_slots:
@@ -1376,11 +1402,6 @@ def merge_luma_with_session(
             f"luma_intent={merged_intent_name}, session_intent={session_intent_name}, "
             f"has_new_slots=False"
         )
-        print(
-            f"[INFORMATIONAL_TURN] Detected informational turn: "
-            f"luma_intent={merged_intent_name}, session_intent={session_intent_name}, "
-            f"has_new_slots=False"
-        )
 
         # Preserve previous session.slots (do NOT mutate)
         # merged_slots already contains session slots from earlier merge, but ensure it's complete
@@ -1397,30 +1418,35 @@ def merge_luma_with_session(
                 logger.info(
                     f"[INFORMATIONAL_TURN] Preserved slots: {list(session_slots_to_preserve.keys())}"
                 )
-                print(
-                    f"[INFORMATIONAL_TURN] Preserved slots: {list(session_slots_to_preserve.keys())}"
-                )
 
-        # Preserve previous missing_slots by recomputing from session slots only
-        # CRITICAL: Do NOT use Luma slots or promotion for informational turns
-        # missing_slots must remain unchanged unless new slots are added
-        # Since missing_slots are not persisted, we recompute from session slots only
-        # This effectively preserves the previous state since no new slots were added
-        # CRITICAL: Use modification context from merged response (detected earlier) or session
+        # Preserve previous missing_slots by recomputing from session slots + proposals
         previous_missing_slots = []
         if session_state and isinstance(session_state, dict) and session_intent_name:
-            # Compute missing_slots from session slots only (no promotion, no Luma slots)
-            # This preserves the previous missing_slots state
-            # Use modification context from merged response (detected before informational turn check) or session
-            modification_context = merged.get("_modification_context")
-            if not modification_context:
-                modification_context = session_state.get("_modification_context")
-            previous_missing_slots = compute_missing_slots(
-                session_intent_name,
-                session_slots_dict,
-                modification_context,
-                session_state,
+            from core.orchestration.temporal_proposal import (
+                expand_slots_for_planning,
+                resolve_session_proposals,
             )
+            from core.planning.policy.action_policy import load_planning_policy, plan_intent
+
+            _proposals = resolve_session_proposals(
+                previous_session_state=session_state
+            )
+            if _proposals["date_proposal"] is not None:
+                merged["date_proposal"] = _proposals["date_proposal"]
+            if _proposals["time_proposal"] is not None:
+                merged["time_proposal"] = _proposals["time_proposal"]
+
+            policy = load_planning_policy()
+            planning_slots = expand_slots_for_planning(
+                session_slots_dict,
+                date_proposal=_proposals["date_proposal"],
+                time_proposal=_proposals["time_proposal"],
+                date_constraint=session_state.get("date_constraint"),
+                time_constraint=session_state.get("time_constraint"),
+                intent_name=session_intent_name,
+            )
+            plan = plan_intent(session_intent_name, planning_slots, policy)
+            previous_missing_slots = plan["missing_slots"]
 
         # INVARIANT CHECK: missing_slots must be a list
         assert isinstance(
@@ -1438,7 +1464,6 @@ def merge_luma_with_session(
         logger.info(
             f"[INFORMATIONAL_TURN] Preserved missing_slots: {previous_missing_slots}"
         )
-        print(f"[INFORMATIONAL_TURN] Preserved missing_slots: {previous_missing_slots}")
 
         # Skip promotion and recomputation - return early with preserved state
         # Store effective collected slots for consistency (from session slots only)
@@ -1673,31 +1698,32 @@ def merge_luma_with_session(
     # Use planner to compute missing_slots
     # Slots are treated as an unordered, additive map
     policy = load_planning_policy()
-    plan = plan_intent(effective_intent, durable_slots_for_computation, policy)
+    from core.orchestration.temporal_proposal import expand_slots_for_planning
+
+    _facts_for_planning = merged.get("facts")
+    if not isinstance(_facts_for_planning, dict):
+        _facts_for_planning = None
+    planning_slots = expand_slots_for_planning(
+        slots_for_planning,
+        date_proposal=merged.get("date_proposal")
+        or (session_state or {}).get("date_proposal")
+        or ((session_state or {}).get("facts") or {}).get("date_proposal"),
+        time_proposal=merged.get("time_proposal")
+        or (session_state or {}).get("time_proposal")
+        or ((session_state or {}).get("facts") or {}).get("time_proposal"),
+        date_constraint=merged.get("date_constraint"),
+        nlu_facts=_facts_for_planning,
+        time_constraint=luma_response.get("time_constraint"),
+        intent_name=effective_intent,
+    )
+    plan = plan_intent(effective_intent, planning_slots, policy)
     missing_slots = plan["missing_slots"]
 
-    # APPOINTMENT INTENT RULE: time_constraint satisfies the time requirement
-    # APPOINTMENT INTENT RULE: Only exact time_constraint satisfies the time requirement
-    # mode=exact → satisfies time, mode=fuzzy/window → does NOT satisfy time
-    time_constraint = luma_response.get("time_constraint")
-    if effective_intent == "CREATE_APPOINTMENT" and time_constraint is not None:
-        # Check if time_constraint mode is exact (only exact satisfies time requirement)
-        time_constraint_mode = None
-        if isinstance(time_constraint, dict):
-            time_constraint_mode = time_constraint.get("mode")
+    from core.orchestration.temporal_proposal import apply_time_constraint_to_missing_slots
 
-        # Only remove "time" from missing_slots if mode is exact
-        if time_constraint_mode == "exact":
-            if "time" in missing_slots:
-                missing_slots = [s for s in missing_slots if s != "time"]
-                logger.info(
-                    f"[MISSING_SLOTS] time_constraint (mode=exact) satisfies time for CREATE_APPOINTMENT - removed 'time' from missing_slots"
-                )
-        else:
-            # Fuzzy/window time_constraint does NOT satisfy time requirement
-            logger.debug(
-                f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}) does NOT satisfy time for CREATE_APPOINTMENT - keeping 'time' in missing_slots"
-            )
+    missing_slots = apply_time_constraint_to_missing_slots(
+        effective_intent, missing_slots, luma_response.get("time_constraint")
+    )
 
     # MISSING_SLOTS_DECISION: Log missing slots computation decision
     from core.planning.orchestration.missing_slots import (
@@ -1972,7 +1998,10 @@ def _compute_effective_collected_slots(
 
     # FACT-ONLY: Promote facts to slots BEFORE any processing
     # This ensures facts.service_id, facts.times, etc. are available for planning
-    from core.orchestration.luma_facts_adapter import facts_to_slots
+    from core.orchestration.luma_facts_adapter import (
+        facts_to_slots,
+        merge_promoted_luma_slots,
+    )
 
     facts_obj = luma_response.get("facts", {})
     # Get intent for date_range promotion (CREATE_RESERVATION with 2+ dates)
@@ -2000,13 +2029,13 @@ def _compute_effective_collected_slots(
 
     # Merge promoted slots (from facts.service_id, facts.times, etc.) with nested slots
     # Promoted slots take precedence (they are the source of truth)
-    raw_slots = {**nested_slots, **promoted_slots_from_facts}
-    if (
-        isinstance(nested_slots, dict)
-        and "service_id" in nested_slots
-        and "service_id" in promoted_slots_from_facts
-    ):
-        raw_slots["service_id"] = nested_slots["service_id"]
+    raw_slots = merge_promoted_luma_slots(
+        nested_slots,
+        promoted_slots_from_facts,
+        luma_response.get("date_constraint"),
+        facts_obj if isinstance(facts_obj, dict) else None,
+        prefer_nested_service_id=True,
+    )
     if not isinstance(raw_slots, dict):
         raw_slots = {}
 
@@ -2140,32 +2169,37 @@ def _compute_effective_collected_slots(
 
     # Use planner to compute missing_slots
     policy = load_planning_policy()
-    plan = plan_intent(intent_name, promoted_slots, policy)
+    from core.orchestration.temporal_proposal import (
+        expand_slots_for_planning,
+        extract_nlu_proposals,
+        merge_session_proposals,
+    )
+
+    _nlu_props = extract_nlu_proposals(luma_response)
+    _merged_props = merge_session_proposals(None, _nlu_props["date_proposal"], _nlu_props["time_proposal"])
+    luma_response["date_proposal"] = _merged_props["date_proposal"]
+    luma_response["time_proposal"] = _merged_props["time_proposal"]
+
+    _facts_for_planning = luma_response.get("facts")
+    if not isinstance(_facts_for_planning, dict):
+        _facts_for_planning = None
+    planning_slots = expand_slots_for_planning(
+        promoted_slots,
+        date_proposal=luma_response.get("date_proposal"),
+        time_proposal=luma_response.get("time_proposal"),
+        date_constraint=luma_response.get("date_constraint"),
+        nlu_facts=_facts_for_planning,
+        time_constraint=luma_response.get("time_constraint"),
+        intent_name=intent_name,
+    )
+    plan = plan_intent(intent_name, planning_slots, policy)
     missing_slots = plan["missing_slots"]
 
-    # APPOINTMENT INTENT RULE: time_constraint satisfies the time requirement
-    # APPOINTMENT INTENT RULE: Only exact time_constraint satisfies the time requirement
-    # mode=exact → satisfies time, mode=fuzzy/window → does NOT satisfy time
-    # This must happen BEFORE plan status is set and BEFORE session persistence
-    time_constraint = luma_response.get("time_constraint")
-    if intent_name == "CREATE_APPOINTMENT" and time_constraint is not None:
-        # Check if time_constraint mode is exact (only exact satisfies time requirement)
-        time_constraint_mode = None
-        if isinstance(time_constraint, dict):
-            time_constraint_mode = time_constraint.get("mode")
+    from core.orchestration.temporal_proposal import apply_time_constraint_to_missing_slots
 
-        # Only remove "time" from missing_slots if mode is exact
-        if time_constraint_mode == "exact":
-            if "time" in missing_slots:
-                missing_slots = [s for s in missing_slots if s != "time"]
-                logger.info(
-                    f"[MISSING_SLOTS] time_constraint (mode=exact) satisfies time for CREATE_APPOINTMENT - removed 'time' from missing_slots"
-                )
-        else:
-            # Fuzzy/window time_constraint does NOT satisfy time requirement
-            logger.debug(
-                f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}) does NOT satisfy time for CREATE_APPOINTMENT - keeping 'time' in missing_slots"
-            )
+    missing_slots = apply_time_constraint_to_missing_slots(
+        intent_name, missing_slots, luma_response.get("time_constraint")
+    )
 
     # Normalize MODIFY_BOOKING missing_slots (test contract)
     from core.orchestration.nlu.luma_response_processor import (
@@ -2193,10 +2227,6 @@ def _compute_effective_collected_slots(
     logger.info(
         f"[MISSING_SLOTS] Computed missing_slots for first turn: intent={intent_name}, missing_slots={missing_slots}"
     )
-    print(
-        f"[MISSING_SLOTS] Computed missing_slots for first turn: intent={intent_name}, missing_slots={missing_slots}"
-    )
-
     return luma_response
 
 
@@ -2474,36 +2504,50 @@ def build_session_state_from_outcome(
             modification_context = previous_session_state.get("_modification_context")
         # Use planner to recompute missing_slots
         from core.planning.policy.action_policy import load_planning_policy, plan_intent
+        from core.orchestration.temporal_proposal import (
+            expand_slots_for_planning,
+            resolve_session_proposals,
+        )
 
         policy = load_planning_policy()
-        plan = plan_intent(intent_name, slots, policy)
+        _proposals = resolve_session_proposals(
+            merged_luma_response=merged_luma_response,
+            outcome=outcome,
+            previous_session_state=previous_session_state,
+        )
+        _facts_for_planning = (
+            outcome.get("facts", {}) if isinstance(outcome, dict) else {}
+        )
+        if not isinstance(_facts_for_planning, dict):
+            _facts_for_planning = {}
+        _merged_response = merged_luma_response or {}
+        planning_slots = expand_slots_for_planning(
+            slots,
+            date_proposal=_proposals["date_proposal"],
+            time_proposal=_proposals["time_proposal"],
+            date_constraint=_merged_response.get("date_constraint")
+            or previous_session_state.get("date_constraint")
+            if isinstance(previous_session_state, dict)
+            else None,
+            nlu_facts=_facts_for_planning,
+            time_constraint=_merged_response.get("time_constraint")
+            or (
+                previous_session_state.get("time_constraint")
+                if isinstance(previous_session_state, dict)
+                else None
+            ),
+            intent_name=intent_name,
+        )
+        plan = plan_intent(intent_name, planning_slots, policy)
         recomputed_missing_slots = plan["missing_slots"]
 
-        # APPOINTMENT INTENT RULE: Only exact time_constraint satisfies the time requirement
-        # mode=exact → satisfies time, mode=fuzzy/window → does NOT satisfy time
-        # This must happen BEFORE plan status is set and BEFORE session persistence
-        merged_response = merged_luma_response or {}
-        time_constraint = merged_response.get("time_constraint")
-        if intent_name == "CREATE_APPOINTMENT" and time_constraint is not None:
-            # Check if time_constraint mode is exact (only exact satisfies time requirement)
-            time_constraint_mode = None
-            if isinstance(time_constraint, dict):
-                time_constraint_mode = time_constraint.get("mode")
+        from core.orchestration.temporal_proposal import apply_time_constraint_to_missing_slots
 
-            # Only remove "time" from missing_slots if mode is exact
-            if time_constraint_mode == "exact":
-                if "time" in recomputed_missing_slots:
-                    recomputed_missing_slots = [
-                        s for s in recomputed_missing_slots if s != "time"
-                    ]
-                    logger.info(
-                        f"[MISSING_SLOTS] time_constraint (mode=exact) satisfies time for CREATE_APPOINTMENT - removed 'time' from recomputed_missing_slots"
-                    )
-            else:
-                # Fuzzy/window time_constraint does NOT satisfy time requirement
-                logger.debug(
-                    f"[MISSING_SLOTS] time_constraint (mode={time_constraint_mode}) does NOT satisfy time for CREATE_APPOINTMENT - keeping 'time' in recomputed_missing_slots"
-                )
+        recomputed_missing_slots = apply_time_constraint_to_missing_slots(
+            intent_name,
+            recomputed_missing_slots,
+            (merged_luma_response or {}).get("time_constraint"),
+        )
 
         # Normalize MODIFY_BOOKING missing_slots (test contract)
         from core.orchestration.nlu.luma_response_processor import (
@@ -2511,7 +2555,7 @@ def build_session_state_from_outcome(
         )
 
         recomputed_missing_slots = _normalize_modify_booking_missing_slots(
-            recomputed_missing_slots, merged_response
+            recomputed_missing_slots, _merged_response
         )
 
         # INVARIANT CHECK: missing_slots must be a list
@@ -2539,12 +2583,7 @@ def build_session_state_from_outcome(
         if "facts" in outcome:
             outcome["facts"]["missing_slots"] = recomputed_missing_slots
             logger.info(
-                f"[MISSING_SLOTS] Updated outcome facts with recomputed missing_slots: "
-                f"intent={intent_name}, persisted_slots={list(slots.keys())}, missing_slots={recomputed_missing_slots}"
-            )
-            print(
-                f"[MISSING_SLOTS] Updated outcome facts with recomputed missing_slots: "
-                f"intent={intent_name}, persisted_slots={list(slots.keys())}, missing_slots={recomputed_missing_slots}"
+                f"[MISSING_SLOTS] Updated outcome facts: intent={intent_name} missing={recomputed_missing_slots}"
             )
 
         # CRITICAL: Ensure merged_luma_response["missing_slots"] equals recomputed missing_slots
@@ -2898,6 +2937,22 @@ def build_session_state_from_outcome(
             f"NOT persisting intent or slots, but persisting {len(serializable_facts)} facts"
         )
 
+    from core.orchestration.temporal_proposal import resolve_session_proposals
+
+    _persisted_proposals = resolve_session_proposals(
+        merged_luma_response=merged_luma_response,
+        outcome=outcome,
+        previous_session_state=previous_session_state,
+    )
+    if _persisted_proposals["date_proposal"] is not None:
+        session_state["date_proposal"] = _persisted_proposals["date_proposal"]
+    if _persisted_proposals["time_proposal"] is not None:
+        session_state["time_proposal"] = _persisted_proposals["time_proposal"]
+    if merged_luma_response and isinstance(merged_luma_response, dict):
+        date_constraint = merged_luma_response.get("date_constraint")
+        if date_constraint is not None:
+            session_state["date_constraint"] = date_constraint
+
     # HARD GUARD: Ensure session_state["facts"] is always present as a dict
     # This invariant must hold for all sessions, especially those with active_capability
     # Session facts are first-class and must never be omitted, even if empty
@@ -2925,44 +2980,10 @@ def build_session_state_from_outcome(
         f"Got type: {type(session_state['facts'])}, value: {session_state.get('facts')}"
     )
 
-    # HARD GUARD: Ensure session_state["slot_attempts"] is always present as a dict
-    # This invariant ensures consistent session shape and safe retry tracking
-    # slot_attempts defaults to empty dict if not present or invalid
-    # Defensive guarantee: always ensure slot_attempts exists before validation
-
-    # DEBUG: Log state before guard block
-    logger.debug(
-        f"[SLOT_ATTEMPTS_DEBUG] BEFORE guard block: "
-        f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
-        f"id={id(session_state.get('slot_attempts'))}, "
-        f"type={type(session_state.get('slot_attempts'))}"
-    )
-
+    # Ensure slot_attempts is a dict (setdefault handles missing key; guard handles None/wrong type)
     session_state.setdefault("slot_attempts", {})
-    if "slot_attempts" not in session_state:
-        logger.warning(
-            f"[SLOT_ATTEMPTS_DEBUG] OVERWRITE: slot_attempts not in session_state, setting to {{}}"
-        )
+    if session_state["slot_attempts"] is None or not isinstance(session_state["slot_attempts"], dict):
         session_state["slot_attempts"] = {}
-    elif session_state["slot_attempts"] is None:
-        logger.warning(
-            f"[SLOT_ATTEMPTS_DEBUG] OVERWRITE: session_state['slot_attempts'] is None, replacing with empty dict. "
-            f"Previous id was {id(session_state.get('slot_attempts'))}"
-        )
-        session_state["slot_attempts"] = {}
-    elif not isinstance(session_state["slot_attempts"], dict):
-        logger.warning(
-            f"[SLOT_ATTEMPTS_DEBUG] OVERWRITE: session_state['slot_attempts'] is not a dict (type: {type(session_state['slot_attempts'])}), "
-            f"replacing with empty dict. Previous value: {session_state.get('slot_attempts')}, id={id(session_state.get('slot_attempts'))}"
-        )
-        session_state["slot_attempts"] = {}
-
-    # DEBUG: Log state after guard block
-    logger.debug(
-        f"[SLOT_ATTEMPTS_DEBUG] AFTER guard block: "
-        f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
-        f"id={id(session_state.get('slot_attempts'))}"
-    )
 
     # Hard assertion: slot_attempts must be a dict
     assert isinstance(session_state["slot_attempts"], dict), (
@@ -2970,9 +2991,8 @@ def build_session_state_from_outcome(
         f"Got type: {type(session_state.get('slot_attempts'))}, value: {session_state.get('slot_attempts')}"
     )
 
-    # SESSION_SAVE_DEBUG: Guard logging before session save
-    logger.error(
-        "[SESSION_SAVE_DEBUG] intent_name=%r status=%r stage=%r action=%r",
+    logger.debug(
+        "[SESSION_WRITE] intent_name=%r status=%r stage=%r action=%r",
         session_state.get("intent_name"),
         session_state.get("status"),
         session_state.get("stage"),
@@ -2988,9 +3008,7 @@ def build_session_state_from_outcome(
         )
     )
 
-    # Persist time_constraint to session state for multi-turn scenarios
-    # This ensures time_constraint from previous turns (e.g., "book at 2pm") is preserved
-    # when the next turn only provides date (e.g., "tomorrow")
+    # Persist time_constraint and date_constraint to session state for multi-turn scenarios
     if merged_luma_response and isinstance(merged_luma_response, dict):
         time_constraint = merged_luma_response.get("time_constraint")
         if time_constraint is not None and final_intent_name == "CREATE_APPOINTMENT":
@@ -2998,6 +3016,10 @@ def build_session_state_from_outcome(
             logger.debug(
                 f"[TIME_CONSTRAINT] Persisting time_constraint to session_state: {time_constraint}"
             )
+        # date_proposal / time_proposal already persisted by resolve_session_proposals above
+        date_constraint = merged_luma_response.get("date_constraint")
+        if date_constraint is not None:
+            session_state["date_constraint"] = date_constraint
 
     # Persist availability_planned flag for CREATE_APPOINTMENT
     # This tracks when SEARCH_AVAILABILITY was planned (even if execution was blocked)
@@ -3534,5 +3556,12 @@ def build_session_state_from_outcome(
         f"outcome.facts id={id(outcome.get('facts') if outcome and isinstance(outcome, dict) else None)}, "
         f"outcome.facts['slot_attempts']={outcome.get('facts', {}).get('slot_attempts') if outcome and isinstance(outcome.get('facts'), dict) else None}"
     )
+
+    # Carry conversation memory forward so NLU receives it on the next turn.
+    # _conversation is attached to merged_luma_response by orchestrator after the Luma call.
+    if merged_luma_response and isinstance(merged_luma_response, dict):
+        conv = merged_luma_response.get("_conversation")
+        if conv and isinstance(conv, dict):
+            session_state["conversation"] = conv
 
     return session_state

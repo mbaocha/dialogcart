@@ -9,14 +9,14 @@ import os
 import sys
 from pathlib import Path
 
-from capabilities.adapters.payment import PaymentAdapter
-from capabilities.clients.payment import (
+from extensions.capabilities.adapters.payment import PaymentAdapter
+from extensions.capabilities.clients.payment import (
     MockPaymentClient,
     mark_payment_as_paid,
     reset_payment_store,
 )
-from capabilities.registry import clear_registry, register_adapter
-from capabilities.runner import CapabilityRunner, RunnerResult
+from extensions.capabilities.registry import clear_registry, register_adapter
+from extensions.capabilities.runner import CapabilityRunner, RunnerResult
 
 # Add src/ to Python path (test is in src/capabilities/tests/)
 src_path = Path(__file__).resolve().parent.parent.parent

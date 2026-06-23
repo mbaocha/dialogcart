@@ -1,5 +1,5 @@
 """Config package."""
 
-from . import core, temporal
+from . import booking_id, core, temporal
 
-__all__ = ["core", "temporal"]
+__all__ = ["booking_id", "core", "temporal"]

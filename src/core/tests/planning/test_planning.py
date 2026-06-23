@@ -269,6 +269,16 @@ def assert_turn_expectations(
             if actual_slots[key] != expected_value:
                 return f"Turn {turn_index + 1} slot {key} mismatch: expected {expected_value}, got {actual_slots[key]}"
 
+    for proposal_key in ("date_proposal", "time_proposal"):
+        expected_proposal = expected.get(proposal_key)
+        if expected_proposal is not None:
+            actual_proposal = normalized.get(proposal_key)
+            if actual_proposal != expected_proposal:
+                return (
+                    f"Turn {turn_index + 1} {proposal_key} mismatch: "
+                    f"expected {expected_proposal}, got {actual_proposal}"
+                )
+
     # Assert status if provided
     # Status must match planning contract: NEEDS_CLARIFICATION when missing_slots != [], READY when missing_slots == []
     expected_status = expected.get("status")
@@ -569,10 +579,12 @@ def _test_scenario(
         final_expected = turns[-1].get("expected", {})
         final_missing_slots = final_expected.get("missing_slots", [])
         final_intent = final_expected.get("intent", "")
+        final_status = final_expected.get("status")
 
         # RULE: Session should be cleared when missing_slots is empty for non-durable intents
         # Durable intents preserve session on READY (allows follow-up modifications)
-        if final_missing_slots == []:
+        # HANDLER_DELEGATED turns do not persist session — skip lifecycle check
+        if final_missing_slots == [] and final_status != "HANDLER_DELEGATED":
             session_state = get_session(user_id)
             # Check session intent_name (session stores intent_name, not intent)
             # Also check expected intent from test scenario

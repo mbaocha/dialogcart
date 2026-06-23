@@ -44,6 +44,7 @@ class LumaClient:
         domain: str = "service",
         timezone: str = "UTC",
         tenant_context: Optional[Dict[str, Any]] = None,
+        conversation_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Call Luma /resolve endpoint.
@@ -71,6 +72,8 @@ class LumaClient:
         }
         if tenant_context:
             payload["tenant_context"] = tenant_context
+        if conversation_context:
+            payload["conversation_context"] = conversation_context
 
         try:
             response = self._client.post(url, json=payload)

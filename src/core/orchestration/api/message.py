@@ -23,19 +23,24 @@ from core.orchestration.errors import ContractViolation, UpstreamError
 from core.orchestration.orchestrator import handle_message
 from core.orchestration.session import clear_session, get_session, save_session
 
-# Capability runner (optional - only used when AWAITING_CAPABILITY)
-# This is the SINGLE integration point between core and capabilities.
-# Core never imports adapters or branches on capability names.
+# Extension runners (optional) — single integration point between core and extensions.
+# Core never imports adapters/handlers or branches on their names.
 try:
-    from capabilities.runner import CapabilityRunner
+    from extensions.bootstrap import register_default_extensions
+    from extensions.capabilities.runner import CapabilityRunner
+    from extensions.handlers.runner import HandlerRunner
 
     _capability_runner = CapabilityRunner()
-    _capability_runner_available = True
+    _handler_runner: Optional[HandlerRunner] = HandlerRunner()
+    _extensions_available = True
 except ImportError:
-    # Capabilities module not available - runner will not be used
-    # Removing capabilities restores exact previous behavior (no crashes, no side effects)
+    register_default_extensions = None  # type: ignore[misc, assignment]
     _capability_runner = None
-    _capability_runner_available = False
+    _handler_runner = None
+    _extensions_available = False
+
+_capability_runner_available = _extensions_available
+_handler_runner_available = _extensions_available
 
 # Bootstrap flag to ensure adapters are registered exactly once
 _BOOTSTRAPPED = False
@@ -90,24 +95,15 @@ async def post_message(request: MessageRequest):
     Returns:
         Message response with success status and outcome or error
     """
-    # Bootstrap capability adapters (once per process)
+    # Bootstrap extensions (once per process, org-scoped gate adapters)
     global _BOOTSTRAPPED
-    if not _BOOTSTRAPPED and _capability_runner_available:
+    if not _BOOTSTRAPPED and _extensions_available and register_default_extensions:
         try:
-            from capabilities.bootstrap import register_default_adapters
-
-            register_default_adapters(organization_id=request.organization_id)
+            register_default_extensions(organization_id=request.organization_id)
             _BOOTSTRAPPED = True
-        except ImportError:
-            # Bootstrap module not available - adapters will not be registered
-            # This is fine - runner will passthrough if adapter not found
-            logger.debug(
-                "Capability bootstrap module not available - adapters not registered"
-            )
         except Exception as e:
-            # Bootstrap failed - log but don't crash
             logger.warning(
-                f"Failed to bootstrap capability adapters: {e}. Continuing without capabilities."
+                f"Failed to bootstrap extensions: {e}. Continuing without extensions."
             )
 
     try:
@@ -116,6 +112,8 @@ async def post_message(request: MessageRequest):
 
         # Load session at request start
         session_state = get_session(request.user_id)
+        # Keep the unfiltered session so HANDLER_DELEGATED can preserve booking state
+        _raw_session = session_state
 
         # Explicit session load logging
         logger.info(
@@ -221,6 +219,50 @@ async def post_message(request: MessageRequest):
                     # Re-enter core normally on next turn
                     # Facts are merged into outcome.facts, which will be available
                     # when core runs again (via session merge or direct outcome)
+
+        # Handle HANDLER_DELEGATED — invoke registered intent handler (e.g. RAG)
+        if (
+            outcome
+            and isinstance(outcome, dict)
+            and outcome.get("status") == "HANDLER_DELEGATED"
+            and _handler_runner_available
+            and _handler_runner
+        ):
+            handler_name = outcome.get("active_handler", "")
+            context = {
+                "user_id": request.user_id,
+                "intent_name": outcome.get("intent_name"),
+                "search_query": outcome.get("search_query"),
+                "slots": outcome.get("slots", {}),
+                "session_slots": (_raw_session.get("slots", {}) if _raw_session else {}),
+            }
+            handler_result = _handler_runner.handle(handler_name, context)
+            if handler_result.text:
+                outcome["text"] = handler_result.text
+                result["outcome"] = outcome
+
+            # Update conversation memory and persist, preserving any active booking session.
+            # _raw_session carries the full booking state (if any); update_conversation
+            # copies all its keys and appends this turn to session["conversation"].
+            from core.orchestration.nlu.conversation_memory import update_conversation
+
+            _conv_base = _raw_session or {}
+            _updated_session = update_conversation(
+                _conv_base,
+                user_text=request.text,
+                intent=outcome.get("intent_name", "UNKNOWN"),
+                search_query=outcome.get("search_query"),
+                assistant_text=handler_result.text or None,
+            )
+            save_session(request.user_id, _updated_session)
+            logger.info(
+                "[session] handler_delegated_save",
+                extra={
+                    "user_id": request.user_id,
+                    "handler": handler_name,
+                    "intent": outcome.get("intent_name"),
+                },
+            )
 
         # Handle session persistence after response
         if outcome and isinstance(outcome, dict):

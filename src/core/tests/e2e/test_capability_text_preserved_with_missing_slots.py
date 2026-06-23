@@ -18,9 +18,9 @@ import os
 from datetime import datetime, timezone
 from unittest.mock import Mock
 
-from capabilities.adapters.payment import PaymentAdapter
-from capabilities.clients.payment import MockPaymentClient, reset_payment_store
-from capabilities.registry import clear_registry, register_adapter
+from extensions.capabilities.adapters.payment import PaymentAdapter
+from extensions.capabilities.clients.payment import MockPaymentClient, reset_payment_store
+from extensions.capabilities.registry import clear_registry, register_adapter
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.nlu import LumaClient
 from core.orchestration.orchestrator import handle_message
@@ -111,7 +111,7 @@ def test_capability_text_preserved_when_missing_slots_present():
         # The capability renderer will look for booking_code="BOOK123" from the mock response
         # But the mock's create_payment_intent uses booking_id and stores as "booking_{booking_id}"
         # So we directly add to the payment store with the correct booking_code key
-        from capabilities.clients.payment.mock_payment import _PAYMENT_STATE
+        from extensions.capabilities.clients.payment.mock_payment import _PAYMENT_STATE
 
         booking_code = "BOOK123"  # From mock response booking.code
         _PAYMENT_STATE[booking_code] = {

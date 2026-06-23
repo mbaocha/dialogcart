@@ -21,9 +21,9 @@ import os
 import sys
 from unittest.mock import Mock
 
-from capabilities.adapters.noop import NoopAdapter
-from capabilities.registry import clear_registry, register_adapter
-from capabilities.runner import CapabilityRunner
+from extensions.capabilities.adapters.noop import NoopAdapter
+from extensions.capabilities.registry import clear_registry, register_adapter
+from extensions.capabilities.runner import CapabilityRunner
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.nlu import LumaClient
 from core.orchestration.orchestrator import handle_message

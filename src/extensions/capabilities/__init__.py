@@ -1,15 +1,11 @@
 """
-Capabilities Module
+Capability adapters — multi-turn integrations for AWAITING_CAPABILITY.
 
-Provides adapter interface for external capabilities (payment, KYC, consent, etc.)
-that integrate with DialogCart core via the capability gate mechanism.
-
-Adapters are invoked when core emits AWAITING_CAPABILITY status and operate
-independently of core intent/planning logic.
+Part of extensions.capabilities.
 """
 
 # Optional: Export adapters for convenience
-# Users can import from capabilities.adapters or capabilities
+# Users can import from extensions.capabilities.adapters or extensions.capabilities
 from .adapters import NoopAdapter, PaymentAdapter
 from .base import AdapterResponse, CapabilityAdapter
 

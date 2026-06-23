@@ -30,7 +30,7 @@ TEST_NOW = "2026-01-13T10:00:00Z"
 os.environ["LUMA_TEST_NOW"] = TEST_NOW
 
 
-def call_luma(sentence, booking_mode, user_id=None, aliases=None, options=None):
+def call_luma(sentence, booking_mode, user_id=None, aliases=None, options=None, conversation_context=None):
     """
     Call luma API with the given sentence and booking mode.
 
@@ -78,8 +78,10 @@ def call_luma(sentence, booking_mode, user_id=None, aliases=None, options=None):
         "domain": domain,
         "user_id": user_id,
         "tenant_context": tenant_context,
-        "test_now": TEST_NOW,  # Pass reference date in request payload for deterministic testing
+        "test_now": TEST_NOW,
     }
+    if conversation_context:
+        payload["conversation_context"] = conversation_context
 
     resp = requests.post(API_BASE, json=payload, timeout=30)
     try:
@@ -254,15 +256,15 @@ def test_cases(scenarios_to_run=None):
 
     failures = []
     for i, case in enumerate(scenarios_to_run, start=1):
-        # Get scenario-specific aliases if provided, otherwise use None (default aliases)
         scenario_aliases = case.get("aliases", None)
-        # Get scenario-specific options if provided
         scenario_options = case.get("options", None)
+        scenario_context = case.get("conversation_context", None)
         resp, resp_status, resp_raw = call_luma(
             case["sentence"],
             case["booking_mode"],
             aliases=scenario_aliases,
             options=scenario_options,
+            conversation_context=scenario_context,
         )
         try:
             if resp_status != 200 or resp is None:
@@ -362,16 +364,16 @@ def test_no_canonical_service_id_in_response():
 
 def test_output_independent_of_previous_requests():
     """
-    Invariant test: Assert that Luma output must not depend on previous requests.
+    Invariant test: Without conversation_context, Luma output must not depend on previous requests.
 
-    Luma is stateless - each request is processed independently without any memory
-    or context from previous requests. This test verifies that:
-    1. Same input with same user_id produces identical output regardless of prior requests
-    2. Different inputs with same user_id produce outputs that depend only on the current input
-    3. Fragmentary inputs like "tomorrow" or "at 3pm" without booking verbs return UNKNOWN
-       regardless of any prior requests with the same user_id
+    Luma is stateless by default — each request is processed independently.
+    When conversation_context is explicitly supplied, prior-turn data is intentional
+    and controlled by the caller; this test covers the no-context path only.
 
-    This invariant ensures that Luma never infers intent or facts from previous turns.
+    Verifies:
+    1. Same input + same user_id → identical output regardless of intervening requests.
+    2. Fragmentary inputs without booking verbs → UNKNOWN regardless of prior requests.
+    3. Explicit booking inputs work regardless of prior fragmentary inputs.
     """
     # Use a fixed user_id to test statelessness
     fixed_user_id = f"{USER_ID_PREFIX}stateless_test"
@@ -543,11 +545,13 @@ Examples:
                 single_case = scenarios_to_run[idx - 1]
                 scenario_aliases = single_case.get("aliases", None)
                 scenario_options = single_case.get("options", None)
+                scenario_context = single_case.get("conversation_context", None)
                 single_resp, single_status, single_raw = call_luma(
                     single_case["sentence"],
                     single_case["booking_mode"],
                     aliases=scenario_aliases,
                     options=scenario_options,
+                    conversation_context=scenario_context,
                 )
                 try:
                     if single_status != 200 or single_resp is None:

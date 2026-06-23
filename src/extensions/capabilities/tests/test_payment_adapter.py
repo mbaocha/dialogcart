@@ -9,8 +9,8 @@ import os
 import sys
 from pathlib import Path
 
-from capabilities.adapters.payment import PaymentAdapter
-from capabilities.clients.payment import (
+from extensions.capabilities.adapters.payment import PaymentAdapter
+from extensions.capabilities.clients.payment import (
     MockPaymentClient,
     mark_payment_as_paid,
     reset_payment_store,
@@ -109,7 +109,7 @@ def test_start_creates_payment_intent():
         response = adapter.start(context)
 
         # Assert - verify payment intent was created
-        from capabilities.clients.payment.mock_payment import _PAYMENT_STATE
+        from extensions.capabilities.clients.payment.mock_payment import _PAYMENT_STATE
 
         assert "booking_123" in _PAYMENT_STATE, (
             f"Payment intent should exist for booking_code 'booking_123' after start(). "

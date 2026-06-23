@@ -82,6 +82,7 @@ class TestLumaClient(LumaClient):
         domain: str = "service",
         timezone: str = "UTC",
         tenant_context: Optional[Dict[str, Any]] = None,
+        conversation_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Override resolve to inject test aliases into tenant_context.
@@ -100,6 +101,7 @@ class TestLumaClient(LumaClient):
             domain=domain,
             timezone=timezone,
             tenant_context=merged_tenant_context,
+            conversation_context=conversation_context,
         )
 
         # Store last response for debugging

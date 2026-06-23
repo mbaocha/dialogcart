@@ -617,6 +617,19 @@ def handle_message(
             "plan": plan,
         }
 
+    # HANDLER_DELEGATED: an intent handler (e.g. RAG) will respond — bypass execution path
+    if plan.get("status") == "HANDLER_DELEGATED":
+        hd_outcome = {
+            "status": "HANDLER_DELEGATED",
+            "intent_name": plan.get("intent_name", ""),
+            "active_handler": plan.get("active_handler"),
+            "search_query": plan.get("search_query"),
+            "slots": plan.get("slots", {}),
+            "missing_slots": plan.get("missing_slots", []),
+            "facts": plan.get("facts", {}),
+        }
+        return {"success": True, "outcome": hd_outcome, "result": hd_outcome}
+
     # POLICY-DRIVEN EXECUTION ELIGIBILITY
     # Execution eligibility is driven by action-level policy, not planning completeness
     # - Exploratory actions execute when their action-level required_slots are satisfied
@@ -857,6 +870,19 @@ def handle_message(
             elif not slots.get("organization_id"):
                 # Try to get from env as fallback
                 slots["organization_id"] = _get_org_id_from_env()
+
+            if action == "SEARCH_AVAILABILITY":
+                from core.orchestration.temporal_proposal import (
+                    resolve_execution_proposals,
+                    slots_for_availability_search,
+                )
+
+                _exec_proposals = resolve_execution_proposals(plan, session_state)
+                slots = slots_for_availability_search(
+                    slots,
+                    _exec_proposals["date_proposal"],
+                    _exec_proposals["time_proposal"],
+                )
 
             # Update plan with organization_id
             plan["slots"] = slots
@@ -1163,6 +1189,21 @@ def handle_message(
                                 logger.warning(
                                     f"Failed to persist availability fingerprint to session_store: {e}"
                                 )
+
+                    from core.orchestration.temporal_proposal import (
+                        apply_confirmed_datetime,
+                        resolve_execution_proposals,
+                    )
+
+                    _exec_proposals = resolve_execution_proposals(plan, session_state)
+                    confirmed_slots = apply_confirmed_datetime(
+                        slots,
+                        _exec_proposals["date_proposal"],
+                        _exec_proposals["time_proposal"],
+                    )
+                    slots.clear()
+                    slots.update(confirmed_slots)
+                    plan["slots"] = confirmed_slots
 
                 # Step 1: Capture datetime_range when SEARCH_AVAILABILITY succeeds
                 # Construct datetime_range from date + time if not already present
@@ -1671,6 +1712,13 @@ def handle_message_legacy(
             tenant_context = {"booking_mode": derived_domain}
 
     # Step 2: Call Luma
+    # Build conversation context from session memory for follow-up resolution
+    from core.orchestration.nlu.conversation_memory import (
+        build_conversation_context,
+        update_conversation,
+    )
+    conversation_context = build_conversation_context(session_state)
+
     # Build and log Luma payload
     luma_payload = {
         "user_id": user_id,
@@ -1701,6 +1749,7 @@ def handle_message_legacy(
             domain=derived_domain,
             timezone=timezone,
             tenant_context=tenant_context,
+            conversation_context=conversation_context,
         )
 
         # Store raw response for attachment to effective_response (must be accessible after try block)
@@ -2336,7 +2385,6 @@ def handle_message_legacy(
                         facts_obj,
                         intent_name=effective_intent,
                         source_text=text,
-                        time_constraint=luma_response.get("time_constraint"),
                     )
                     if isinstance(facts_obj, dict)
                     else {}
@@ -2355,19 +2403,32 @@ def handle_message_legacy(
                 # Return informational response (similar to non-core intent handling)
                 # Do NOT persist to session, do NOT plan, do NOT merge
                 # Preserve existing durable session state (do not clear session)
+                from core.routing.handler_router import resolve_handler
+
+                _handler = resolve_handler(effective_intent)
+                _base_outcome = {
+                    "intent_name": effective_intent,
+                    "slots": slots,
+                    "missing_slots": [],
+                    "facts": {
+                        "slots": slots,
+                        "missing_slots": [],
+                        "context": luma_response.get("context", {}),
+                    },
+                }
+                if _handler == "rag":
+                    return {
+                        "success": True,
+                        "outcome": {
+                            **_base_outcome,
+                            "status": "HANDLER_DELEGATED",
+                            "active_handler": _handler,
+                            "search_query": luma_response.get("search_query"),
+                        },
+                    }
                 return {
                     "success": True,
-                    "outcome": {
-                        "status": "NON_DURABLE_INTENT",
-                        "intent_name": effective_intent,
-                        "slots": slots,
-                        "missing_slots": [],  # Non-durable intents don't have required slots
-                        "facts": {
-                            "slots": slots,
-                            "missing_slots": [],
-                            "context": luma_response.get("context", {}),
-                        },
-                    },
+                    "outcome": {**_base_outcome, "status": "NON_DURABLE_INTENT"},
                 }
         except (ImportError, Exception) as e:
             # If durability check fails, log warning but continue (defensive)
@@ -2386,9 +2447,22 @@ def handle_message_legacy(
     # This ensures UNKNOWN intents can be recovered from session when durable
     effective_response["_effective_intent"] = effective_intent or ""
 
+    # Attach updated conversation memory so session_merge can persist it.
+    # Records the effective intent (post-recovery) and search_query for this turn.
+    _updated_session = update_conversation(
+        session_state or {},
+        user_text=text,
+        intent=effective_intent or "UNKNOWN",
+        search_query=luma_response.get("search_query"),
+    )
+    effective_response["_conversation"] = _updated_session.get("conversation")
+
     # FACT-ONLY: Promote facts to slots BEFORE any other processing
     # This ensures facts.service_id, facts.times, etc. are available for planning
-    from core.orchestration.luma_facts_adapter import facts_to_slots
+    from core.orchestration.luma_facts_adapter import (
+        facts_to_slots,
+        merge_promoted_luma_slots,
+    )
 
     facts_obj = luma_response.get("facts", {})
     # Pass effective_intent for date_range promotion (CREATE_RESERVATION with 2+ dates)
@@ -2397,7 +2471,6 @@ def handle_message_legacy(
             facts_obj,
             intent_name=effective_intent,
             source_text=text,
-            time_constraint=luma_response.get("time_constraint"),
         )
         if isinstance(facts_obj, dict)
         else {}
@@ -2413,17 +2486,39 @@ def handle_message_legacy(
         # Legacy format: slots at top level
         nested_slots = luma_response.get("slots", {})
 
-    # Merge promoted slots (from facts.service_id, facts.times, etc.) with nested slots
-    # Promoted slots take precedence (they are the source of truth)
-    effective_response["slots"] = {**nested_slots, **promoted_slots}
+    # Merge promoted slots; strip date keys when Fix 4 applies (flexible + same-turn service)
+    effective_response["slots"] = merge_promoted_luma_slots(
+        nested_slots,
+        promoted_slots,
+        luma_response.get("date_constraint"),
+        facts_obj if isinstance(facts_obj, dict) else None,
+    )
 
     # Preserve the raw user text for follow-up slot promotion
     effective_response["_source_text"] = text
 
-    # Extract time_constraint from luma_response for CREATE_APPOINTMENT missing slot computation
+    # Extract constraints from luma_response for planning
     time_constraint = luma_response.get("time_constraint")
     if time_constraint:
         effective_response["time_constraint"] = time_constraint
+    date_constraint = luma_response.get("date_constraint")
+    if date_constraint:
+        effective_response["date_constraint"] = date_constraint
+
+    from core.orchestration.temporal_proposal import (
+        extract_nlu_proposals,
+        merge_session_proposals,
+    )
+
+    _proposal_session = original_session_state if original_session_state else {}
+    _nlu_proposals = extract_nlu_proposals(luma_response)
+    _merged_proposals = merge_session_proposals(
+        _proposal_session,
+        _nlu_proposals["date_proposal"],
+        _nlu_proposals["time_proposal"],
+    )
+    effective_response["date_proposal"] = _merged_proposals["date_proposal"]
+    effective_response["time_proposal"] = _merged_proposals["time_proposal"]
 
     # Normalize service_id using tenant aliases (e.g., "suite" -> "room", "deluxe" -> "room")
     # CRITICAL: Preserve raw tenant value while storing canonical for planning
@@ -3474,7 +3569,7 @@ def handle_message_legacy(
             if active_capability_value:
                 try:
                     # Try to import capability runner (optional dependency)
-                    from capabilities.runner import CapabilityRunner
+                    from extensions.capabilities.runner import CapabilityRunner
 
                     # Build context for adapter (read-only access to session)
                     # Merge session_state slots/facts with outcome to ensure booking info is available
@@ -3724,7 +3819,7 @@ def handle_message_legacy(
             if active_capability_for_runner:
                 try:
                     # Try to import capability runner (optional dependency)
-                    from capabilities.runner import CapabilityRunner
+                    from extensions.capabilities.runner import CapabilityRunner
 
                     # Build context for adapter (read-only access to session)
                     # Merge session_state slots/facts with outcome_dict to ensure booking info is available
@@ -3904,7 +3999,7 @@ def handle_message_legacy(
                             try:
                                 # Try to access payment store to verify intent exists
                                 # This is a test-time assertion to catch missing payment intents
-                                from capabilities.clients.payment.mock_payment import (
+                                from extensions.capabilities.clients.payment.mock_payment import (
                                     _PAYMENT_STATE,
                                 )
 
@@ -5352,6 +5447,12 @@ def plan_message(
         "_decision": result.get("_decision"),
     }
 
+    # Carry HANDLER_DELEGATED routing fields — stripped by standard planning_result construction
+    if outcome.get("status") == "HANDLER_DELEGATED":
+        for _k in ("active_handler", "search_query"):
+            if outcome.get(_k) is not None:
+                planning_result[_k] = outcome[_k]
+
     # Extract time_constraint from multiple possible sources
     # Priority: 1) effective_response (merged_luma_response), 2) raw_luma_response, 3) outcome.facts.context
     time_constraint = None
@@ -5377,6 +5478,14 @@ def plan_message(
     # Add time_constraint if present
     if time_constraint is not None:
         planning_result["time_constraint"] = time_constraint
+
+    # Propagate proposals from merged response so execution call sites can read them
+    # from plan without relying on session_state being mutated by plan_message.
+    if isinstance(merged_luma_response, dict):
+        for _prop_key in ("date_proposal", "time_proposal"):
+            _prop_val = merged_luma_response.get(_prop_key)
+            if _prop_val is not None:
+                planning_result[_prop_key] = _prop_val
 
     # Preserve rendered clarification text if present
     # Text is injected at top level of result by _inject_rendering_text

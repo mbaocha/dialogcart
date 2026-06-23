@@ -7,6 +7,7 @@ Stage 3 (calendar): ISO-8601 date binding via calendar_binder
 """
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -32,6 +33,193 @@ _DATE_TIME_TOKENS = _WEEKDAYS | _MONTHS | {
     "morning", "afternoon", "evening", "night", "noon", "midnight",
     "am", "pm",
 }
+
+_RELATIVE_DATE_PHRASES = (
+    "today", "tomorrow", "yesterday", "next week", "this weekend", "next weekend",
+    "this friday", "next friday", "this monday", "next monday",
+    "this tuesday", "next tuesday", "this wednesday", "next wednesday",
+    "this thursday", "next thursday", "this saturday", "next saturday",
+    "this sunday", "next sunday",
+)
+
+_MONTH_PATTERN = (
+    r"(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|"
+    r"jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|"
+    r"nov(?:ember)?|dec(?:ember)?)"
+)
+_DATE_SINGLE_RE = re.compile(
+    rf"\b{_MONTH_PATTERN}\s+\d{{1,2}}(?:st|nd|rd|th)?\b",
+    re.IGNORECASE,
+)
+_NUMERIC_DATE_RE = re.compile(r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b")
+_BOOKING_VERB_RE = re.compile(r"\b(?:book|reserve|schedule)\b", re.IGNORECASE)
+_RESERVATION_NOUN_RE = re.compile(
+    r"\b(?:room|suite|accommodation|stay|deluxe|delux)\b", re.IGNORECASE
+)
+
+
+def _text_mentions_date(text: str) -> bool:
+    """True when the utterance explicitly mentions a calendar date (not bare clock time)."""
+    lowered = text.lower()
+    for phrase in _RELATIVE_DATE_PHRASES:
+        if phrase in lowered:
+            return True
+    words = lowered.split()
+    if any(w.strip(".,!?") in _WEEKDAYS for w in words):
+        return True
+    if _DATE_SINGLE_RE.search(lowered):
+        return True
+    if _NUMERIC_DATE_RE.search(lowered):
+        return True
+    if re.search(r"\b(?:next|this|last)\s+\w+\b", lowered):
+        return True
+    return False
+
+
+_FUZZY_TIME_TOKENS = {"morning", "afternoon", "evening", "night"}
+
+# Explicit clock-time patterns: "3pm", "3:30 am", "15:00", "9am"
+_EXPLICIT_CLOCK_RE = re.compile(
+    r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{2}:\d{2}\b",
+    re.IGNORECASE,
+)
+
+
+def _normalize_fuzzy_time(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
+    """Ensure fuzzy time-window tokens (morning/afternoon/evening/night) produce a
+    fuzzy time_constraint and NOT a concrete clock time in facts.times.
+
+    Haiku sometimes emits a concrete time like "20:00" when the user says "evening".
+    That concrete time gets promoted to slots.time and satisfies the time slot too
+    early, causing READY when NEEDS_CLARIFICATION is expected (scenario 21).
+
+    When an explicit clock time is also present ("evening at 7pm"), leave the SLM
+    output unchanged — the clock time takes precedence.
+    """
+    text_lower = text.lower()
+
+    found_token = None
+    for token in _FUZZY_TIME_TOKENS:
+        if re.search(rf"\b{token}s?\b", text_lower):
+            found_token = token
+            break
+
+    if not found_token:
+        return slm
+
+    # Explicit clock time present → let it win; don't override
+    if _EXPLICIT_CLOCK_RE.search(text_lower):
+        return slm
+
+    facts = slm.get("facts") or {}
+    times = list(facts.get("times") or [])
+    tc = slm.get("time_constraint") or {}
+
+    # Already correct: fuzzy with right label and no spurious clock times
+    if (
+        isinstance(tc, dict)
+        and tc.get("mode") == "fuzzy"
+        and tc.get("label") == found_token
+        and not times
+    ):
+        return slm
+
+    try:
+        from .config.temporal import FUZZY_TIME_WINDOWS
+        start, end = FUZZY_TIME_WINDOWS[found_token]
+    except Exception:
+        return slm
+
+    new_tc = {"mode": "fuzzy", "label": found_token, "start": start, "end": end}
+    logger.debug(
+        "_normalize_fuzzy_time: text=%r token=%r cleared_times=%r tc=%r→%r",
+        text,
+        found_token,
+        times,
+        tc,
+        new_tc,
+    )
+    return {
+        **slm,
+        "time_constraint": new_tc,
+        "facts": {**facts, "times": []},
+    }
+
+
+_CANCEL_VERB_RE = re.compile(r"\bcancel\b", re.IGNORECASE)
+_CANCEL_NEGATION_RE = re.compile(
+    r"\b(?:don'?t|do not|not|won'?t|can'?t|cannot|please\s+don'?t|please\s+do\s+not)\s+cancel\b",
+    re.IGNORECASE,
+)
+
+
+def _normalize_cancel_intent(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
+    """Force CANCEL_BOOKING when text contains an unambiguous cancel verb.
+
+    Haiku sometimes misclassifies "nevermind cancel" or "actually cancel it" as UNKNOWN
+    or leaves context from a prior CREATE_APPOINTMENT turn.  A regex override is more
+    reliable for these short pivot utterances.
+
+    Negation guard: "don't cancel", "please do not cancel", etc. pass through unchanged.
+    """
+    if not _CANCEL_VERB_RE.search(text):
+        return slm
+    if _CANCEL_NEGATION_RE.search(text):
+        return slm
+    current_intent = slm.get("intent", "UNKNOWN")
+    if current_intent == "CANCEL_BOOKING":
+        return slm
+    logger.debug(
+        "_normalize_cancel_intent: text=%r intent=%r→CANCEL_BOOKING",
+        text, current_intent,
+    )
+    return {**slm, "intent": "CANCEL_BOOKING"}
+
+
+def _strip_unmentioned_dates(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove dates Haiku invented when the user only mentioned a clock time."""
+    if _text_mentions_date(text):
+        return slm
+    facts = slm.get("facts", {})
+    if not facts.get("dates") and not facts.get("date_time_pairs"):
+        return slm
+    logger.debug(
+        "Stripping unmentioned dates from SLM output for text=%r dates=%r pairs=%r",
+        text,
+        facts.get("dates"),
+        facts.get("date_time_pairs"),
+    )
+    return {
+        **slm,
+        "facts": {
+            **facts,
+            "dates": [],
+            "date_time_pairs": [],
+        },
+    }
+
+
+def _apply_booking_mode_intent(
+    text: str, slm: Dict[str, Any], tenant_context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Upgrade reservation intents when booking_mode=reservation and verb is present."""
+    if tenant_context.get("booking_mode") != "reservation":
+        return slm
+    intent = slm.get("intent", "UNKNOWN")
+    if intent not in ("UNKNOWN", "CREATE_APPOINTMENT"):
+        return slm
+    if not _BOOKING_VERB_RE.search(text):
+        return slm
+    facts = slm.get("facts", {})
+    has_service = facts.get("service_id") is not None
+    if has_service or _RESERVATION_NOUN_RE.search(text):
+        logger.debug(
+            "Promoting intent %r → CREATE_RESERVATION for reservation booking_mode text=%r",
+            intent,
+            text,
+        )
+        return {**slm, "intent": "CREATE_RESERVATION"}
+    return slm
 
 
 def _resolve_alias_ambiguity(
@@ -93,6 +281,98 @@ def _resolve_alias_ambiguity(
     return top_keys[0]
 
 
+_BOOKING_ID_EXPLICIT_RE = re.compile(
+    r'(?:'
+    r'#\s*\w+'
+    r'|(?:booking|reservation)\s*(?:id|ref|reference|number|code)[\s:#]'
+    r'|(?:id|ref|reference|number|code)\s*[:#]\s*\w+'
+    r')',
+    re.IGNORECASE,
+)
+
+_BOOKING_ID_LABELLED_RE = re.compile(
+    r'(?:booking|reservation)\s+([\w-]+)',
+    re.IGNORECASE,
+)
+
+
+def _booking_id_allowed_in_context(text: str, booking_id: str) -> bool:
+    """True when the utterance clearly presents *booking_id* as a reference token."""
+    bid = str(booking_id).strip()
+    if not bid:
+        return False
+    stripped = text.strip()
+    if stripped.lower() == bid.lower():
+        return True
+    if _BOOKING_ID_EXPLICIT_RE.search(text):
+        return True
+    for match in _BOOKING_ID_LABELLED_RE.finditer(text):
+        if match.group(1).strip().lower() == bid.lower():
+            return True
+    return False
+
+
+def _normalize_booking_id(
+    text: str,
+    slm: Dict[str, Any],
+    tenant_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Validate and normalize booking_id using tenant-aware regex + phrase gates.
+
+    Haiku may propose a booking_id; the pipeline is authoritative:
+      1. Regex-scan raw text for ID-shaped tokens (global default, tenant override).
+      2. Prefer the scanned token when present; otherwise keep Haiku's value if valid.
+      3. Emit booking_id only when the phrase context allows it:
+         - standalone ID reply, explicit anchor (#, "booking id:"), or
+         - "booking/reservation <ID>" when <ID> matches the format.
+    """
+    from .config.booking_id import (
+        get_booking_id_settings,
+        is_valid_booking_id,
+        scan_booking_id_from_text,
+    )
+
+    facts = slm.get("facts", {}) or {}
+    validate_re, scan_re, _ = get_booking_id_settings(tenant_context)
+
+    haiku_id = facts.get("booking_id")
+    scanned_id = scan_booking_id_from_text(text, validate_re, scan_re)
+
+    candidate: Optional[str] = None
+    if scanned_id:
+        candidate = scanned_id
+    elif haiku_id and is_valid_booking_id(str(haiku_id), validate_re):
+        candidate = str(haiku_id).strip()
+
+    if not candidate:
+        if haiku_id:
+            logger.debug(
+                "_normalize_booking_id: dropping invalid booking_id=%r text=%r",
+                haiku_id,
+                text,
+            )
+            return {**slm, "facts": {**facts, "booking_id": None}}
+        return slm
+
+    if not _booking_id_allowed_in_context(text, candidate):
+        logger.debug(
+            "_normalize_booking_id: dropping booking_id=%r (format ok, phrase not allowed) text=%r",
+            candidate,
+            text,
+        )
+        return {**slm, "facts": {**facts, "booking_id": None}}
+
+    if candidate != haiku_id:
+        logger.debug(
+            "_normalize_booking_id: setting booking_id=%r (scanned=%r haiku=%r) text=%r",
+            candidate,
+            scanned_id,
+            haiku_id,
+            text,
+        )
+    return {**slm, "facts": {**facts, "booking_id": candidate}}
+
+
 def _resolve_now(request_now: str = None) -> str:
     """Resolve reference datetime: request field → env var → wall clock."""
     if request_now:
@@ -110,6 +390,7 @@ class PipelineResult:
     facts: Dict[str, Any] = field(default_factory=dict)
     time_constraint: Optional[Dict[str, Any]] = None
     search_query: Optional[str] = None
+    date_constraint: Optional[Dict[str, Any]] = None
 
 
 class _SemanticResultAdapter:
@@ -169,9 +450,21 @@ class NLUPipeline:
     def __init__(self):
         self._extractor = HaikuExtractor()
 
-    def run(self, text: str, tenant_context: Dict[str, Any], now: str = None, timezone: str = "UTC") -> PipelineResult:
+    def run(
+        self,
+        text: str,
+        tenant_context: Dict[str, Any],
+        now: str = None,
+        timezone: str = "UTC",
+        conversation_context: Optional[Dict[str, Any]] = None,
+    ) -> PipelineResult:
         now = _resolve_now(now)
-        slm = self._slm_extract(text, tenant_context, now)
+        slm = self._slm_extract(text, tenant_context, now, conversation_context=conversation_context)
+        slm = _strip_unmentioned_dates(text, slm)
+        slm = _normalize_fuzzy_time(text, slm)
+        slm = _normalize_cancel_intent(text, slm)
+        slm = _normalize_booking_id(text, slm, tenant_context)
+        slm = _apply_booking_mode_intent(text, slm, tenant_context)
         slm = self._correct_bare_weekday_dates(text, slm)
         slm = self._resolve_service_ambiguity(text, slm, tenant_context)
         return self._bind_calendar(slm, tenant_context, now, timezone)
@@ -214,8 +507,14 @@ class NLUPipeline:
             return {**slm, "facts": {**facts, "service_id": resolved}}
         return slm
 
-    def _slm_extract(self, text: str, tenant_context: Dict[str, Any], now: str) -> Dict[str, Any]:
-        return self._extractor.extract(text, tenant_context, now)
+    def _slm_extract(
+        self,
+        text: str,
+        tenant_context: Dict[str, Any],
+        now: str,
+        conversation_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        return self._extractor.extract(text, tenant_context, now, conversation_context=conversation_context)
 
     def _bind_calendar(
         self, decision: Dict[str, Any], tenant_context: Dict[str, Any], now: str, timezone: str = "UTC"
@@ -284,9 +583,25 @@ class NLUPipeline:
         if not binder_resolved and len(bound_dates) > 2 and date_mode == "range":
             bound_dates = [bound_dates[0], bound_dates[-1]]
 
+        # Fix 2: propagate the binder-resolved ISO date back into date_time_pairs so
+        # facts_to_slots sees the canonical date rather than the raw phrase ("tomorrow",
+        # "friday") which would overwrite the ISO date already set from facts.dates[0].
+        updated_dt_pairs = facts.get("date_time_pairs", [])
+        if binder_resolved and bound_dates and isinstance(updated_dt_pairs, list) and updated_dt_pairs:
+            iso_date = bound_dates[0]
+            updated_dt_pairs = [
+                {**pair, "date": iso_date} if isinstance(pair, dict) and "date" in pair else pair
+                for pair in updated_dt_pairs
+            ]
+
+        # Fix 4: signal flexible/ambiguous date ranges so Core can withhold date slot
+        # satisfaction for combined first-turn utterances like "book facial next week".
+        date_constraint = {"mode": date_mode} if date_mode == "flexible" else None
+
         return PipelineResult(
             intent={"name": intent, "confidence": confidence},
-            facts={**facts, "dates": bound_dates},
+            facts={**facts, "dates": bound_dates, "date_time_pairs": updated_dt_pairs},
             time_constraint=_enrich_time_constraint(tc),
             search_query=search_query,
+            date_constraint=date_constraint,
         )

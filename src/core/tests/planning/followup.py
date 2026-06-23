@@ -50,7 +50,8 @@ followup_scenarios = [
                     "status": "NEEDS_CLARIFICATION",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "haircut", "date": "2026-01-14"},
+                    "slots": {"service_id": "haircut"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-14"},
                 },
             },
             {
@@ -59,11 +60,9 @@ followup_scenarios = [
                     "status": "READY",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {
-                        "service_id": "haircut",
-                        "date": "2026-01-14",
-                        "time": "11am",
-                    },
+                    "slots": {"service_id": "haircut"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-14"},
+                    "time_proposal": {"mode": "exact", "value": "11:00"},
                 },
             },
         ],
@@ -90,7 +89,8 @@ followup_scenarios = [
                     "status": "NEEDS_CLARIFICATION",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "massage", "date": "2026-01-16"},
+                    "slots": {"service_id": "massage"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-16"},
                 },
             },
             {
@@ -99,11 +99,9 @@ followup_scenarios = [
                     "status": "READY",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {
-                        "service_id": "massage",
-                        "date": "2026-01-16",
-                        "time": "3pm",
-                    },
+                    "slots": {"service_id": "massage"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-16"},
+                    "time_proposal": {"mode": "exact", "value": "15:00"},
                 },
             },
         ],
@@ -131,7 +129,8 @@ followup_scenarios = [
                     "status": "NEEDS_CLARIFICATION",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
-                    "slots": {"service_id": "facial", "date": "2026-01-19"},
+                    "slots": {"service_id": "facial"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-19"},
                 },
             },
             {
@@ -140,11 +139,9 @@ followup_scenarios = [
                     "status": "READY",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {
-                        "service_id": "facial",
-                        "date": "2026-01-19",
-                        "time": "10am",
-                    },
+                    "slots": {"service_id": "facial"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-19"},
+                    "time_proposal": {"mode": "exact", "value": "10:00"},
                 },
             },
         ],
@@ -165,6 +162,7 @@ followup_scenarios = [
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date"],
                     "slots": {"service_id": "massage"},
+                    "time_proposal": {"mode": "exact", "value": "14:00"},
                 },
             },
             {
@@ -173,7 +171,9 @@ followup_scenarios = [
                     "status": "READY",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {"service_id": "massage", "date": "2026-01-14"},
+                    "slots": {"service_id": "massage"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-14"},
+                    "time_proposal": {"mode": "exact", "value": "14:00"},
                 },
             },
         ],
@@ -192,6 +192,7 @@ followup_scenarios = [
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["date"],
                     "slots": {"service_id": "haircut"},
+                    "time_proposal": {"mode": "exact", "value": "10:00"},
                 },
             },
             {
@@ -200,7 +201,9 @@ followup_scenarios = [
                     "status": "READY",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {"service_id": "haircut", "date": "2026-01-16"},
+                    "slots": {"service_id": "haircut"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-16"},
+                    "time_proposal": {"mode": "exact", "value": "10:00"},
                 },
             },
         ],
@@ -229,13 +232,11 @@ followup_scenarios = [
                     "status": "NEEDS_CLARIFICATION",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
-                    # Date ranges (e.g., "next week") now satisfy the date slot for CREATE_APPOINTMENT.
-                    # Core promotes date ranges to both date_range (authoritative) and date (for planning compatibility).
-                    # The date slot is considered satisfied when a date_range is present.
-                    "slots": {
-                        "service_id": "facial",
-                        "date_range": {"start": "2026-01-19", "end": "2026-01-25"},
-                        "date": "2026-01-19",
+                    "slots": {"service_id": "facial"},
+                    "date_proposal": {
+                        "mode": "flexible",
+                        "start": "2026-01-19",
+                        "end": "2026-01-25",
                     },
                 },
             },
@@ -245,14 +246,17 @@ followup_scenarios = [
                     "status": "READY",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    # Bounded fuzzy times (e.g., "afternoon" with start and end) satisfy the time slot.
-                    # Date range from turn 2 persists in session and satisfies the date slot.
-                    # Both date and time are now satisfied, so status is READY.
-                    "slots": {
-                        "service_id": "facial",
-                        "date_range": {"start": "2026-01-19", "end": "2026-01-25"},
-                        "date": "2026-01-19",
-                        "time": "afternoon",
+                    "slots": {"service_id": "facial"},
+                    "date_proposal": {
+                        "mode": "flexible",
+                        "start": "2026-01-19",
+                        "end": "2026-01-25",
+                    },
+                    "time_proposal": {
+                        "mode": "fuzzy",
+                        "label": "afternoon",
+                        "start": "12:00",
+                        "end": "16:59",
                     },
                 },
             },
@@ -272,7 +276,9 @@ followup_scenarios = [
                     "status": "READY",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {"service_id": "massage", "date": "2026-01-14"},
+                    "slots": {"service_id": "massage"},
+                    "date_proposal": {"mode": "single_day", "start": "2026-01-14"},
+                    "time_proposal": {"mode": "exact", "value": "15:00"},
                 },
             }
         ],
@@ -337,7 +343,12 @@ followup_scenarios = [
                     "status": "READY",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": [],
-                    "slots": {"service_id": "room", "date_range": "march 10 to 15"},
+                    "slots": {"service_id": "room"},
+                    "date_proposal": {
+                        "mode": "range",
+                        "start": "2026-03-10",
+                        "end": "2026-03-15",
+                    },
                 },
             },
         ],
@@ -427,10 +438,10 @@ followup_scenarios = [
             },
         ],
     },
-    # No slot inference guarantees (IDs 36-45)
+    # Booking ID format extraction (IDs 36-45)
     {
         "id": 36,
-        "name": "booking_id_not_inferred",
+        "name": "booking_id_format_extracted",
         "domain": "service",
         "aliases": {"haircut": "haircut"},
         "turns": [
@@ -447,10 +458,10 @@ followup_scenarios = [
             {
                 "sentence": "booking abc123",
                 "expected": {
-                    "status": "NEEDS_CLARIFICATION",
+                    "status": "READY",
                     "plan": {"stage": "IDENTIFY", "action": "FETCH_BOOKING"},
-                    "missing_slots": ["booking_id"],
-                    "slots": {},
+                    "missing_slots": [],
+                    "slots": {"booking_id": "abc123"},
                 },
             },
         ],
@@ -568,13 +579,11 @@ followup_scenarios = [
                     "status": "NEEDS_CLARIFICATION",
                     "plan": {"stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
                     "missing_slots": ["time"],
-                    # Date ranges (e.g., "from nov 1st to nov 5th") now satisfy the date slot for CREATE_APPOINTMENT.
-                    # Core promotes date ranges to both date_range (authoritative) and date (for planning compatibility).
-                    # The date slot is considered satisfied when a date_range is present.
-                    "slots": {
-                        "service_id": "haircut",
-                        "date_range": {"start": "2026-11-01", "end": "2026-11-05"},
-                        "date": "2026-11-01",
+                    "slots": {"service_id": "haircut"},
+                    "date_proposal": {
+                        "mode": "range",
+                        "start": "2026-11-01",
+                        "end": "2026-11-05",
                     },
                 },
             },

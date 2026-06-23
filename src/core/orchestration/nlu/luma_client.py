@@ -45,6 +45,7 @@ class LumaClient:
         domain: str = "service",
         timezone: str = "UTC",
         tenant_context: Optional[Dict[str, Any]] = None,
+        conversation_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Call Luma /resolve endpoint for semantic understanding.
@@ -55,6 +56,7 @@ class LumaClient:
             domain: Domain (optional, default: "service")
             timezone: Timezone (optional, default: "UTC")
             tenant_context: Optional tenant context with aliases (optional)
+            conversation_context: Optional prior-turn context for follow-up resolution (optional)
 
         Returns:
             Luma response dictionary with intent and extracted entities
@@ -72,6 +74,8 @@ class LumaClient:
         }
         if tenant_context:
             payload["tenant_context"] = tenant_context
+        if conversation_context:
+            payload["conversation_context"] = conversation_context
 
         try:
             response = self._client.post(url, json=payload)

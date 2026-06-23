@@ -13,8 +13,8 @@ from unittest.mock import Mock, patch
 src_path = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(src_path))
 
-from capabilities.registry import clear_registry, get_adapter
-from capabilities.runner import CapabilityRunner
+from extensions.capabilities.registry import clear_registry, get_adapter
+from extensions.capabilities.runner import CapabilityRunner
 from core.orchestration.api.message import MessageRequest, post_message
 
 
@@ -110,7 +110,7 @@ def test_bootstrap_only_runs_once():
     # Simulate first call (would trigger bootstrap)
     # In real usage, this happens in post_message
     try:
-        from capabilities.bootstrap import register_default_adapters
+        from extensions.capabilities.bootstrap import register_default_adapters
 
         register_default_adapters(organization_id=1)
 
