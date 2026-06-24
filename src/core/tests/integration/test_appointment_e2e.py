@@ -1,7 +1,11 @@
 """
 End-to-End Conversational Test
 
-Tests the full lifecycle: orchestration → routing → execution → rendering.
+DEPRECATED for new scenarios: use core/tests/planning (planning-only) or
+core/tests/execution (mock booking) or core/tests/smoke (RUN_REAL_LUMA_E2E).
+
+Shared test clients live in core.tests.harness; this module re-exports them
+for backward compatibility and retains the CLI booking scenario runner.
 
 This test exercises:
 - Real handle_message entrypoint
@@ -36,9 +40,9 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from core.orchestration.clients.catalog_client import CatalogClient
-from core.orchestration.nlu import LumaClient
 from core.orchestration.orchestrator import handle_message
+from core.tests.harness.clients import TestCatalogClient, TestLumaClient
+from core.tests.harness.org_setup import get_customer_details, setup_test_org_domain
 from core.routing.execution.test_backend import TestExecutionBackend
 from core.tests.integration.booking_scenarios import (
     STATUS_AWAITING_CONFIRMATION,
@@ -120,138 +124,8 @@ except Exception as e:
     print(f"Error loading .env files: {e}")
 
 
-def get_customer_details() -> Dict[str, Optional[Any]]:
-    """Load customer details from environment variables."""
-    phone_number = os.getenv("TEST_CUSTOMER_PHONE")
-    email = os.getenv("TEST_CUSTOMER_EMAIL")
-    customer_id_str = os.getenv("TEST_CUSTOMER_ID")
-    customer_id = int(customer_id_str) if customer_id_str else None
-
-    return {"phone_number": phone_number, "email": email, "customer_id": customer_id}
-
-
-class TestLumaClient(LumaClient):  # noqa: N801
-    __test__ = False  # Not a pytest test class
-    """Custom LumaClient that injects tenant_context from test aliases."""
-
-    def __init__(self, test_aliases: Optional[Dict[str, str]] = None):
-        """Initialize with test aliases to inject."""
-        super().__init__()
-        self.test_aliases = test_aliases or {}
-        self.last_response: Optional[Dict[str, Any]] = None
-
-    def resolve(
-        self,
-        user_id: str,
-        text: str,
-        domain: str = "service",
-        timezone: str = "UTC",
-        tenant_context: Optional[Dict[str, Any]] = None,
-        conversation_context: Optional[Dict[str, Any]] = None,
-    ) -> Dict[str, Any]:
-        """
-        Override resolve to inject test aliases into tenant_context.
-
-        Test aliases are merged into tenant_context, preserving other fields like booking_mode.
-        """
-        # Merge test aliases into tenant_context, preserving existing fields (e.g., booking_mode)
-        if self.test_aliases:
-            if tenant_context is None:
-                tenant_context = {}
-            # Merge aliases, but preserve other fields like booking_mode
-            tenant_context = {**tenant_context, "aliases": self.test_aliases}
-
-        response = super().resolve(
-            user_id,
-            text,
-            domain,
-            timezone,
-            tenant_context,
-            conversation_context=conversation_context,
-        )
-        self.last_response = response  # Store for test access
-        return response
-
-
-class TestCatalogClient(CatalogClient):  # noqa: N801
-    __test__ = False  # Not a pytest test class
-    """Custom CatalogClient that returns test aliases as catalog data."""
-
-    def __init__(
-        self, test_aliases: Optional[Dict[str, str]] = None, domain: str = "service"
-    ):
-        """
-        Initialize with test aliases to return as catalog data.
-
-        Args:
-            test_aliases: Dict mapping alias names to canonical keys
-            domain: Domain type ("service" or "reservation")
-        """
-        super().__init__()
-        self.test_aliases = test_aliases or {}
-        self.domain = domain
-
-    def get_services(self, organization_id: int) -> Dict[str, Any]:
-        """Return test services matching test aliases."""
-        services = []
-        for alias_name, canonical_key in self.test_aliases.items():
-            services.append(
-                {
-                    "name": alias_name,
-                    "canonical": canonical_key,
-                    "service_family_id": canonical_key,
-                    "is_active": True,
-                }
-            )
-        return {
-            "catalog_last_updated_at": "2026-01-01T00:00:00Z",
-            "business_category_id": 1,
-            "services": services,
-        }
-
-    def get_reservation(self, organization_id: int) -> Dict[str, Any]:
-        """Return test rooms matching test aliases."""
-        rooms = []
-        for alias_name, canonical_key in self.test_aliases.items():
-            rooms.append(
-                {
-                    "name": alias_name,
-                    "canonical_key": canonical_key,
-                    "canonical": canonical_key,
-                    "is_active": True,
-                }
-            )
-        return {
-            "catalog_last_updated_at": "2026-01-01T00:00:00Z",
-            "business_category_id": 2,
-            "room_types": rooms,  # catalog_cache will also add "rooms" alias
-            "extras": [],
-        }
-
-
-def _setup_test_org_domain(domain: str):
-    """
-    Set up org domain cache for testing.
-
-    This pre-populates the cache so the orchestrator uses the correct domain
-    instead of deriving it from organization details.
-
-    Args:
-        domain: Domain to set ("service" or "reservation")
-    """
-    from core.orchestration.cache.org_domain_cache import org_domain_cache
-
-    # Map domain to businessCategoryId
-    # Based on org_domain_cache.py:
-    # SERVICE_CATEGORY_IDS = {1, "beauty_and_wellness"}
-    # RESERVATION_CATEGORY_IDS = {2, "lodging", "hotel", "hospitality"}
-    business_category_id = 1 if domain == "service" else 2
-
-    # Pre-populate cache with test domain
-    test_org_id = int(os.getenv("ORG_ID", "1"))
-    org_domain_cache._mem_set(
-        test_org_id, {"domain": domain, "businessCategoryId": business_category_id}
-    )
+# Backward-compatible alias (planning and legacy tests import this name)
+_setup_test_org_domain = setup_test_org_domain
 
 
 def _validate_rendered_response(
@@ -406,7 +280,7 @@ def run_scenario_e2e(
 
     # Set up org domain cache to use the scenario's domain
     # This ensures the orchestrator uses the correct domain instead of deriving from org
-    _setup_test_org_domain(domain)
+    setup_test_org_domain(domain)
 
     # Clear catalog cache to ensure fresh data from TestCatalogClient
     from core.orchestration.cache.catalog_cache import catalog_cache

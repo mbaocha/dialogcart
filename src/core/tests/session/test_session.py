@@ -23,12 +23,8 @@ from core.orchestration.api.session_merge import build_session_state_from_outcom
 from core.orchestration.cache.catalog_cache import catalog_cache
 from core.orchestration.orchestrator import handle_message
 from core.orchestration.session import clear_session, get_session, save_session
-from core.tests.integration.test_appointment_e2e import (
-    TestCatalogClient,
-    TestLumaClient,
-    _setup_test_org_domain,
-    get_customer_details,
-)
+from core.tests.harness.clients import TestCatalogClient, TestLumaClient
+from core.tests.harness.org_setup import get_customer_details, setup_test_org_domain
 from core.tests.planning.followup import followup_scenarios
 from core.tests.planning.test_planning_edges import planning_edges_scenarios
 
@@ -355,7 +351,7 @@ def run_scenario_test(
     catalog_client = TestCatalogClient(test_aliases=aliases, domain=domain)
 
     # Set up org domain cache
-    _setup_test_org_domain(domain)
+    setup_test_org_domain(domain)
 
     # Clear catalog cache
     test_org_id = int(os.getenv("ORG_ID", "1"))

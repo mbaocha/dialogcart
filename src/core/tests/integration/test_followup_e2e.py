@@ -1,6 +1,9 @@
 """
 End-to-End Followup Conversation Test
 
+DEPRECATED: Multi-turn planning scenarios are covered by core/tests/planning.
+Use core/tests/integration/test_appointment_e2e only for legacy booking_scenarios CLI.
+
 Tests multi-turn conversations with shared user_id to verify conversational continuity.
 
 This test exercises:
@@ -46,13 +49,9 @@ from core.tests.integration.booking_scenarios import (
     STATUS_NEEDS_CLARIFICATION,
 )
 from core.tests.integration.followup_scenarios import core_followup_scenarios
-from core.tests.integration.test_appointment_e2e import (
-    TestCatalogClient,
-    TestLumaClient,
-    _setup_test_org_domain,
-    _validate_rendered_response,
-    get_customer_details,
-)
+from core.tests.harness.clients import TestCatalogClient, TestLumaClient
+from core.tests.harness.org_setup import get_customer_details, setup_test_org_domain
+from core.tests.integration.test_appointment_e2e import _validate_rendered_response
 
 # Set execution mode to test for deterministic E2E tests
 os.environ["CORE_EXECUTION_MODE"] = "test"
@@ -153,7 +152,7 @@ def run_followup_scenario_e2e(
     catalog_client = TestCatalogClient(test_aliases=aliases, domain=domain)
 
     # Set up org domain cache to use the scenario's domain
-    _setup_test_org_domain(domain)
+    setup_test_org_domain(domain)
 
     # Clear catalog cache to ensure fresh data from TestCatalogClient
     from core.orchestration.cache.catalog_cache import catalog_cache

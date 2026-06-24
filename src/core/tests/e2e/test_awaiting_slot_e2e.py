@@ -48,12 +48,8 @@ from core.orchestration.orchestrator import handle_message
 from core.orchestration.session import clear_session, get_session, save_session
 
 # Import after path setup
-from core.tests.integration.test_appointment_e2e import (
-    TestCatalogClient,
-    TestLumaClient,
-    _setup_test_org_domain,
-    get_customer_details,
-)
+from core.tests.harness.clients import TestCatalogClient, TestLumaClient
+from core.tests.harness.org_setup import get_customer_details, setup_test_org_domain
 
 
 def test_e2e_awaiting_slot_soft_guided_flow():
@@ -81,7 +77,7 @@ def test_e2e_awaiting_slot_soft_guided_flow():
     catalog_client = TestCatalogClient(test_aliases=aliases, domain=domain)
 
     # Set up org domain cache
-    _setup_test_org_domain(domain)
+    setup_test_org_domain(domain)
 
     # Get customer details
     customer_details = get_customer_details()

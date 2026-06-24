@@ -11,6 +11,8 @@ Usage:
     # Run specific category
     python core/tests/test.py --category orchestration
     python core/tests/test.py --category planning
+    python core/tests/test.py --category execution
+    python core/tests/test.py --category smoke
     python core/tests/test.py --category e2e
 
     # Run with pytest options
@@ -54,11 +56,12 @@ TEST_CATEGORIES = {
     "all": "core/tests",
     "orchestration": "core/tests/orchestration",
     "planning": "core/tests/planning",
+    "execution": "core/tests/execution",
+    "smoke": "core/tests/smoke",
     "e2e": "core/tests/e2e",
     "integration": "core/tests/integration",
-    "execution": "core/tests/execution",
-    "session": "core/tests/session",
     "workflows": "core/tests/workflows",
+    "session": "core/tests/session",
     "intents": "core/tests/intents",
     "rendering": "core/tests/rendering",
 }
@@ -157,8 +160,17 @@ Examples:
   # Run specific test by name
   python core/tests/test.py --category planning -- -k scenario4
 
-  # Run E2E tests with real Luma
-  RUN_REAL_LUMA_E2E=true python core/tests/test.py --category e2e
+  # Run planning (requires Luma for 29 scenario tests)
+  python core/tests/test.py --category planning
+
+  # Run mock-booking execution tier (requires Luma)
+  python core/tests/test.py --category execution
+
+  # Run unified smoke YAML scenarios
+  RUN_REAL_LUMA_E2E=true python core/tests/test.py --category smoke
+
+  # Run legacy e2e folder
+  python core/tests/test.py --category e2e
 
   # Run rendering tests
   python core/tests/test.py --category rendering

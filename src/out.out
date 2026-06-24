@@ -11,7 +11,7 @@ core/tests/planning/test_confirm_continuation_hardening.py .......       [ 26%]
 core/tests/planning/test_planning.py .............................       [ 70%]
 core/tests/planning/test_policy_invariants.py ...................        [100%]
 
-============================= 65 passed in 10.43s ==============================
+============================== 65 passed in 8.62s ==============================
 ================================================================================
 Running tests: planning
 Path: core/tests/planning
