@@ -178,11 +178,16 @@ def expand_slots_for_planning(
         elif start:
             expanded["date"] = start
 
-    if time_proposal and not expanded.get("time"):
+    if time_proposal:
         if time_proposal.get("mode") == "exact" and time_proposal.get("value"):
+            # Exact time from this turn overrides stale session time (e.g. 2pm → 3pm,
+            # or fuzzy label "afternoon" → 14:00 after clarification).
             expanded["time"] = time_proposal["value"]
-        elif time_proposal.get("mode") == "fuzzy" and time_proposal.get("label"):
-            expanded["time"] = time_proposal["label"]
+        elif not expanded.get("time"):
+            # Fuzzy time (mode=fuzzy, window, etc.) does NOT satisfy the time planning
+            # requirement — consistent with apply_time_constraint_to_missing_slots which
+            # also requires mode=exact before removing "time" from missing_slots.
+            pass
 
     # CREATE_APPOINTMENT exact time_constraint (legacy path)
     if (
@@ -204,6 +209,25 @@ def expand_slots_for_planning(
     return expanded
 
 
+def proposal_satisfies_planning_time(
+    time_proposal: Optional[Dict[str, Any]],
+) -> bool:
+    """True when time_proposal satisfies the planning-time requirement for missing_slots.
+
+    Exact proposals always satisfy.  Bounded fuzzy windows (start + end) satisfy
+    planning without promoting the fuzzy label into confirmed slots.time.
+    """
+    if not isinstance(time_proposal, dict):
+        return False
+    if time_proposal.get("mode") == "exact" and time_proposal.get("value"):
+        return True
+    if time_proposal.get("mode") == "fuzzy":
+        start = time_proposal.get("start")
+        end = time_proposal.get("end")
+        return bool(start and end)
+    return False
+
+
 def apply_confirmed_datetime(
     slots: Dict[str, Any],
     date_proposal: Optional[Dict[str, Any]] = None,
@@ -223,10 +247,14 @@ def apply_confirmed_datetime(
         elif start:
             confirmed["date"] = start
     if time_proposal:
+        # Only exact times become confirmed slots; fuzzy windows stay proposals until
+        # the user supplies an exact time (matches expand_slots_for_planning).
         if time_proposal.get("mode") == "exact" and time_proposal.get("value"):
             confirmed["time"] = time_proposal["value"]
-        elif time_proposal.get("mode") == "fuzzy" and time_proposal.get("label"):
-            confirmed["time"] = time_proposal["label"]
+        elif time_proposal.get("mode") == "fuzzy":
+            # slots_for_availability_search may inject fuzzy labels for the API call;
+            # they must not survive as confirmed slots.time in session.
+            confirmed.pop("time", None)
     return confirmed
 
 

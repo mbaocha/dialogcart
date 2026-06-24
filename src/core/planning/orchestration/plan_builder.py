@@ -766,6 +766,7 @@ def build_decision_plan(
         "blocked_actions": blocked_actions,
         "awaiting": awaiting,
         "executable_actions": executable_actions,
+        "missing_slots": missing_slots,
     }
 
     # CRITICAL: Preserve active_capability if it was already set (from capability gating or previous planning)

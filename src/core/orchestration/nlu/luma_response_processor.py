@@ -973,15 +973,19 @@ def process_luma_response(
         else {}
     )
 
-    # Extract slots from facts.facts.slots if present (nested format)
-    # Otherwise fall back to legacy slots field
-    nested_slots = {}
+    # Merge session-merged top-level slots with nested facts.slots.
+    # merge_luma_with_session writes durable slots (e.g. date from UNKNOWN → booking
+    # materialization) to luma_response["slots"]; facts.slots is often partial
+    # (current-turn service_id only) and must not drop prior-turn slots.
+    merged_authoritative_slots = luma_response.get("slots") or {}
+    if not isinstance(merged_authoritative_slots, dict):
+        merged_authoritative_slots = {}
+    nested_from_facts: Dict[str, Any] = {}
     if isinstance(facts_obj, dict) and "slots" in facts_obj:
-        # Nested format: facts.facts.slots
-        nested_slots = facts_obj.get("slots", {})
-    else:
-        # Legacy format: slots at top level
-        nested_slots = luma_response.get("slots", {})
+        nested_from_facts = facts_obj.get("slots") or {}
+        if not isinstance(nested_from_facts, dict):
+            nested_from_facts = {}
+    nested_slots = {**nested_from_facts, **merged_authoritative_slots}
 
     # Merge promoted slots (from facts.service_id, facts.times, etc.) with nested slots
     # Promoted slots take precedence (they are the source of truth)
@@ -1118,18 +1122,12 @@ def process_luma_response(
         # For bounded fuzzy/window modes, a concrete time slot is REQUIRED.
         # Only exact mode can satisfy without a concrete slot.
         #
-        # NARROW GUARD: For fuzzy/window modes, require concrete time slot (do not rely on bounded constraint alone)
+        # Bounded fuzzy/window constraints satisfy planning time without a concrete slots.time.
         if time_constraint_mode in ("fuzzy", "window"):
-            # Fuzzy/window modes: require concrete time slot (bounded constraint alone is NOT sufficient)
-            can_remove_time = has_concrete_time_slot
+            can_remove_time = has_concrete_time_slot or is_bounded
         else:
-            # Exact mode or unknown mode: allow removal if concrete slot exists OR exact mode
             can_remove_time = has_concrete_time_slot or is_exact_mode
 
-        # Bounded time_constraint (with both start and end) satisfies time requirement ONLY if:
-        # - A concrete time slot exists, OR
-        # - Mode is exact
-        # Do NOT satisfy for fuzzy/window modes without concrete time slot
         if is_bounded:
             if "time" in missing_slots:
                 if can_remove_time:
@@ -1322,18 +1320,43 @@ def process_luma_response(
     # Use effective_collected_slots as it represents the authoritative slot state
     current_slots = effective_collected_slots
 
-    # Compare fingerprints to determine if availability is resolved
+    # Compare fingerprints using proposal-expanded slots so a new exact time_proposal
+    # (or date_proposal) invalidates a prior SEARCH_AVAILABILITY fingerprint.
+    from core.orchestration.temporal_proposal import expand_slots_for_planning
+
+    fingerprint_slots = expand_slots_for_planning(
+        current_slots,
+        date_proposal=luma_response.get("date_proposal"),
+        time_proposal=luma_response.get("time_proposal"),
+        date_constraint=luma_response.get("date_constraint"),
+        nlu_facts=facts_obj if isinstance(facts_obj, dict) else None,
+        time_constraint=luma_response.get("time_constraint"),
+        intent_name=intent_name,
+    )
+
     # Fingerprint scope is conditional on time presence:
     # - Without time: {organization_id, service_id, date}
     # - With time: {organization_id, service_id, date, time}
     # This ensures availability is re-checked when time is introduced
     availability_resolved = slots_match_availability_fingerprint(
-        current_slots, stored_fingerprint, intent_name=intent_name
+        fingerprint_slots, stored_fingerprint, intent_name=intent_name
     )
+
+    # User said "yes" to confirm after a successful availability search — treat
+    # availability as resolved for this turn so policy selects CONFIRM_* not SEARCH_*.
+    if (
+        luma_response.get("_confirm_booking_continuation")
+        and stored_fingerprint
+    ):
+        availability_resolved = True
+        logger.info(
+            "[AVAILABILITY_FINGERPRINT] confirm_booking_continuation: "
+            "forcing availability_resolved=True (stored fingerprint present)"
+        )
 
     # Log fingerprint comparison for debugging
     current_fingerprint = compute_availability_fingerprint(
-        current_slots, intent_name=intent_name
+        fingerprint_slots, intent_name=intent_name
     )
     logger.debug(
         f"[AVAILABILITY_FINGERPRINT] intent={intent_name}, "
@@ -1355,6 +1378,12 @@ def process_luma_response(
         availability_resolved=availability_resolved,
         session_state=session_state,
     )
+
+    # build_decision_plan applies awaiting_slot prioritization; sync local missing_slots
+    plan_missing_slots = plan.get("missing_slots")
+    if isinstance(plan_missing_slots, list):
+        missing_slots = plan_missing_slots
+        luma_response_for_plan["missing_slots"] = missing_slots
 
     # DEBUG LOG: Planning decision point (after planner, before any override)
     # Track fingerprint-based availability resolution for debugging

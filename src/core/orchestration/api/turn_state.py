@@ -176,6 +176,12 @@ def finalize_turn_state(
     collected_slot_names = set(plan["collected_slots"])
     missing_slots = plan["missing_slots"]
 
+    if intent_name == "CREATE_APPOINTMENT":
+        from core.orchestration.temporal_proposal import proposal_satisfies_planning_time
+
+        if proposal_satisfies_planning_time(pc.get("time_proposal")) and "time" in missing_slots:
+            missing_slots = [s for s in missing_slots if s != "time"]
+
     if existing_missing_slots is not None and existing_missing_slots != missing_slots:
         logger.info(
             f"[MISSING_SLOTS_TRACE] finalize_turn_state: Recomputed missing_slots "

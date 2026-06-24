@@ -1,5 +1,5 @@
 """
-Shared test harness for core integration, planning, execution, and smoke tests.
+Shared test harness for planning, execution, and smoke tests.
 
 No test_*.py files here — pytest must not collect this package as tests.
 """
@@ -19,9 +19,6 @@ from core.tests.harness.scenario_runner import (
 )
 from core.tests.harness.session_store import MockSessionStore
 
-# Backward-compatible alias used by integration tests
-_setup_test_org_domain = setup_test_org_domain
-
 __all__ = [
     "TestCatalogClient",
     "TestLumaClient",
@@ -31,7 +28,6 @@ __all__ = [
     "create_mock_organization_client",
     "get_customer_details",
     "setup_test_org_domain",
-    "_setup_test_org_domain",
     "load_yaml_scenarios",
     "scenario_param_id",
     "assert_turn_expectations",

@@ -13,7 +13,7 @@ This test validates that capabilities are treated as execution workflows, not pl
 Payment intent creation happens during capability execution, not during planning.
 
 **IMPORTANT:** This test must be run with pytest:
-    pytest src/core/tests/e2e/test_core_capability_payment_e2e.py
+    pytest core/tests/execution/test_core_capability_payment_e2e.py
 
 Direct execution with `python` is not supported. Pytest automatically adds
 `src/` to PYTHONPATH via pytest.ini configuration.
@@ -588,4 +588,4 @@ def test_core_capability_payment_end_to_end():
 
 
 # Note: This test must be run with pytest, not directly with python
-# Run with: pytest src/core/tests/e2e/test_core_capability_payment_e2e.py
+# Run with: pytest core/tests/execution/test_core_capability_payment_e2e.py

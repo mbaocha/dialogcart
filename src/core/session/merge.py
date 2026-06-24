@@ -1606,9 +1606,11 @@ def merge_luma_with_session(
         if raw_luma_slots:
             merged_slots_keys = set(merged_slots.keys())
             raw_luma_slots_keys = set(raw_luma_slots.keys())
-            missing_keys = raw_luma_slots_keys - merged_slots_keys
+            # Only count non-None Luma slots — null values are validly dropped during
+            # intent-change filtering and should not trigger the invariant.
+            missing_keys = {k for k in raw_luma_slots_keys if raw_luma_slots.get(k) is not None} - merged_slots_keys
 
-            if not merged_slots or missing_keys:
+            if missing_keys:
                 error_msg = (
                     f"INVARIANT VIOLATION: Luma slots dropped before required-slot computation\n"
                     f"  raw_luma_slots: {raw_luma_slots}\n"

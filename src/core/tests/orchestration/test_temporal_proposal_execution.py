@@ -108,12 +108,12 @@ class TestApplyConfirmedDatetime:
         )
         assert confirmed["time"] == "15:00"
 
-    def test_fuzzy_time_proposal_sets_label(self):
+    def test_fuzzy_time_proposal_does_not_set_confirmed_time(self):
         confirmed = apply_confirmed_datetime(
-            {"service_id": "haircut"},
+            {"service_id": "haircut", "time": "afternoon"},
             time_proposal={"mode": "fuzzy", "label": "afternoon"},
         )
-        assert confirmed["time"] == "afternoon"
+        assert "time" not in confirmed
 
     def test_no_proposals_passthrough(self):
         slots = {"service_id": "haircut"}

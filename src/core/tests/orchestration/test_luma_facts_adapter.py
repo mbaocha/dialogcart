@@ -8,12 +8,16 @@ from core.orchestration.luma_facts_adapter import (
 from core.orchestration.temporal_proposal import (
     build_date_proposal,
     expand_slots_for_planning,
+    proposal_satisfies_planning_time,
 )
 
 
-def test_is_flexible_combined_requires_same_turn_service_id():
+def test_is_flexible_combined_requires_same_turn_service_and_dates():
     dc = {"mode": "flexible"}
-    assert is_flexible_combined_utterance(dc, {"service_id": "facial"})
+    assert is_flexible_combined_utterance(
+        dc, {"service_id": "facial", "dates": ["2026-01-19"]}
+    )
+    assert not is_flexible_combined_utterance(dc, {"service_id": "facial"})
     assert not is_flexible_combined_utterance(dc, {})
     assert not is_flexible_combined_utterance(None, {"service_id": "facial"})
 
@@ -46,6 +50,43 @@ def test_expand_slots_for_planning_uses_proposals():
         intent_name="CREATE_APPOINTMENT",
     )
     assert expanded["date"] == "2026-01-14"
+    assert expanded["time"] == "14:00"
+
+
+def test_expand_slots_exact_time_overrides_stale_session_time():
+    expanded = expand_slots_for_planning(
+        {"service_id": "haircut", "date": "2026-01-14", "time": "14:00"},
+        time_proposal={"mode": "exact", "value": "15:00"},
+        intent_name="CREATE_APPOINTMENT",
+    )
+    assert expanded["time"] == "15:00"
+
+
+def test_proposal_satisfies_planning_time_bounded_fuzzy():
+    assert proposal_satisfies_planning_time(
+        {"mode": "fuzzy", "label": "evening", "start": "17:00", "end": "21:59"}
+    )
+    assert not proposal_satisfies_planning_time(
+        {"mode": "fuzzy", "label": "evening", "start": "17:00"}
+    )
+    assert proposal_satisfies_planning_time({"mode": "exact", "value": "15:00"})
+
+
+def test_expand_slots_bounded_fuzzy_does_not_fill_slots_time():
+    expanded = expand_slots_for_planning(
+        {"service_id": "haircut", "date": "2026-01-14"},
+        time_proposal={"mode": "fuzzy", "label": "afternoon", "start": "12:00", "end": "16:59"},
+        intent_name="CREATE_APPOINTMENT",
+    )
+    assert "time" not in expanded
+
+
+def test_expand_slots_exact_time_overrides_fuzzy_label():
+    expanded = expand_slots_for_planning(
+        {"service_id": "haircut", "date": "2026-01-14", "time": "afternoon"},
+        time_proposal={"mode": "exact", "value": "14:00"},
+        intent_name="CREATE_APPOINTMENT",
+    )
     assert expanded["time"] == "14:00"
 
 

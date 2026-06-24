@@ -124,6 +124,22 @@ def _persist_session_for_next_turn(
         "missing_slots": normalized.get("missing_slots", []),
         "status": normalized.get("status"),
     }
+    outcome = result.get("outcome") if isinstance(result.get("outcome"), dict) else {}
+    facts = outcome.get("facts") if isinstance(outcome.get("facts"), dict) else {}
+    merged = result.get("_merged_luma_response")
+    if isinstance(merged, dict):
+        if merged.get("date_proposal") is not None:
+            session_state["date_proposal"] = merged["date_proposal"]
+        if merged.get("time_proposal") is not None:
+            session_state["time_proposal"] = merged["time_proposal"]
+    if facts.get("date_proposal") is not None:
+        session_state["date_proposal"] = facts["date_proposal"]
+    if facts.get("time_proposal") is not None:
+        session_state["time_proposal"] = facts["time_proposal"]
+    # Promote resolved date from facts into durable slots for UNKNOWN → booking flows
+    if facts.get("dates") and isinstance(facts["dates"], list) and facts["dates"]:
+        if not slots.get("date"):
+            session_state["slots"]["date"] = facts["dates"][0]
     if "stage" in plan_obj:
         session_state["stage"] = plan_obj.get("stage")
     if "action" in plan_obj:

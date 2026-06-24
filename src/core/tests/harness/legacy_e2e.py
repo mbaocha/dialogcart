@@ -1,4 +1,4 @@
-"""Helpers for thin legacy E2E wrapper modules under core/tests/e2e/."""
+"""Helpers for smoke and legacy YAML scenario modules."""
 
 from datetime import datetime, timezone
 from pathlib import Path
@@ -13,7 +13,7 @@ FROZEN_TIME = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
 
 
 def load_e2e_scenarios(scenarios_dir: Path, yaml_name: str) -> List[Dict[str, Any]]:
-    """Load scenarios from e2e/scenarios/ with standard skip if missing."""
+    """Load scenarios from core/tests/scenarios/smoke/ (or given dir)."""
     path = scenarios_dir / yaml_name
     scenarios = load_yaml_scenarios(path)
     if not scenarios:

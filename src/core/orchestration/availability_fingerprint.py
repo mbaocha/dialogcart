@@ -12,7 +12,36 @@ for {service_id, date} may differ from {service_id, date, time}.
 
 import hashlib
 import json
+import re
 from typing import Any, Dict, Optional
+
+
+def _normalize_time_for_fingerprint(time_value: Any) -> Optional[str]:
+    """Normalize time strings to HH:MM (24h) for stable fingerprint comparison."""
+    if time_value is None:
+        return None
+    raw = str(time_value).lower().strip()
+    if not raw:
+        return None
+
+    # Already HH:MM or H:MM
+    m = re.match(r"^(\d{1,2}):(\d{2})$", raw)
+    if m:
+        return f"{int(m.group(1)):02d}:{m.group(2)}"
+
+    # Forms like 2pm, 2 pm, 14:00:00
+    m = re.match(r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$", raw)
+    if m:
+        hour = int(m.group(1))
+        minute = int(m.group(2) or 0)
+        meridiem = m.group(3)
+        if meridiem == "pm" and hour < 12:
+            hour += 12
+        elif meridiem == "am" and hour == 12:
+            hour = 0
+        return f"{hour:02d}:{minute:02d}"
+
+    return raw
 
 
 def _extract_normalized_slots(
@@ -55,8 +84,7 @@ def _extract_normalized_slots(
 
     # Extract time
     time = slots.get("time")
-    # Normalize time (convert to string, lowercase, strip)
-    normalized_time = str(time).lower().strip() if time else None
+    normalized_time = _normalize_time_for_fingerprint(time)
 
     return (normalized_org, normalized_service, normalized_date, normalized_time)
 

@@ -11,7 +11,7 @@ Tests the full flow:
 This test validates the complete integration between core, runner, and adapter.
 
 **IMPORTANT:** This test must be run with pytest:
-    pytest src/core/tests/e2e/test_core_capability_noop_e2e.py
+    pytest core/tests/execution/test_core_capability_noop_e2e.py
 
 Direct execution with `python` is not supported. Pytest automatically adds
 `src/` to PYTHONPATH via pytest.ini configuration.
@@ -283,4 +283,4 @@ def test_core_capability_noop_end_to_end():
 
 
 # Note: This test must be run with pytest, not directly with python
-# Run with: pytest src/core/tests/e2e/test_core_capability_noop_e2e.py
+# Run with: pytest core/tests/execution/test_core_capability_noop_e2e.py

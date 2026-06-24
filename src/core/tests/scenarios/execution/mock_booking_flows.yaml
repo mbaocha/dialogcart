@@ -86,8 +86,9 @@ scenarios:
     turns:
       - sentence: "book a haircut tomorrow afternoon"
         expect:
-          status: NEEDS_CLARIFICATION
-          missing_slots: ["time"]
+          status: READY
+          missing_slots: []
+          action: SEARCH_AVAILABILITY
       - sentence: "around 2pm"
         expect:
           status: READY

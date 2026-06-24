@@ -1,11 +1,10 @@
 """
-Unified smoke test runner for YAML scenarios under core/tests/e2e/scenarios/.
+Unified smoke test runner for YAML scenarios under core/tests/scenarios/smoke/.
 
-Replaces duplicated per-intent E2E drivers. Gated by RUN_REAL_LUMA_E2E=true.
+Gated by RUN_REAL_LUMA_E2E=true.
 
 Usage:
   RUN_REAL_LUMA_E2E=true python core/tests/test.py --category smoke
-  RUN_REAL_LUMA_E2E=true pytest core/tests/smoke/test_smoke_scenarios.py -v
 """
 
 import os
@@ -28,7 +27,7 @@ if not os.getenv("RUN_REAL_LUMA_E2E"):
 from core.tests.harness.legacy_e2e import run_legacy_e2e_scenario
 from core.tests.harness.scenario_loader import load_yaml_scenarios, scenario_param_id
 
-_E2E_SCENARIOS_DIR = Path(__file__).resolve().parent.parent / "e2e" / "scenarios"
+_SCENARIOS_DIR = Path(__file__).resolve().parent.parent / "scenarios" / "smoke"
 
 # prefix, yaml filename, inject clients, assert execution mock calls
 SMOKE_SCENARIO_FILES: List[Tuple[str, str, bool, bool]] = [
@@ -44,7 +43,7 @@ SMOKE_SCENARIO_FILES: List[Tuple[str, str, bool, bool]] = [
 def _build_smoke_params() -> List[Tuple[str, Dict[str, Any], bool, bool]]:
     params: List[Tuple[str, Dict[str, Any], bool, bool]] = []
     for prefix, filename, inject_clients, assert_exec in SMOKE_SCENARIO_FILES:
-        path = _E2E_SCENARIOS_DIR / filename
+        path = _SCENARIOS_DIR / filename
         scenarios = load_yaml_scenarios(path)
         for scenario in scenarios:
             sid = scenario_param_id(scenario, scenarios)
@@ -56,7 +55,7 @@ _SMOKE_PARAMS = _build_smoke_params()
 
 if not _SMOKE_PARAMS:
     pytest.skip(
-        f"No smoke scenarios found under {_E2E_SCENARIOS_DIR}",
+        f"No smoke scenarios found under {_SCENARIOS_DIR}",
         allow_module_level=True,
     )
 
@@ -66,9 +65,7 @@ if not _SMOKE_PARAMS:
     _SMOKE_PARAMS,
     ids=[p[0] for p in _SMOKE_PARAMS],
 )
-def test_smoke_scenario(
-    scenario_id, scenario, inject_clients, assert_execution_calls
-):
+def test_smoke_scenario(scenario_id, scenario, inject_clients, assert_execution_calls):
     run_legacy_e2e_scenario(
         scenario,
         user_id_prefix=f"smoke_{scenario_id.replace('/', '_')}",

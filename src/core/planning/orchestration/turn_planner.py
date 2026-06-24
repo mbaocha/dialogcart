@@ -833,6 +833,7 @@ def plan_turn(
                     )
 
     # SHORT-CIRCUIT: Non-durable intents must NOT reach planning or persistence
+    confirm_booking_continuation = False
     # Rule: Any intent with durable=false may be recognized, but must:
     # - STOP before planning (do not call build_decision_plan)
     # - NOT be persisted to session (do not update session.intent_name or slots)
@@ -846,68 +847,98 @@ def plan_turn(
             is_durable = get_intent_durable(effective_intent)
 
             if not is_durable:
-                # Non-durable intent detected - return informational response immediately
-                # Do NOT proceed to planning, merge, or persistence
-                # Do NOT treat this as a session reset - preserve existing durable session state
-                logger.info(
-                    f"[NON_DURABLE_INTENT] Short-circuiting planning for non-durable intent: {effective_intent} "
-                    f"(user_id={user_id}{log_transaction_id})"
+                # Special case: CONFIRM_ACTION arriving over a READY booking session means
+                # the user said "yes" to confirm the booking. Route to the session's booking
+                # intent so that CONFIRM_APPOINTMENT (or equivalent commit action) executes.
+                # This does NOT override session slots — we simply adopt the session intent.
+                _session_for_confirm = (
+                    session_state if isinstance(session_state, dict) else {}
                 )
+                _session_booking_intent = _session_for_confirm.get("intent_name", "")
+                if (
+                    effective_intent == "CONFIRM_ACTION"
+                    and _session_for_confirm.get("status") == "READY"
+                    and _session_booking_intent
+                ):
+                    try:
+                        from core.policy.intent_policy import get_intent_durable as _gid
 
-                # Extract facts from Luma response for informational response
-                facts_obj = luma_response.get("facts", {})
-                from core.orchestration.luma_facts_adapter import facts_to_slots
+                        if _gid(_session_booking_intent):
+                            logger.info(
+                                f"[CONFIRM_ACTION] Rerouting to session booking intent "
+                                f"{_session_booking_intent!r} (session READY) "
+                                f"(user_id={user_id}{log_transaction_id})"
+                            )
+                            effective_intent = _session_booking_intent
+                            confirm_booking_continuation = True
+                            # Fall through to regular planning with the session intent
+                            is_durable = True
+                    except Exception:
+                        pass  # If check fails, fall through to normal NON_DURABLE_INTENT handling
 
-                slots = (
-                    facts_to_slots(
-                        facts_obj,
-                        intent_name=effective_intent,
-                        source_text=text,
+                if not is_durable:
+                    # Non-durable intent detected - return informational response immediately
+                    # Do NOT proceed to planning, merge, or persistence
+                    # Do NOT treat this as a session reset - preserve existing durable session state
+                    logger.info(
+                        f"[NON_DURABLE_INTENT] Short-circuiting planning for non-durable intent: {effective_intent} "
+                        f"(user_id={user_id}{log_transaction_id})"
                     )
-                    if isinstance(facts_obj, dict)
-                    else {}
-                )
 
-                # Also check for slots in nested facts.facts.slots or top-level slots
-                if isinstance(facts_obj, dict) and "slots" in facts_obj:
-                    nested_slots = facts_obj.get("slots", {})
-                    if isinstance(nested_slots, dict):
-                        slots.update(nested_slots)
-                elif "slots" in luma_response:
-                    top_level_slots = luma_response.get("slots", {})
-                    if isinstance(top_level_slots, dict):
-                        slots.update(top_level_slots)
+                    # Extract facts from Luma response for informational response
+                    facts_obj = luma_response.get("facts", {})
+                    from core.orchestration.luma_facts_adapter import facts_to_slots
 
-                # Return informational response (similar to non-core intent handling)
-                # Do NOT persist to session, do NOT plan, do NOT merge
-                # Preserve existing durable session state (do not clear session)
-                from core.routing.handler_router import resolve_handler
+                    slots = (
+                        facts_to_slots(
+                            facts_obj,
+                            intent_name=effective_intent,
+                            source_text=text,
+                        )
+                        if isinstance(facts_obj, dict)
+                        else {}
+                    )
 
-                _handler = resolve_handler(effective_intent)
-                _base_outcome = {
-                    "intent_name": effective_intent,
-                    "slots": slots,
-                    "missing_slots": [],
-                    "facts": {
+                    # Also check for slots in nested facts.facts.slots or top-level slots
+                    if isinstance(facts_obj, dict) and "slots" in facts_obj:
+                        nested_slots = facts_obj.get("slots", {})
+                        if isinstance(nested_slots, dict):
+                            slots.update(nested_slots)
+                    elif "slots" in luma_response:
+                        top_level_slots = luma_response.get("slots", {})
+                        if isinstance(top_level_slots, dict):
+                            slots.update(top_level_slots)
+
+                    # Return informational response (similar to non-core intent handling)
+                    # Do NOT persist to session, do NOT plan, do NOT merge
+                    # Preserve existing durable session state (do not clear session)
+                    from core.routing.handler_router import resolve_handler
+
+                    _handler = resolve_handler(effective_intent)
+                    _base_outcome = {
+                        "intent_name": effective_intent,
                         "slots": slots,
                         "missing_slots": [],
-                        "context": luma_response.get("context", {}),
-                    },
-                }
-                if _handler == "rag":
-                    return {
-                        "success": True,
-                        "outcome": {
-                            **_base_outcome,
-                            "status": "HANDLER_DELEGATED",
-                            "active_handler": _handler,
-                            "search_query": luma_response.get("search_query"),
+                        "facts": {
+                            "slots": slots,
+                            "missing_slots": [],
+                            "context": luma_response.get("context", {}),
                         },
                     }
-                return {
-                    "success": True,
-                    "outcome": {**_base_outcome, "status": "NON_DURABLE_INTENT"},
-                }
+                    if _handler == "rag":
+                        return {
+                            "success": True,
+                            "outcome": {
+                                **_base_outcome,
+                                "status": "HANDLER_DELEGATED",
+                                "active_handler": _handler,
+                                "search_query": luma_response.get("search_query"),
+                            },
+                        }
+                    return {
+                        "success": True,
+                        "outcome": {**_base_outcome, "status": "NON_DURABLE_INTENT"},
+                    }
         except (ImportError, Exception) as e:
             # If durability check fails, log warning but continue (defensive)
             logger.warning(
@@ -924,6 +955,8 @@ def plan_turn(
     # CRITICAL: Set _effective_intent for process_luma_response to recover durable intents
     # This ensures UNKNOWN intents can be recovered from session when durable
     effective_response["_effective_intent"] = effective_intent or ""
+    if confirm_booking_continuation:
+        effective_response["_confirm_booking_continuation"] = True
 
     # Attach updated conversation memory so session_merge can persist it.
     # Records the effective intent (post-recovery) and search_query for this turn.
@@ -954,15 +987,18 @@ def plan_turn(
         else {}
     )
 
-    # Extract slots from facts.facts.slots if present (nested format)
-    # Otherwise fall back to legacy slots field
-    nested_slots = {}
+    # Merge session-merged top-level slots with nested facts.slots.
+    # merge_luma_with_session writes durable slots (e.g. date from prior UNKNOWN turn)
+    # to luma_response["slots"]; facts.slots is often partial and must not replace them.
+    merged_authoritative_slots = luma_response.get("slots") or {}
+    if not isinstance(merged_authoritative_slots, dict):
+        merged_authoritative_slots = {}
+    nested_from_facts: Dict[str, Any] = {}
     if isinstance(facts_obj, dict) and "slots" in facts_obj:
-        # Nested format: facts.facts.slots
-        nested_slots = facts_obj.get("slots", {})
-    elif "slots" in luma_response:
-        # Legacy format: slots at top level
-        nested_slots = luma_response.get("slots", {})
+        nested_from_facts = facts_obj.get("slots") or {}
+        if not isinstance(nested_from_facts, dict):
+            nested_from_facts = {}
+    nested_slots = {**nested_from_facts, **merged_authoritative_slots}
 
     # Merge promoted slots; strip date keys when Fix 4 applies (flexible + same-turn service)
     effective_response["slots"] = merge_promoted_luma_slots(
@@ -1172,14 +1208,23 @@ def plan_turn(
         # set confirmation_state to "confirmed" in the booking object
         # NOTE: Use original luma_intent_name (from line 1446) BEFORE merge, not after merge
         # because merge_luma_with_session changes effective_response['intent']['name'] to session intent
-        # HARDENED: Only set confirmation_state when session.status == "AWAITING_CONFIRMATION"
-        if (
+        # HARDENED: Set confirmation_state when user confirms an in-progress booking.
+        # AWAITING_CONFIRMATION: explicit confirm prompt path.
+        # READY + CONFIRM_ACTION reroute: "yes" after availability search (mock-booking flows).
+        _confirm_continuation = (
             luma_intent_name
             and luma_intent_name.startswith("CONFIRM_")
             and effective_intent != luma_intent_name
             and is_session_intent_durable
-            and session_status_for_merge == "AWAITING_CONFIRMATION"
-        ):
+            and (
+                session_status_for_merge == "AWAITING_CONFIRMATION"
+                or (
+                    session_status_for_merge == "READY"
+                    and luma_intent_name == "CONFIRM_ACTION"
+                )
+            )
+        )
+        if _confirm_continuation:
             # CONFIRM_* was treated as continuation - set confirmation_state
             if "booking" not in effective_response:
                 effective_response["booking"] = {}

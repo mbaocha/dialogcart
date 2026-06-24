@@ -33,14 +33,15 @@ def is_flexible_combined_utterance(
 ) -> bool:
     """True when vague date + service appear in the same NLU turn (Fix 4).
 
-    Only facts.service_id counts — session-carried service_id must not trigger this
-    on follow-up turns like \"next week\" after \"book facial\".
+    Requires facts.dates so a follow-up like \"book a haircut\" after \"tomorrow\"
+    (service only, date already in session) does not strip the carried date.
     """
     facts = facts or {}
     return (
         isinstance(date_constraint, dict)
         and date_constraint.get("mode") == "flexible"
         and facts.get("service_id") is not None
+        and bool(facts.get("dates"))
     )
 
 
@@ -63,8 +64,11 @@ def merge_promoted_luma_slots(
     ):
         merged["service_id"] = nested["service_id"]
     if is_flexible_combined_utterance(date_constraint, facts):
-        merged.pop("date", None)
-        merged.pop("date_range", None)
+        # Only strip dates promoted from this turn's NLU, not session carry-over.
+        if "date" in promoted or (facts and facts.get("dates")):
+            merged.pop("date", None)
+        if "date_range" in promoted or (facts and facts.get("dates")):
+            merged.pop("date_range", None)
     return merged
 
 

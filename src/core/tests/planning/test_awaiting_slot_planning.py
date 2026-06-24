@@ -2,7 +2,7 @@
 Isolated unit tests for awaiting_slot prioritization in planning.
 
 These tests verify that awaiting_slot correctly prioritizes missing_slots
-without relying on the scenario engine or full integration tests.
+without relying on the scenario engine or full handle_message flows.
 """
 
 from typing import Any, Dict, List, Optional
@@ -234,3 +234,32 @@ def test_awaiting_slot_with_none_session_state():
         result == missing_slots
     ), f"Expected no change, got {result} != {missing_slots}"
     assert result == sorted(result), f"Expected sorted, got {result}"
+
+
+def test_build_decision_plan_exposes_prioritized_missing_slots():
+    """build_decision_plan must return awaiting_slot-prioritized missing_slots on the plan."""
+    from core.planning.orchestration.plan_builder import build_decision_plan
+
+    session_state = {
+        "awaiting_slot": "service_id",
+        "intent_name": "CREATE_RESERVATION",
+        "status": "NEEDS_CLARIFICATION",
+    }
+    luma_response = {
+        "intent": {"name": "CREATE_RESERVATION"},
+        "missing_slots": ["date_range", "service_id"],
+        "needs_clarification": True,
+        "slots": {"service_id": None, "booking_id": None},
+    }
+
+    plan = build_decision_plan(
+        "CREATE_RESERVATION",
+        luma_response,
+        domain="reservation",
+        session_state=session_state,
+    )
+
+    assert plan.get("missing_slots") == [
+        "service_id",
+        "date_range",
+    ], f"Expected prioritized missing_slots on plan, got {plan.get('missing_slots')}"

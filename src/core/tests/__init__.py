@@ -1,9 +1,7 @@
 """
-Tests package for dialogcart-core
+Tests package for dialogcart-core.
 
-Tests are organized by layer:
-- orchestration/ - Orchestration layer tests
-- routing/ - Routing layer tests  
-- rendering/ - Rendering layer tests
-- integration/ - Integration tests
+Primary gates: planning/, execution/ (see core/tests/test.py).
+Optional tiers: orchestration/, session/, rendering/, routing/, intents/, workflows/, smoke/.
+Shared infrastructure: harness/, mocks/, scenarios/ (not pytest categories).
 """

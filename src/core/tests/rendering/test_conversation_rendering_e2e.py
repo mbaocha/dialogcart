@@ -26,7 +26,9 @@ if str(src_path) not in sys.path:
 
 def _load_scenarios() -> List[Dict[str, Any]]:
     """Load scenarios from YAML file."""
-    scenarios_path = Path(__file__).parent / "scenarios" / "conversation_rendering.yaml"
+    scenarios_path = (
+        Path(__file__).parent.parent / "scenarios" / "smoke" / "conversation_rendering.yaml"
+    )
     with open(scenarios_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     return data.get("scenarios", [])
