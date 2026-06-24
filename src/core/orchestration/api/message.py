@@ -193,7 +193,10 @@ async def post_message(request: MessageRequest):
             # Update conversation memory and persist, preserving any active booking session.
             # _raw_session carries the full booking state (if any); update_conversation
             # copies all its keys and appends this turn to session["conversation"].
-            from core.orchestration.nlu.conversation_memory import update_conversation
+            from core.orchestration.nlu.conversation_memory import (
+                append_messages_turn,
+                update_conversation,
+            )
 
             _conv_base = _raw_session or {}
             _updated_session = update_conversation(
@@ -202,6 +205,9 @@ async def post_message(request: MessageRequest):
                 intent=outcome.get("intent_name", "UNKNOWN"),
                 search_query=outcome.get("search_query"),
                 assistant_text=handler_result.text or None,
+            )
+            _updated_session = append_messages_turn(
+                _updated_session, request.text, handler_result.text or None
             )
             save_session(request.user_id, _updated_session)
             logger.info(
@@ -230,6 +236,13 @@ async def post_message(request: MessageRequest):
                     request.user_id,
                 )
                 if new_session_state:
+                    from core.orchestration.nlu.conversation_memory import (
+                        append_messages_turn,
+                    )
+
+                    new_session_state = append_messages_turn(
+                        new_session_state, request.text, outcome.get("text")
+                    )
                     save_session(request.user_id, new_session_state)
                     logger.info(
                         "[session] save",
@@ -262,10 +275,16 @@ async def post_message(request: MessageRequest):
                                     else slot_attempts
                                 )
             elif outcome_status == "READY":
-                # FIX: Do NOT clear session on READY unless execution has occurred
-                # Sessions should only be cleared after confirmed execution event
-                # This preserves intent + slots for follow-up modification turns (e.g. "make it 4pm")
-                # Keep session state unchanged - clearing will happen after execution
+                # Preserve intent + slots for follow-up modifications ("make it 4pm").
+                # Also append messages to the existing session so conversation history
+                # is available on the next turn regardless of outcome type.
+                from core.orchestration.nlu.conversation_memory import append_messages_turn
+
+                _ready_base = _raw_session or {}
+                _ready_session = append_messages_turn(
+                    _ready_base, request.text, outcome.get("text")
+                )
+                save_session(request.user_id, _ready_session)
                 logger.info(
                     f"session_preserved_on_ready user_id={request.user_id} transaction_id={transaction_id} "
                     f"(session preserved for follow-up modifications)"
