@@ -630,8 +630,7 @@ def handle_message(
                 f"Got type: {type(facts)}, user_id={user_id}"
             )
 
-    # Call plan_message to get planning result
-    # plan_message internally calls Luma and handle_message_legacy
+    # Call plan_message to get planning result (NLU → slot merge → plan)
     plan = plan_message(
         text=text,
         user_id=user_id,
@@ -1361,49 +1360,6 @@ def handle_message(
     return result
 
 
-def handle_message_legacy(
-    user_id: str,
-    text: str,
-    domain: str = "service",  # caller-provided; will be overridden by org domain
-    timezone: str = "UTC",
-    phone_number: Optional[str] = None,
-    email: Optional[str] = None,
-    customer_id: Optional[int] = None,
-    organization_id: Optional[int] = None,
-    luma_client: Optional[LumaClient] = None,
-    catalog_client: Optional[CatalogClient] = None,
-    organization_client: Optional[OrganizationClient] = None,
-    verbose: bool = False,
-    session_state: Optional[Dict[str, Any]] = None,
-    transaction_id: Optional[str] = None,
-    planning_only: bool = False,
-) -> Dict[str, Any]:
-    """
-    [LEGACY] Thin wrapper — delegates to plan_turn() in turn_planner.
-
-    Kept for backward compatibility; plan_message and tests call this entrypoint.
-    """
-    from core.planning.orchestration.turn_planner import plan_turn
-
-    return plan_turn(
-        user_id=user_id,
-        text=text,
-        domain=domain,
-        timezone=timezone,
-        phone_number=phone_number,
-        email=email,
-        customer_id=customer_id,
-        organization_id=organization_id,
-        luma_client=luma_client,
-        catalog_client=catalog_client,
-        organization_client=organization_client,
-        verbose=verbose,
-        session_state=session_state,
-        transaction_id=transaction_id,
-        planning_only=planning_only,
-    )
-
-
 def plan_message(
     text: str,
     user_id: str,
@@ -1440,8 +1396,9 @@ def plan_message(
     Raises:
         Any exceptions from handle_message are propagated.
     """
-    # Call handle_message_legacy with planning_only=True to avoid execution logic
-    result = handle_message_legacy(
+    from core.planning.orchestration.turn_planner import plan_turn
+
+    result = plan_turn(
         user_id=user_id,
         text=text,
         session_state=session_state,

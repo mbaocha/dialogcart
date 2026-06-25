@@ -27,7 +27,7 @@ import yaml
 from core.orchestration.api.turn_state import DecisionReason, TurnState
 from core.orchestration.errors import UnsupportedIntentError
 from core.routing import get_action_name, get_template_key
-from luma.clarification.reasons import ClarificationReason
+from nlu.clarification.reasons import ClarificationReason
 
 logger = logging.getLogger(__name__)
 

@@ -1,8 +1,7 @@
 """
 Turn planner — single-turn NLU merge, planning, and outcome construction.
 
-Extracted from handle_message_legacy; invoked with planning_only=True via
-plan_message / handle_message_legacy wrappers.
+Invoked via plan_message() in orchestrator.py (planning_only=True).
 """
 
 import copy

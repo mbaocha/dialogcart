@@ -3,34 +3,19 @@ platform linux -- Python 3.10.13, pytest-9.0.2, pluggy-1.6.0
 rootdir: /mnt/c/Users/user/Documents/projects/dialogcart/dialogcart/src
 configfile: pytest.ini
 plugins: anyio-4.12.0
-collected 44 items
+collected 72 items
 
-core/tests/execution/test_availability_execution.py ..                   [  4%]
-core/tests/execution/test_booking_execution.py ..                        [  9%]
-core/tests/execution/test_capability_bootstrap_integration.py ..         [ 13%]
-core/tests/execution/test_capability_text_preserved_with_missing_slots.py . [ 15%]
-                                                                         [ 15%]
-core/tests/execution/test_commit_gated_workflow.py ...                   [ 22%]
-core/tests/execution/test_confirmation_execution.py ..                   [ 27%]
-core/tests/execution/test_core_capability_noop_e2e.py .                  [ 29%]
-core/tests/execution/test_core_capability_payment_e2e.py .               [ 31%]
-core/tests/execution/test_core_e2e_followup_availability.py .            [ 34%]
-core/tests/execution/test_core_e2e_single_turn_availability.py .         [ 36%]
-core/tests/execution/test_execution_mock_booking.py .................... [ 81%]
-                                                                         [ 81%]
-core/tests/execution/test_lifecycle_notification.py .                    [ 84%]
-core/tests/execution/test_test_backend.py .......                        [100%]
+core/tests/planning/test_awaiting_slot_planning.py ......                [  8%]
+core/tests/planning/test_capability_org_condition.py .....               [ 15%]
+core/tests/planning/test_confirm_continuation_hardening.py .......       [ 25%]
+core/tests/planning/test_correction_intent_resolution.py ......          [ 33%]
+core/tests/planning/test_planning.py .............................       [ 73%]
+core/tests/planning/test_policy_invariants.py ...................        [100%]
 
-=============================== warnings summary ===============================
-../../../../../../../../../home/mbaocha/.pyenv/versions/3.10.13/lib/python3.10/site-packages/pydantic/fields.py:799
-  /home/mbaocha/.pyenv/versions/3.10.13/lib/python3.10/site-packages/pydantic/fields.py:799: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'deprecated'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.5/migration/
-    warn(
-
--- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-=================== 44 passed, 1 warning in 74.83s (0:01:14) ===================
+============================== 72 passed in 6.80s ==============================
 ================================================================================
-Running tests: execution
-Path: core/tests/execution
+Running tests: planning
+Path: core/tests/planning
 Working directory: /mnt/c/Users/user/Documents/projects/dialogcart/dialogcart/src
 ================================================================================
 
