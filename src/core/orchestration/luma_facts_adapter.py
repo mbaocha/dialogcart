@@ -54,9 +54,15 @@ def merge_promoted_luma_slots(
     prefer_nested_service_id: bool = False,
 ) -> Dict[str, Any]:
     """Merge nested + promoted slots and strip date keys when Fix 4 applies."""
+    # Null means "not extracted this turn" — never overwrite durable session values.
+    merged = {
+        k: v for k, v in (nested_slots or {}).items() if v is not None
+    }
+    for key, value in (promoted_slots or {}).items():
+        if value is not None:
+            merged[key] = value
     nested = dict(nested_slots or {})
     promoted = dict(promoted_slots or {})
-    merged = {**nested, **promoted}
     if (
         prefer_nested_service_id
         and "service_id" in nested
@@ -88,11 +94,11 @@ def facts_to_slots(
 
     slots = {}
 
-    # Direct mappings
-    if "service_id" in facts:
+    # Direct mappings — omit null (empty extraction / slot skeleton), same as merge_luma_with_session
+    if facts.get("service_id") is not None:
         slots["service_id"] = facts["service_id"]
 
-    if "booking_id" in facts:
+    if facts.get("booking_id") is not None:
         slots["booking_id"] = facts["booking_id"]
 
     # Phase 2: dates/times live in date_proposal/time_proposal (see temporal_proposal.py).

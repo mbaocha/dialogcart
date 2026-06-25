@@ -13,6 +13,7 @@ import pytest
 from core.orchestration.temporal_proposal import (
     apply_confirmed_datetime,
     apply_time_constraint_to_missing_slots,
+    datetime_range_from_availability_result,
     resolve_execution_proposals,
     slots_for_availability_search,
 )
@@ -256,3 +257,37 @@ class TestApplyTimeConstraintToMissingSlots:
             {"mode": "exact", "start": "15:00"},
         )
         assert result == ["date"]
+
+
+# ---------------------------------------------------------------------------
+# datetime_range_from_availability_result
+# ---------------------------------------------------------------------------
+
+
+class TestDatetimeRangeFromAvailabilityResult:
+    def test_extracts_from_starts_at_ends_at(self):
+        result = datetime_range_from_availability_result(
+            {
+                "slots": [
+                    {
+                        "starts_at": "2026-03-05T15:00:00Z",
+                        "ends_at": "2026-03-08T11:00:00Z",
+                    }
+                ]
+            }
+        )
+        assert result == {
+            "start": "2026-03-05T15:00:00Z",
+            "end": "2026-03-08T11:00:00Z",
+        }
+
+    def test_extracts_from_start_end_keys(self):
+        result = datetime_range_from_availability_result(
+            {"slots": [{"start": "2026-01-16T15:00:00Z", "end": "2026-01-16T16:00:00Z"}]}
+        )
+        assert result["start"] == "2026-01-16T15:00:00Z"
+        assert result["end"] == "2026-01-16T16:00:00Z"
+
+    def test_empty_slots_returns_none(self):
+        assert datetime_range_from_availability_result({"slots": []}) is None
+        assert datetime_range_from_availability_result(None) is None

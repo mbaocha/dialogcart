@@ -9,7 +9,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from .slm.extractor import HaikuExtractor
@@ -19,6 +19,16 @@ logger = logging.getLogger(__name__)
 _WEEKDAYS = {
     "monday", "tuesday", "wednesday", "thursday",
     "friday", "saturday", "sunday",
+}
+
+_WEEKDAY_TO_DOW = {
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
 }
 
 _MONTHS = {
@@ -414,6 +424,78 @@ def _normalize_dates(dates: List[str]) -> List[str]:
     return result
 
 
+def _fix_iso_weekday_mismatch(
+    text: str,
+    slm: Dict[str, Any],
+    conversation_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Fix Haiku ISO dates that do not match a weekday name in the utterance.
+
+    Common on CORRECTION turns ("saturday instead") when Haiku pre-resolves to
+    the wrong ISO day. Uses last_date_proposal from conversation_context as an
+    anchor when present; otherwise resets to bare weekday for calendar binding.
+    """
+    facts = slm.get("facts", {})
+    if not isinstance(facts, dict):
+        return slm
+    dates = facts.get("dates")
+    if not isinstance(dates, list) or len(dates) != 1:
+        return slm
+
+    raw = str(dates[0])
+    if not re.match(r"^\d{4}-\d{2}-\d{2}", raw):
+        return slm
+    iso = raw.split("T")[0].split(" ")[0]
+
+    text_lower = (text or "").lower()
+    mentioned = next((name for name in _WEEKDAY_TO_DOW if name in text_lower), None)
+    if not mentioned:
+        return slm
+
+    expected_dow = _WEEKDAY_TO_DOW[mentioned]
+    try:
+        actual_dow = datetime.strptime(iso, "%Y-%m-%d").weekday()
+    except ValueError:
+        return slm
+    if actual_dow == expected_dow:
+        return slm
+
+    anchor_date = None
+    if isinstance(conversation_context, dict):
+        last_dp = conversation_context.get("last_date_proposal")
+        if isinstance(last_dp, dict):
+            anchor_date = last_dp.get("start")
+
+    if anchor_date:
+        try:
+            base = datetime.strptime(
+                str(anchor_date).split("T")[0].split(" ")[0], "%Y-%m-%d"
+            )
+        except ValueError:
+            base = datetime.strptime(iso, "%Y-%m-%d")
+        days_ahead = (expected_dow - base.weekday()) % 7
+        if days_ahead == 0:
+            days_ahead = 7
+        fixed = (base + timedelta(days=days_ahead)).strftime("%Y-%m-%d")
+        logger.info(
+            "[DATE_WEEKDAY_FIX] text=%r mentioned=%s bad_iso=%s anchor=%s fixed=%s",
+            text,
+            mentioned,
+            iso,
+            anchor_date,
+            fixed,
+        )
+        return {**slm, "facts": {**facts, "dates": [fixed]}}
+
+    logger.info(
+        "[DATE_WEEKDAY_FIX] text=%r mentioned=%s bad_iso=%s → bare weekday for binder",
+        text,
+        mentioned,
+        iso,
+    )
+    return {**slm, "facts": {**facts, "dates": [mentioned]}}
+
+
 def _infer_date_mode(dates: List[str]) -> str:
     """Map the date list to the DateMode string the calendar binder expects."""
     if not dates:
@@ -444,6 +526,124 @@ def _enrich_time_constraint(tc: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
     return tc
 
 
+# Intents that may continue via bare slot-fill follow-ups (not FAQ/RAG intents).
+_SLOT_FILL_BOOKING_INTENTS = frozenset(
+    {"CREATE_APPOINTMENT", "CREATE_RESERVATION", "MODIFY_BOOKING"}
+)
+
+# Utterances with these verbs should be classified by SLM, not coerced post-hoc.
+_SLOT_FILL_BLOCKING_VERBS = re.compile(
+    r"\b(book|schedule|reserve|cancel|modify|reschedule|change\s+booking)\b",
+    re.IGNORECASE,
+)
+
+_CORRECTION_SIGNAL = re.compile(
+    r"\b(instead|actually)\b|"
+    r"\bwait,?\s*i\s+meant\b|"
+    r"\bno,?\s*make\s+it\b|"
+    r"\bchange\s+it\s+to\b",
+    re.IGNORECASE,
+)
+
+
+def _active_booking_intent_from_context(
+    conversation_context: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    if not isinstance(conversation_context, dict):
+        return None
+    last_intent = conversation_context.get("last_intent")
+    if last_intent in _SLOT_FILL_BOOKING_INTENTS:
+        return last_intent
+    active = conversation_context.get("active_booking_intent")
+    if active in _SLOT_FILL_BOOKING_INTENTS:
+        return active
+    return None
+
+
+def _has_slot_material(facts: Dict[str, Any]) -> bool:
+    if not isinstance(facts, dict):
+        return False
+    dates = facts.get("dates")
+    times = facts.get("times")
+    pairs = facts.get("date_time_pairs")
+    tc = facts.get("time_constraint")
+    if isinstance(dates, list) and dates:
+        return True
+    if isinstance(times, list) and times:
+        return True
+    if isinstance(pairs, list) and pairs:
+        return True
+    if isinstance(tc, dict) and tc.get("mode") not in (None, "none"):
+        return True
+    return False
+
+
+def _resolve_slot_fill_intent(
+    slm: Dict[str, Any],
+    text: str,
+    conversation_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Promote UNKNOWN → active booking intent on slot-fill continuation turns.
+
+    Guardrail when Haiku returns UNKNOWN despite booking conversation context.
+    Does not run without context, on correction phrases, or when a booking verb is present.
+    """
+    slm_intent = slm.get("intent", "UNKNOWN")
+    if slm_intent != "UNKNOWN":
+        return slm
+    if not isinstance(conversation_context, dict):
+        return slm
+    booking_intent = _active_booking_intent_from_context(conversation_context)
+    if not booking_intent:
+        return slm
+    facts = slm.get("facts", {})
+    if not isinstance(facts, dict) or not _has_slot_material(facts):
+        return slm
+    if _SLOT_FILL_BLOCKING_VERBS.search(text or ""):
+        return slm
+    if _CORRECTION_SIGNAL.search(text or ""):
+        return slm
+
+    logger.info(
+        "[SLOT_FILL_INTENT] slm_intent=UNKNOWN promoted_to=%s (booking continuation)",
+        booking_intent,
+    )
+    return {**slm, "intent": booking_intent}
+
+
+def _resolve_calendar_binding_intent(
+    slm_intent: str,
+    facts: Dict[str, Any],
+    conversation_context: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Pick intent passed to calendar binder (may differ from SLM intent on slot-fill turns.
+
+    When Haiku returns UNKNOWN or CORRECTION but dates are present and
+    conversation_context carries an active booking intent, bind using the
+    session intent so named-month / range dates resolve to ISO.
+    """
+    from .calendar.calendar_binder import BINDING_INTENTS
+
+    dates = facts.get("dates") if isinstance(facts, dict) else []
+    has_dates = isinstance(dates, list) and len(dates) > 0
+    if slm_intent in BINDING_INTENTS or not has_dates:
+        return slm_intent
+    if not isinstance(conversation_context, dict):
+        return slm_intent
+
+    booking_intent = _active_booking_intent_from_context(conversation_context)
+    if slm_intent in ("UNKNOWN", "CORRECTION") and booking_intent in BINDING_INTENTS:
+        logger.info(
+            "[CALENDAR_BIND_INTENT] slm_intent=%s binding_as=%s (session slot-fill/correction)",
+            slm_intent,
+            booking_intent,
+        )
+        return booking_intent
+    return slm_intent
+
+
+
+
 class NLUPipeline:
     """3-stage NLU pipeline."""
 
@@ -466,8 +666,12 @@ class NLUPipeline:
         slm = _normalize_booking_id(text, slm, tenant_context)
         slm = _apply_booking_mode_intent(text, slm, tenant_context)
         slm = self._correct_bare_weekday_dates(text, slm)
+        slm = _fix_iso_weekday_mismatch(text, slm, conversation_context)
         slm = self._resolve_service_ambiguity(text, slm, tenant_context)
-        return self._bind_calendar(slm, tenant_context, now, timezone)
+        slm = _resolve_slot_fill_intent(slm, text, conversation_context)
+        return self._bind_calendar(
+            slm, tenant_context, now, timezone, conversation_context
+        )
 
     def _correct_bare_weekday_dates(self, text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
         """Normalise Haiku's date output for bare weekday / weekend inputs.
@@ -517,7 +721,12 @@ class NLUPipeline:
         return self._extractor.extract(text, tenant_context, now, conversation_context=conversation_context)
 
     def _bind_calendar(
-        self, decision: Dict[str, Any], tenant_context: Dict[str, Any], now: str, timezone: str = "UTC"
+        self,
+        decision: Dict[str, Any],
+        tenant_context: Dict[str, Any],
+        now: str,
+        timezone: str = "UTC",
+        conversation_context: Optional[Dict[str, Any]] = None,
     ) -> PipelineResult:
         from .calendar.calendar_binder import bind_calendar
 
@@ -526,6 +735,10 @@ class NLUPipeline:
         facts = decision.get("facts", {})
         tc = decision.get("time_constraint")
         search_query = decision.get("search_query")
+
+        binding_intent = _resolve_calendar_binding_intent(
+            intent, facts, conversation_context
+        )
 
         raw_dates = facts.get("dates", [])
         normalized_dates = _normalize_dates(raw_dates)
@@ -562,7 +775,7 @@ class NLUPipeline:
                 semantic_result=semantic,
                 now=now_dt,
                 timezone=timezone,
-                intent=intent,
+                intent=binding_intent,
             )
             date_range = binder_result.calendar_booking.get("date_range")
             if date_range:
@@ -576,7 +789,11 @@ class NLUPipeline:
                 elif start:
                     bound_dates = [start]
         except Exception:
-            logger.exception("Calendar binding failed for intent=%r", intent)
+            logger.exception(
+                "Calendar binding failed for intent=%r (binding_intent=%r)",
+                intent,
+                binding_intent,
+            )
 
         # Compact enumerated date sequences (e.g. Haiku outputs every date in a range).
         # When the binder skipped, collapse 3+ dates to [first, last].

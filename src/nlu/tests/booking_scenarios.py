@@ -1093,4 +1093,119 @@ booking_scenarios = [
             "search_query": "deep tissue massage duration",
         },
     },
+    # ────────────────
+    # SLOT-FILL CONTINUATION — booking intent with conversation context
+    # ────────────────
+    {
+        "sentence": "tomorrow",
+        "booking_mode": "service",
+        "aliases": {"haircut": "haircut"},
+        "conversation_context": {
+            "last_intent": "CREATE_APPOINTMENT",
+            "turns": [
+                {
+                    "user": "book a haircut",
+                    "intent": "CREATE_APPOINTMENT",
+                    "search_query": None,
+                }
+            ],
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "facts": {
+                "dates": ["2026-01-14"],
+                "times": [],
+                "date_time_pairs": [],
+                "service_id": None,
+                "booking_id": None,
+            },
+        },
+    },
+    {
+        "sentence": "11am",
+        "booking_mode": "service",
+        "aliases": {"haircut": "haircut"},
+        "conversation_context": {
+            "last_intent": "CREATE_APPOINTMENT",
+            "turns": [
+                {
+                    "user": "book a haircut",
+                    "intent": "CREATE_APPOINTMENT",
+                    "search_query": None,
+                },
+                {
+                    "user": "tomorrow",
+                    "intent": "CREATE_APPOINTMENT",
+                    "search_query": None,
+                },
+            ],
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "facts": {
+                "dates": [],
+                "times": ["11:00"],
+                "date_time_pairs": [],
+                "service_id": None,
+                "booking_id": None,
+            },
+        },
+    },
+    {
+        "sentence": "march 10 to 15",
+        "booking_mode": "reservation",
+        "aliases": {"room": "room"},
+        "conversation_context": {
+            "last_intent": "CREATE_RESERVATION",
+            "turns": [
+                {
+                    "user": "book room",
+                    "intent": "CREATE_RESERVATION",
+                    "search_query": None,
+                }
+            ],
+        },
+        "expected": {
+            "intent": "CREATE_RESERVATION",
+            "facts": {
+                "dates": ["2026-03-10", "2026-03-15"],
+                "times": [],
+                "date_time_pairs": [],
+                "service_id": None,
+                "booking_id": None,
+            },
+        },
+    },
+    {
+        "sentence": "tomorrow at 5pm",
+        "booking_mode": "service",
+        "aliases": {"haircut": "haircut"},
+        "conversation_context": {
+            "last_intent": "QUOTE",
+            "last_search_query": "haircut price",
+            "active_booking_intent": "CREATE_APPOINTMENT",
+            "turns": [
+                {
+                    "user": "book a haircut",
+                    "intent": "CREATE_APPOINTMENT",
+                    "search_query": None,
+                },
+                {
+                    "user": "how much is it",
+                    "intent": "QUOTE",
+                    "search_query": "haircut price",
+                },
+            ],
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "facts": {
+                "dates": ["2026-01-14"],
+                "times": ["17:00"],
+                "date_time_pairs": [],
+                "service_id": None,
+                "booking_id": None,
+            },
+        },
+    },
 ]

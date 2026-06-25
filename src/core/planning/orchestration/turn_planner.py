@@ -876,6 +876,24 @@ def plan_turn(
                     except Exception:
                         pass  # If check fails, fall through to normal NON_DURABLE_INTENT handling
 
+                # CORRECTION: slot update within an active durable session.
+                # Unlike CONFIRM_ACTION, corrections are valid in any session status
+                # (NEEDS_CLARIFICATION, READY, etc.) — the user is refining a slot, not confirming.
+                if not is_durable and effective_intent == "CORRECTION" and _session_booking_intent:
+                    try:
+                        from core.policy.intent_policy import get_intent_durable as _gid
+
+                        if _gid(_session_booking_intent):
+                            logger.info(
+                                f"[CORRECTION] Rerouting to session booking intent "
+                                f"{_session_booking_intent!r} "
+                                f"(user_id={user_id}{log_transaction_id})"
+                            )
+                            effective_intent = _session_booking_intent
+                            is_durable = True
+                    except Exception:
+                        pass  # If check fails, fall through to NON_DURABLE_INTENT
+
                 if not is_durable:
                     # Non-durable intent detected - return informational response immediately
                     # Do NOT proceed to planning, merge, or persistence

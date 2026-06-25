@@ -16,6 +16,7 @@ Request body (POST /resolve):
         "conversation_context": {           # optional — omit for stateless behaviour
             "last_intent": str,             # intent from the previous turn
             "last_search_query": str,       # search_query from the previous turn
+            "active_booking_intent": str,     # durable booking session after FAQ detour (optional)
             "turns": [                      # prior turns, max 3 used
                 {
                     "user": str,

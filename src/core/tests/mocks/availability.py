@@ -102,3 +102,39 @@ def mock_get_service_availability(
     )
 
     return {"slots": [{"start": start_iso, "end": end_iso, "available": True}]}
+
+
+def mock_get_reservation_availability(
+    organization_id: int,
+    start_date: str,
+    end_date: str,
+    extra_params: Optional[Dict[str, Any]] = None,
+    **kwargs,
+) -> Dict[str, Any]:
+    """
+    Mock reservation availability for CREATE_RESERVATION SEARCH_AVAILABILITY.
+
+    Returns the same slots shape as mock_get_service_availability.
+    """
+    del organization_id, extra_params, kwargs
+
+    try:
+        start_dt = datetime.strptime(str(start_date).split("T")[0], "%Y-%m-%d")
+        end_dt = datetime.strptime(str(end_date).split("T")[0], "%Y-%m-%d")
+    except ValueError:
+        start_dt = datetime(2026, 3, 5)
+        end_dt = datetime(2026, 3, 8)
+
+    check_in = start_dt.replace(hour=15, minute=0, second=0, microsecond=0)
+    check_out = (end_dt + timedelta(days=1)).replace(
+        hour=11, minute=0, second=0, microsecond=0
+    )
+    start_iso = check_in.strftime("%Y-%m-%dT%H:%M:%SZ")
+    end_iso = check_out.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    logger.debug(
+        f"[MOCK] Reservation availability: start={start_date}, end={end_date}, "
+        f"slot={start_iso}..{end_iso}"
+    )
+
+    return {"slots": [{"start": start_iso, "end": end_iso, "available": True}]}

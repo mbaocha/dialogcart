@@ -11,6 +11,7 @@ from core.tests.mocks import (
     mock_cancel_booking,
     mock_confirm_booking,
     mock_create_booking,
+    mock_get_reservation_availability,
     mock_get_service_availability,
 )
 
@@ -79,13 +80,33 @@ def create_mock_availability_client(
         )
 
     mock_availability_client.get_service_availability.side_effect = mock_get_availability
+
+    def mock_reservation_availability(
+        organization_id=None,
+        start_date=None,
+        end_date=None,
+        extra_params=None,
+        **kwargs,
+    ):
+        return mock_get_reservation_availability(
+            organization_id=organization_id or 1,
+            start_date=start_date or "2026-03-05",
+            end_date=end_date or "2026-03-08",
+            extra_params=extra_params,
+            **kwargs,
+        )
+
+    mock_availability_client.get_reservation_availability.side_effect = (
+        mock_reservation_availability
+    )
     return mock_availability_client
 
 
-def create_mock_booking_client() -> Mock:
+def create_mock_booking_client(*, reject_duplicate_cancel: bool = False) -> Mock:
     """Stateful mock BookingClient backed by core.tests.mocks."""
     mock_booking_client = Mock(spec=BookingClient)
     created_bookings: Dict[str, Dict[str, Any]] = {}
+    cancelled_booking_codes: set[str] = set()
     most_recent_booking: Optional[Dict[str, Any]] = None
 
     def mock_booking(
@@ -144,8 +165,12 @@ def create_mock_booking_client() -> Mock:
         return result
 
     def cancel_booking_wrapper(booking_code: str, **kwargs):
-        if booking_code in created_bookings:
-            created_bookings[booking_code]["status"] = "cancelled"
+        code = str(booking_code)
+        if reject_duplicate_cancel and code in cancelled_booking_codes:
+            raise ValueError(f"Booking {code} is already cancelled")
+        if code in created_bookings:
+            created_bookings[code]["status"] = "cancelled"
+        cancelled_booking_codes.add(code)
         return mock_cancel_booking(booking_code=booking_code, **kwargs)
 
     def confirm_booking_wrapper(booking_code: str, organization_id=None, **kwargs):

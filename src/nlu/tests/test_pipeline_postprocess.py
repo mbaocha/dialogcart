@@ -14,9 +14,12 @@ from nlu.config.booking_id import (
 )
 from nlu.pipeline import (  # noqa: E402
     _apply_booking_mode_intent,
+    _fix_iso_weekday_mismatch,
     _normalize_booking_id,
     _normalize_cancel_intent,
     _normalize_fuzzy_time,
+    _resolve_calendar_binding_intent,
+    _resolve_slot_fill_intent,
     _strip_unmentioned_dates,
     _text_mentions_date,
 )
@@ -208,3 +211,119 @@ class TestNormalizeBookingId:
         before = slm["facts"]["booking_id"]
         _normalize_booking_id("booking ABC123", slm, {})
         assert slm["facts"]["booking_id"] == before
+
+
+class TestFixIsoWeekdayMismatch:
+    def _slm(self, dates):
+        return {"intent": "CORRECTION", "facts": {"dates": dates}}
+
+    def test_corrects_saturday_after_friday_anchor(self):
+        slm = self._slm(["2026-01-18"])
+        ctx = {"last_date_proposal": {"mode": "single_day", "start": "2026-01-16"}}
+        result = _fix_iso_weekday_mismatch("no saturday instead", slm, ctx)
+        assert result["facts"]["dates"] == ["2026-01-17"]
+
+    def test_noop_when_iso_matches_weekday(self):
+        slm = self._slm(["2026-01-17"])
+        ctx = {"last_date_proposal": {"start": "2026-01-16"}}
+        result = _fix_iso_weekday_mismatch("no saturday instead", slm, ctx)
+        assert result["facts"]["dates"] == ["2026-01-17"]
+
+    def test_noop_without_weekday_in_text(self):
+        slm = self._slm(["2026-01-18"])
+        ctx = {"last_date_proposal": {"start": "2026-01-16"}}
+        result = _fix_iso_weekday_mismatch("no make it later", slm, ctx)
+        assert result["facts"]["dates"] == ["2026-01-18"]
+
+    def test_resets_to_bare_weekday_without_anchor(self):
+        slm = self._slm(["2026-01-18"])
+        result = _fix_iso_weekday_mismatch("no saturday instead", slm, None)
+        assert result["facts"]["dates"] == ["saturday"]
+
+
+class TestResolveCalendarBindingIntent:
+    def test_unknown_slot_fill_uses_session_create_reservation(self):
+        facts = {"dates": ["march 10", "march 15"]}
+        ctx = {"last_intent": "CREATE_RESERVATION"}
+        assert (
+            _resolve_calendar_binding_intent("UNKNOWN", facts, ctx)
+            == "CREATE_RESERVATION"
+        )
+
+    def test_unknown_without_session_intent_unchanged(self):
+        facts = {"dates": ["march 10", "march 15"]}
+        assert _resolve_calendar_binding_intent("UNKNOWN", facts, None) == "UNKNOWN"
+
+    def test_create_reservation_unchanged(self):
+        facts = {"dates": ["march 10", "march 15"]}
+        assert (
+            _resolve_calendar_binding_intent("CREATE_RESERVATION", facts, None)
+            == "CREATE_RESERVATION"
+        )
+
+    def test_unknown_without_dates_unchanged(self):
+        ctx = {"last_intent": "CREATE_RESERVATION"}
+        assert _resolve_calendar_binding_intent("UNKNOWN", {"dates": []}, ctx) == "UNKNOWN"
+
+    def test_correction_date_update_uses_session_intent(self):
+        facts = {"dates": ["saturday"]}
+        ctx = {"last_intent": "CREATE_APPOINTMENT"}
+        assert (
+            _resolve_calendar_binding_intent("CORRECTION", facts, ctx)
+            == "CREATE_APPOINTMENT"
+        )
+
+    def test_calendar_bind_uses_active_booking_intent_after_quote_detour(self):
+        facts = {"dates": ["march 10", "march 15"]}
+        ctx = {
+            "last_intent": "QUOTE",
+            "active_booking_intent": "CREATE_RESERVATION",
+        }
+        assert (
+            _resolve_calendar_binding_intent("UNKNOWN", facts, ctx)
+            == "CREATE_RESERVATION"
+        )
+
+
+class TestResolveSlotFillIntent:
+    def test_promotes_unknown_with_booking_last_intent(self):
+        slm = {
+            "intent": "UNKNOWN",
+            "facts": {"dates": ["tomorrow"], "times": []},
+        }
+        ctx = {"last_intent": "CREATE_APPOINTMENT"}
+        result = _resolve_slot_fill_intent(slm, "tomorrow", ctx)
+        assert result["intent"] == "CREATE_APPOINTMENT"
+
+    def test_no_promotion_without_context(self):
+        slm = {"intent": "UNKNOWN", "facts": {"dates": ["tomorrow"]}}
+        assert _resolve_slot_fill_intent(slm, "tomorrow", None)["intent"] == "UNKNOWN"
+
+    def test_no_promotion_after_quote_last_intent_without_active_booking(self):
+        slm = {"intent": "UNKNOWN", "facts": {"dates": ["tomorrow"]}}
+        ctx = {"last_intent": "QUOTE"}
+        assert _resolve_slot_fill_intent(slm, "tomorrow", ctx)["intent"] == "UNKNOWN"
+
+    def test_promotion_via_active_booking_after_quote_detour(self):
+        slm = {
+            "intent": "UNKNOWN",
+            "facts": {"dates": ["tomorrow"], "times": ["17:00"]},
+        }
+        ctx = {
+            "last_intent": "QUOTE",
+            "active_booking_intent": "CREATE_APPOINTMENT",
+        }
+        result = _resolve_slot_fill_intent(slm, "tomorrow at 5pm", ctx)
+        assert result["intent"] == "CREATE_APPOINTMENT"
+
+    def test_no_promotion_with_booking_verb(self):
+        slm = {"intent": "UNKNOWN", "facts": {"dates": ["tomorrow"]}}
+        ctx = {"last_intent": "CREATE_APPOINTMENT"}
+        result = _resolve_slot_fill_intent(slm, "book for tomorrow", ctx)
+        assert result["intent"] == "UNKNOWN"
+
+    def test_no_promotion_on_correction_phrase(self):
+        slm = {"intent": "UNKNOWN", "facts": {"dates": ["friday"]}}
+        ctx = {"last_intent": "CREATE_APPOINTMENT"}
+        result = _resolve_slot_fill_intent(slm, "wait I meant friday", ctx)
+        assert result["intent"] == "UNKNOWN"

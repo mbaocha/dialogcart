@@ -436,9 +436,12 @@ def select_next_execution_step(
             # SPECIAL CASE: FETCH_BOOKING can run even when booking_id is missing
             # (it's the step that helps us GET the booking_id)
             if action == "FETCH_BOOKING":
-                # FETCH_BOOKING is allowed to run when booking_id is missing
-                # This enables booking identification when user says "cancel my booking"
-                pass  # Skip required_slots check for FETCH_BOOKING
+                # Skip FETCH_BOOKING once booking_id is already collected — user provided
+                # it directly, so there is no need to stage the fetch. The next step
+                # (CONFIRM_CANCELLATION, SEARCH_AVAILABILITY, etc.) runs instead.
+                if "booking_id" in collected_slot_names:
+                    continue
+                # booking_id still unknown: keep FETCH_BOOKING as the staged plan action.
             else:
                 required_slots_set = set(required_slots)
                 if not required_slots_set.issubset(collected_slot_names):
@@ -450,6 +453,17 @@ def select_next_execution_step(
             if not availability_resolved:
                 # Prerequisite not met - skip this step
                 continue
+
+        if "booking_hold_created" in requires:
+            booking_hold_created = flags.get("booking_hold_created")
+            if booking_hold_created is None:
+                booking_hold_created = "booking_id" in collected_slot_names
+            if not booking_hold_created:
+                continue
+
+        # Hold already placed — advance to FINALIZE_RESERVATION instead of re-running hold
+        if action == "CREATE_BOOKING_HOLD" and "booking_id" in collected_slot_names:
+            continue
 
         # MODIFY_BOOKING and MODIFY_RESERVATION sequencing: SEARCH_AVAILABILITY runs when confirmation_state is None
         # APPLY_MODIFICATION runs when confirmation_state == "confirmed"

@@ -10,13 +10,14 @@ Endpoints mocked:
 - POST /api/internal/bookings/{bookingCode}/confirm
 """
 
-from .availability import mock_get_service_availability
+from .availability import mock_get_reservation_availability, mock_get_service_availability
 from .bookings import mock_confirm_booking, mock_create_booking, reset_booking_counter
 from .cancellations import mock_cancel_booking
 from .discovery import mock_discovery_endpoints
 
 __all__ = [
     "mock_get_service_availability",
+    "mock_get_reservation_availability",
     "mock_create_booking",
     "mock_confirm_booking",
     "mock_cancel_booking",

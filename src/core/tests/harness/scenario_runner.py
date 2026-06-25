@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from core.orchestration.orchestrator import handle_message
+from core.orchestration.persistence.durable_intents import is_durable_intent
 from core.tests.harness.clients import TestCatalogClient, TestLumaClient
 from core.tests.harness.mock_clients import (
     create_mock_availability_client,
@@ -39,10 +40,22 @@ def assert_turn_expectations(
     mock_booking_client: Any = None,
 ) -> None:
     """Assert turn expectations against normalized planning outcome."""
-    assert result.get("success") is True, (
-        f"[{scenario_name}] Turn {turn_number}: Expected success=True, "
-        f"got {result.get('success')} with error: {result.get('error')}"
-    )
+    expected_success = expectations.get("success", True)
+    if expected_success:
+        assert result.get("success") is True, (
+            f"[{scenario_name}] Turn {turn_number}: Expected success=True, "
+            f"got {result.get('success')} with error: {result.get('error')}"
+        )
+    else:
+        assert result.get("success") is False, (
+            f"[{scenario_name}] Turn {turn_number}: Expected success=False, "
+            f"got success={result.get('success')}"
+        )
+        if "error" in expectations:
+            assert result.get("error") == expectations["error"], (
+                f"[{scenario_name}] Turn {turn_number}: Expected error "
+                f"{expectations['error']!r}, got {result.get('error')!r}"
+            )
 
     normalized = normalize_planning_outcome(result)
     plan = normalized.get("plan", {}) or normalized
@@ -79,6 +92,16 @@ def assert_turn_expectations(
             f"{expected_missing}, got {actual_missing}"
         )
 
+    if "active_handler" in expectations:
+        outcome = result.get("outcome")
+        if not isinstance(outcome, dict):
+            outcome = result.get("result") if isinstance(result.get("result"), dict) else {}
+        actual_handler = outcome.get("active_handler")
+        assert actual_handler == expectations["active_handler"], (
+            f"[{scenario_name}] Turn {turn_number}: Expected active_handler "
+            f"{expectations['active_handler']!r}, got {actual_handler!r}"
+        )
+
     if assert_execution_calls and mock_booking_client is not None:
         expected_action = expectations.get("action")
         if expected_action == "CONFIRM_APPOINTMENT":
@@ -97,6 +120,10 @@ def assert_turn_expectations(
             assert mock_booking_client.update_booking.called, (
                 f"[{scenario_name}] Turn {turn_number}: Expected update_booking to be called"
             )
+        elif expected_action == "CREATE_BOOKING_HOLD":
+            assert mock_booking_client.create_booking.called, (
+                f"[{scenario_name}] Turn {turn_number}: Expected create_booking to be called"
+            )
 
 
 def _persist_session_for_next_turn(
@@ -105,8 +132,20 @@ def _persist_session_for_next_turn(
     session_store: MockSessionStore,
     user_id: str,
     current_intent: Optional[str],
+    booking_intent: Optional[str] = None,
 ) -> None:
     """Mirror session fields required for multi-turn execution flows."""
+    previous_session = session_store.get_session(user_id)
+    if (
+        normalized.get("status") == "HANDLER_DELEGATED"
+        and previous_session
+        and booking_intent
+        and is_durable_intent(booking_intent)
+    ):
+        # Informational detour: durable booking session must survive unchanged
+        session_store.save_session(user_id, previous_session)
+        return
+
     plan_obj = normalized.get("plan", {})
     execution_result = result.get("result", {})
     slots = dict(normalized.get("slots", {}))
@@ -117,6 +156,9 @@ def _persist_session_for_next_turn(
         exec_booking_id = execution_result.get("booking_id")
         if exec_booking_id:
             slots["booking_id"] = exec_booking_id
+        exec_booking_code = execution_result.get("booking_code")
+        if exec_booking_code:
+            slots["booking_code"] = exec_booking_code
 
     session_state: Dict[str, Any] = {
         "intent_name": current_intent or "",
@@ -132,6 +174,9 @@ def _persist_session_for_next_turn(
             session_state["date_proposal"] = merged["date_proposal"]
         if merged.get("time_proposal") is not None:
             session_state["time_proposal"] = merged["time_proposal"]
+        conv = merged.get("_conversation")
+        if isinstance(conv, dict):
+            session_state["conversation"] = conv
     if facts.get("date_proposal") is not None:
         session_state["date_proposal"] = facts["date_proposal"]
     if facts.get("time_proposal") is not None:
@@ -163,7 +208,6 @@ def _persist_session_for_next_turn(
                 "resolved_datetime_range"
             ]
 
-    previous_session = session_store.get_session(user_id)
     if previous_session:
         if (
             "availability_fingerprint" not in session_state
@@ -179,6 +223,10 @@ def _persist_session_for_next_turn(
             session_state["resolved_datetime_range"] = previous_session[
                 "resolved_datetime_range"
             ]
+        if "conversation" not in session_state and previous_session.get("conversation"):
+            session_state["conversation"] = previous_session["conversation"]
+        if "messages" not in session_state and previous_session.get("messages"):
+            session_state["messages"] = previous_session["messages"]
 
     session_store.save_session(user_id, session_state)
 
@@ -225,8 +273,13 @@ def run_multi_turn_scenario(
     mock_org_client = create_mock_organization_client(
         business_category_id=1 if domain == "service" else 2
     )
+    mock_booking_opts = scenario.get("mock_booking") or {}
     if inject_execution_clients:
-        mock_booking_client = create_mock_booking_client()
+        mock_booking_client = create_mock_booking_client(
+            reject_duplicate_cancel=bool(
+                mock_booking_opts.get("reject_duplicate_cancel")
+            ),
+        )
         mock_availability_client = create_mock_availability_client(
             frozen_time=frozen_time
         )
@@ -234,6 +287,7 @@ def run_multi_turn_scenario(
     session_store = MockSessionStore()
     user_id = f"{user_id_prefix}_{scenario_name}_{id(scenario)}"
     previous_intent = None
+    booking_intent: Optional[str] = None
 
     for turn_idx, turn in enumerate(turns, start=1):
         sentence = turn["sentence"]
@@ -274,22 +328,71 @@ def run_multi_turn_scenario(
             "intent_name"
         )
 
-        if turn_idx > 1 and previous_intent:
+        durable_reference = booking_intent or previous_intent
+        if turn_idx > 1 and durable_reference:
             if expectations.get("intent_switched"):
-                assert current_intent != previous_intent, (
+                assert current_intent != durable_reference, (
                     f"[{scenario_name}] Turn {turn_idx}: Expected intent switch "
-                    f"from {previous_intent}, got {current_intent}"
+                    f"from {durable_reference}, got {current_intent}"
                 )
             elif expectations.get("intent_preserved", False):
-                assert current_intent == previous_intent or current_intent != "", (
+                assert current_intent == durable_reference or current_intent != "", (
                     f"[{scenario_name}] Turn {turn_idx}: Expected intent preserved "
-                    f"({previous_intent}), got {current_intent}"
+                    f"({durable_reference}), got {current_intent}"
                 )
 
-        if current_intent:
+        if (
+            current_intent
+            and normalized.get("status") != "HANDLER_DELEGATED"
+            and is_durable_intent(current_intent)
+        ):
+            booking_intent = current_intent
+
+        if current_intent and normalized.get("status") != "HANDLER_DELEGATED":
             previous_intent = current_intent
 
         if turn_idx < len(turns):
             _persist_session_for_next_turn(
-                result, normalized, session_store, user_id, current_intent
+                result,
+                normalized,
+                session_store,
+                user_id,
+                current_intent,
+                booking_intent=booking_intent,
             )
+            if expectations.get("preserve_booking_session") and booking_intent:
+                preserved = session_store.get_session(user_id)
+                assert preserved is not None, (
+                    f"[{scenario_name}] Turn {turn_idx}: Expected booking session "
+                    f"to be preserved after detour, got None"
+                )
+                assert preserved.get("intent_name") == booking_intent, (
+                    f"[{scenario_name}] Turn {turn_idx}: Expected session intent "
+                    f"{booking_intent!r} after detour, got {preserved.get('intent_name')!r}"
+                )
+                preserved_slots = preserved.get("slots", {})
+                if preserved_slots.get("service_id"):
+                    assert preserved_slots.get("service_id"), (
+                        f"[{scenario_name}] Turn {turn_idx}: Expected service_id in "
+                        f"preserved session slots after detour"
+                    )
+                elif booking_intent in ("CANCEL_BOOKING", "MODIFY_BOOKING"):
+                    assert preserved_slots.get("booking_id") or preserved.get(
+                        "intent_name"
+                    ) == booking_intent, (
+                        f"[{scenario_name}] Turn {turn_idx}: Expected booking session "
+                        f"preserved after detour, slots={list(preserved_slots.keys())}"
+                    )
+                else:
+                    assert preserved_slots.get("service_id"), (
+                        f"[{scenario_name}] Turn {turn_idx}: Expected service_id in "
+                        f"preserved session slots after detour"
+                    )
+
+    max_create_calls = scenario.get("assert_create_booking_calls")
+    if max_create_calls is not None and mock_booking_client is not None:
+        actual_calls = mock_booking_client.create_booking.call_count
+        assert actual_calls == max_create_calls, (
+            f"[{scenario_name}] Expected create_booking call_count="
+            f"{max_create_calls}, got {actual_calls}"
+        )

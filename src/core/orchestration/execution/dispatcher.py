@@ -1153,9 +1153,7 @@ def _execute_service_availability(
                     extracted_service_id = (
                         booking.get("service_id")
                         or booking.get("item_id")
-                        or booking.get("service", {}).get("id")
-                        if isinstance(booking.get("service"), dict)
-                        else None
+                        or (booking.get("service", {}).get("id") if isinstance(booking.get("service"), dict) else None)
                     )
                     if extracted_service_id:
                         logger.info(

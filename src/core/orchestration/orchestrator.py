@@ -700,7 +700,14 @@ def handle_message(
                 if mode == "exploratory":
                     # Exploratory actions execute when their required_slots are satisfied
                     # regardless of plan status or missing planning slots
-                    can_execute = action_slots_satisfied
+                    if plan_action == "FETCH_BOOKING":
+                        # Planning may label the turn FETCH_BOOKING while still missing
+                        # booking_id — do not call the API until an id/code is present.
+                        can_execute = bool(
+                            slots.get("booking_id") or slots.get("booking_code")
+                        )
+                    else:
+                        can_execute = action_slots_satisfied
                 else:
                     # Committing actions require planning completeness
                     can_execute = plan_status == "READY" and action_slots_satisfied
@@ -721,6 +728,10 @@ def handle_message(
                     )
 
                     if mode == "exploratory" and action_slots_satisfied:
+                        if action_name == "FETCH_BOOKING" and not (
+                            slots.get("booking_id") or slots.get("booking_code")
+                        ):
+                            continue
                         # Found an executable exploratory action
                         execution_step = step
                         plan_action = action_name
@@ -1186,11 +1197,16 @@ def handle_message(
                 # CONFIRM_APPOINTMENT can reuse the validated range next turn.
                 from core.orchestration.temporal_proposal import (
                     build_datetime_range_from_slots,
+                    datetime_range_from_availability_result,
                 )
 
                 resolved_datetime_range = build_datetime_range_from_slots(
                     slots, execution_result
                 )
+                if not resolved_datetime_range:
+                    resolved_datetime_range = datetime_range_from_availability_result(
+                        execution_result
+                    )
 
                 if resolved_datetime_range:
                     _persist_to_session(

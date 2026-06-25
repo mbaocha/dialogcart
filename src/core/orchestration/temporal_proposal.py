@@ -166,16 +166,17 @@ def expand_slots_for_planning(
     if is_flexible_combined_utterance(date_constraint, nlu_facts):
         return expanded
 
-    if date_proposal and not expanded.get("date") and not expanded.get("date_range"):
+    if date_proposal:
         mode = date_proposal.get("mode")
         start = date_proposal.get("start")
         end = date_proposal.get("end")
         if mode == "single_day" and start:
+            # New date_proposal overrides stale session date (e.g. friday → saturday).
             expanded["date"] = start
         elif start and end:
             expanded["date_range"] = {"start": start, "end": end}
             expanded["date"] = start
-        elif start:
+        elif start and not expanded.get("date") and not expanded.get("date_range"):
             expanded["date"] = start
 
     if time_proposal:
@@ -372,6 +373,25 @@ def build_datetime_range_from_slots(
 
     end_dt = start_dt + _td(minutes=duration_minutes)
     return {"start": start_dt.isoformat(), "end": end_dt.isoformat()}
+
+
+def datetime_range_from_availability_result(
+    execution_result: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, str]]:
+    """Build resolved_datetime_range from normalized availability execution slots."""
+    if not isinstance(execution_result, dict):
+        return None
+    slots_list = execution_result.get("slots", [])
+    if not isinstance(slots_list, list) or not slots_list:
+        return None
+    first = slots_list[0]
+    if not isinstance(first, dict):
+        return None
+    start = first.get("starts_at") or first.get("start")
+    end = first.get("ends_at") or first.get("end")
+    if start and end:
+        return {"start": str(start), "end": str(end)}
+    return None
 
 
 def slots_for_availability_search(

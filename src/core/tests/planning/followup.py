@@ -459,7 +459,7 @@ followup_scenarios = [
                 "sentence": "booking abc123",
                 "expected": {
                     "status": "READY",
-                    "plan": {"stage": "IDENTIFY", "action": "FETCH_BOOKING"},
+                    "plan": {"stage": "CONFIRM", "action": "CONFIRM_CANCELLATION"},
                     "missing_slots": [],
                     "slots": {"booking_id": "abc123"},
                 },

@@ -1343,16 +1343,36 @@ def process_luma_response(
     )
 
     # User said "yes" to confirm after a successful availability search — treat
-    # availability as resolved for this turn so policy selects CONFIRM_* not SEARCH_*.
-    if (
-        luma_response.get("_confirm_booking_continuation")
-        and stored_fingerprint
-    ):
-        availability_resolved = True
-        logger.info(
-            "[AVAILABILITY_FINGERPRINT] confirm_booking_continuation: "
-            "forcing availability_resolved=True (stored fingerprint present)"
+    # availability as resolved for this turn so policy selects APPLY_* / CONFIRM_*
+    # not SEARCH_*.
+    if luma_response.get("_confirm_booking_continuation"):
+        stored_range = (
+            session_state.get("resolved_datetime_range")
+            if isinstance(session_state, dict)
+            else None
         )
+        if stored_fingerprint:
+            availability_resolved = True
+            logger.info(
+                "[AVAILABILITY_FINGERPRINT] confirm_booking_continuation: "
+                "forcing availability_resolved=True (stored fingerprint present)"
+            )
+        elif isinstance(stored_range, dict) and stored_range.get("start"):
+            availability_resolved = True
+            logger.info(
+                "[AVAILABILITY_FINGERPRINT] confirm_booking_continuation: "
+                "forcing availability_resolved=True (resolved_datetime_range in session)"
+            )
+        elif (
+            intent_name in ("MODIFY_BOOKING", "MODIFY_RESERVATION")
+            and isinstance(session_state, dict)
+            and session_state.get("status") == "READY"
+        ):
+            availability_resolved = True
+            logger.info(
+                "[AVAILABILITY_FINGERPRINT] confirm_booking_continuation: "
+                "forcing availability_resolved=True (MODIFY READY confirm after search)"
+            )
 
     # Log fingerprint comparison for debugging
     current_fingerprint = compute_availability_fingerprint(

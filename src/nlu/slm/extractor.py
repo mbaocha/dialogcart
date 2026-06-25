@@ -55,6 +55,7 @@ INTENT_GROUPS = {
         "intents": {
             "CONFIRM_ACTION": "confirming a proposed action (yes, confirm, ok, sure)",
             "REJECT_ACTION":  "rejecting a proposed action (no, cancel that, don’t)",
+            "CORRECTION":     "correcting or replacing a slot in the CURRENT flow — ONLY when conversation context shows an active booking intent (actually X, make it X, change it to X, wait I meant X)",
         },
     },
     "fallback": {
@@ -198,10 +199,16 @@ def _format_conversation_context(ctx: Dict[str, Any]) -> str:
     ]
     last_intent = ctx.get("last_intent")
     last_sq = ctx.get("last_search_query")
+    last_dp = ctx.get("last_date_proposal")
     if last_intent:
         lines.append(f"Last intent: {last_intent}")
     if last_sq:
         lines.append(f'Last search query: "{last_sq}"')
+    if isinstance(last_dp, dict) and last_dp.get("start"):
+        lines.append(f"Last date proposal: {last_dp.get('start')}")
+    active_booking = ctx.get("active_booking_intent")
+    if active_booking and active_booking != last_intent:
+        lines.append(f"Active booking intent (durable session): {active_booking}")
 
     turns = (ctx.get("turns") or [])[-3:]
     if turns:
@@ -225,6 +232,8 @@ def _format_conversation_context(ctx: Dict[str, Any]) -> str:
         '  last="cancellation policy" + "and for group bookings?" → "cancellation policy group bookings"',
         '  last="deep tissue massage" + "how long is it?" → "deep tissue massage duration"',
         "- Do NOT invent booking slots (dates, times, services) on FAQ detours.",
+        "- Slot-fill continuation (see STEP 1): bare date/time fragments after a booking intent",
+        "  continue that booking intent — not UNKNOWN, not CORRECTION.",
     ]
     return "\n".join(lines)
 
@@ -304,7 +313,38 @@ STEP 1 — INTENT CLASSIFICATION
 
 - UNKNOWN               — input is ambiguous, fragmentary, or matches none of the above
 
-UNKNOWN examples:
+CORRECTION guidance (ONLY when CONVERSATION CONTEXT shows an active booking intent):
+  last_intent=CREATE_APPOINTMENT + "actually a massage" → CORRECTION  (service update)
+  last_intent=CREATE_APPOINTMENT + "make it 3pm instead" → CORRECTION  (time update)
+  last_intent=CREATE_APPOINTMENT + "change it to a massage tomorrow at 2pm" → CORRECTION
+  last_intent=CREATE_APPOINTMENT + "wait, I meant friday" → CORRECTION  (date update)
+  last_intent=CREATE_APPOINTMENT + date was friday + "no saturday instead" → CORRECTION, dates=["2026-01-17"]  (saturday after friday)
+  last_intent=MODIFY_BOOKING + "actually 5pm" → CORRECTION  (time update)
+  last_intent=CANCEL_BOOKING + "wait, it's ABC12345" → CORRECTION  (booking_id update)
+  last_intent=MODIFY_BOOKING + "wait, it's ABC12345" → CORRECTION  (booking_id update)
+  No prior booking context + booking verb present → use appropriate booking intent (CREATE_APPOINTMENT etc.), not CORRECTION
+  No prior booking context + no booking verb → UNKNOWN
+  "actually a massage at 3pm" (no prior context) → CREATE_APPOINTMENT, not CORRECTION
+  "cancel that" → REJECT_ACTION  (not a slot correction)
+  "I want to modify my booking" → MODIFY_BOOKING  (explicit new intent, not a slot correction)
+  "change booking" (no prior context) → MODIFY_BOOKING
+  "I need to reschedule" (no prior context) → MODIFY_BOOKING
+
+SLOT-FILL continuation (ONLY when CONVERSATION CONTEXT shows Last intent OR Active booking intent
+is CREATE_APPOINTMENT, CREATE_RESERVATION, or MODIFY_BOOKING):
+  User supplies ONLY missing slot material — bare date, bare time, date range, or date+time — with
+  NO new booking/switch verb and NO correction language ("instead", "wait I meant", "actually", "no make it").
+  → Return the SAME booking intent from context (NOT UNKNOWN, NOT CORRECTION).
+  last_intent=CREATE_APPOINTMENT + "tomorrow"           → CREATE_APPOINTMENT, dates=["tomorrow"]
+  last_intent=CREATE_APPOINTMENT + "11am"               → CREATE_APPOINTMENT, times=["11:00"]
+  last_intent=CREATE_APPOINTMENT + "tomorrow at 3pm"    → CREATE_APPOINTMENT, dates=["tomorrow"], times=["15:00"]
+  last_intent=CREATE_RESERVATION + "march 10 to 15"     → CREATE_RESERVATION, dates=[start,end ISO]
+  active_booking_intent=CREATE_APPOINTMENT + "tomorrow at 5pm" (after a QUOTE/FAQ detour) → CREATE_APPOINTMENT
+  Do NOT apply when Last intent is QUOTE, GENERAL_INQUIRY, DISCOVERY, DETAILS, or other FAQ/RAG intents.
+  Do NOT apply without CONVERSATION CONTEXT (cold start).
+  Explicit booking verb in the utterance ("book", "schedule", "reserve") → classify normally, not slot-fill rule.
+
+UNKNOWN examples (NO conversation context / cold start):
   "haircut tomorrow"          → UNKNOWN  (no booking verb, not a question)
   "from april 12 to april 16" → UNKNOWN  (date range fragment, no verb or question)
   "friday"                    → UNKNOWN  (bare weekday, no context)
@@ -321,7 +361,8 @@ CRITICAL: Only extract dates the user explicitly mentions. Never default to toda
 date_time_pairs: ONLY when BOTH date AND time appear in the same utterance (e.g. "tomorrow at 3pm").
 Named-month dates (no year): month > current → current year; month == current → current year; month < current → next year.
 Example (today=2026-01-13): "march 3"→2026-03-03, "jan 10"→2026-01-10, "dec 1"→2026-12-01.
-Resolve named-month dates to ISO YYYY-MM-DD. For weekday/relative terms, preserve the user's exact words — do NOT add modifiers: bare "friday" stays "friday" (not "next friday"), "next monday" stays "next monday", "tomorrow" stays "tomorrow".
+Resolve named-month dates to ISO YYYY-MM-DD. For weekday/relative terms on a NEW booking turn, preserve the user's exact words in dates[] — do NOT add modifiers: bare "friday" stays "friday" (not "next friday"), "next monday" stays "next monday", "tomorrow" stays "tomorrow".
+EXCEPTION — CORRECTION date replacement: when intent is CORRECTION and the user substitutes a new date/weekday ("saturday instead", "no make it friday", "wait I meant tomorrow"), resolve the NEW date to ISO YYYY-MM-DD using Current date/time (same weekday/named-month rules as above).
 For date ranges ("mar 5 through 8", "from may 1 to 10"), output exactly [start_date, end_date] as two ISO dates — never enumerate intermediate dates.
 Numeric format is DD/MM (day first): "04/03"→day=4,month=3→2026-03-04.
 

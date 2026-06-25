@@ -62,6 +62,16 @@ def test_expand_slots_exact_time_overrides_stale_session_time():
     assert expanded["time"] == "15:00"
 
 
+def test_expand_slots_date_proposal_overrides_stale_session_date():
+    expanded = expand_slots_for_planning(
+        {"service_id": "haircut", "date": "2026-01-16", "time": "14:00"},
+        date_proposal={"mode": "single_day", "start": "2026-01-17"},
+        intent_name="CREATE_APPOINTMENT",
+    )
+    assert expanded["date"] == "2026-01-17"
+    assert expanded["time"] == "14:00"
+
+
 def test_proposal_satisfies_planning_time_bounded_fuzzy():
     assert proposal_satisfies_planning_time(
         {"mode": "fuzzy", "label": "evening", "start": "17:00", "end": "21:59"}
@@ -88,6 +98,26 @@ def test_expand_slots_exact_time_overrides_fuzzy_label():
         intent_name="CREATE_APPOINTMENT",
     )
     assert expanded["time"] == "14:00"
+
+
+def test_facts_to_slots_skips_null_booking_and_service_id():
+    facts = {"service_id": None, "booking_id": None}
+    assert facts_to_slots(facts) == {}
+
+
+def test_merge_promoted_does_not_overwrite_durable_slots_with_null():
+    nested = {
+        "booking_id": "ABC12345",
+        "date": "2026-01-14",
+        "time": "15:00",
+    }
+    promoted = {"service_id": None, "booking_id": None}
+    merged = merge_promoted_luma_slots(nested, promoted)
+    assert merged == {
+        "booking_id": "ABC12345",
+        "date": "2026-01-14",
+        "time": "15:00",
+    }
 
 
 def test_merge_strips_stale_date_when_fix4_applies():

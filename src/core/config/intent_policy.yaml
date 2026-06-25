@@ -117,7 +117,6 @@ intents:
         mode: exploratory
         required_slots:
           - booking_id
-          - service_id
         optional_slots:
           - date
           - time

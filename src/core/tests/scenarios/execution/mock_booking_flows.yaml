@@ -78,6 +78,34 @@ scenarios:
           action: SEARCH_AVAILABILITY
           intent_preserved: true
 
+  - name: appointment_hours_detour_then_confirm
+    description: FAQ detour mid-booking preserves session; resume time change and confirm
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book a haircut tomorrow at 2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+      - sentence: "what time do you open?"
+        expect:
+          status: HANDLER_DELEGATED
+          active_handler: rag
+          intent_switched: true
+          preserve_booking_session: true
+      - sentence: "actually make it 3pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_APPOINTMENT
+          intent_preserved: true
+
   - name: appointment_fuzzy_time_then_confirm
     description: Fuzzy time clarified, search, then confirm
     domain: service
@@ -98,4 +126,333 @@ scenarios:
         expect:
           status: READY
           action: CONFIRM_APPOINTMENT
+          intent_preserved: true
+
+  - name: appointment_faq_during_slot_fill_then_confirm
+    description: FAQ detour while missing time preserves session; resume slot fill and confirm
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book a haircut tomorrow"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: SEARCH_AVAILABILITY
+          missing_slots: ["time"]
+      - sentence: "what time do you open?"
+        expect:
+          status: HANDLER_DELEGATED
+          active_handler: rag
+          intent_switched: true
+          preserve_booking_session: true
+      - sentence: "2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_APPOINTMENT
+          intent_preserved: true
+
+  - name: cancel_booking_fetch_then_confirm
+    description: Cancel flow fetch booking id then execute cancellation
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "cancel my booking"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          intent: CANCEL_BOOKING
+          missing_slots: ["booking_id"]
+      - sentence: "booking ABC12345"
+        expect:
+          status: READY
+          action: CONFIRM_CANCELLATION
+          intent: CANCEL_BOOKING
+          intent_preserved: true
+
+  - name: reschedule_booking_search_then_apply
+    description: Modify booking fetch id, re-search availability, apply modification
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "i need to reschedule"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          intent: MODIFY_BOOKING
+          missing_slots: ["booking_id", "date"]
+      - sentence: "booking ABC12345 to tomorrow at 3pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent: MODIFY_BOOKING
+          intent_preserved: true
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: APPLY_MODIFICATION
+          intent: MODIFY_BOOKING
+          intent_preserved: true
+
+  - name: appointment_date_override_then_confirm
+    description: Date correction triggers re-search before confirm
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book a haircut friday at 2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+      - sentence: "no saturday instead"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_APPOINTMENT
+          intent_preserved: true
+
+  - name: appointment_faq_then_confirm_unchanged
+    description: FAQ detour at READY preserves fingerprint; confirm without slot change
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book a haircut tomorrow at 2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+      - sentence: "what time do you open?"
+        expect:
+          status: HANDLER_DELEGATED
+          active_handler: rag
+          intent_switched: true
+          preserve_booking_session: true
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_APPOINTMENT
+          intent_preserved: true
+
+  - name: appointment_double_confirm_idempotent
+    description: Second yes after confirm does not call create_booking again
+    domain: service
+    assert_create_booking_calls: 1
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "book a haircut tomorrow at 2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_APPOINTMENT
+          intent_preserved: true
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_APPOINTMENT
+          intent_preserved: true
+
+  - name: confirm_action_cold_yes_no_session
+    description: Cold yes with no session does not reroute into a booking confirm
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "yes"
+        expect:
+          status: NON_DURABLE_INTENT
+
+  - name: appointment_service_switch_after_search
+    description: Service change after search forces re-search before confirm
+    domain: service
+    aliases:
+      haircut: haircut
+      massage: massage
+    turns:
+      - sentence: "book a haircut tomorrow at 2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+      - sentence: "change it to a massage tomorrow at 2pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CONFIRM_APPOINTMENT
+          intent_preserved: true
+
+  - name: modify_time_change_after_search
+    description: Time correction after modify search re-runs availability before apply
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "reschedule booking ABC12345 to tomorrow at 3pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+      - sentence: "actually 5pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent_preserved: true
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: APPLY_MODIFICATION
+          intent: MODIFY_BOOKING
+          intent_preserved: true
+
+  - name: modify_progressive_slot_fill
+    description: Split-turn booking_id then date/time accumulation for modify
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "I need to reschedule"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          intent: MODIFY_BOOKING
+          missing_slots: ["booking_id", "date"]
+      - sentence: "booking ABC12345"
+        expect:
+          status: NEEDS_CLARIFICATION
+          intent: MODIFY_BOOKING
+          missing_slots: ["date"]
+          intent_preserved: true
+      - sentence: "to next friday at 10am"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent: MODIFY_BOOKING
+          intent_preserved: true
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: APPLY_MODIFICATION
+          intent: MODIFY_BOOKING
+          intent_preserved: true
+
+  - name: cancel_faq_detour_then_confirm
+    description: FAQ detour during cancel preserves CANCEL_BOOKING session
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "cancel my booking"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          intent: CANCEL_BOOKING
+          missing_slots: ["booking_id"]
+      - sentence: "what's your refund policy?"
+        expect:
+          status: HANDLER_DELEGATED
+          active_handler: rag
+          intent_switched: true
+          preserve_booking_session: true
+      - sentence: "booking ABC12345"
+        expect:
+          status: READY
+          action: CONFIRM_CANCELLATION
+          intent: CANCEL_BOOKING
+          intent_preserved: true
+
+  - name: modify_booking_id_correction
+    description: User corrects booking_id before modification is applied
+    domain: service
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "i need to reschedule"
+        expect:
+          status: NEEDS_CLARIFICATION
+          action: FETCH_BOOKING
+          intent: MODIFY_BOOKING
+          missing_slots: ["booking_id", "date"]
+      - sentence: "booking XYZ789"
+        expect:
+          status: NEEDS_CLARIFICATION
+          intent: MODIFY_BOOKING
+          missing_slots: ["date"]
+          intent_preserved: true
+      - sentence: "wait, it's ABC12345"
+        expect:
+          status: NEEDS_CLARIFICATION
+          intent: MODIFY_BOOKING
+          missing_slots: ["date"]
+          intent_preserved: true
+      - sentence: "to tomorrow at 3pm"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          intent: MODIFY_BOOKING
+          intent_preserved: true
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: APPLY_MODIFICATION
+          intent: MODIFY_BOOKING
+          intent_preserved: true
+
+  - name: cancel_already_cancelled_booking
+    description: Second cancel of same booking surfaces execution_failed
+    domain: service
+    mock_booking:
+      reject_duplicate_cancel: true
+    aliases:
+      haircut: haircut
+    turns:
+      - sentence: "cancel booking ABC12345"
+        expect:
+          status: READY
+          action: CONFIRM_CANCELLATION
+          intent: CANCEL_BOOKING
+      - sentence: "cancel booking ABC12345"
+        expect:
+          success: false
+          error: execution_failed
+
+  - name: reservation_search_hold_then_finalize
+    description: CREATE_RESERVATION search, hold, then finalize
+    domain: reservation
+    aliases:
+      room: room
+    turns:
+      - sentence: "book a room march 5 to 8"
+        expect:
+          status: READY
+          action: SEARCH_AVAILABILITY
+          missing_slots: []
+      - sentence: "yes"
+        expect:
+          status: READY
+          action: CREATE_BOOKING_HOLD
+          intent_preserved: true
+      - sentence: "confirm"
+        expect:
+          status: READY
+          action: FINALIZE_RESERVATION
           intent_preserved: true

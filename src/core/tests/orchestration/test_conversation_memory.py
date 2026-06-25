@@ -22,8 +22,13 @@ class TestBuildConversationContext:
     def test_returns_none_for_empty_session(self):
         assert build_conversation_context({}) is None
 
-    def test_returns_none_when_no_conversation_key(self):
-        assert build_conversation_context({"intent_name": "CREATE_APPOINTMENT"}) is None
+    def test_synthesizes_last_intent_from_durable_session_intent_name(self):
+        session = {"intent_name": "CREATE_APPOINTMENT", "status": "NEEDS_CLARIFICATION"}
+        result = build_conversation_context(session)
+        assert result == {"last_intent": "CREATE_APPOINTMENT"}
+
+    def test_returns_none_when_no_conversation_and_ephemeral_intent(self):
+        assert build_conversation_context({"intent_name": "GENERAL_INQUIRY"}) is None
 
     def test_returns_none_for_empty_conversation(self):
         session = {"conversation": {}}
@@ -38,13 +43,13 @@ class TestBuildConversationContext:
         conv = {"last_intent": "GENERAL_INQUIRY", "last_search_query": None, "turns": []}
         session = {"conversation": conv}
         result = build_conversation_context(session)
-        assert result is conv
+        assert result == conv
 
     def test_returns_context_when_last_search_query_present(self):
         conv = {"last_intent": None, "last_search_query": "cancellation policy", "turns": []}
         session = {"conversation": conv}
         result = build_conversation_context(session)
-        assert result is conv
+        assert result == conv
 
     def test_returns_context_when_turns_non_empty(self):
         conv = {
@@ -54,9 +59,9 @@ class TestBuildConversationContext:
         }
         session = {"conversation": conv}
         result = build_conversation_context(session)
-        assert result is conv
+        assert result == conv
 
-    def test_ignores_other_session_keys(self):
+    def test_attaches_active_booking_when_session_has_durable_booking_intent(self):
         conv = {"last_intent": "GENERAL_INQUIRY", "last_search_query": "hours", "turns": []}
         session = {
             "intent_name": "CREATE_APPOINTMENT",
@@ -64,7 +69,55 @@ class TestBuildConversationContext:
             "conversation": conv,
         }
         result = build_conversation_context(session)
-        assert result is conv
+        assert result["last_intent"] == "GENERAL_INQUIRY"
+        assert result["active_booking_intent"] == "CREATE_APPOINTMENT"
+
+    def test_includes_last_date_proposal_from_session(self):
+        conv = {"last_intent": "CREATE_APPOINTMENT", "last_search_query": None, "turns": []}
+        session = {
+            "conversation": conv,
+            "date_proposal": {"mode": "single_day", "start": "2026-01-16"},
+        }
+        result = build_conversation_context(session)
+        assert result["last_date_proposal"]["start"] == "2026-01-16"
+
+    def test_synthesized_context_includes_last_date_proposal(self):
+        session = {
+            "intent_name": "CREATE_RESERVATION",
+            "date_proposal": {"mode": "range", "start": "2026-03-01", "end": "2026-03-05"},
+        }
+        result = build_conversation_context(session)
+        assert result["last_intent"] == "CREATE_RESERVATION"
+        assert result["last_date_proposal"]["start"] == "2026-03-01"
+
+    def test_attaches_active_booking_intent_after_faq_detour(self):
+        session = {
+            "intent_name": "CREATE_APPOINTMENT",
+            "status": "NEEDS_CLARIFICATION",
+            "conversation": {
+                "last_intent": "QUOTE",
+                "last_search_query": "haircut price",
+                "turns": [
+                    {"user": "book haircut", "intent": "CREATE_APPOINTMENT", "search_query": None},
+                    {"user": "how much is it", "intent": "QUOTE", "search_query": "haircut price"},
+                ],
+            },
+        }
+        result = build_conversation_context(session)
+        assert result["last_intent"] == "QUOTE"
+        assert result["active_booking_intent"] == "CREATE_APPOINTMENT"
+
+    def test_no_active_booking_when_last_intent_is_booking(self):
+        session = {
+            "intent_name": "CREATE_APPOINTMENT",
+            "conversation": {
+                "last_intent": "CREATE_APPOINTMENT",
+                "last_search_query": None,
+                "turns": [],
+            },
+        }
+        result = build_conversation_context(session)
+        assert "active_booking_intent" not in result
 
 
 # ---------------------------------------------------------------------------

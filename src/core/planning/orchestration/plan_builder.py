@@ -685,6 +685,7 @@ def build_decision_plan(
         flags = {
             "availability_resolved": availability_resolved,
             "confirmation_state": confirmation_state,
+            "booking_hold_created": bool(effective_slots.get("booking_id")),
         }
 
         selected_step = select_next_execution_step(intent_name, effective_slots, flags)

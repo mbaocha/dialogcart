@@ -28,6 +28,30 @@ Schema (session["messages"]):
 """
 from typing import Any, Dict, List, Optional
 
+# Booking intents that accept bare slot-fill follow-ups (not FAQ/RAG).
+_SLOT_FILL_BOOKING_INTENTS = frozenset(
+    {"CREATE_APPOINTMENT", "CREATE_RESERVATION", "MODIFY_BOOKING"}
+)
+
+
+def _attach_active_booking_intent(
+    result: Dict[str, Any], session: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Expose durable session booking intent when last turn was informational (FAQ detour)."""
+    intent_name = session.get("intent_name")
+    if not isinstance(intent_name, str) or not intent_name:
+        return result
+    if intent_name not in _SLOT_FILL_BOOKING_INTENTS:
+        return result
+    from core.orchestration.persistence.durable_intents import is_durable_intent
+
+    if not is_durable_intent(intent_name):
+        return result
+    last = result.get("last_intent")
+    if last in _SLOT_FILL_BOOKING_INTENTS:
+        return result
+    return {**result, "active_booking_intent": intent_name}
+
 
 def build_conversation_context(
     session: Optional[Dict[str, Any]],
@@ -49,12 +73,39 @@ def build_conversation_context(
     has_messages = isinstance(messages, list) and len(messages) > 0
 
     if not has_conv and not has_messages:
+        # Durable booking sessions may lack session["conversation"] when the prior
+        # turn's merged Luma response was not persisted (e.g. handle_message strips
+        # _merged_luma_response). Synthesize last_intent so NLU can bind slot-fill
+        # dates ("march 10 to 15") against the active booking intent.
+        intent_name = session.get("intent_name")
+        if isinstance(intent_name, str) and intent_name:
+            from core.orchestration.persistence.durable_intents import is_durable_intent
+
+            if is_durable_intent(intent_name):
+                result = {"last_intent": intent_name}
+                last_dp = session.get("date_proposal")
+                if not isinstance(last_dp, dict):
+                    facts = session.get("facts")
+                    if isinstance(facts, dict):
+                        last_dp = facts.get("date_proposal")
+                if isinstance(last_dp, dict) and last_dp.get("start"):
+                    result["last_date_proposal"] = last_dp
+                return result
         return None
 
     result: Dict[str, Any] = dict(conv) if has_conv else {}
     if has_messages:
         result["messages"] = messages
-    return result
+
+    last_dp = session.get("date_proposal")
+    if not isinstance(last_dp, dict):
+        facts = session.get("facts")
+        if isinstance(facts, dict):
+            last_dp = facts.get("date_proposal")
+    if isinstance(last_dp, dict) and last_dp.get("start"):
+        result["last_date_proposal"] = last_dp
+
+    return _attach_active_booking_intent(result, session)
 
 
 def update_conversation(
