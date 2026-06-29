@@ -1,1 +1,0 @@
-"""Mapper module for rendering."""

@@ -188,7 +188,7 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
     logger = logging.getLogger(__name__)
 
     key = _get_session_key(user_id)
-    logger.error("[SESSION_LOAD] Attempting to load: user_id=%s key=%s", user_id, key)
+    logger.debug("[SESSION_LOAD] user_id=%s key=%s", user_id, key)
 
     redis_client = _get_redis_client()
     if redis_client:
@@ -196,26 +196,14 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
         try:
             raw = redis_client.get(key)
             if not raw:
-                logger.error(
-                    "[SESSION_LOAD] Not found in Redis: user_id=%s key=%s", user_id, key
-                )
+                logger.debug("[SESSION_LOAD] not found in Redis: user_id=%s", user_id)
                 return None
             session_state = json.loads(raw)
-            # Debug log: Print session keys to confirm "facts" is present
-            session_keys = list(session_state.keys())
-            facts_keys = (
-                list(session_state.get("facts", {}).keys())
-                if isinstance(session_state.get("facts"), dict)
-                else []
-            )
-            logger.error(
-                "[SESSION_LOAD] Found in Redis: user_id=%s key=%s intent_name=%r status=%r keys=%s facts_keys=%s",
+            logger.debug(
+                "[SESSION_LOAD] found in Redis: user_id=%s intent_name=%r status=%r",
                 user_id,
-                key,
                 session_state.get("intent_name"),
                 session_state.get("status"),
-                session_keys,
-                facts_keys,
             )
             return session_state
         except Exception as e:
@@ -232,30 +220,19 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
         session_data = _in_memory_sessions[user_id]
         stored_at = session_data.get("_stored_at", 0)
         if time.time() - stored_at > SESSION_TTL_SECONDS_FALLBACK:
-            # Expired, remove it
             del _in_memory_sessions[user_id]
-            logger.error("[SESSION_LOAD] Expired in in-memory: user_id=%s", user_id)
+            logger.debug("[SESSION_LOAD] expired in-memory: user_id=%s", user_id)
             return None
-        # Return session state (without internal _stored_at field)
         session_state = {k: v for k, v in session_data.items() if not k.startswith("_")}
-        # Debug log: Print session keys to confirm "facts" is present
-        session_keys = list(session_state.keys())
-        facts_keys = (
-            list(session_state.get("facts", {}).keys())
-            if isinstance(session_state.get("facts"), dict)
-            else []
-        )
-        logger.error(
-            "[SESSION_LOAD] Found in in-memory: user_id=%s intent_name=%r status=%r keys=%s facts_keys=%s",
+        logger.debug(
+            "[SESSION_LOAD] found in-memory: user_id=%s intent_name=%r status=%r",
             user_id,
             session_state.get("intent_name"),
             session_state.get("status"),
-            session_keys,
-            facts_keys,
         )
         return session_state
 
-    logger.error("[SESSION_LOAD] Not found anywhere: user_id=%s key=%s", user_id, key)
+    logger.debug("[SESSION_LOAD] not found: user_id=%s", user_id)
     return None
 
 
@@ -278,24 +255,10 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
 
     logger = logging.getLogger(__name__)
 
-    # INSTRUMENTATION: Print object IDs at save_session entry
-    print(
-        f"[PERSISTENCE_TRACE] save_session ENTRY: "
-        f"user_id={user_id}, "
-        f"session_state id={id(session_state)}, "
-        f"session_state['facts'] id={id(session_state.get('facts'))}, "
-        f"session_state['slot_attempts'] id={id(session_state.get('slot_attempts'))}, "
-        f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
-        f"session_state['facts']['slot_attempts']={session_state.get('facts', {}).get('slot_attempts') if isinstance(session_state.get('facts'), dict) else None}"
-    )
-    logger.error(
-        f"[PERSISTENCE_TRACE] save_session ENTRY: "
-        f"user_id={user_id}, "
-        f"session_state id={id(session_state)}, "
-        f"session_state['facts'] id={id(session_state.get('facts'))}, "
-        f"session_state['slot_attempts'] id={id(session_state.get('slot_attempts'))}, "
-        f"session_state['slot_attempts']={session_state.get('slot_attempts')}, "
-        f"session_state['facts']['slot_attempts']={session_state.get('facts', {}).get('slot_attempts') if isinstance(session_state.get('facts'), dict) else None}"
+    logger.debug(
+        "[PERSISTENCE_TRACE] save_session: user_id=%s slot_attempts=%s",
+        user_id,
+        session_state.get("slot_attempts"),
     )
 
     # HARD GUARD: Ensure session_state["facts"] is always present as a dict before saving
@@ -334,14 +297,12 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
         if isinstance(session_state.get("facts"), dict)
         else []
     )
-    logger.error(
-        "[SESSION_SAVE] user_id=%s key=%s intent_name=%r status=%r slots_keys=%s facts_keys=%s",
+    logger.debug(
+        "[SESSION_SAVE] user_id=%s intent_name=%r status=%r slots_keys=%s",
         user_id,
-        _get_session_key(user_id),
         intent_name,
         status,
         slots_keys,
-        facts_keys,
     )
 
     redis_client = _get_redis_client()
@@ -351,9 +312,7 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
             key = _get_session_key(user_id)
             serialized = json.dumps(session_state)
             redis_client.setex(key, SESSION_TTL_SECONDS, serialized)
-            logger.error(
-                "[SESSION_SAVE] Saved to Redis: user_id=%s key=%s", user_id, key
-            )
+            logger.debug("[SESSION_SAVE] saved to Redis: user_id=%s", user_id)
             return
         except Exception as e:
             logger.warning(
@@ -368,7 +327,7 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
     session_data = session_state.copy()
     session_data["_stored_at"] = time.time()
     _in_memory_sessions[user_id] = session_data
-    logger.error("[SESSION_SAVE] Saved to in-memory: user_id=%s", user_id)
+    logger.debug("[SESSION_SAVE] saved to in-memory: user_id=%s", user_id)
 
 
 def clear_session(user_id: str) -> None:

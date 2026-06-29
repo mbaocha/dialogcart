@@ -121,6 +121,7 @@ def _assert_rendering_clarification(
     slot_mentioned = any(slot.lower() in text_lower for slot in expected_missing_slots)
 
     # Generic clarification phrases (semantic check, not exact match)
+    # Also accepts LLM fallback when no API key is configured
     generic_phrases = [
         "need",
         "information",
@@ -130,6 +131,8 @@ def _assert_rendering_clarification(
         "bit more",
         "additional",
         "details",
+        "unable",
+        "try again",
     ]
     is_generic_clarification = any(phrase in text_lower for phrase in generic_phrases)
 

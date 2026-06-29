@@ -51,13 +51,7 @@ from core.orchestration.nlu import (
     process_luma_response,
 )
 from core.orchestration.persistence.durable_intents import is_durable_intent
-from core.rendering import (
-    render,
-    render_clarification,
-    render_outcome,
-    render_system,
-)
-from core.rendering.mapper.clarification_mapper import derive_clarification_reason
+from core.rendering.llm_renderer import LlmRenderRequest, render_llm
 from core.routing.workflows import get_workflow
 
 logger = logging.getLogger(__name__)
@@ -193,56 +187,18 @@ def build_outcome_from_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
     return outcome
 
 
-def _render_clarification_text(
-    decision: Dict[str, Any], slots: Dict[str, Any]
-) -> Optional[str]:
-    """
-    Render clarification text from decision and slots (best-effort).
-
-    Args:
-        decision: Decision/plan dictionary with status and missing_slots (optionally facts)
-        slots: Dictionary of slot values for template interpolation
-
-    Returns:
-        Rendered text string if rendering succeeds, None otherwise.
-        Returns None if status is not NEEDS_CLARIFICATION or if rendering fails.
-    """
-    try:
-        # Only render for NEEDS_CLARIFICATION status
-        status = decision.get("status")
-        if status != "NEEDS_CLARIFICATION":
-            return None
-
-        # Derive clarification reason from decision
-        reason = derive_clarification_reason(decision)
-        if not reason:
-            # No reason derived (shouldn't happen for NEEDS_CLARIFICATION, but be safe)
-            return None
-
-        # Extract slot_attempts if available in decision.facts
-        attempt_count = 0
-        facts = decision.get("facts", {})
-        if isinstance(facts, dict):
-            slot_attempts = facts.get("slot_attempts", {})
-            missing_slots = decision.get("missing_slots", [])
-            first_missing = (
-                missing_slots[0]
-                if isinstance(missing_slots, list) and missing_slots
-                else None
-            )
-            if first_missing and isinstance(slot_attempts, dict):
-                attempt_count = slot_attempts.get(first_missing, 0)
-
-        # Render with slots and attempt_count
-        render_spec = render_clarification(reason, slots, attempt_count)
-        return render_spec.text
-    except Exception as e:
-        # Best-effort: log error and return None
-        logger.warning(
-            f"Failed to render clarification text: {e}. "
-            f"Rendering is best-effort and will be omitted."
-        )
-        return None
+def _structured_context_from_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
+    org = {}
+    facts = decision.get("facts") if isinstance(decision, dict) else None
+    if isinstance(facts, dict):
+        org = facts.get("org") or {}
+    if not isinstance(org, dict):
+        org = {}
+    return {
+        "business_name": org.get("businessName") or org.get("business_name"),
+        "business_about": org.get("businessAbout") or org.get("about") or org.get("business_about"),
+        "business_phone": org.get("businessPhone") or org.get("business_phone"),
+    }
 
 
 def _inject_rendering_text(
@@ -250,41 +206,52 @@ def _inject_rendering_text(
     decision: Dict[str, Any],
     session_state: Optional[Dict[str, Any]] = None,
 ) -> None:
-    """
-    Inject rendered text into top-level response for clarification states.
-
-    This is a pure post-processing step that:
-    - Detects clarification state from decision
-    - Attaches session_state to decision for rendering
-    - Calls rendering.render(decision)
-    - Injects returned text into top-level response as 'text'
-    - Falls back to generic template if rendering returns None
-
-    Args:
-        result: Response dictionary to modify (mutated in place)
-        decision: Decision dictionary with plan and facts
-        session_state: Optional session state dictionary to attach to decision
-    """
     try:
-        # Attach session_state to decision for rendering (Phase 2: acknowledgement rendering)
         decision["_session"] = session_state or {}
-
-        # Merge slot_attempts from session_state into decision for rendering
         if session_state and isinstance(session_state, dict):
             slot_attempts = session_state.get("slot_attempts")
             if isinstance(slot_attempts, dict):
-                # Prefer top-level slot_attempts in decision (renderer checks this first)
                 decision["slot_attempts"] = slot_attempts
-                # Also ensure it's in facts as fallback
                 facts = decision.get("facts", {})
                 if isinstance(facts, dict):
                     facts["slot_attempts"] = slot_attempts
 
-        rendered_text = render(decision)
+        # missing_slots may live at top level, or nested in plan/facts
+        missing_slots = (
+            decision.get("missing_slots")
+            or decision.get("plan", {}).get("missing_slots")
+            or decision.get("facts", {}).get("missing_slots")
+            or []
+        )
+        if not missing_slots:
+            return
+        intent_name = (
+            decision.get("intent_name")
+            or decision.get("plan", {}).get("intent_name")
+            or "your request"
+        )
+        slot_attempts = decision.get("slot_attempts") or {}
+        if not isinstance(slot_attempts, dict):
+            slot_attempts = {}
+        first_missing = missing_slots[0] if missing_slots else None
+        attempt_count = slot_attempts.get(first_missing, 0) if first_missing else 0
+        last_filled = (session_state or {}).get("last_filled_slot") if session_state else None
+        ack_note = f" Start by briefly acknowledging you received {last_filled}." if last_filled and attempt_count < 1 else ""
+        retry_note = " The user was already asked — rephrase naturally." if attempt_count >= 1 else ""
+        render_instruction = (
+            f"The user wants to {intent_name.lower().replace('_', ' ')}. "
+            f"Ask them for: {', '.join(missing_slots)}.{ack_note}{retry_note} "
+            "Be natural and brief."
+        )
+        conversation_history = (session_state or {}).get("messages", [])
+        rendered_text = render_llm(LlmRenderRequest(
+            render_instruction=render_instruction,
+            facts={"structured_context": _structured_context_from_decision(decision)},
+            conversation_history=conversation_history,
+        ))
         if rendered_text:
             result["text"] = rendered_text
     except Exception as e:
-        # Best-effort: log error and continue without text
         logger.warning(
             f"Failed to render clarification text: {e}. "
             f"Rendering is best-effort and will be omitted."
@@ -294,32 +261,35 @@ def _inject_rendering_text(
 def _inject_outcome_text(
     result: Dict[str, Any], decision: Optional[Dict[str, Any]], outcome: Dict[str, Any]
 ) -> None:
-    """
-    Inject rendered outcome text into result for EXECUTED or FAILED outcomes.
-
-    This is a pure post-processing step that:
-    - Only triggers for outcome.status in ("EXECUTED", "FAILED")
-    - Derives template key from decision + outcome
-    - Renders text using outcome templates
-    - Injects result["text"] = rendered_text
-
-    Args:
-        result: Response dictionary to modify (mutated in place)
-        decision: Decision dictionary (optional, for intent extraction)
-        outcome: Outcome dictionary with status, intent_name, etc.
-    """
-    # Only render for EXECUTED or FAILED status
     outcome_status = outcome.get("status")
     if outcome_status not in ("EXECUTED", "FAILED"):
         return
 
     try:
-        # Render outcome text
-        render_spec = render_outcome(decision, outcome)
-        if render_spec and render_spec.text:
-            result["text"] = render_spec.text
+        intent_name = (
+            outcome.get("intent_name")
+            or (decision.get("intent_name") if decision else None)
+            or "your request"
+        )
+        booking_code = outcome.get("booking_code")
+        if outcome_status == "EXECUTED":
+            code_note = f" Booking reference: {booking_code}." if booking_code else ""
+            render_instruction = (
+                f"Tell the user their {intent_name.lower().replace('_', ' ')} was successful.{code_note} "
+                "Be warm and brief."
+            )
+        else:
+            render_instruction = (
+                f"Tell the user their {intent_name.lower().replace('_', ' ')} could not be completed. "
+                "Be empathetic and suggest they try again."
+            )
+        rendered_text = render_llm(LlmRenderRequest(
+            render_instruction=render_instruction,
+            facts={"structured_context": _structured_context_from_decision(decision)},
+        ))
+        if rendered_text:
+            result["text"] = rendered_text
     except Exception as e:
-        # Best-effort: log error and continue without text
         logger.debug(
             f"Failed to render outcome text: {e}. "
             f"Rendering is best-effort and will be omitted."
@@ -327,30 +297,21 @@ def _inject_outcome_text(
 
 
 def _inject_system_text(result: Dict[str, Any], decision: Dict[str, Any]) -> None:
-    """
-    Inject rendered system text into result for greeting/welcome intents.
-
-    This is a pure post-processing step that:
-    - Only triggers for GREETING or WELCOME intents
-    - Renders text using system templates
-    - Injects result["text"] = rendered_text
-
-    Must NOT override:
-    - Clarification rendering
-    - Capability rendering
-    - Outcome rendering
-
-    Args:
-        result: Response dictionary to modify (mutated in place)
-        decision: Decision dictionary with intent_name
-    """
     try:
-        intent_name = decision.get("intent_name")
-        render_spec = render_system(intent_name)
-        if render_spec and render_spec.text:
-            result["text"] = render_spec.text
+        intent_name = decision.get("intent_name", "")
+        if not intent_name or intent_name.upper() not in ("GREETING", "WELCOME"):
+            return
+        render_instruction = (
+            "Greet the user warmly and let them know you can help with bookings "
+            "and related inquiries. Keep it brief and friendly."
+        )
+        rendered_text = render_llm(LlmRenderRequest(
+            render_instruction=render_instruction,
+            facts={"structured_context": _structured_context_from_decision(decision)},
+        ))
+        if rendered_text:
+            result["text"] = rendered_text
     except Exception:
-        # Best-effort: silently fail (don't break flow)
         pass
 
 

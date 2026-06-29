@@ -15,6 +15,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Any, Dict
+from unittest.mock import patch
 
 # Set execution mode to test for deterministic tests
 os.environ["CORE_EXECUTION_MODE"] = "test"
@@ -110,13 +111,17 @@ def test_adaptive_clarification_variant_after_retry():
     turn1_text = "book haircut"
 
     # Execute turn 1
-    result1 = handle_message(
-        text=turn1_text,
-        user_id=user_id,
-        luma_client=luma_client,
-        organization_client=None,
-        session_store=session_store,
-    )
+    with patch(
+        "core.orchestration.orchestrator.render_llm",
+        return_value="What date would you like for your haircut?",
+    ):
+        result1 = handle_message(
+            text=turn1_text,
+            user_id=user_id,
+            luma_client=luma_client,
+            organization_client=None,
+            session_store=session_store,
+        )
 
     # Assert turn 1 succeeded
     assert result1 is not None, "Turn 1 result should not be None"
@@ -224,13 +229,17 @@ def test_adaptive_clarification_variant_after_retry():
     turn2_text = "still thinking"
 
     # Execute turn 2
-    result2 = handle_message(
-        text=turn2_text,
-        user_id=user_id,
-        luma_client=luma_client,
-        organization_client=None,
-        session_store=session_store,
-    )
+    with patch(
+        "core.orchestration.orchestrator.render_llm",
+        return_value="I still need to know what date you'd prefer.",
+    ):
+        result2 = handle_message(
+            text=turn2_text,
+            user_id=user_id,
+            luma_client=luma_client,
+            organization_client=None,
+            session_store=session_store,
+        )
 
     # Assert turn 2 succeeded
     assert result2 is not None, "Turn 2 result should not be None"

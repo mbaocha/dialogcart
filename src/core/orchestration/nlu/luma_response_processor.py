@@ -315,34 +315,21 @@ def _build_decision_plan(
         booking.get("confirmation_state") if isinstance(booking, dict) else None
     )
 
-    # DEBUG: Print decision plan building details
-    print(
-        f"[BUILD_PLAN] intent={intent_name} missing_slots={missing_slots} needs_clarification={needs_clarification} confirmation_state={confirmation_state}"
+    logger.debug(
+        "[BUILD_PLAN] intent=%s missing_slots=%s needs_clarification=%s confirmation_state=%s",
+        intent_name, missing_slots, needs_clarification, confirmation_state,
     )
 
-    # CRITICAL: If missing_slots is non-empty, status MUST be NEEDS_CLARIFICATION
-    # This is the authoritative rule - missing slots drive clarification, not Luma flags
-    # NEVER use `if not missing_slots` - only check length (empty list is valid)
     if len(missing_slots) > 0:
         status = "NEEDS_CLARIFICATION"
-        print(
-            f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots={missing_slots}"
-        )
     elif needs_clarification:
         status = "NEEDS_CLARIFICATION"
-        print(
-            f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because needs_clarification=True"
-        )
     elif confirmation_state == "pending":
         status = "AWAITING_CONFIRMATION"
-        print(
-            f"[BUILD_PLAN] Setting status=AWAITING_CONFIRMATION because confirmation_state=pending"
-        )
     else:
         status = "READY"
-        print(
-            f"[BUILD_PLAN] Setting status=READY (no missing slots, no clarification needed, no pending confirmation)"
-        )
+
+    logger.debug("[BUILD_PLAN] status=%s", status)
 
     # Determine allowed and blocked actions
     allowed_actions: List[str] = []
@@ -851,7 +838,7 @@ def _log_turn_outcome_snapshot(
         f"[TURN_OUTCOME_SNAPSHOT] Final turn outcome: intent={intent_name}, "
         f"status={final_status}, missing_slots={computed_missing_slots}"
     )
-    print(f"[TURN_OUTCOME_SNAPSHOT] {json.dumps(turn_outcome_snapshot, indent=2)}")
+    logger.debug("[TURN_OUTCOME_SNAPSHOT] %s", json.dumps(turn_outcome_snapshot, indent=2))
 
 
 def process_luma_response(
@@ -1238,8 +1225,9 @@ def process_luma_response(
         f"effective_collected_slots_keys={list(effective_collected_slots.keys())}, "
         f"missing_slots={missing_slots}, status={turn_state['status']}"
     )
-    print(
-        f"[SLOT_STATE_TRACE] Before finalization: {json.dumps(slot_state_trace_before_finalization, indent=2)}"
+    logger.debug(
+        "[SLOT_STATE_TRACE] Before finalization: %s",
+        json.dumps(slot_state_trace_before_finalization, indent=2),
     )
 
     logger.info(
@@ -1517,10 +1505,7 @@ def process_luma_response(
             plan=plan,
         )
 
-        # ONE unconditional debug print/log at end of turn
-        print(
-            f"TURN_STATE: {json.dumps(turn_state_obj.to_dict(), indent=2, default=str)}"
-        )
+        logger.debug("TURN_STATE: %s", json.dumps(turn_state_obj.to_dict(), indent=2, default=str))
 
         return {
             "intent_name": intent_name,  # CRITICAL: Always include intent_name in decision
@@ -1736,8 +1721,7 @@ def process_luma_response(
         plan=plan,
     )
 
-    # ONE unconditional debug print/log at end of turn
-    print(f"TURN_STATE: {json.dumps(turn_state_obj.to_dict(), indent=2, default=str)}")
+    logger.debug("TURN_STATE: %s", json.dumps(turn_state_obj.to_dict(), indent=2, default=str))
 
     # Core planning-only output structure
     # Core NEVER executes - only returns planning information

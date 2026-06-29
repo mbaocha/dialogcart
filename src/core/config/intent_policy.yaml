@@ -212,3 +212,45 @@ intents:
           - booking_id_resolved
         client: booking_client
 
+  CHECK_AVAILABILITY:
+    metadata:
+      durable: false
+    planning:
+      required_slots:
+        - service_id
+      optional_slots:
+        - date
+        - time
+        - date_range
+      executable_with:
+        - service_id
+    execution:
+      SEARCH_AVAILABILITY:
+        mode: exploratory
+        required_slots:
+          - service_id
+        optional_slots:
+          - date
+          - time
+          - date_range
+        resolves:
+          - availability
+        client: availability_client
+
+  VIEW_BOOKING:
+    metadata:
+      durable: false
+    planning:
+      required_slots:
+        - booking_id
+      optional_slots: []
+      executable_with:
+        - booking_id
+    execution:
+      FETCH_BOOKING:
+        mode: exploratory
+        required_slots: []
+        resolves:
+          - booking_id
+        client: booking_client
+

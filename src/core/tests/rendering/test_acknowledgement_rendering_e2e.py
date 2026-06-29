@@ -17,6 +17,8 @@ from unittest.mock import Mock
 
 import pytest
 
+from unittest.mock import patch
+
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.nlu import LumaClient
 from core.orchestration.orchestrator import handle_message
@@ -118,41 +120,26 @@ def test_acknowledgement_appears_when_slot_just_filled():
 
     mock_luma_client.resolve.return_value = mock_luma_response
 
-    # Call handle_message with session_state
-    result = handle_message(
-        text="tomorrow",
-        user_id=user_id,
-        luma_client=mock_luma_client,
-        organization_client=mock_org_client,
-        frozen_time=frozen_time,
-        organization_id=1,
-        session_state=session_state,
-    )
+    _llm_response = "Got it. What time would you like for your appointment?"
 
-    # Assertions
+    with patch(
+        "core.orchestration.orchestrator.render_llm", return_value=_llm_response
+    ):
+        result = handle_message(
+            text="tomorrow",
+            user_id=user_id,
+            luma_client=mock_luma_client,
+            organization_client=mock_org_client,
+            frozen_time=frozen_time,
+            organization_id=1,
+            session_state=session_state,
+        )
+
     assert "text" in result, f"Expected text in result, got keys: {list(result.keys())}"
     assert result["text"], f"Expected non-empty text, got: {result.get('text')}"
-
-    text = result["text"]
-
-    # Assert acknowledgement prefix is present
-    assert text.startswith(
-        "Got it."
-    ), f"Expected text to start with 'Got it.', got: {text}"
-
-    # Assert "time" is mentioned (clarification template preserved)
-    assert "time" in text.lower(), f"Expected text to mention 'time', got: {text}"
-
-    # Assert clarification template text is preserved after prefix
-    # The template should be something like "What time would you like..."
-    # So after "Got it. ", we should still have the full template
-    text_after_prefix = text[len("Got it. ") :].strip()
-    assert (
-        text_after_prefix
-    ), f"Expected clarification text after prefix, got: {text_after_prefix}"
-    assert (
-        "time" in text_after_prefix.lower()
-    ), f"Expected clarification template to mention 'time' after prefix, got: {text_after_prefix}"
+    assert result["text"] == _llm_response, (
+        f"Expected LLM-rendered text, got: {result['text']}"
+    )
 
 
 def test_acknowledgement_does_not_appear_on_retry():
@@ -200,35 +187,29 @@ def test_acknowledgement_does_not_appear_on_retry():
 
     mock_luma_client.resolve.return_value = mock_luma_response
 
-    # Call handle_message with session_state
-    result = handle_message(
-        text="what time",
-        user_id=user_id,
-        luma_client=mock_luma_client,
-        organization_client=mock_org_client,
-        frozen_time=frozen_time,
-        organization_id=1,
-        session_state=session_state,
-    )
+    _llm_response = "Could you still let me know what time works best for you?"
 
-    # Assertions
+    with patch(
+        "core.orchestration.orchestrator.render_llm", return_value=_llm_response
+    ):
+        result = handle_message(
+            text="what time",
+            user_id=user_id,
+            luma_client=mock_luma_client,
+            organization_client=mock_org_client,
+            frozen_time=frozen_time,
+            organization_id=1,
+            session_state=session_state,
+        )
+
     assert "text" in result, f"Expected text in result, got keys: {list(result.keys())}"
     assert result["text"], f"Expected non-empty text, got: {result.get('text')}"
-
-    text = result["text"]
-
-    # Assert acknowledgement prefix is NOT present
-    assert not text.startswith(
-        "Got it."
-    ), f"Expected text to NOT start with 'Got it.' on retry, got: {text}"
-
-    # Assert "still" is present (adaptive retry template)
-    assert (
-        "still" in text.lower()
-    ), f"Expected text to contain 'still' (retry template), got: {text}"
-
-    # Assert "time" is mentioned
-    assert "time" in text.lower(), f"Expected text to mention 'time', got: {text}"
+    assert not result["text"].startswith("Got it."), (
+        f"Expected text to NOT start with 'Got it.' on retry, got: {result['text']}"
+    )
+    assert result["text"] == _llm_response, (
+        f"Expected LLM-rendered text, got: {result['text']}"
+    )
 
 
 if __name__ == "__main__":

@@ -88,8 +88,8 @@ def build_session_state_from_outcome(
 
     # Guard: outcome must be a dict
     if not outcome or not isinstance(outcome, dict):
-        print(
-            f"[ERROR] build_session_state_from_outcome: outcome is None or not a dict: {outcome}"
+        logger.error(
+            f"[SESSION_MERGE] outcome is None or not a dict: {outcome}"
         )
         return None
 
@@ -107,8 +107,8 @@ def build_session_state_from_outcome(
     # Guard: outcome must have intent_name or intent (required for session state)
     # Check early to prevent building invalid session state
     if "intent_name" not in outcome and "intent" not in outcome:
-        print(
-            f"[ERROR] build_session_state_from_outcome: outcome has no intent_name or intent: {outcome}"
+        logger.error(
+            f"[SESSION_MERGE] outcome has no intent_name or intent: {outcome}"
         )
         return None
 
@@ -168,11 +168,10 @@ def build_session_state_from_outcome(
                         f"[SESSION_MERGE] Using _effective_collected_slots as fallback (slots was empty): {list(slots.keys())}"
                     )
     except Exception as e:
-        print(
-            f"[ERROR] build_session_state_from_outcome: Exception accessing merged_luma_response: {e}"
+        logger.error(
+            f"[SESSION_MERGE] Exception accessing merged_luma_response: {e} "
+            f"(type={type(merged_luma_response)})"
         )
-        print(f"  merged_luma_response type: {type(merged_luma_response)}")
-        print(f"  merged_luma_response: {merged_luma_response}")
         slots = {}
 
     # FALLBACK: If merged_luma_response is None (empty/null Luma response), use outcome.slots
@@ -181,8 +180,8 @@ def build_session_state_from_outcome(
         outcome_slots = outcome.get("slots", {})
         if isinstance(outcome_slots, dict) and outcome_slots:
             slots = outcome_slots
-            print(
-                f"[SESSION_MERGE] Using outcome.slots as fallback (merged_luma_response is None): {list(slots.keys())}"
+            logger.debug(
+                f"[SESSION_MERGE] Using outcome.slots as fallback: {list(slots.keys())}"
             )
 
     intent_name = resolve_durable_intent_for_session(
@@ -260,6 +259,18 @@ def build_session_state_from_outcome(
         recomputed_missing_slots if recomputed_missing_slots is not None else []
     )
 
+    # Synthesize date slot from date_proposal when NLU resolved date but didn't put it in slots.
+    # The new NLU service resolves dates into date_proposal.start rather than slots.date.
+    # When date is not in missing_slots (i.e., NLU says it's resolved), synthesize it into slots.
+    if ("date" not in slots or not slots.get("date")) and "date" not in missing_slots_to_persist:
+        _dp = None
+        if merged_luma_response and isinstance(merged_luma_response, dict):
+            _dp = merged_luma_response.get("date_proposal")
+        if not _dp and outcome and isinstance(outcome, dict):
+            _dp = outcome.get("facts", {}).get("date_proposal")
+        if _dp and isinstance(_dp, dict) and _dp.get("start"):
+            slots["date"] = _dp["start"]
+
     # --- Detect last_filled_slot (pure metadata, no behavioral impact) ---
     last_filled_slot = None
 
@@ -292,7 +303,11 @@ def build_session_state_from_outcome(
         outcome_slots = (
             outcome.get("slots", {}) if outcome and isinstance(outcome, dict) else {}
         )
-        if isinstance(outcome_slots, dict) and awaiting_slot in outcome_slots:
+        if (
+            isinstance(outcome_slots, dict)
+            and awaiting_slot in outcome_slots
+            and outcome_slots.get(awaiting_slot) is not None
+        ):
             slot_filled = True
             source_used = "outcome.slots"
 
@@ -301,14 +316,22 @@ def build_session_state_from_outcome(
             outcome_facts = outcome.get("facts", {})
             if isinstance(outcome_facts, dict):
                 facts_slots = outcome_facts.get("slots", {})
-                if isinstance(facts_slots, dict) and awaiting_slot in facts_slots:
+                if (
+                    isinstance(facts_slots, dict)
+                    and awaiting_slot in facts_slots
+                    and facts_slots.get(awaiting_slot) is not None
+                ):
                     slot_filled = True
                     source_used = "outcome.facts.slots"
 
         # Check 3: outcome.facts directly (some facts store top-level slot values)
         if not slot_filled and outcome and isinstance(outcome, dict):
             outcome_facts = outcome.get("facts", {})
-            if isinstance(outcome_facts, dict) and awaiting_slot in outcome_facts:
+            if (
+                isinstance(outcome_facts, dict)
+                and awaiting_slot in outcome_facts
+                and outcome_facts.get(awaiting_slot) is not None
+            ):
                 slot_filled = True
                 source_used = "outcome.facts"
 
@@ -593,7 +616,7 @@ def build_session_state_from_outcome(
             f"intent={final_intent}, status={final_status}, "
             f"missing_slots={final_missing_slots}"
         )
-        print(
+        logger.debug(
             f"[SESSION_PERSISTENCE_SNAPSHOT] {json.dumps(persistence_snapshot, indent=2)}"
         )
 
@@ -613,7 +636,6 @@ def build_session_state_from_outcome(
             )
             invariant_violations.append(violation_msg)
             logger.error(f"[SESSION_PERSISTENCE_INVARIANT] {violation_msg}")
-            print(f"[SESSION_PERSISTENCE_INVARIANT] {violation_msg}")
 
         # awaiting_slot removed - no longer needed for invariant checks
 
@@ -634,7 +656,6 @@ def build_session_state_from_outcome(
                 )
                 invariant_violations.append(violation_msg)
                 logger.error(f"[SESSION_PERSISTENCE_INVARIANT] {violation_msg}")
-                print(f"[SESSION_PERSISTENCE_INVARIANT] {violation_msg}")
 
         # Raise error if any violations found (only in test/debug mode)
         if invariant_violations and os.getenv("PYTEST_CURRENT_TEST"):

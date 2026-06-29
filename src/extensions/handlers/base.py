@@ -1,11 +1,10 @@
 """
 Intent Handler Base Interface
 
-Defines the contract for intent handlers that are invoked when core emits
-status == "HANDLER_DELEGATED".
+Defines the contract for intent handlers invoked when core emits HANDLER_DELEGATED.
 
-Unlike capability adapters (which have multi-turn lifecycle), handlers are
-single-shot: one call per turn, returns text immediately.
+Handlers are single-shot: one call per turn, returns raw facts + a render instruction.
+Core owns rendering — the handler never produces user-facing text directly.
 """
 
 from abc import ABC, abstractmethod
@@ -17,11 +16,13 @@ from typing import Any, Dict, Optional
 class HandlerResponse:
     """Response from an intent handler."""
 
-    text: str
-    """Text to return to the user."""
+    render_instruction: str
+    """Natural-language instruction telling the LLM renderer what to do.
+    Example: "Answer the user's question 'haircut price' using the provided evidence."
+    Core passes this verbatim to the LLM renderer alongside facts."""
 
     facts: Dict[str, Any] = field(default_factory=dict)
-    """Optional facts to surface (reserved for future use)."""
+    """Raw retrieval data for the renderer (chunks, structured_context, etc.)."""
 
 
 class IntentHandler(ABC):
@@ -35,14 +36,20 @@ class IntentHandler(ABC):
     @abstractmethod
     def handle(self, context: Dict[str, Any]) -> HandlerResponse:
         """
-        Handle the intent and return a response.
+        Resolve the intent and return raw facts + a render instruction.
+
+        Core calls the LLM renderer with render_instruction + facts after this returns.
+        Do not produce user-facing text here.
 
         Args:
             context: {
                 "user_id": str,
+                "organization_id": int | None,
+                "user_text": str,
                 "intent_name": str,
                 "search_query": str | None,
                 "slots": dict,
-                "session_slots": dict,
+                "session_slots": dict,   # persisted booking-kernel slots
+                "session": dict,         # full raw session (read-only)
             }
         """

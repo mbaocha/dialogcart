@@ -23,6 +23,7 @@ from core.orchestration.api.session_merge import build_session_state_from_outcom
 from core.orchestration.errors import ContractViolation, UpstreamError
 from core.orchestration.orchestrator import handle_message
 from core.orchestration.session import clear_session, get_session, save_session
+from core.rendering.llm_renderer import LlmRenderRequest, render_llm
 
 # Extension runners (optional) — single integration point between core and extensions.
 # Core never imports adapters/handlers or branches on their names.
@@ -180,19 +181,33 @@ async def post_message(request: MessageRequest):
             handler_name = outcome.get("active_handler", "")
             context = {
                 "user_id": request.user_id,
+                "organization_id": request.organization_id,
+                "user_text": request.text,
                 "intent_name": outcome.get("intent_name"),
                 "search_query": outcome.get("search_query"),
                 "slots": outcome.get("slots", {}),
                 "session_slots": (_raw_session.get("slots", {}) if _raw_session else {}),
+                "session": _raw_session or {},
             }
             handler_result = _handler_runner.handle(handler_name, context)
-            if handler_result.text:
-                outcome["text"] = handler_result.text
-                result["outcome"] = outcome
+
+            # Render via LLM — extension owns the instruction, core executes it.
+            if handler_result.render_instruction:
+                conversation_history = (_raw_session or {}).get("messages", [])
+                rendered_text = render_llm(
+                    LlmRenderRequest(
+                        render_instruction=handler_result.render_instruction,
+                        facts=handler_result.facts,
+                        conversation_history=conversation_history,
+                    )
+                )
+            else:
+                rendered_text = "I'm unable to respond right now."
+
+            outcome["text"] = rendered_text
+            result["outcome"] = outcome
 
             # Update conversation memory and persist, preserving any active booking session.
-            # _raw_session carries the full booking state (if any); update_conversation
-            # copies all its keys and appends this turn to session["conversation"].
             from core.orchestration.nlu.conversation_memory import (
                 append_messages_turn,
                 update_conversation,
@@ -204,10 +219,10 @@ async def post_message(request: MessageRequest):
                 user_text=request.text,
                 intent=outcome.get("intent_name", "UNKNOWN"),
                 search_query=outcome.get("search_query"),
-                assistant_text=handler_result.text or None,
+                assistant_text=rendered_text,
             )
             _updated_session = append_messages_turn(
-                _updated_session, request.text, handler_result.text or None
+                _updated_session, request.text, rendered_text
             )
             save_session(request.user_id, _updated_session)
             logger.info(
@@ -241,7 +256,7 @@ async def post_message(request: MessageRequest):
                     )
 
                     new_session_state = append_messages_turn(
-                        new_session_state, request.text, outcome.get("text")
+                        new_session_state, request.text, result.get("text") or outcome.get("text")
                     )
                     save_session(request.user_id, new_session_state)
                     logger.info(
@@ -282,7 +297,7 @@ async def post_message(request: MessageRequest):
 
                 _ready_base = _raw_session or {}
                 _ready_session = append_messages_turn(
-                    _ready_base, request.text, outcome.get("text")
+                    _ready_base, request.text, result.get("text") or outcome.get("text")
                 )
                 save_session(request.user_id, _ready_session)
                 logger.info(

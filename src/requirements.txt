@@ -6,3 +6,4 @@ langchain
 sentencepiece>=0.1.99
 python-dotenv
 httpx
+anthropic

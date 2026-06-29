@@ -29,7 +29,6 @@ from core.orchestration.nlu import (
 )
 from core.orchestration.nlu.conversation_memory import update_conversation
 from core.orchestration.persistence.durable_intents import is_durable_intent
-from core.rendering.mapper.clarification_mapper import derive_clarification_reason
 
 logger = logging.getLogger(__name__)
 turn_logger = logging.getLogger("core.turn_log")
@@ -58,7 +57,6 @@ def plan_turn(
         _get_org_id_from_env,
         _inject_rendering_text,
         _inject_system_text,
-        _render_clarification_text,
         build_outcome_from_decision,
     )
 
@@ -321,23 +319,11 @@ def plan_turn(
                 "next sunday",
             ]
             if any(w in text_l for w in weekday_keywords):
-                print("\n=== DEBUG_LUMA_WEEKDAY RAW LUMA RESPONSE ===")
-                print(f"Input text: {text}")
-                print(f"User ID: {user_id}")
-                print(f"Session state exists: {session_state is not None}")
-                if session_state:
-                    print(f"Session status: {session_state.get('status')}")
-                    print(f"Session intent: {session_state.get('intent')}")
                 try:
-                    # Print full response without truncation
-                    response_str = json.dumps(
-                        luma_response, indent=2, default=str, ensure_ascii=False
-                    )
-                    print(response_str)
-                except Exception as e:
-                    print(f"JSON serialization failed: {e}")
-                    pprint.pprint(luma_response)
-                print("=== END DEBUG_LUMA_WEEKDAY ===\n")
+                    response_str = json.dumps(luma_response, indent=2, default=str, ensure_ascii=False)
+                except Exception:
+                    response_str = repr(luma_response)
+                logger.debug("[DEBUG_LUMA_WEEKDAY] text=%r response=%s", text, response_str)
 
     except UpstreamError as e:
         logger.error(
@@ -2287,31 +2273,8 @@ def plan_turn(
                             f"[NEEDS_CLARIFICATION] No intent available to set in outcome"
                         )
 
-            # Add rendered text (best-effort)
-            if "outcome" in result:
-                outcome_obj = result["outcome"]
-                facts_obj = outcome_obj.get("facts", {})
-                slots_for_rendering = facts_obj.get("slots", {})
-                if not slots_for_rendering:
-                    slots_for_rendering = outcome_obj.get("slots", {})
-
-                # Build decision dict for rendering
-                rendering_decision = {
-                    "status": "NEEDS_CLARIFICATION",
-                    "missing_slots": facts_obj.get(
-                        "missing_slots", outcome_obj.get("missing_slots", [])
-                    ),
-                    "facts": facts_obj,  # Include facts for adaptive rendering
-                }
-
-                rendered_text = _render_clarification_text(
-                    rendering_decision, slots_for_rendering
-                )
-                if rendered_text:
-                    outcome_obj["rendered_text"] = rendered_text
-
             # Inject rendering text at top level for clarification states
-            _inject_rendering_text(result, decision)
+            _inject_rendering_text(result, decision, session_state)
 
             result["_merged_luma_response"] = effective_response
             return result
@@ -2500,26 +2463,8 @@ def plan_turn(
             if "slots" in facts_obj:
                 result["outcome"]["slots"] = facts_obj["slots"]
 
-            # Add rendered text (best-effort)
-            slots_for_rendering = facts_obj.get("slots", {})
-            if not slots_for_rendering:
-                slots_for_rendering = result["outcome"].get("slots", {})
-
-            # Build decision dict for rendering
-            rendering_decision = {
-                "status": "NEEDS_CLARIFICATION",
-                "missing_slots": missing_slots,
-                "facts": facts_obj,  # Include facts for adaptive rendering
-            }
-
-            rendered_text = _render_clarification_text(
-                rendering_decision, slots_for_rendering
-            )
-            if rendered_text:
-                result["outcome"]["rendered_text"] = rendered_text
-
         # Inject rendering text at top level for clarification states
-        _inject_rendering_text(result, decision)
+        _inject_rendering_text(result, decision, session_state)
 
         # Store effective Luma response for session building
         result["_merged_luma_response"] = effective_response

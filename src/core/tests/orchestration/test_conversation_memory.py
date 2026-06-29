@@ -154,17 +154,16 @@ class TestUpdateConversation:
         s2 = update_conversation(s1, user_text="turn 2", intent="DETAILS", search_query="q2")
         assert len(s2["conversation"]["turns"]) == 2
 
-    def test_three_turn_cap_fifo(self):
+    def test_five_turn_cap_fifo(self):
         session: dict = {}
         s = session
-        for i in range(4):
+        for i in range(6):
             s = update_conversation(s, user_text=f"turn {i}", intent="GENERAL_INQUIRY", search_query=f"q{i}")
         turns = s["conversation"]["turns"]
-        assert len(turns) == 3
-        # Oldest turn (0) evicted; turns 1-3 remain
+        assert len(turns) == 5
+        # Oldest turn (0) evicted; turns 1-5 remain
         assert turns[0]["user"] == "turn 1"
-        assert turns[1]["user"] == "turn 2"
-        assert turns[2]["user"] == "turn 3"
+        assert turns[4]["user"] == "turn 5"
 
     def test_last_intent_and_search_query_updated_each_turn(self):
         session: dict = {}

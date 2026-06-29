@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
-from core.rendering import render_capability
+from core.rendering.llm_renderer import LlmRenderRequest, render_llm
 
 logger = logging.getLogger(__name__)
 
@@ -72,20 +72,6 @@ def build_capability_context(
     }
 
 
-def _render_capability_text(
-    outcome: Dict[str, Any],
-    context: Dict[str, Any],
-) -> Optional[str]:
-    render_spec = render_capability(
-        status=outcome.get("status"),
-        active_capability=outcome.get("active_capability"),
-        facts=outcome.get("facts", {}),
-        slots=outcome.get("slots", {}),
-        context=context,
-    )
-    if render_spec is not None and render_spec.text:
-        return render_spec.text
-    return None
 
 
 def _verify_payment_intent_if_required(
@@ -167,8 +153,18 @@ def apply_capability_to_result(
     _verify_payment_intent_if_required(active_capability, context)
 
     if not runner_result.passthrough:
-        rendered_text = _render_capability_text(outcome, context)
-        prompt_text = rendered_text or runner_result.text
+        adapter_text = runner_result.text or ""
+        if adapter_text:
+            render_instruction = (
+                "Present the following action request to the user naturally. "
+                f"Preserve any URLs or payment links exactly as given:\n{adapter_text}"
+            )
+        else:
+            render_instruction = "Ask the user to complete the required action to continue with their booking."
+        prompt_text = render_llm(LlmRenderRequest(
+            render_instruction=render_instruction,
+            facts={"structured_context": {}},
+        ))
         return {
             "success": True,
             "outcome": {

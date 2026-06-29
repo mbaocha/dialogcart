@@ -4,12 +4,15 @@ Base HTTP Client
 Shared base class for thin HTTP clients.
 """
 
+import logging
 import os
 from typing import Any, Dict, Optional
 
 import httpx
 
 from core.orchestration.errors import UpstreamError
+
+logger = logging.getLogger(__name__)
 
 
 class BaseClient:
@@ -76,29 +79,34 @@ class BaseClient:
             UpstreamError: On network failures or HTTP errors
         """
         url = f"{self.base_url}{path}"
+        logger.debug("→ %s %s  payload=%s", method, url, json)
 
         try:
             response = self._client.request(
                 method=method, url=url, json=json, params=params
             )
+            logger.debug("← %s %s  status=%s", method, url, response.status_code)
             response.raise_for_status()
             return response.json()
         except httpx.HTTPStatusError as e:
             status_code = e.response.status_code
             error_text = e.response.text[:500] if e.response.text else ""
-            # Try to parse JSON error for better error messages
             try:
                 error_json = e.response.json()
                 error_text = str(error_json)
             except Exception:
                 pass
             raise UpstreamError(
-                f"API returned error {status_code}: {error_text}"
+                f"[{method} {url}] HTTP {status_code}: {error_text}"
             ) from e
         except httpx.RequestError as e:
-            raise UpstreamError(f"API request failed: {str(e)}") from e
+            raise UpstreamError(
+                f"[{method} {url}] Connection failed: {str(e)}"
+            ) from e
         except Exception as e:
-            raise UpstreamError(f"Unexpected error calling API: {str(e)}") from e
+            raise UpstreamError(
+                f"[{method} {url}] Unexpected error: {str(e)}"
+            ) from e
 
     def _request_allow_404(
         self,
