@@ -91,6 +91,8 @@ def resolve():
         response["date_constraint"] = result.date_constraint
     if result.search_query is not None:
         response["search_query"] = result.search_query
+    if result.service_candidates:
+        response["service_candidates"] = result.service_candidates
 
     return jsonify(response)
 

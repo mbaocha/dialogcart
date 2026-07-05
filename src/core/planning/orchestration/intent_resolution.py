@@ -21,6 +21,20 @@ from typing import Any, Dict, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 
+def _session_awaiting_booking_confirmation(
+    session_state: Optional[Dict[str, Any]],
+) -> bool:
+    """True when the session is waiting for an explicit booking confirmation."""
+    if not isinstance(session_state, dict):
+        return False
+    from core.session.confirmation_gate import get_confirmation_state
+
+    return (
+        session_state.get("status") == "AWAITING_CONFIRMATION"
+        or get_confirmation_state(session_state) == "pending"
+    )
+
+
 def resolve_effective_intent(
     luma_response: Dict[str, Any],
     session_state: Optional[Dict[str, Any]],
@@ -157,11 +171,13 @@ def resolve_effective_intent(
     # This prevents MODIFY_BOOKING flow from breaking when user confirms with "yes"
     # but also prevents CONFIRM_* from auto-confirming when status != AWAITING_CONFIRMATION
     if luma_intent_name and luma_intent_name.startswith("CONFIRM_") and session_state:
-        # Defensive null check for session_state.get("status")
         session_status = session_state.get("status") if session_state else None
+        awaiting_booking_confirmation = _session_awaiting_booking_confirmation(
+            session_state
+        )
 
-        # Only treat CONFIRM_* as continuation when status == AWAITING_CONFIRMATION
-        if session_status == "AWAITING_CONFIRMATION":
+        # Treat CONFIRM_* as continuation when awaiting explicit booking confirmation.
+        if awaiting_booking_confirmation:
             session_intent = session_state.get("intent_name") or session_state.get(
                 "intent"
             )
@@ -192,7 +208,7 @@ def resolve_effective_intent(
                             f"[session] confirm_intent_continuation user_id={user_id}{log_transaction_id} "
                             f"session.intent={session_intent_str} luma.intent={luma_intent_name} "
                             f"session.status={session_status} "
-                            f"(CONFIRM_* treated as continuation of durable intent with AWAITING_CONFIRMATION status)"
+                            f"(CONFIRM_* treated as continuation of durable intent awaiting confirmation)"
                         )
                 except (ImportError, Exception) as e:
                     logger.warning(
@@ -200,11 +216,15 @@ def resolve_effective_intent(
                         f"Continuing with normal intent resolution."
                     )
         else:
-            # Status != AWAITING_CONFIRMATION - treat CONFIRM_* as normal non-core intent
+            from core.session.confirmation_gate import get_confirmation_state
+
+            session_confirmation = get_confirmation_state(session_state)
+            # Not awaiting confirmation - treat CONFIRM_* as normal non-core intent
             logger.info(
                 f"[session] confirm_intent_not_continuation user_id={user_id}{log_transaction_id} "
                 f"luma.intent={luma_intent_name} session.status={session_status} "
-                f"(CONFIRM_* NOT treated as continuation - status != AWAITING_CONFIRMATION)"
+                f"confirmation_state={session_confirmation} "
+                f"(CONFIRM_* NOT treated as continuation - not awaiting confirmation)"
             )
 
     # SESSION LIFECYCLE RULE: Handle session intent override for:
@@ -344,7 +364,7 @@ def resolve_effective_intent(
                 )
                 should_block_recovery = (
                     is_confirm_intent
-                    and session_status_for_recovery != "AWAITING_CONFIRMATION"
+                    and not _session_awaiting_booking_confirmation(session_state)
                 )
 
                 if should_block_recovery:
@@ -399,12 +419,13 @@ def resolve_effective_intent(
                 # CRITICAL: Informational/question intents (DETAILS, FAQ, HELP, etc.) are intent breakers
                 # They should switch the intent even if they're non-core, interrupting booking flow
                 # This allows users to ask questions mid-booking without preserving the booking intent
+                # AVAILABILITY / CHECK_AVAILABILITY are not listed here — they refine an
+                # active booking (date/time search) and preserve the session intent like CORRECTION.
                 informational_intents = {
                     "DETAILS",
                     "FAQ",
                     "GENERAL_INQUIRY",
                     "HELP",
-                    "AVAILABILITY",
                     "QUOTE",
                     "RECOMMENDATION",
                     "DISCOVERY",
@@ -422,7 +443,7 @@ def resolve_effective_intent(
                 )
                 should_block_noncore_preservation = (
                     is_confirm_intent
-                    and session_status_for_noncore != "AWAITING_CONFIRMATION"
+                    and not _session_awaiting_booking_confirmation(session_state)
                 )
 
                 if (
@@ -532,7 +553,7 @@ def resolve_effective_intent(
                     )
                     should_block_same_preservation = (
                         is_confirm_intent
-                        and session_status_for_same != "AWAITING_CONFIRMATION"
+                        and not _session_awaiting_booking_confirmation(session_state)
                     )
 
                     if should_block_same_preservation:

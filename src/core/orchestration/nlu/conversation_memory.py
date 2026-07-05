@@ -53,6 +53,41 @@ def _attach_active_booking_intent(
     return {**result, "active_booking_intent": intent_name}
 
 
+def _attach_resolved_service_id(
+    result: Dict[str, Any], session: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Tell NLU which service is already locked when service_id is satisfied."""
+    missing = session.get("missing_slots")
+    if isinstance(missing, list) and "service_id" in missing:
+        return result
+    slots = session.get("slots")
+    if not isinstance(slots, dict):
+        facts = session.get("facts")
+        if isinstance(facts, dict):
+            nested = facts.get("slots")
+            if isinstance(nested, dict):
+                slots = nested
+    if not isinstance(slots, dict):
+        return result
+    service_id = slots.get("service_id")
+    if isinstance(service_id, str) and service_id:
+        return {**result, "resolved_service_id": service_id}
+    return result
+
+
+def _attach_service_candidates(
+    result: Dict[str, Any], session: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Pass active disambiguation options to NLU when service_id is still missing."""
+    missing = session.get("missing_slots")
+    if not isinstance(missing, list) or "service_id" not in missing:
+        return result
+    cands = session.get("service_candidates")
+    if isinstance(cands, list) and cands:
+        return {**result, "service_candidates": cands}
+    return result
+
+
 def build_conversation_context(
     session: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
@@ -90,6 +125,11 @@ def build_conversation_context(
                         last_dp = facts.get("date_proposal")
                 if isinstance(last_dp, dict) and last_dp.get("start"):
                     result["last_date_proposal"] = last_dp
+                missing = session.get("missing_slots")
+                if isinstance(missing, list) and missing:
+                    result["missing_slots"] = missing
+                result = _attach_resolved_service_id(result, session)
+                result = _attach_service_candidates(result, session)
                 return result
         return None
 
@@ -105,7 +145,13 @@ def build_conversation_context(
     if isinstance(last_dp, dict) and last_dp.get("start"):
         result["last_date_proposal"] = last_dp
 
-    return _attach_active_booking_intent(result, session)
+    result = _attach_active_booking_intent(result, session)
+    missing = session.get("missing_slots")
+    if isinstance(missing, list) and missing:
+        result = {**result, "missing_slots": missing}
+    result = _attach_resolved_service_id(result, session)
+    result = _attach_service_candidates(result, session)
+    return result
 
 
 def update_conversation(

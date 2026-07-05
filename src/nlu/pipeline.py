@@ -1,9 +1,15 @@
 """
-NLU Pipeline — 3-stage: SLM extraction → decision → calendar binding.
+NLU Pipeline — two-stage extraction + normalisation + calendar binding.
 
-Stage 1 (SLM):      HaikuExtractor → intent + raw facts + time_constraint
-Stage 2 (decision): Pass-through — decision layer output contract differs from /resolve
-Stage 3 (calendar): ISO-8601 date binding via calendar_binder
+Stage 1 (intent):   Stage1IntentExtractor — lightweight LLM call, intent + confidence only
+Stage 2 (slots):    Stage2 dispatcher → per-group slot extractor (LLM, focused prompt)
+                    UNKNOWN routes to create; validated_intent may re-route intent.
+Stage 3 (slots):    When validated_intent maps to a different group, re-run that extractor.
+Normalisation:      Rule-based post-processing (date, time, cancel, booking_id, alias)
+Calendar binding:   ISO-8601 date resolution via calendar_binder
+
+Backward-compat shim: `_slm_extract` delegates to the two-stage path so existing
+tests and callers that patch `_slm_extract` continue to work unchanged.
 """
 import logging
 import os
@@ -12,7 +18,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from .slm.extractor import HaikuExtractor
+from .catalog import resolve_service
+from .stages.stage1.extractor import Stage1IntentExtractor
+from .stages.stage2.dispatcher import extract_slots as _stage2_extract
 
 logger = logging.getLogger(__name__)
 
@@ -186,12 +194,120 @@ def _normalize_cancel_intent(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
     return {**slm, "intent": "CANCEL_BOOKING"}
 
 
+def _tokenize_utterance(text: str) -> List[str]:
+    """Lowercase tokenization for utterance / service_term grounding checks."""
+    return re.sub(r"[^\w\s]", " ", (text or "").lower()).split()
+
+
+# Filler tokens stripped before checking whether a service_term is grounded in text.
+_SERVICE_GROUNDING_NOISE = _DATE_TIME_TOKENS | frozenset({
+    "a", "an", "the", "to", "for", "me", "my", "i", "want", "need", "please",
+    "switch", "change", "instead", "actually", "book", "schedule", "reserve",
+})
+
+
+def _ground_service_term_in_text(
+    text: str, service_term: Optional[str]
+) -> Optional[str]:
+    """Keep only service tokens explicitly present in the current utterance.
+
+    Returns None when no service token from *service_term* appears in *text*.
+    Partial hallucinations (e.g. service_term='premium haircut' on utterance
+    'premium') collapse to the grounded subset ('premium').
+    """
+    if not service_term or not str(service_term).strip():
+        return None
+
+    text_tokens = _tokenize_utterance(text)
+    if not text_tokens:
+        return None
+
+    text_joined = " ".join(text_tokens)
+    term_tokens = [
+        t
+        for t in _tokenize_utterance(str(service_term))
+        if t not in _SERVICE_GROUNDING_NOISE
+    ]
+    if not term_tokens:
+        return None
+
+    term_norm = " ".join(term_tokens)
+    if term_norm and term_norm in text_joined:
+        return term_norm
+
+    grounded = [t for t in term_tokens if t in text_tokens]
+    if not grounded:
+        return None
+    if len(grounded) == len(term_tokens):
+        return term_norm
+    return " ".join(grounded)
+
+
+def _text_mentions_service(
+    text: str,
+    service_term: Optional[str] = None,
+    facts_service_id: Optional[str] = None,
+) -> bool:
+    """True when the current utterance explicitly mentions a service."""
+    if _ground_service_term_in_text(text, service_term):
+        return True
+    if not facts_service_id:
+        return False
+    text_tokens = set(_tokenize_utterance(text))
+    for token in _tokenize_utterance(str(facts_service_id)):
+        if token not in _SERVICE_GROUNDING_NOISE and token in text_tokens:
+            return True
+    return False
+
+
+def _strip_unmentioned_service(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove service slots Haiku inferred from conversation context alone.
+
+    Mirrors _strip_unmentioned_dates: booking services must appear in the
+    current utterance. Core owns session stickiness via merge + resolved_service_id.
+    """
+    facts = slm.get("facts") or {}
+    service_term = slm.get("service_term")
+    facts_service_id = facts.get("service_id")
+
+    if not service_term and not facts_service_id:
+        return slm
+
+    if _text_mentions_service(text, service_term, facts_service_id):
+        grounded = _ground_service_term_in_text(text, service_term)
+        if service_term and grounded != service_term:
+            logger.debug(
+                "Grounding service_term in utterance text=%r service_term=%r → %r",
+                text,
+                service_term,
+                grounded,
+            )
+            return {**slm, "service_term": grounded}
+        return slm
+
+    logger.debug(
+        "Stripping unmentioned service from SLM output for text=%r "
+        "service_term=%r facts.service_id=%r",
+        text,
+        service_term,
+        facts_service_id,
+    )
+    updated = {**slm, "service_term": None, "service_candidates": []}
+    if facts_service_id is not None:
+        updated["facts"] = {**facts, "service_id": None}
+    return updated
+
+
 def _strip_unmentioned_dates(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
     """Remove dates Haiku invented when the user only mentioned a clock time."""
     if _text_mentions_date(text):
         return slm
     facts = slm.get("facts", {})
     if not facts.get("dates") and not facts.get("date_time_pairs"):
+        return slm
+    # date_time_pairs requires BOTH date AND time — if populated, the LLM found a real
+    # date+time pair (not an invented date). Trust extraction even for misspelled words.
+    if facts.get("date_time_pairs"):
         return slm
     logger.debug(
         "Stripping unmentioned dates from SLM output for text=%r dates=%r pairs=%r",
@@ -231,64 +347,6 @@ def _apply_booking_mode_intent(
         return {**slm, "intent": "CREATE_RESERVATION"}
     return slm
 
-
-def _resolve_alias_ambiguity(
-    text: str, service_id: Optional[str], aliases: Dict[str, str]
-) -> Optional[str]:
-    """Return None when service_id is ambiguous across multiple alias keys.
-
-    Algorithm:
-    1. Build alias vocabulary — the set of all words that appear in any alias key,
-       minus date/time tokens (month names, weekdays, time words) that could
-       collide with date phrases in user input.
-    2. Filter user tokens to only those in the filtered alias vocabulary.
-    3. If an alias key appears verbatim as a contiguous token sequence, it is an
-       exact match — return service_id unchanged.
-    4. Score each alias key by how many relevant user tokens it contains.
-       Tie → null; single winner → return service_id unchanged.
-    """
-    if not aliases or service_id is None:
-        return service_id
-
-    alias_vocab: set = set()
-    for key in aliases:
-        alias_vocab.update(key.lower().split())
-    alias_vocab -= _DATE_TIME_TOKENS
-
-    user_tokens = [w.strip(".,!?") for w in text.lower().split()]
-    relevant = [t for t in user_tokens if t in alias_vocab]
-
-    if not relevant:
-        return service_id
-
-    # Exact-key match: alias key appears as a contiguous token sequence — unambiguous.
-    def _key_in_tokens(key: str) -> bool:
-        key_words = key.lower().split()
-        n = len(key_words)
-        return any(user_tokens[i:i+n] == key_words for i in range(len(user_tokens) - n + 1))
-
-    exact_matches = [k for k in aliases if _key_in_tokens(k)]
-    if len(exact_matches) == 1:
-        return exact_matches[0]
-
-    def _score(alias_key: str) -> int:
-        return len(set(relevant) & set(alias_key.lower().split()))
-
-    scores = {key: _score(key) for key in aliases}
-    max_score = max(scores.values())
-
-    if max_score == 0:
-        return service_id
-
-    top_keys = [k for k, s in scores.items() if s == max_score]
-    if len(top_keys) >= 2:
-        logger.debug(
-            "Alias ambiguity: relevant=%r top_keys=%r → nulling service_id",
-            relevant, top_keys,
-        )
-        return None
-
-    return top_keys[0]
 
 
 _BOOKING_ID_EXPLICIT_RE = re.compile(
@@ -401,6 +459,7 @@ class PipelineResult:
     time_constraint: Optional[Dict[str, Any]] = None
     search_query: Optional[str] = None
     date_constraint: Optional[Dict[str, Any]] = None
+    service_candidates: List[str] = field(default_factory=list)
 
 
 class _SemanticResultAdapter:
@@ -645,10 +704,10 @@ def _resolve_calendar_binding_intent(
 
 
 class NLUPipeline:
-    """3-stage NLU pipeline."""
+    """Two-stage NLU pipeline: Stage 1 (intent) → Stage 2 (slots) → normalise → calendar."""
 
     def __init__(self):
-        self._extractor = HaikuExtractor()
+        self._stage1 = Stage1IntentExtractor()
 
     def run(
         self,
@@ -661,17 +720,31 @@ class NLUPipeline:
         now = _resolve_now(now)
         slm = self._slm_extract(text, tenant_context, now, conversation_context=conversation_context)
         slm = _strip_unmentioned_dates(text, slm)
+        slm = _strip_unmentioned_service(text, slm)
         slm = _normalize_fuzzy_time(text, slm)
         slm = _normalize_cancel_intent(text, slm)
         slm = _normalize_booking_id(text, slm, tenant_context)
         slm = _apply_booking_mode_intent(text, slm, tenant_context)
         slm = self._correct_bare_weekday_dates(text, slm)
         slm = _fix_iso_weekday_mismatch(text, slm, conversation_context)
-        slm = self._resolve_service_ambiguity(text, slm, tenant_context)
+        slm = self._resolve_service_ambiguity(slm, tenant_context, conversation_context)
         slm = _resolve_slot_fill_intent(slm, text, conversation_context)
-        return self._bind_calendar(
+        result = self._bind_calendar(
             slm, tenant_context, now, timezone, conversation_context
         )
+        logger.info(
+            "[NLU_FINAL] text=%r intent=%r resolved_dates=%r date_time_pairs=%r times=%r "
+            "service_id=%r service_candidates=%r time_constraint=%r",
+            text,
+            result.intent.get("name"),
+            result.facts.get("dates"),
+            result.facts.get("date_time_pairs"),
+            result.facts.get("times"),
+            result.facts.get("service_id"),
+            result.service_candidates,
+            result.time_constraint,
+        )
+        return result
 
     def _correct_bare_weekday_dates(self, text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
         """Normalise Haiku's date output for bare weekday / weekend inputs.
@@ -699,17 +772,52 @@ class NLUPipeline:
         return slm
 
     def _resolve_service_ambiguity(
-        self, text: str, slm: Dict[str, Any], tenant_context: Dict[str, Any]
+        self, slm: Dict[str, Any], tenant_context: Dict[str, Any],
+        conversation_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         aliases = tenant_context.get("aliases", {})
         if not aliases:
             return slm
+
+        service_term = slm.get("service_term")
         facts = slm.get("facts", {})
-        service_id = facts.get("service_id")
-        resolved = _resolve_alias_ambiguity(text, service_id, aliases)
-        if resolved != service_id:
-            return {**slm, "facts": {**facts, "service_id": resolved}}
-        return slm
+
+        ctx = conversation_context if isinstance(conversation_context, dict) else {}
+        awaiting_service_id = "service_id" in ctx.get("missing_slots", [])
+
+        prior_text: Optional[str] = None
+        candidate_keys: Optional[List[str]] = None
+        resolved_service_id: Optional[str] = None
+        if ctx:
+            cands = ctx.get("service_candidates")
+            if isinstance(cands, list) and cands:
+                candidate_keys = cands
+            if awaiting_service_id:
+                turns = ctx.get("turns") or []
+                joined = " ".join(t.get("user", "") for t in turns).strip()
+                prior_text = joined or None
+            raw_resolved = ctx.get("resolved_service_id")
+            if isinstance(raw_resolved, str) and raw_resolved:
+                resolved_service_id = raw_resolved
+
+        resolved = resolve_service(
+            service_term=service_term,
+            aliases=aliases,
+            prior_text=prior_text,
+            awaiting_service_id=awaiting_service_id,
+            candidate_keys=candidate_keys,
+            resolved_service_id=resolved_service_id,
+        )
+        logger.debug(
+            "_resolve_service_ambiguity: service_term=%r awaiting=%r prior=%r candidates=%r → service_id=%r out_candidates=%r",
+            service_term, awaiting_service_id, prior_text, candidate_keys,
+            resolved["service_id"], resolved["service_candidates"],
+        )
+        return {
+            **slm,
+            "facts": {**facts, "service_id": resolved["service_id"]},
+            "service_candidates": resolved["service_candidates"],
+        }
 
     def _slm_extract(
         self,
@@ -718,7 +826,44 @@ class NLUPipeline:
         now: str,
         conversation_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        return self._extractor.extract(text, tenant_context, now, conversation_context=conversation_context)
+        """Two-stage extraction: Stage 1 classifies intent, Stage 2 extracts slots."""
+        stage1 = self._stage1.classify(text, now, conversation_context)
+        intent = stage1.get("intent", "UNKNOWN")
+        confidence = stage1.get("confidence", 0.0)
+        logger.info(
+            "[NLU_STAGE1] text=%r intent=%r confidence=%.2f ctx_last_intent=%r",
+            text,
+            intent,
+            confidence,
+            (conversation_context or {}).get("last_intent"),
+        )
+
+        result = _stage2_extract(
+            intent=intent,
+            text=text,
+            now=now,
+            tenant_context=tenant_context,
+            conversation_context=conversation_context,
+        )
+        _facts = result.get("facts") or {}
+        logger.info(
+            "[NLU_STAGE2] text=%r intent=%r dates=%r date_time_pairs=%r times=%r service_term=%r",
+            text,
+            result.get("intent"),
+            _facts.get("dates"),
+            _facts.get("date_time_pairs"),
+            _facts.get("times"),
+            result.get("service_term"),
+        )
+        # Carry through Stage 1 confidence when Stage 2 didn't change the intent
+        if result.get("intent") == intent and result.get("confidence", 0.0) == 0.0:
+            result = {**result, "confidence": confidence}
+        # Ensure service_candidates and service_term are always present
+        if "service_candidates" not in result:
+            result = {**result, "service_candidates": []}
+        if "service_term" not in result:
+            result = {**result, "service_term": None}
+        return result
 
     def _bind_calendar(
         self,
@@ -735,6 +880,7 @@ class NLUPipeline:
         facts = decision.get("facts", {})
         tc = decision.get("time_constraint")
         search_query = decision.get("search_query")
+        service_candidates = decision.get("service_candidates") or []
 
         binding_intent = _resolve_calendar_binding_intent(
             intent, facts, conversation_context
@@ -821,4 +967,5 @@ class NLUPipeline:
             time_constraint=_enrich_time_constraint(tc),
             search_query=search_query,
             date_constraint=date_constraint,
+            service_candidates=service_candidates,
         )

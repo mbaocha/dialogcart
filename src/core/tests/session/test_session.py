@@ -25,8 +25,7 @@ from core.orchestration.orchestrator import handle_message
 from core.orchestration.session import clear_session, get_session, save_session
 from core.tests.harness.clients import TestCatalogClient, TestLumaClient
 from core.tests.harness.org_setup import get_customer_details, setup_test_org_domain
-from core.tests.planning.followup import followup_scenarios
-from core.tests.planning.test_planning_edges import planning_edges_scenarios
+from core.tests.planning.planning_scenarios import planning_scenarios
 
 # Set execution mode to test for deterministic tests
 os.environ["CORE_EXECUTION_MODE"] = "test"
@@ -859,7 +858,7 @@ Examples:
         scenario_ids = parse_scenario_args(args.scenarios)
 
         # Combine all scenarios
-        all_scenarios = followup_scenarios + planning_edges_scenarios
+        all_scenarios = planning_scenarios
 
         # Filter scenarios
         scenarios_to_run = filter_scenarios_by_id(all_scenarios, scenario_ids)
@@ -882,7 +881,7 @@ Examples:
                 print("CORE SESSION FOLLOW-UP TEST SUITE")
                 print("=" * 70)
                 print(
-                    f"Total scenarios: {len(all_scenarios)} (followup: {len(followup_scenarios)}, planning_edges: {len(planning_edges_scenarios)})"
+                    f"Total scenarios: {len(all_scenarios)}"
                 )
                 if len(scenarios_to_run) != len(all_scenarios):
                     print(

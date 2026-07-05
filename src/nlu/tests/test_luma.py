@@ -91,32 +91,23 @@ def call_luma(sentence, booking_mode, user_id=None, aliases=None, options=None, 
     return data, resp.status_code, resp.text
 
 
-def _resolve_alias_ambiguity_fn():
-    """Lazy import — stubs anthropic so pipeline loads without the SDK."""
+def resolve_alias_ambiguity_case(case):
+    """Run one alias-ambiguity scenario via catalog.resolve_service; returns the result dict."""
     import sys
     from unittest.mock import MagicMock
 
     sys.modules.setdefault("anthropic", MagicMock())
-    from nlu.pipeline import _resolve_alias_ambiguity
+    from nlu.catalog import resolve_service
 
-    return _resolve_alias_ambiguity
-
-
-def resolve_alias_ambiguity_case(case):
-    """Run one alias-ambiguity scenario; returns resolved service_id."""
-    fn = _resolve_alias_ambiguity_fn()
-    return fn(
-        case["text"],
-        case.get("haiku_service_id"),
-        case["aliases"],
-    )
+    return resolve_service(case.get("service_term"), case["aliases"])
 
 
 def assert_alias_ambiguity(case, result):
     """Assert resolved service_id matches scenario expectation."""
     expected = case["expected"]
-    assert result == expected, (
-        f"service_id mismatch: got {result!r}, expected {expected!r}"
+    actual = result.get("service_id")
+    assert actual == expected, (
+        f"service_id mismatch: got {actual!r}, expected {expected!r}"
     )
 
 

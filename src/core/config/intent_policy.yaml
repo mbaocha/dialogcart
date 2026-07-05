@@ -51,6 +51,7 @@ intents:
           - time
         requires:
           - availability_resolved
+          - confirmation_state_confirmed
         client: booking_client
 
   CREATE_RESERVATION:

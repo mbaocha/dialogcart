@@ -27,6 +27,17 @@ class TestBuildConversationContext:
         result = build_conversation_context(session)
         assert result == {"last_intent": "CREATE_APPOINTMENT"}
 
+    def test_synthesized_context_includes_resolved_service_id(self):
+        session = {
+            "intent_name": "CREATE_APPOINTMENT",
+            "status": "READY",
+            "slots": {"service_id": "premium haircut"},
+            "missing_slots": ["time"],
+        }
+        result = build_conversation_context(session)
+        assert result["last_intent"] == "CREATE_APPOINTMENT"
+        assert result["resolved_service_id"] == "premium haircut"
+
     def test_returns_none_when_no_conversation_and_ephemeral_intent(self):
         assert build_conversation_context({"intent_name": "GENERAL_INQUIRY"}) is None
 
@@ -118,6 +129,65 @@ class TestBuildConversationContext:
         }
         result = build_conversation_context(session)
         assert "active_booking_intent" not in result
+
+    def test_includes_service_candidates_when_awaiting_service_id(self):
+        session = {
+            "intent_name": "CREATE_APPOINTMENT",
+            "missing_slots": ["service_id", "date", "time"],
+            "service_candidates": ["premium haircut", "flexi haircut + prunning"],
+            "conversation": {
+                "last_intent": "CREATE_APPOINTMENT",
+                "last_search_query": None,
+                "turns": [
+                    {"user": "book me a haircut", "intent": "CREATE_APPOINTMENT"},
+                ],
+            },
+        }
+        result = build_conversation_context(session)
+        assert result["service_candidates"] == [
+            "premium haircut",
+            "flexi haircut + prunning",
+        ]
+
+    def test_omits_service_candidates_when_service_id_satisfied(self):
+        session = {
+            "intent_name": "CREATE_APPOINTMENT",
+            "missing_slots": ["date", "time"],
+            "service_candidates": ["premium haircut", "flexi haircut + prunning"],
+            "conversation": {
+                "last_intent": "CREATE_APPOINTMENT",
+                "turns": [],
+            },
+        }
+        result = build_conversation_context(session)
+        assert "service_candidates" not in result
+
+    def test_attaches_resolved_service_id_when_service_satisfied(self):
+        session = {
+            "intent_name": "CREATE_APPOINTMENT",
+            "status": "READY",
+            "slots": {"service_id": "premium haircut"},
+            "missing_slots": ["time"],
+            "conversation": {
+                "last_intent": "CREATE_APPOINTMENT",
+                "turns": [
+                    {"user": "premium", "intent": "CREATE_APPOINTMENT"},
+                ],
+            },
+        }
+        result = build_conversation_context(session)
+        assert result["resolved_service_id"] == "premium haircut"
+        assert "service_candidates" not in result
+
+    def test_omits_resolved_service_id_when_service_still_missing(self):
+        session = {
+            "intent_name": "CREATE_APPOINTMENT",
+            "missing_slots": ["service_id", "date"],
+            "slots": {},
+            "conversation": {"last_intent": "CREATE_APPOINTMENT", "turns": []},
+        }
+        result = build_conversation_context(session)
+        assert "resolved_service_id" not in result
 
 
 # ---------------------------------------------------------------------------

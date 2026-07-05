@@ -25,6 +25,40 @@ turn_logger = logging.getLogger("core.turn_log")
 turn_logger.setLevel(logging.INFO)
 
 
+def _extract_service_candidates_for_session(
+    merged_luma_response: Optional[Dict[str, Any]],
+    outcome: Optional[Dict[str, Any]],
+) -> list:
+    """Read active service disambiguation options from merge/outcome payloads."""
+    for source in (merged_luma_response, outcome):
+        if not isinstance(source, dict):
+            continue
+        cands = source.get("service_candidates")
+        if isinstance(cands, list) and cands:
+            return cands
+        facts = source.get("facts")
+        if isinstance(facts, dict):
+            cands = facts.get("service_candidates")
+            if isinstance(cands, list) and cands:
+                return cands
+    return []
+
+
+def _apply_service_candidates_to_session(
+    session_state: Dict[str, Any],
+    merged_luma_response: Optional[Dict[str, Any]],
+    outcome: Optional[Dict[str, Any]],
+) -> None:
+    """Persist narrowed service options for NLU list-pick turns; clear when resolved."""
+    missing = session_state.get("missing_slots") or []
+    if "service_id" in missing:
+        cands = _extract_service_candidates_for_session(merged_luma_response, outcome)
+        if cands:
+            session_state["service_candidates"] = cands
+    else:
+        session_state.pop("service_candidates", None)
+
+
 from core.session.appointment_extensions import apply_create_appointment_extensions
 from core.session.intent_persist import (
     resolve_durable_intent_for_session,
@@ -188,6 +222,20 @@ def build_session_state_from_outcome(
         outcome, previous_session_state, outcome_status
     )
 
+    from core.orchestration.temporal_proposal import (
+        has_bound_booking_datetime,
+        strip_unconfirmed_temporal_slots,
+    )
+
+    slots = strip_unconfirmed_temporal_slots(
+        slots,
+        intent_name,
+        previous_session_state,
+        confirmed=has_bound_booking_datetime(
+            slots, previous_session_state, merged_luma_response
+        ),
+    )
+
     should_clear, _clear_reason = should_clear_session_on_ready(outcome_status, intent_name)
     if should_clear:
         return None
@@ -258,18 +306,6 @@ def build_session_state_from_outcome(
     missing_slots_to_persist = (
         recomputed_missing_slots if recomputed_missing_slots is not None else []
     )
-
-    # Synthesize date slot from date_proposal when NLU resolved date but didn't put it in slots.
-    # The new NLU service resolves dates into date_proposal.start rather than slots.date.
-    # When date is not in missing_slots (i.e., NLU says it's resolved), synthesize it into slots.
-    if ("date" not in slots or not slots.get("date")) and "date" not in missing_slots_to_persist:
-        _dp = None
-        if merged_luma_response and isinstance(merged_luma_response, dict):
-            _dp = merged_luma_response.get("date_proposal")
-        if not _dp and outcome and isinstance(outcome, dict):
-            _dp = outcome.get("facts", {}).get("date_proposal")
-        if _dp and isinstance(_dp, dict) and _dp.get("start"):
-            slots["date"] = _dp["start"]
 
     # --- Detect last_filled_slot (pure metadata, no behavioral impact) ---
     last_filled_slot = None
@@ -480,6 +516,8 @@ def build_session_state_from_outcome(
         date_constraint = merged_luma_response.get("date_constraint")
         if date_constraint is not None:
             session_state["date_constraint"] = date_constraint
+
+    _apply_service_candidates_to_session(session_state, merged_luma_response, outcome)
 
     normalize_session_guards(session_state)
 

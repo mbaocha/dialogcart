@@ -15,13 +15,16 @@ from nlu.config.booking_id import (
 from nlu.pipeline import (  # noqa: E402
     _apply_booking_mode_intent,
     _fix_iso_weekday_mismatch,
+    _ground_service_term_in_text,
     _normalize_booking_id,
     _normalize_cancel_intent,
     _normalize_fuzzy_time,
     _resolve_calendar_binding_intent,
     _resolve_slot_fill_intent,
     _strip_unmentioned_dates,
+    _strip_unmentioned_service,
     _text_mentions_date,
+    _text_mentions_service,
 )
 
 
@@ -71,6 +74,60 @@ def test_strip_unmentioned_dates_preserves_explicit_date():
     }
     result = _strip_unmentioned_dates("book massage tomorrow at 3pm", slm)
     assert result["facts"]["dates"] == ["tomorrow"]
+
+
+@pytest.mark.parametrize(
+    "text,service_term,expected",
+    [
+        ("12pm", "premium", None),
+        ("tomorrow", "premium", None),
+        ("premium", "premium", "premium"),
+        ("switch to premium spa", "premium spa", "premium spa"),
+        ("premium", "premium haircut", "premium"),
+    ],
+)
+def test_ground_service_term_in_text(text, service_term, expected):
+    assert _ground_service_term_in_text(text, service_term) == expected
+
+
+def test_text_mentions_service_time_only():
+    assert _text_mentions_service("12pm", service_term="premium") is False
+
+
+def test_text_mentions_service_explicit_premium():
+    assert _text_mentions_service("premium", service_term="premium") is True
+
+
+def test_strip_unmentioned_service_clears_context_leaked_premium_on_12pm():
+    slm = {
+        "intent": "CREATE_APPOINTMENT",
+        "service_term": "premium",
+        "service_candidates": [],
+        "facts": {"service_id": None, "times": ["12:00"]},
+    }
+    result = _strip_unmentioned_service("12pm", slm)
+    assert result["service_term"] is None
+    assert result.get("service_candidates") == []
+
+
+def test_strip_unmentioned_service_preserves_premium_in_utterance():
+    slm = {
+        "intent": "CREATE_APPOINTMENT",
+        "service_term": "premium",
+        "facts": {"service_id": None},
+    }
+    result = _strip_unmentioned_service("premium", slm)
+    assert result["service_term"] == "premium"
+
+
+def test_strip_unmentioned_service_clears_facts_service_id_on_tomorrow():
+    slm = {
+        "intent": "AVAILABILITY",
+        "service_term": None,
+        "facts": {"service_id": "premium haircut", "dates": ["2026-07-03"]},
+    }
+    result = _strip_unmentioned_service("tomorrow", slm)
+    assert result["facts"]["service_id"] is None
 
 
 def test_apply_booking_mode_promotes_book_room():

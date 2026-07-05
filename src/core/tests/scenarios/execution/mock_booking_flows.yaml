@@ -15,8 +15,8 @@ scenarios:
           missing_slots: ["time"]
       - sentence: "2pm"
         expect:
-          status: READY
-          action: SEARCH_AVAILABILITY
+          status: AWAITING_CONFIRMATION
+          action: CONFIRM_APPOINTMENT
           intent_preserved: true
       - sentence: "yes"
         expect:
@@ -32,13 +32,13 @@ scenarios:
     turns:
       - sentence: "book a haircut tomorrow at 2pm"
         expect:
-          status: READY
-          action: SEARCH_AVAILABILITY
+          status: AWAITING_CONFIRMATION
+          action: CONFIRM_APPOINTMENT
           missing_slots: []
       - sentence: "actually make it 3pm"
         expect:
-          status: READY
-          action: SEARCH_AVAILABILITY
+          status: AWAITING_CONFIRMATION
+          action: CONFIRM_APPOINTMENT
           intent_preserved: true
       - sentence: "yes"
         expect:
@@ -54,8 +54,8 @@ scenarios:
     turns:
       - sentence: "book haircut tomorrow by 2pm"
         expect:
-          status: READY
-          action: SEARCH_AVAILABILITY
+          status: AWAITING_CONFIRMATION
+          action: CONFIRM_APPOINTMENT
           missing_slots: []
 
   - name: appointment_date_then_service_then_time
@@ -74,8 +74,8 @@ scenarios:
           intent_preserved: true
       - sentence: "3pm"
         expect:
-          status: READY
-          action: SEARCH_AVAILABILITY
+          status: AWAITING_CONFIRMATION
+          action: CONFIRM_APPOINTMENT
           intent_preserved: true
 
   - name: appointment_hours_detour_then_confirm
@@ -86,8 +86,8 @@ scenarios:
     turns:
       - sentence: "book a haircut tomorrow at 2pm"
         expect:
-          status: READY
-          action: SEARCH_AVAILABILITY
+          status: AWAITING_CONFIRMATION
+          action: CONFIRM_APPOINTMENT
           missing_slots: []
       - sentence: "what time do you open?"
         expect:
@@ -97,8 +97,8 @@ scenarios:
           preserve_booking_session: true
       - sentence: "actually make it 3pm"
         expect:
-          status: READY
-          action: SEARCH_AVAILABILITY
+          status: AWAITING_CONFIRMATION
+          action: CONFIRM_APPOINTMENT
           intent_preserved: true
       - sentence: "yes"
         expect:
@@ -119,8 +119,8 @@ scenarios:
           action: SEARCH_AVAILABILITY
       - sentence: "around 2pm"
         expect:
-          status: READY
-          action: SEARCH_AVAILABILITY
+          status: AWAITING_CONFIRMATION
+          action: CONFIRM_APPOINTMENT
           intent_preserved: true
       - sentence: "yes"
         expect:
@@ -147,8 +147,8 @@ scenarios:
           preserve_booking_session: true
       - sentence: "2pm"
         expect:
-          status: READY
-          action: SEARCH_AVAILABILITY
+          status: AWAITING_CONFIRMATION
+          action: CONFIRM_APPOINTMENT
           intent_preserved: true
       - sentence: "yes"
         expect:
@@ -208,13 +208,13 @@ scenarios:
     turns:
       - sentence: "book a haircut friday at 2pm"
         expect:
-          status: READY
-          action: SEARCH_AVAILABILITY
+          status: AWAITING_CONFIRMATION
+          action: CONFIRM_APPOINTMENT
           missing_slots: []
       - sentence: "no saturday instead"
         expect:
-          status: READY
-          action: SEARCH_AVAILABILITY
+          status: AWAITING_CONFIRMATION
+          action: CONFIRM_APPOINTMENT
           intent_preserved: true
       - sentence: "yes"
         expect:
@@ -230,8 +230,8 @@ scenarios:
     turns:
       - sentence: "book a haircut tomorrow at 2pm"
         expect:
-          status: READY
-          action: SEARCH_AVAILABILITY
+          status: AWAITING_CONFIRMATION
+          action: CONFIRM_APPOINTMENT
           missing_slots: []
       - sentence: "what time do you open?"
         expect:
@@ -254,8 +254,8 @@ scenarios:
     turns:
       - sentence: "book a haircut tomorrow at 2pm"
         expect:
-          status: READY
-          action: SEARCH_AVAILABILITY
+          status: AWAITING_CONFIRMATION
+          action: CONFIRM_APPOINTMENT
           missing_slots: []
       - sentence: "yes"
         expect:
@@ -287,13 +287,13 @@ scenarios:
     turns:
       - sentence: "book a haircut tomorrow at 2pm"
         expect:
-          status: READY
-          action: SEARCH_AVAILABILITY
+          status: AWAITING_CONFIRMATION
+          action: CONFIRM_APPOINTMENT
           missing_slots: []
       - sentence: "change it to a massage tomorrow at 2pm"
         expect:
-          status: READY
-          action: SEARCH_AVAILABILITY
+          status: AWAITING_CONFIRMATION
+          action: CONFIRM_APPOINTMENT
           intent_preserved: true
       - sentence: "yes"
         expect:

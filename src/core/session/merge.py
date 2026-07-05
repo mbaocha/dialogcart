@@ -25,6 +25,39 @@ logger = logging.getLogger(__name__)
 turn_logger = logging.getLogger("core.turn_log")
 turn_logger.setLevel(logging.INFO)
 
+
+def should_merge_session_context(
+    session_state: Optional[Dict[str, Any]],
+    *,
+    session_reset_occurred: bool = False,
+) -> bool:
+    """Whether to merge session context into this turn.
+
+    Invariant: status does not decide merge eligibility. Merge when a durable
+    booking flow is active (or pre-intent slots await materialization) and the
+    turn is not a destructive intent reset.
+    """
+    if not session_state or session_reset_occurred:
+        return False
+
+    intent_name = session_state.get("intent_name") or session_state.get("intent")
+    if isinstance(intent_name, dict):
+        intent_name = intent_name.get("name")
+    intent_name = intent_name or ""
+
+    if intent_name and intent_name != "UNKNOWN":
+        try:
+            if is_durable_intent(intent_name):
+                return True
+        except Exception:
+            return False
+        return False
+
+    # Pre-intent materialization: slots collected before durable intent exists.
+    slots = session_state.get("slots")
+    return isinstance(slots, dict) and bool(slots)
+
+
 def merge_luma_with_session(
     luma_response: Dict[str, Any],
     session_state: Dict[str, Any],
@@ -89,6 +122,16 @@ def merge_luma_with_session(
         f"merge_luma_with_session: luma_intent={luma_intent_name} "
         f"session_intent={session_intent} session_status={session_status}"
     )
+
+    # Rehydrate persisted booking confirmation_state for multi-turn confirm flows.
+    from core.session.confirmation_gate import (
+        get_confirmation_state,
+        set_confirmation_state,
+    )
+
+    session_confirmation = get_confirmation_state(session_state)
+    if session_confirmation is not None and get_confirmation_state(merged) is None:
+        set_confirmation_state(merged, session_confirmation)
 
     # Extract session intent name for comparison (MUST be done before first use)
     # CRITICAL: Handle both string and dict formats, and handle None/empty strings correctly
@@ -912,18 +955,58 @@ def merge_luma_with_session(
         elif value is not None:  # Only merge non-None values
             merged_slots[key] = value
 
-    # CRITICAL: Preserve raw service_id from session if Luma didn't provide it
-    # This ensures raw tenant value persists across turns
-    if "service_id" not in luma_slots and raw_service_id_from_session:
-        merged_slots["service_id"] = raw_service_id_from_session
-        logger.debug(
-            f"Preserved raw service_id from session: {raw_service_id_from_session}"
-        )
+    # Preserve raw service_id from session only when user did NOT mention a service this turn.
+    # service_candidates non-empty means the user said a service term that matched ambiguously —
+    # the session value must not silently win over the user's new (unresolved) request.
+    # Candidates are checked first: session facts.slots can leak a stale service_id into
+    # luma_slots (non-null), which must not block the drop path.
+    current_candidates = (
+        merged.get("service_candidates")
+        or (merged.get("facts") or {}).get("service_candidates")
+        or []
+    )
+    if raw_service_id_from_session:
+        if current_candidates:
+            # User mentioned a service this turn (ambiguous match) — drop stale session value
+            merged_slots.pop("service_id", None)
+            merged_slots.pop("_canonical_service_id", None)
+            merged.setdefault("_intentionally_dropped_slots", set()).add("service_id")
+            # Clear nested facts.slots so promotion does not re-inject stale service_id
+            merged_facts_obj = merged.get("facts")
+            if isinstance(merged_facts_obj, dict):
+                nested_facts_slots = merged_facts_obj.get("slots")
+                if isinstance(nested_facts_slots, dict) and "service_id" in nested_facts_slots:
+                    cleaned_nested = {
+                        k: v for k, v in nested_facts_slots.items() if k != "service_id"
+                    }
+                    if cleaned_nested:
+                        merged["facts"] = {**merged_facts_obj, "slots": cleaned_nested}
+                    else:
+                        merged["facts"] = {
+                            k: v for k, v in merged_facts_obj.items() if k != "slots"
+                        }
+            raw_snapshot = merged.get("_raw_luma_slots")
+            if isinstance(raw_snapshot, dict):
+                merged["_raw_luma_slots"] = {
+                    k: v
+                    for k, v in raw_snapshot.items()
+                    if k not in ("service_id", "_canonical_service_id")
+                }
+            logger.debug(
+                f"Dropped session service_id={raw_service_id_from_session}: "
+                f"user mentioned a service (candidates={current_candidates})"
+            )
+        elif luma_slots.get("service_id") is None:
+            merged_slots["service_id"] = raw_service_id_from_session
+            logger.debug(
+                f"Preserved raw service_id from session: {raw_service_id_from_session}"
+            )
 
-    # Preserve canonical service_id from session if present
+    # Preserve canonical service_id from session if present (only when raw was also preserved)
     if (
         canonical_service_id_from_session
         and "_canonical_service_id" not in merged_slots
+        and "service_id" in merged_slots
     ):
         merged_slots["_canonical_service_id"] = canonical_service_id_from_session
         logger.debug(
@@ -944,7 +1027,8 @@ def merge_luma_with_session(
 
     # CRITICAL: Verify all session slots are preserved
     if session_slot_keys:
-        lost_slots = session_slot_keys - merged_slot_keys
+        intentionally_dropped = merged.get("_intentionally_dropped_slots") or set()
+        lost_slots = session_slot_keys - merged_slot_keys - intentionally_dropped
         if lost_slots:
             logger.error(
                 f"[SLOT_DURABILITY] VIOLATION: Session slots lost during merge! "
@@ -1073,7 +1157,8 @@ def merge_luma_with_session(
     # Assertion: All session slots must be preserved in merged slots
     # ARCHITECTURAL INVARIANT: Slots are durable facts - they must never be lost
     if session_slots:
-        missing_session_slots = set(session_slots.keys()) - set(merged_slots.keys())
+        intentionally_dropped = merged.get("_intentionally_dropped_slots") or set()
+        missing_session_slots = set(session_slots.keys()) - set(merged_slots.keys()) - intentionally_dropped
         if missing_session_slots:
             logger.error(
                 f"[SLOT_DURABILITY] VIOLATION: Session slots were lost during merge! "
@@ -1314,21 +1399,21 @@ def merge_luma_with_session(
         merged_slots and any(key not in session_slots_dict for key in merged_slots)
     )
 
-    # Informational turn: has active planning AND (informational intent OR no new slots)
-    is_informational_turn = has_active_planning and (
-        is_informational_intent or not current_turn_has_new_slots
+    # Actionable facts include proposals (time/date/service), not only new slot keys.
+    # facts_to_slots only promotes service_id/booking_id, so time revisions must not
+    # be treated as informational no-ops.
+    from core.session.confirmation_gate import has_actionable_booking_facts
+
+    has_actionable_this_turn = current_turn_has_new_slots or has_actionable_booking_facts(
+        merged, session_state
     )
 
-    # For informational turns with no new slots: preserve everything and skip promotion/recomputation
+    # For turns with no actionable booking work: preserve session and skip bind/planning.
     # CRITICAL: For MODIFY_* intents, disable informational-turn early return
     # Required-slot computation MUST always run, even when has_new_slots=False
     # This ensures modification_context can properly override base planning slots
     is_modify_intent = merged_intent_name in ("MODIFY_BOOKING", "MODIFY_RESERVATION")
-    if (
-        is_informational_turn
-        and not current_turn_has_new_slots
-        and not is_modify_intent
-    ):
+    if has_active_planning and not has_actionable_this_turn and not is_modify_intent:
         # LOG: detected informational turn
         logger.info(
             f"[INFORMATIONAL_TURN] Detected informational turn: "
@@ -1430,14 +1515,17 @@ def merge_luma_with_session(
                 f"merge_luma_with_session: _effective_intent not set, using intent['name']={effective_intent}"
             )
 
-    # For informational turns WITH new slots: use session intent but still process normally
-    if is_informational_turn and current_turn_has_new_slots:
-        # Informational turn but with new slots - use session intent for missing_slots computation
-        # but still go through promotion and recomputation with new slots
+    # Non-core intent with actionable booking facts: keep session durable intent
+    # (e.g. CORRECTION + time) while still running promotion/bind.
+    if (
+        is_informational_intent
+        and has_actionable_this_turn
+        and session_intent_name
+    ):
         effective_intent = session_intent_name
 
         logger.info(
-            f"[INFORMATIONAL_TURN] Detected informational turn with new slots: "
+            f"[INFORMATIONAL_TURN] Non-core intent with actionable facts: "
             f"luma_intent={merged_intent_name}, session_intent={session_intent_name}, "
             f"new_slots={[k for k in merged_slots.keys() if k not in session_slots_dict]}"
         )
@@ -1514,6 +1602,60 @@ def merge_luma_with_session(
     merged["slots"] = promoted_slots
     merged_slots = promoted_slots  # Update merged_slots to include promoted slots
 
+    datetime_bound_this_turn = False
+    if effective_intent == "CREATE_APPOINTMENT":
+        from core.orchestration.temporal_proposal import try_bind_offered_time_selection
+
+        from core.session.confirmation_gate import (
+            apply_booking_revision,
+            clear_pending_confirmation,
+            detect_booking_revision,
+            get_confirmation_state,
+        )
+
+        was_pending = get_confirmation_state(merged) == "pending" or (
+            isinstance(session_state, dict)
+            and get_confirmation_state(session_state) == "pending"
+        )
+        revision = detect_booking_revision(merged, session_state)
+        if was_pending and revision.any:
+            merged["slots"] = dict(promoted_slots)
+            apply_booking_revision(merged, revision, reason="merge_revision")
+            promoted_slots = merged["slots"]
+            logger.info(
+                "[BOOKING_CONFIRMATION] Applied revision service=%s date=%s time=%s",
+                revision.service,
+                revision.date,
+                revision.time,
+            )
+
+        bind_result = try_bind_offered_time_selection(
+            promoted_slots,
+            session_state,
+            date_proposal=merged.get("date_proposal"),
+            time_proposal=merged.get("time_proposal"),
+            time_constraint=merged.get("time_constraint"),
+        )
+        if bind_result:
+            promoted_slots = bind_result["slots"]
+            merged["slots"] = promoted_slots
+            merged_slots = promoted_slots
+            merged["resolved_datetime_range"] = bind_result["resolved_datetime_range"]
+            datetime_bound_this_turn = True
+            # Fresh bind replaces prior selection; plan_builder may re-enter pending.
+            clear_pending_confirmation(
+                merged, clear_time=False, reason="rebound_selection"
+            )
+
+        # User revised date/time proposals — drop stale pending confirmation.
+        if not datetime_bound_this_turn and (
+            merged.get("date_proposal") or merged.get("time_proposal")
+        ):
+            if get_confirmation_state(merged) == "pending":
+                clear_pending_confirmation(
+                    merged, clear_time=False, reason="unbound_proposal_revision"
+                )
+
     # STEP 4.1.5: Apply domain slot filtering BEFORE required-slot computation
     # CRITICAL: Domain filtering must happen BEFORE:
     #   - required-slot computation
@@ -1528,9 +1670,23 @@ def merge_luma_with_session(
         promoted_slots, effective_intent, planning_only=planning_only
     )
 
+    from core.orchestration.temporal_proposal import (
+        strip_unconfirmed_temporal_slots,
+        temporal_slots_confirmed,
+    )
+
+    durable_slots_for_persist = strip_unconfirmed_temporal_slots(
+        domain_filtered_slots,
+        effective_intent,
+        session_state,
+        confirmed=datetime_bound_this_turn or temporal_slots_confirmed(session_state),
+    )
+    merged["slots"] = durable_slots_for_persist
+    merged_slots = durable_slots_for_persist
+
     # Slots are treated as an unordered, additive map
     # No special routing needed - users can provide missing slots in any order
-    effective_slots_for_computation = domain_filtered_slots.copy()
+    effective_slots_for_computation = durable_slots_for_persist.copy()
 
     # STEP 4.2: Compute missing_slots ONCE per turn (pure derived value)
     # ARCHITECTURAL INVARIANT: missing_slots = REQUIRED_SLOTS(intent) - effective_slots.keys()
@@ -1609,6 +1765,32 @@ def merge_luma_with_session(
             # Only count non-None Luma slots — null values are validly dropped during
             # intent-change filtering and should not trigger the invariant.
             missing_keys = {k for k in raw_luma_slots_keys if raw_luma_slots.get(k) is not None} - merged_slots_keys
+
+            # CREATE_APPOINTMENT: date/time in raw Luma slots become proposals, not durable slots.
+            if missing_keys and intent == "CREATE_APPOINTMENT":
+                from core.orchestration.temporal_proposal import (
+                    _CREATE_APPOINTMENT_TEMPORAL_SLOT_KEYS,
+                    resolve_session_proposals,
+                )
+
+                _proposals = resolve_session_proposals(
+                    merged_luma_response=merged,
+                    previous_session_state=session_state,
+                )
+                _date_proposal = _proposals.get("date_proposal")
+                _time_proposal = _proposals.get("time_proposal")
+                proposal_covered = set()
+                if isinstance(_date_proposal, dict) and _date_proposal.get("start"):
+                    proposal_covered |= _CREATE_APPOINTMENT_TEMPORAL_SLOT_KEYS - {"time"}
+                if isinstance(_time_proposal, dict) and (
+                    _time_proposal.get("value")
+                    or (
+                        _time_proposal.get("mode") == "fuzzy"
+                        and _time_proposal.get("start")
+                    )
+                ):
+                    proposal_covered.add("time")
+                missing_keys -= proposal_covered
 
             if missing_keys:
                 error_msg = (
@@ -1723,13 +1905,15 @@ def merge_luma_with_session(
     assert missing_slots is not None, "missing_slots must not be None after computation"
 
     # INVARIANT CHECK: If a slot was satisfied in a previous turn and is in session.slots,
-    # it MUST NOT reappear in missing_slots
+    # it MUST NOT reappear in missing_slots — unless it was intentionally dropped this turn
+    # (e.g. service_id dropped because the user mentioned a different ambiguous service).
     if session_state and isinstance(session_state, dict):
         previous_slots = session_state.get("slots", {})
         if isinstance(previous_slots, dict):
             previous_slot_keys = set(previous_slots.keys())
             missing_slots_set = set(missing_slots)
-            satisfied_but_missing = previous_slot_keys & missing_slots_set
+            intentionally_dropped = merged.get("_intentionally_dropped_slots") or set()
+            satisfied_but_missing = (previous_slot_keys & missing_slots_set) - intentionally_dropped
             if satisfied_but_missing:
                 logger.error(
                     f"[SLOT_SATISFACTION] VIOLATION: Previously satisfied slots reappeared in missing_slots! "
@@ -1766,7 +1950,7 @@ def merge_luma_with_session(
     # These are the slots that actually satisfy required slots after promotion
     # This ensures slots explicitly satisfied in a turn are persisted so they're not re-computed as missing
     effective_collected_slots = _compute_effective_collected_slots_internal(
-        promoted_slots, effective_intent, planning_only=planning_only
+        durable_slots_for_persist, effective_intent, planning_only=planning_only
     )
     merged["_effective_collected_slots"] = effective_collected_slots
 

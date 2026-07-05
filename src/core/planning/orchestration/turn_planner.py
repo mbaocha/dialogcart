@@ -102,89 +102,91 @@ def plan_turn(
     catalog_data_for_alias: Optional[Dict[str, Any]] = None
     tenant_context = None
     if derived_domain in ("service", "reservation"):
-        # Skip catalog access when planning_only=True to avoid network calls
-        if not planning_only:
-            catalog_data_for_alias = catalog_cache.get_catalog(
-                resolved_org_id, catalog_client, domain=derived_domain
+        catalog_data_for_alias = catalog_cache.get_catalog(
+            resolved_org_id, catalog_client, domain=derived_domain
+        )
+        alias_map: Dict[str, Any] = {}
+        if derived_domain == "service":
+            services_for_alias = (
+                catalog_data_for_alias.get("services", [])
+                if isinstance(catalog_data_for_alias, dict)
+                else []
             )
-            alias_map: Dict[str, Any] = {}
-            if derived_domain == "service":
-                services_for_alias = (
-                    catalog_data_for_alias.get("services", [])
-                    if isinstance(catalog_data_for_alias, dict)
-                    else []
+            for svc in services_for_alias:
+                if not isinstance(svc, dict) or svc.get("is_active") is False:
+                    continue
+                name = svc.get("name")
+                if not name:
+                    continue
+                item_id = svc.get("id")
+                if item_id is not None:
+                    try:
+                        alias_map[name.lower()] = int(item_id)
+                        continue
+                    except (TypeError, ValueError):
+                        pass
+                canonical_key = (
+                    svc.get("service_family_id")
+                    or svc.get("canonical")
+                    or svc.get("slug")
+                    or name.lower().replace(" ", "_")
                 )
-                for svc in services_for_alias:
-                    if not isinstance(svc, dict) or svc.get("is_active") is False:
-                        continue
-                    name = svc.get("name")
-                    if not name:
-                        continue
-                    canonical_key = (
-                        svc.get("service_family_id")
-                        or svc.get("canonical")
-                        or svc.get("slug")
-                        or name.lower().replace(" ", "_")
-                    )
-                    if not canonical_key:
-                        continue
-                    # Construct full canonical path if it's a short form (no dot)
-                    # Luma expects format: "category.family_id" (e.g., "beauty_and_wellness.haircut")
-                    if "." not in str(canonical_key):
-                        # Short form canonical - prefix with category for service domain
-                        canonical_key = f"beauty_and_wellness.{canonical_key}"
-                    alias_map[name.lower()] = canonical_key
-            else:
-                rooms_for_alias = (
-                    catalog_data_for_alias.get("rooms", [])
-                    if isinstance(catalog_data_for_alias, dict)
-                    else []
-                )
-                for rt in rooms_for_alias:
-                    if not isinstance(rt, dict) or rt.get("is_active") is False:
-                        continue
-                    name = rt.get("name")
-                    if not name:
-                        continue
-                    canonical_key = (
-                        rt.get("canonical_key")
-                        or rt.get("canonical")
-                        or rt.get("slug")
-                        or name.lower().replace(" ", "_")
-                    )
-                    if not canonical_key:
-                        continue
-                    alias_map[name.lower()] = canonical_key
-                extras_for_alias = (
-                    catalog_data_for_alias.get("extras", [])
-                    if isinstance(catalog_data_for_alias, dict)
-                    else []
-                )
-                for ex in extras_for_alias:
-                    if not isinstance(ex, dict) or ex.get("is_active") is False:
-                        continue
-                    name = ex.get("name")
-                    if not name:
-                        continue
-                    canonical_key = (
-                        ex.get("canonical")
-                        or ex.get("slug")
-                        or name.lower().replace(" ", "_")
-                    )
-                    if not canonical_key:
-                        continue
-                    alias_map[name.lower()] = canonical_key
-
-            # Always create tenant_context with booking_mode, even if no aliases
-            tenant_context = {}
-            if alias_map:
-                tenant_context["aliases"] = alias_map
-            # Always include booking_mode in tenant_context so Luma can determine intent correctly
-            # booking_mode should match domain: "service" for appointments, "reservation" for reservations
-            tenant_context["booking_mode"] = derived_domain
+                if not canonical_key:
+                    continue
+                # Construct full canonical path if it's a short form (no dot)
+                # Luma expects format: "category.family_id" (e.g., "beauty_and_wellness.haircut")
+                if "." not in str(canonical_key):
+                    # Short form canonical - prefix with category for service domain
+                    canonical_key = f"beauty_and_wellness.{canonical_key}"
+                alias_map[name.lower()] = canonical_key
         else:
-            # planning_only=True: Create minimal tenant_context with only booking_mode
-            tenant_context = {"booking_mode": derived_domain}
+            rooms_for_alias = (
+                catalog_data_for_alias.get("rooms", [])
+                if isinstance(catalog_data_for_alias, dict)
+                else []
+            )
+            for rt in rooms_for_alias:
+                if not isinstance(rt, dict) or rt.get("is_active") is False:
+                    continue
+                name = rt.get("name")
+                if not name:
+                    continue
+                canonical_key = (
+                    rt.get("canonical_key")
+                    or rt.get("canonical")
+                    or rt.get("slug")
+                    or name.lower().replace(" ", "_")
+                )
+                if not canonical_key:
+                    continue
+                alias_map[name.lower()] = canonical_key
+            extras_for_alias = (
+                catalog_data_for_alias.get("extras", [])
+                if isinstance(catalog_data_for_alias, dict)
+                else []
+            )
+            for ex in extras_for_alias:
+                if not isinstance(ex, dict) or ex.get("is_active") is False:
+                    continue
+                name = ex.get("name")
+                if not name:
+                    continue
+                canonical_key = (
+                    ex.get("canonical")
+                    or ex.get("slug")
+                    or name.lower().replace(" ", "_")
+                )
+                if not canonical_key:
+                    continue
+                alias_map[name.lower()] = canonical_key
+
+        # Always create tenant_context with booking_mode, even if no aliases
+        tenant_context = {}
+        if alias_map:
+            tenant_context["aliases"] = alias_map
+        # Always include booking_mode in tenant_context so Luma can determine intent correctly
+        # booking_mode should match domain: "service" for appointments, "reservation" for reservations
+        tenant_context["booking_mode"] = derived_domain
 
     # Step 2: Call Luma
     # Build conversation context from session memory for follow-up resolution
@@ -825,6 +827,130 @@ def plan_turn(
     # - Preserve any existing durable session state
     # Only durable intents may reach build_decision_plan
     # CRITICAL: Check AFTER UNKNOWN recovery to ensure we catch non-durable intents even after recovery
+
+    # Confirmation gate: classify once (accept / reject / revise / none).
+    from core.session.confirmation_gate import (
+        ConfirmationGateTurn,
+        apply_booking_revision,
+        classify_confirmation_gate_turn,
+        clear_pending_confirmation,
+        detect_booking_revision,
+    )
+
+    _gate_session = (
+        original_session_state
+        if isinstance(original_session_state, dict)
+        else (session_state if isinstance(session_state, dict) else {})
+    )
+    _gate_booking_intent = _gate_session.get("intent_name") or ""
+    if isinstance(_gate_booking_intent, dict):
+        _gate_booking_intent = _gate_booking_intent.get("name") or ""
+    gate_action = classify_confirmation_gate_turn(luma_response, _gate_session)
+    revision_summary_for_turn = None
+    logger.info(
+        f"[CONFIRMATION_GATE] action={gate_action.value} "
+        f"raw_intent={luma_intent_name!r} booking_intent={_gate_booking_intent!r} "
+        f"user_id={user_id}{log_transaction_id}"
+    )
+
+    if gate_action == ConfirmationGateTurn.REJECT and _gate_booking_intent:
+        try:
+            from core.rendering.booking_confirmation_renderer import (
+                render_booking_confirmation_rejected,
+            )
+
+            cleared = clear_pending_confirmation(
+                dict(_gate_session),
+                clear_time=True,
+                reason="reject",
+            )
+            session_slots = dict(cleared.get("slots") or {})
+            missing_slots = (
+                ["time"]
+                if session_slots.get("service_id") and session_slots.get("date")
+                else [
+                    s
+                    for s in ("service_id", "date", "time")
+                    if not session_slots.get(s)
+                ]
+            )
+            reject_text = render_booking_confirmation_rejected()
+            merged = {
+                "intent": {"name": _gate_booking_intent},
+                "_effective_intent": _gate_booking_intent,
+                "slots": session_slots,
+                "missing_slots": missing_slots,
+                "booking": {},
+                "_booking_confirmation_rejected": True,
+            }
+            for key in (
+                "date_proposal",
+                "presented_availability",
+                "last_execution_result",
+                "availability_fingerprint",
+            ):
+                if cleared.get(key) is not None:
+                    merged[key] = cleared.get(key)
+            logger.info(
+                f"[CONFIRMATION_GATE] REJECT cleared pending for "
+                f"{_gate_booking_intent!r} (user_id={user_id}{log_transaction_id})"
+            )
+            return {
+                "success": True,
+                "text": reject_text,
+                "outcome": {
+                    "status": "NEEDS_CLARIFICATION",
+                    "intent_name": _gate_booking_intent,
+                    "slots": session_slots,
+                    "missing_slots": missing_slots,
+                    "booking": {},
+                    "facts": {
+                        "slots": session_slots,
+                        "missing_slots": missing_slots,
+                    },
+                },
+                "_merged_luma_response": merged,
+            }
+        except Exception as reject_exc:
+            logger.warning(
+                f"[CONFIRMATION_GATE] REJECT handling failed: {reject_exc}. "
+                f"Falling through."
+            )
+
+    if gate_action == ConfirmationGateTurn.REVISE and _gate_booking_intent:
+        # Field-aware invalidation: time-only keeps presented list; date/service
+        # drop availability artifacts so planner re-searches.
+        # Capture revision summary before apply mutates session (for acknowledgements).
+        cleared = dict(_gate_session)
+        revision = detect_booking_revision(luma_response, _gate_session)
+        if revision.any:
+            revision_summary_for_turn = revision.to_summary()
+            apply_booking_revision(cleared, revision, reason="gate_revise")
+            logger.info(
+                f"[CONFIRMATION_GATE] REVISE fields="
+                f"service={revision.service} date={revision.date} time={revision.time} "
+                f"for {_gate_booking_intent!r} (user_id={user_id}{log_transaction_id})"
+            )
+        else:
+            clear_pending_confirmation(
+                cleared, clear_time=True, reason="revise_fallback"
+            )
+            logger.info(
+                f"[CONFIRMATION_GATE] REVISE fallback clear_time for "
+                f"{_gate_booking_intent!r} (user_id={user_id}{log_transaction_id})"
+            )
+        original_session_state = cleared
+        session_state = cleared
+        effective_intent = _gate_booking_intent
+
+    if gate_action == ConfirmationGateTurn.ACCEPT and _gate_booking_intent:
+        effective_intent = _gate_booking_intent
+        confirm_booking_continuation = True
+        logger.info(
+            f"[CONFIRMATION_GATE] ACCEPT for {_gate_booking_intent!r} "
+            f"(user_id={user_id}{log_transaction_id})"
+        )
+
     if effective_intent and effective_intent != "UNKNOWN":
         try:
             from core.policy.intent_policy import get_intent_durable
@@ -832,18 +958,23 @@ def plan_turn(
             is_durable = get_intent_durable(effective_intent)
 
             if not is_durable:
-                # Special case: CONFIRM_ACTION arriving over a READY booking session means
-                # the user said "yes" to confirm the booking. Route to the session's booking
-                # intent so that CONFIRM_APPOINTMENT (or equivalent commit action) executes.
-                # This does NOT override session slots — we simply adopt the session intent.
+                # Legacy CONFIRM_ACTION path when gate classifier did not fire
+                # (e.g. gate closed). Prefer classify_confirmation_gate_turn.
+                from core.session.confirmation_gate import get_confirmation_state
+
                 _session_for_confirm = (
                     session_state if isinstance(session_state, dict) else {}
                 )
                 _session_booking_intent = _session_for_confirm.get("intent_name", "")
+                _session_confirmation = get_confirmation_state(_session_for_confirm)
                 if (
-                    effective_intent == "CONFIRM_ACTION"
-                    and _session_for_confirm.get("status") == "READY"
+                    not confirm_booking_continuation
+                    and effective_intent == "CONFIRM_ACTION"
                     and _session_booking_intent
+                    and (
+                        _session_for_confirm.get("status") == "READY"
+                        or _session_confirmation == "pending"
+                    )
                 ):
                     try:
                         from core.policy.intent_policy import get_intent_durable as _gid
@@ -856,21 +987,27 @@ def plan_turn(
                             )
                             effective_intent = _session_booking_intent
                             confirm_booking_continuation = True
-                            # Fall through to regular planning with the session intent
                             is_durable = True
                     except Exception:
-                        pass  # If check fails, fall through to normal NON_DURABLE_INTENT handling
+                        pass
 
-                # CORRECTION: slot update within an active durable session.
-                # Unlike CONFIRM_ACTION, corrections are valid in any session status
-                # (NEEDS_CLARIFICATION, READY, etc.) — the user is refining a slot, not confirming.
-                if not is_durable and effective_intent == "CORRECTION" and _session_booking_intent:
+                # Booking refinement: CORRECTION, AVAILABILITY, CHECK_AVAILABILITY within an
+                # active durable session. User is refining slots (date/time/service), not starting
+                # a new flow. Unlike CONFIRM_ACTION, valid in any session status.
+                _BOOKING_REFINEMENT_INTENTS = frozenset(
+                    {"CORRECTION", "AVAILABILITY", "CHECK_AVAILABILITY"}
+                )
+                if (
+                    not is_durable
+                    and effective_intent in _BOOKING_REFINEMENT_INTENTS
+                    and _session_booking_intent
+                ):
                     try:
                         from core.policy.intent_policy import get_intent_durable as _gid
 
                         if _gid(_session_booking_intent):
                             logger.info(
-                                f"[CORRECTION] Rerouting to session booking intent "
+                                f"[{effective_intent}] Rerouting to session booking intent "
                                 f"{_session_booking_intent!r} "
                                 f"(user_id={user_id}{log_transaction_id})"
                             )
@@ -960,6 +1097,9 @@ def plan_turn(
     effective_response["_effective_intent"] = effective_intent or ""
     if confirm_booking_continuation:
         effective_response["_confirm_booking_continuation"] = True
+    # Turn-only metadata for revision acknowledgements (not persisted as business state).
+    if revision_summary_for_turn:
+        effective_response["_revision_summary"] = revision_summary_for_turn
 
     # Attach updated conversation memory so session_merge can persist it.
     # Records the effective intent (post-recovery) and search_query for this turn.
@@ -1047,12 +1187,20 @@ def plan_turn(
         aliases = tenant_context["aliases"]
         raw_service_id = effective_response["slots"]["service_id"]
         if isinstance(raw_service_id, str) and raw_service_id.lower() in aliases:
-            canonical_service_id = aliases[raw_service_id.lower()]
-            logger.info(
-                f"Normalized service_id: {raw_service_id} -> {canonical_service_id} (via tenant aliases)"
-            )
-            # Store canonical for planning, preserve raw for outcome
-            effective_response["slots"]["_canonical_service_id"] = canonical_service_id
+            mapped = aliases[raw_service_id.lower()]
+            if isinstance(mapped, int):
+                effective_response["slots"]["_catalog_item_id"] = mapped
+                logger.debug(
+                    "Resolved catalog item id for planning: %s -> %s",
+                    raw_service_id,
+                    mapped,
+                )
+            else:
+                canonical_service_id = mapped
+                logger.info(
+                    f"Normalized service_id: {raw_service_id} -> {canonical_service_id} (via tenant aliases)"
+                )
+                effective_response["slots"]["_canonical_service_id"] = canonical_service_id
             # Keep raw value in service_id slot (for outcome/dialog)
             effective_response["slots"]["service_id"] = raw_service_id
 
@@ -1142,12 +1290,9 @@ def plan_turn(
                 f"Assuming not durable for merge decision."
             )
 
-    # SESSION MERGE GATING: Allow merge for:
-    # 1. NEEDS_CLARIFICATION sessions (normal follow-up turns)
-    # 2. READY sessions with durable intents (modification turns)
-    # 3. UNKNOWN → concrete intent transitions (intent materialization, preserves pre-intent slots)
-    #    Note: session_reset_occurred is False for UNKNOWN → concrete transitions (see intent_resolution.py)
-    #    This ensures pre-intent slots (e.g., date from "tomorrow") are merged when intent materializes
+    # SESSION MERGE GATING: durable-flow based (status does not decide eligibility).
+    # Merge when a durable booking flow is active, or pre-intent slots await
+    # materialization, unless session_reset_occurred (true intent switch).
 
     # DEBUG: Log merge decision inputs before computing should_merge_session
     session_for_merge_intent = (
@@ -1170,22 +1315,21 @@ def plan_turn(
         f"user_id={user_id}{log_transaction_id}"
     )
 
+    from core.session.merge import should_merge_session_context
+
+    should_merge_session = should_merge_session_context(
+        session_for_merge,
+        session_reset_occurred=session_reset_occurred,
+    )
+
     logger.error(
         f"[ORCHESTRATOR] BEFORE should_merge_session: session_reset_occurred={session_reset_occurred} "
         f"session_for_merge_intent={session_for_merge_intent} "
         f"session_for_merge_slots={session_for_merge_slots} "
         f"session_status_for_merge={session_status_for_merge} "
         f"is_session_intent_durable={is_session_intent_durable} "
+        f"should_merge_session={should_merge_session} "
         f"user_id={user_id}{log_transaction_id}"
-    )
-
-    should_merge_session = (
-        session_for_merge
-        and not session_reset_occurred
-        and (
-            session_status_for_merge == "NEEDS_CLARIFICATION"
-            or (session_status_for_merge == "READY" and is_session_intent_durable)
-        )
     )
 
     # DEBUG: Log final merge decision
@@ -1214,6 +1358,12 @@ def plan_turn(
         # HARDENED: Set confirmation_state when user confirms an in-progress booking.
         # AWAITING_CONFIRMATION: explicit confirm prompt path.
         # READY + CONFIRM_ACTION reroute: "yes" after availability search (mock-booking flows).
+        from core.session.confirmation_gate import (
+            get_confirmation_state,
+            set_confirmation_state,
+        )
+
+        _session_confirmation = get_confirmation_state(session_for_merge)
         _confirm_continuation = (
             luma_intent_name
             and luma_intent_name.startswith("CONFIRM_")
@@ -1221,6 +1371,7 @@ def plan_turn(
             and is_session_intent_durable
             and (
                 session_status_for_merge == "AWAITING_CONFIRMATION"
+                or _session_confirmation == "pending"
                 or (
                     session_status_for_merge == "READY"
                     and luma_intent_name == "CONFIRM_ACTION"
@@ -1229,11 +1380,7 @@ def plan_turn(
         )
         if _confirm_continuation:
             # CONFIRM_* was treated as continuation - set confirmation_state
-            if "booking" not in effective_response:
-                effective_response["booking"] = {}
-            if not isinstance(effective_response["booking"], dict):
-                effective_response["booking"] = {}
-            effective_response["booking"]["confirmation_state"] = "confirmed"
+            set_confirmation_state(effective_response, "confirmed")
             logger.info(
                 f"[CONFIRM_CONTINUATION] Set confirmation_state=confirmed for CONFIRM_* continuation "
                 f"of durable intent {effective_intent}, session.status={session_status_for_merge}, user_id={user_id}"
@@ -1961,12 +2108,42 @@ def plan_turn(
 
         # CRITICAL: Ensure outcome always uses raw service_id (not canonical)
         # Dialog output, outcome.slots, outcome.facts.slots MUST use raw tenant value
-        outcome_slots = slots.copy() if isinstance(slots, dict) else {}
+        from core.orchestration.temporal_proposal import (
+            has_bound_booking_datetime,
+            strip_unconfirmed_temporal_slots,
+        )
+
+        outcome_slots = strip_unconfirmed_temporal_slots(
+            slots.copy() if isinstance(slots, dict) else {},
+            intent_name,
+            session_state,
+            confirmed=has_bound_booking_datetime(
+                slots, session_state, effective_response
+            ),
+        )
+        slots = outcome_slots
+        populated_plan["slots"] = outcome_slots
+
+        intentionally_dropped_slots = set()
+        if effective_response and isinstance(effective_response, dict):
+            intentionally_dropped_slots = (
+                effective_response.get("_intentionally_dropped_slots") or set()
+            )
+        service_candidates = None
+        if session_state and isinstance(session_state, dict):
+            service_candidates = session_state.get("service_candidates")
+
+        skip_session_service_reinject = bool(
+            "service_id" in intentionally_dropped_slots
+            or (service_candidates and len(service_candidates) > 0)
+        )
 
         # Get raw service_id from session or effective_response
         # Priority: 1) session.slots["service_id"], 2) effective_response slots, 3) current slots
         raw_service_id_for_outcome = None
-        if session_state and isinstance(session_state, dict):
+        if not skip_session_service_reinject and session_state and isinstance(
+            session_state, dict
+        ):
             session_slots = session_state.get("slots", {})
             if isinstance(session_slots, dict) and "service_id" in session_slots:
                 raw_service_id_for_outcome = session_slots["service_id"]
@@ -2183,9 +2360,28 @@ def plan_turn(
             outcome_dict["facts"] = facts
 
         # Add booking for AWAITING_CONFIRMATION (backward compatibility)
+        facts = outcome_dict.get("facts", {})
+        if not isinstance(facts, dict):
+            facts = {}
+
+        confirmation_text = None
         if plan_status == "AWAITING_CONFIRMATION":
             booking = decision.get("booking", {})
             outcome_dict["booking"] = booking
+            from core.rendering.booking_confirmation_renderer import (
+                prefix_with_revision_acknowledgement,
+                render_booking_confirmation_prompt,
+            )
+
+            confirm_slots = outcome_dict.get("slots") or facts.get("slots", {})
+            if isinstance(confirm_slots, dict):
+                confirmation_text = render_booking_confirmation_prompt(confirm_slots)
+                revision_summary = None
+                if isinstance(effective_response, dict):
+                    revision_summary = effective_response.get("_revision_summary")
+                confirmation_text = prefix_with_revision_acknowledgement(
+                    confirmation_text, revision_summary
+                )
 
         # Add active_capability for AWAITING_CAPABILITY
         # STRICTLY resolve from decision.plan.active_capability (authoritative source from capability gating)
@@ -2202,6 +2398,8 @@ def plan_turn(
                 outcome_dict["active_capability"] = active_capability
 
         result = {"success": True, "outcome": outcome_dict}
+        if confirmation_text:
+            result["text"] = confirmation_text
         # Store effective Luma response for session building
         result["_merged_luma_response"] = effective_response
 

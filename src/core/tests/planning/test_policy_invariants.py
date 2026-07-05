@@ -195,7 +195,10 @@ class TestCommittingStepInvariants:
                     f"when availability_resolved=False"
                 )
 
-    @pytest.mark.parametrize("intent_name", ["MODIFY_BOOKING", "MODIFY_RESERVATION"])
+    @pytest.mark.parametrize(
+        "intent_name",
+        ["CREATE_APPOINTMENT", "MODIFY_BOOKING", "MODIFY_RESERVATION"],
+    )
     def test_committing_step_requires_confirmation_state_confirmed(self, intent_name):
         """Committing steps that require confirmation_state_confirmed cannot execute without it."""
         policy = _load_intent_policy()

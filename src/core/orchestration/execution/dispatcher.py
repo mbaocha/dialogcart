@@ -9,6 +9,8 @@ import logging
 import re
 from typing import Any, Dict, List, Optional, Tuple
 
+from core.orchestration.catalog_resolver import resolve_catalog_item_id
+
 logger = logging.getLogger(__name__)
 
 
@@ -128,6 +130,8 @@ def _execute_search_availability(
         raise ValueError("organization_id is required in slots for availability search")
 
     # Route based on intent to determine service vs reservation
+    sku_to_catalog_id = plan.get("sku_to_catalog_id") or {}
+
     if intent_name == "CREATE_APPOINTMENT":
         # Service availability search
         return _execute_service_availability(
@@ -137,6 +141,7 @@ def _execute_search_availability(
             availability_client=availability_client,
             intent_name=intent_name,
             booking_client=booking_client,
+            sku_to_catalog_id=sku_to_catalog_id,
         )
     elif intent_name == "CREATE_RESERVATION":
         # Reservation availability search
@@ -155,6 +160,7 @@ def _execute_search_availability(
             availability_client=availability_client,
             intent_name=intent_name,
             booking_client=booking_client,
+            sku_to_catalog_id=sku_to_catalog_id,
         )
     else:
         # Default to service availability for unknown intents
@@ -168,6 +174,7 @@ def _execute_search_availability(
             availability_client=availability_client,
             intent_name=intent_name,
             booking_client=booking_client,
+            sku_to_catalog_id=sku_to_catalog_id,
         )
 
 
@@ -203,6 +210,9 @@ def _execute_confirm_appointment(
     service_id = slots.get("service_id")
     if not service_id:
         raise ValueError("service_id is required in slots for appointment confirmation")
+
+    sku_to_catalog_id = plan.get("sku_to_catalog_id") or {}
+    catalog_item_id = resolve_catalog_item_id(service_id, sku_to_catalog_id)
 
     # Extract customer_id (default to 1 if not provided)
     customer_id = slots.get("customer_id", 1)
@@ -259,7 +269,9 @@ def _execute_confirm_appointment(
             customer_id=customer_id,
             booking_type="service",
             item_id=(
-                service_id
+                catalog_item_id
+                if catalog_item_id is not None
+                else service_id
                 if isinstance(service_id, int)
                 else int(service_id) if str(service_id).isdigit() else 1
             ),
@@ -1123,6 +1135,7 @@ def _execute_service_availability(
     availability_client: Any,
     intent_name: Optional[str] = None,
     booking_client: Optional[Any] = None,
+    sku_to_catalog_id: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
     """
     Execute service availability search.
@@ -1178,6 +1191,15 @@ def _execute_service_availability(
             "service_id is required in slots for service availability search"
         )
 
+    catalog_item_id = resolve_catalog_item_id(service_id, sku_to_catalog_id)
+    api_service_id = catalog_item_id if catalog_item_id is not None else service_id
+    if catalog_item_id is not None and catalog_item_id != service_id:
+        logger.debug(
+            "Resolved SKU %r → catalog item id %s for availability search",
+            service_id,
+            catalog_item_id,
+        )
+
     # Extract date (can be date, start_date, or from date_range/datetime_range)
     # POLICY: date is OPTIONAL for SEARCH_AVAILABILITY (mode=exploratory)
     # Only service_id is required per intent_policy.yaml
@@ -1211,7 +1233,7 @@ def _execute_service_availability(
     try:
         response = availability_client.get_service_availability(
             organization_id=organization_id,
-            service_id=service_id,
+            service_id=api_service_id,
             date=date,  # Can be None - client should handle this
             extra_params=extra_params,
         )
@@ -1403,8 +1425,12 @@ def _normalize_availability_response(response: Dict[str, Any]) -> Dict[str, Any]
             f"Expected dict response from availability client, got {type(response)}"
         )
 
-    # Extract slots from response
-    raw_slots = response.get("slots", [])
+    payload = response
+    if isinstance(response.get("data"), dict):
+        payload = response["data"]
+
+    # Extract slots from response (mock shape or internal API available_slots)
+    raw_slots = payload.get("slots") or payload.get("available_slots") or []
     if not isinstance(raw_slots, list):
         raw_slots = []
 
@@ -1414,9 +1440,15 @@ def _normalize_availability_response(response: Dict[str, Any]) -> Dict[str, Any]
         if not isinstance(slot, dict):
             continue
 
-        # Extract start/end times (handle both "start"/"end" and "starts_at"/"ends_at")
-        starts_at = slot.get("starts_at") or slot.get("start")
-        ends_at = slot.get("ends_at") or slot.get("end")
+        # Extract start/end times (mock + internal API field names)
+        starts_at = (
+            slot.get("starts_at")
+            or slot.get("start")
+            or slot.get("start_time")
+        )
+        ends_at = (
+            slot.get("ends_at") or slot.get("end") or slot.get("end_time")
+        )
 
         if not starts_at or not ends_at:
             logger.warning(f"Skipping slot missing start/end times: {slot}")

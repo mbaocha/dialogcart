@@ -112,6 +112,38 @@ def test_confirm_not_continuation_with_needs_clarification_status():
     # effective_intent is CONFIRM_ACTION, not CREATE_APPOINTMENT
 
 
+def test_confirm_continuation_with_session_pending_confirmation_state():
+    """
+    CONFIRM_ACTION over a session with confirmation_state=pending continues booking.
+    """
+    luma_response = {
+        "intent": {"name": "CONFIRM_ACTION"},
+        "slots": {},
+        "missing_slots": [],
+    }
+
+    session_state = {
+        "intent_name": "CREATE_APPOINTMENT",
+        "status": "NEEDS_CLARIFICATION",
+        "confirmation_state": "pending",
+        "booking": {"confirmation_state": "pending"},
+        "slots": {
+            "service_id": "svc_123",
+            "date": "2024-01-15",
+            "time": "14:00",
+        },
+    }
+
+    with patch("core.policy.intent_policy.get_intent_durable") as mock_durable:
+        mock_durable.return_value = True
+        effective_intent, session_reset = resolve_effective_intent(
+            luma_response, session_state, "test_user"
+        )
+
+    assert effective_intent == "CREATE_APPOINTMENT"
+    assert session_reset is False
+
+
 def test_confirm_not_continuation_with_ready_status():
     """
     Case B variant: Session status = READY

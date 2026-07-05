@@ -8,13 +8,19 @@ Note: Uses session management as a mechanism to enable multi-turn testing,
 but the tests themselves validate planning behavior, not session management.
 
 Usage:
-    python -m core.tests.planning.test_planning              # Run all scenarios
-    python -m core.tests.planning.test_planning 22           # Run scenario 22
-    python -m core.tests.planning.test_planning 22,24        # Run scenarios 22 and 24
-    python -m core.tests.planning.test_planning 30-33        # Run scenarios 30-33
+    python -m core.tests.planning.test_planning              # Run all scenarios (14)
+    python -m core.tests.planning.test_planning 4           # Run scenario 4
+    python -m core.tests.planning.test_planning 4,9         # Run scenarios 4 and 9
+    python -m core.tests.planning.test_planning 20-23       # Run scenarios 20-23
+
+    python -m core.tests.planning.test_planning -o out.out   # Test output only (recommended)
+    python -m core.tests.planning.test_planning > out.out 2>&1  # Shell redirect (stdout+stderr)
+
+Scenarios are defined in planning_scenarios.py (requires NLU on localhost:9002).
 """
 
 import json
+import logging
 import os
 import sys
 import time
@@ -30,8 +36,7 @@ from core.orchestration.session import clear_session, get_session, save_session
 from core.tests.harness.clients import TestCatalogClient, TestLumaClient
 from core.tests.harness.org_setup import get_customer_details, setup_test_org_domain
 from core.tests.planning.adapter import normalize_planning_outcome
-from core.tests.planning.followup import followup_scenarios
-from core.tests.planning.test_planning_edges import planning_edges_scenarios
+from core.tests.planning.planning_scenarios import planning_scenarios
 
 # Pytest support (optional - allows running with pytest)
 try:
@@ -80,6 +85,26 @@ except ImportError:
     pass
 except Exception:
     pass
+
+
+def configure_test_logging(verbose: bool = False) -> None:
+    """Silence orchestrator trace logs during E2E runs unless --verbose.
+
+    Core uses logger.error() for [FLOW_TRACE], [SESSION_RESET_WRITER], etc.
+    Those write to stderr, so shell redirects like ``> out.out`` still flood
+    the terminal unless stderr is merged or logging is quieted here.
+    """
+    level = logging.INFO if verbose else logging.CRITICAL
+    logging.basicConfig(level=level, format="%(message)s", force=True)
+    for logger_name in (
+        "core",
+        "core.planning",
+        "core.orchestration",
+        "core.turn_log",
+        "httpx",
+        "httpcore",
+    ):
+        logging.getLogger(logger_name).setLevel(level)
 
 
 def parse_scenario_args(args: List[str]) -> Set[int]:
@@ -143,6 +168,110 @@ def filter_scenarios_by_id(
 
     # Use 1-based sequential index instead of scenario's "id" field
     return [scenarios[i - 1] for i in scenario_ids if 1 <= i <= len(scenarios)]
+
+
+def _compact_planning_state(state: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Extract planning-relevant fields from session or merged Luma response."""
+    if not state or not isinstance(state, dict):
+        return None
+
+    intent = state.get("intent_name")
+    if not intent:
+        raw_intent = state.get("intent")
+        if isinstance(raw_intent, dict):
+            intent = raw_intent.get("name")
+        elif isinstance(raw_intent, str):
+            intent = raw_intent
+    if not intent:
+        intent = state.get("_effective_intent")
+
+    slots = state.get("slots")
+    if not isinstance(slots, dict):
+        facts = state.get("facts")
+        slots = facts.get("slots") if isinstance(facts, dict) else {}
+    if not isinstance(slots, dict):
+        slots = {}
+
+    missing = state.get("missing_slots")
+    if not isinstance(missing, list):
+        facts = state.get("facts")
+        missing = facts.get("missing_slots") if isinstance(facts, dict) else []
+
+    compact: Dict[str, Any] = {
+        "intent": intent,
+        "status": state.get("status"),
+        "missing_slots": missing or [],
+        "slots": slots,
+    }
+
+    for key in ("service_candidates", "date_proposal", "time_proposal", "_source_text"):
+        val = state.get(key)
+        if val is None and isinstance(state.get("facts"), dict):
+            val = state["facts"].get(key)
+        if val is not None:
+            compact[key] = val
+
+    dropped = state.get("_intentionally_dropped_slots")
+    if dropped:
+        compact["_intentionally_dropped_slots"] = (
+            sorted(dropped) if isinstance(dropped, set) else dropped
+        )
+
+    facts = state.get("facts")
+    if isinstance(facts, dict) and facts.get("service_id") is not None:
+        compact["facts_service_id"] = facts.get("service_id")
+
+    return compact
+
+
+def _compact_got_from_normalized(normalized: Dict[str, Any]) -> Dict[str, Any]:
+    """Planning outcome fields for failure diffs."""
+    got: Dict[str, Any] = {
+        "intent": normalized.get("intent"),
+        "status": normalized.get("status"),
+        "missing_slots": normalized.get("missing_slots", []),
+        "slots": normalized.get("slots", {}),
+        "plan": normalized.get("plan", {}),
+    }
+    for key in ("date_proposal", "time_proposal"):
+        if normalized.get(key) is not None:
+            got[key] = normalized[key]
+    return got
+
+
+def _print_failure(
+    scenario_name: str,
+    turn_label: str,
+    user_id: str,
+    error_msg: str,
+    *,
+    expected: Any,
+    got: Any,
+    session_before: Optional[Dict[str, Any]] = None,
+    session_after: Optional[Dict[str, Any]] = None,
+    merged: Optional[Dict[str, Any]] = None,
+    verbose: bool = False,
+    full_snapshot: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Print a concise failure report; full dumps only with verbose."""
+    print(f"\nFAIL [{scenario_name}] turn={turn_label}: {error_msg}")
+    compact = {
+        "expected": expected,
+        "got": got,
+    }
+    before = _compact_planning_state(session_before)
+    after = _compact_planning_state(session_after)
+    merge = _compact_planning_state(merged)
+    if before:
+        compact["session_before"] = before
+    if after:
+        compact["session_after"] = after
+    if merge:
+        compact["merge"] = merge
+    print(json.dumps(compact, indent=2, default=str))
+    if verbose and full_snapshot is not None:
+        print("\n--- verbose full snapshot ---")
+        print(json.dumps(full_snapshot, indent=2, default=str))
 
 
 def assert_turn_expectations(
@@ -276,7 +405,8 @@ def assert_turn_expectations(
                 )
 
     # Assert status if provided
-    # Status must match planning contract: NEEDS_CLARIFICATION when missing_slots != [], READY when missing_slots == []
+    # Status contract: READY when executable_with subset is satisfied (e.g. service_id present)
+    # OR when missing_slots == []. NEEDS_CLARIFICATION only when no executable_with subset is met.
     expected_status = expected.get("status")
     if expected_status is not None:
         actual_status = normalized.get("status")
@@ -374,15 +504,15 @@ def _test_scenario(
                         # Not NEEDS_CLARIFICATION and not READY (or no intent_name) - clear it
                         session_state = None
 
-            # Print session state before turn
-            if verbose or turn_index > 0:  # Always print for turns after first
+            # Print session state before turn (verbose only)
+            if verbose:
                 print(f"\n[SESSION BEFORE TURN {turn_index + 1}] user_id={user_id}")
                 if session_state:
                     print(
-                        f"  Session state: {json.dumps(session_state, indent=2, default=str)}"
+                        f"  {_compact_planning_state(session_state)}"
                     )
                 else:
-                    print("  Session state: None (no session found)")
+                    print("  (no session)")
 
             # Call handle_message with the same user_id and session_state
             # Create a session_store wrapper that retrieves sessions dynamically
@@ -412,26 +542,16 @@ def _test_scenario(
 
             if not result or not isinstance(result, dict):
                 error_msg = f"Turn {turn_index + 1} failed: handle_message returned None or not a dict: {result}"
-                # Print minimal snapshot on failure
-                print(f"\n{'='*70}")
-                print(
-                    f"FAIL_SNAPSHOT: scenario={scenario_name} turn={turn_index + 1} user_id={user_id}"
+                _print_failure(
+                    scenario_name,
+                    str(turn_index + 1),
+                    user_id,
+                    error_msg,
+                    expected=expected,
+                    got={"error": "handle_message returned None or not a dict", "result": result},
+                    session_before=session_state,
+                    verbose=verbose,
                 )
-                print(f"{'='*70}")
-                fail_snapshot = {
-                    "expected": expected,
-                    "got": {
-                        "error": "handle_message returned None or not a dict",
-                        "result": result,
-                    },
-                    "session_before": session_state,
-                    "session_after": None,
-                    "merged_luma_response": None,
-                    "final_plan": {},
-                    "facts": {},
-                }
-                print(json.dumps(fail_snapshot, indent=2, default=str))
-                print(f"{'='*70}\n")
                 return False, error_msg, user_id
 
             if verbose:
@@ -453,10 +573,10 @@ def _test_scenario(
                     normalized = normalize_planning_outcome(result)
                     outcome_status = normalized.get("status")
 
-                # DEBUG: Print outcome status to understand what's happening
-                if verbose or turn_index >= 2:  # Always print for turn 3+
+                # DEBUG: outcome status (verbose only)
+                if verbose:
                     print(
-                        f"\n[OUTCOME STATUS] Turn {turn_index + 1} outcome_status={outcome_status} outcome_keys={list(outcome.keys())}"
+                        f"\n[OUTCOME STATUS] Turn {turn_index + 1} outcome_status={outcome_status}"
                     )
                 # Initialize new_session_state for all paths
                 new_session_state = None
@@ -473,16 +593,14 @@ def _test_scenario(
                     )
                     if new_session_state:
                         save_session(user_id, new_session_state)
-                        # Print session state after save
+                        if verbose:
+                            print(
+                                f"\n[SESSION AFTER TURN {turn_index + 1}] SAVED "
+                                f"{_compact_planning_state(new_session_state)}"
+                            )
+                    elif verbose:
                         print(
-                            f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - SAVED"
-                        )
-                        print(
-                            f"  Session state: {json.dumps(new_session_state, indent=2, default=str)}"
-                        )
-                    else:
-                        print(
-                            f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - NOT SAVED (new_session_state is None)"
+                            f"\n[SESSION AFTER TURN {turn_index + 1}] NOT SAVED (new_session_state is None)"
                         )
                 elif outcome_status in ("READY", "EXECUTED", "AWAITING_CONFIRMATION"):
                     # For READY status, try to build session state (will be None for non-durable intents)
@@ -498,21 +616,20 @@ def _test_scenario(
                     )
                     if new_session_state is None:
                         clear_session(user_id)
-                        print(
-                            f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - CLEARED (status={outcome_status})"
-                        )
+                        if verbose:
+                            print(
+                                f"\n[SESSION AFTER TURN {turn_index + 1}] CLEARED (status={outcome_status})"
+                            )
                     else:
-                        # Session was preserved (e.g., durable intents on READY for follow-up modifications)
                         save_session(user_id, new_session_state)
-                        print(
-                            f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - SAVED (status={outcome_status}, preserved for modifications)"
-                        )
-                        print(
-                            f"  Session state: {json.dumps(new_session_state, indent=2, default=str)}"
-                        )
-                else:
+                        if verbose:
+                            print(
+                                f"\n[SESSION AFTER TURN {turn_index + 1}] SAVED (status={outcome_status}) "
+                                f"{_compact_planning_state(new_session_state)}"
+                            )
+                elif verbose:
                     print(
-                        f"\n[SESSION AFTER TURN {turn_index + 1}] user_id={user_id} - NOT SAVED (status={outcome_status})"
+                        f"\n[SESSION AFTER TURN {turn_index + 1}] NOT SAVED (status={outcome_status})"
                     )
 
             # Capture data for failure snapshot after save, before assertions
@@ -528,44 +645,36 @@ def _test_scenario(
                 "missing_slots": normalized_snapshot.get("missing_slots", []),
             }
 
-            # Get session after save (if saved) - session was saved above if NEEDS_CLARIFICATION
-            outcome_status_snapshot = normalized_snapshot.get("status")
-            if outcome_status_snapshot == "NEEDS_CLARIFICATION":
-                # Session was saved - get it for snapshot
-                session_state_after = get_session(user_id)
+            # Session state after this turn (for failure diagnostics)
+            session_state_after = get_session(user_id)
 
             # Assert expectations
             error_msg = assert_turn_expectations(
                 result, expected, turn_index, session_state_before
             )
             if error_msg:
-                # Print compact FAIL_SNAPSHOT on assertion failure
-                # Use normalized view for snapshot
-                actual_json = {
-                    "intent": normalized_snapshot.get("intent"),
-                    "status": normalized_snapshot.get("status"),
-                    "missing_slots": normalized_snapshot.get("missing_slots", []),
-                    "slots": normalized_snapshot.get("slots", {}),
-                }
-
-                fail_snapshot = {
+                full_snapshot = {
                     "expected": expected,
-                    "got": actual_json,
+                    "got": _compact_got_from_normalized(normalized_snapshot),
                     "session_before": session_state_before,
                     "session_after": session_state_after,
                     "merged_luma_response": merged_luma_response_for_snapshot,
                     "final_plan": plan_for_snapshot,
                     "facts": facts_for_snapshot,
                 }
-
-                print(f"\n{'='*70}")
-                print(
-                    f"FAIL_SNAPSHOT: scenario={scenario_name} turn={turn_index + 1} user_id={user_id}"
+                _print_failure(
+                    scenario_name,
+                    str(turn_index + 1),
+                    user_id,
+                    error_msg,
+                    expected=expected,
+                    got=_compact_got_from_normalized(normalized_snapshot),
+                    session_before=session_state_before,
+                    session_after=session_state_after,
+                    merged=merged_luma_response_for_snapshot,
+                    verbose=verbose,
+                    full_snapshot=full_snapshot,
                 )
-                print(f"{'='*70}")
-                print(json.dumps(fail_snapshot, indent=2, default=str))
-                print(f"{'='*70}\n")
-
                 return False, error_msg, user_id
 
         # SESSION LIFECYCLE RULE: Deterministic session clearing check
@@ -601,102 +710,69 @@ def _test_scenario(
             if is_durable:
                 if session_state is None:
                     error_msg = f"Durable intent '{intent_to_check}' session was cleared but should be preserved on READY"
-                    fail_snapshot = {
-                        "expected": {
+                    _print_failure(
+                        scenario_name,
+                        "FINAL",
+                        user_id,
+                        error_msg,
+                        expected={
                             "missing_slots": [],
                             "session_cleared": False,
                             "intent_name": intent_to_check,
                             "status": "READY",
                         },
-                        "got": {
-                            "missing_slots": [],
-                            "session_cleared": True,
-                            "session_state": None,
-                        },
-                        "session_before": None,
-                        "session_after": None,
-                        "merged_luma_response": None,
-                        "final_plan": {},
-                        "facts": {},
-                    }
-                    print(f"\n{'='*70}")
-                    print(
-                        f"FAIL_SNAPSHOT: scenario={scenario_name} turn=FINAL user_id={user_id}"
+                        got={"missing_slots": [], "session_cleared": True},
+                        verbose=verbose,
                     )
-                    print(f"{'='*70}")
-                    print(json.dumps(fail_snapshot, indent=2, default=str))
-                    print(f"{'='*70}\n")
                     return False, error_msg, user_id
 
                 # Verify session state is correct for durable intent
                 if session_state.get("intent_name") != intent_to_check:
                     error_msg = f"Durable intent session has wrong intent_name: expected '{intent_to_check}', got '{session_state.get('intent_name')}'"
-                    fail_snapshot = {
-                        "expected": {
+                    _print_failure(
+                        scenario_name,
+                        "FINAL",
+                        user_id,
+                        error_msg,
+                        expected={
                             "missing_slots": [],
                             "intent_name": intent_to_check,
                             "status": "READY",
                         },
-                        "got": {"missing_slots": [], "session_state": session_state},
-                        "session_before": None,
-                        "session_after": session_state,
-                        "merged_luma_response": None,
-                        "final_plan": {},
-                        "facts": {},
-                    }
-                    print(f"\n{'='*70}")
-                    print(
-                        f"FAIL_SNAPSHOT: scenario={scenario_name} turn=FINAL user_id={user_id}"
+                        got=_compact_planning_state(session_state) or {},
+                        session_after=session_state,
+                        verbose=verbose,
                     )
-                    print(f"{'='*70}")
-                    print(json.dumps(fail_snapshot, indent=2, default=str))
-                    print(f"{'='*70}\n")
                     return False, error_msg, user_id
 
                 if session_state.get("status") != "READY":
                     error_msg = f"Durable intent session has wrong status: expected 'READY', got '{session_state.get('status')}'"
-                    fail_snapshot = {
-                        "expected": {"missing_slots": [], "status": "READY"},
-                        "got": {"missing_slots": [], "session_state": session_state},
-                        "session_before": None,
-                        "session_after": session_state,
-                        "merged_luma_response": None,
-                        "final_plan": {},
-                        "facts": {},
-                    }
-                    print(f"\n{'='*70}")
-                    print(
-                        f"FAIL_SNAPSHOT: scenario={scenario_name} turn=FINAL user_id={user_id}"
+                    _print_failure(
+                        scenario_name,
+                        "FINAL",
+                        user_id,
+                        error_msg,
+                        expected={"missing_slots": [], "status": "READY"},
+                        got=_compact_planning_state(session_state) or {},
+                        session_after=session_state,
+                        verbose=verbose,
                     )
-                    print(f"{'='*70}")
-                    print(json.dumps(fail_snapshot, indent=2, default=str))
-                    print(f"{'='*70}\n")
                     return False, error_msg, user_id
             else:
                 # EPHEMERAL INTENT RULE: Ephemeral intents clear session on READY
                 if session_state is not None:
-                    error_msg = f"Session not cleared after planning complete (missing_slots=[]). Session state: {session_state}"
-                    # Print FAIL_SNAPSHOT on session not cleared
-                    fail_snapshot = {
-                        "expected": {"missing_slots": [], "session_cleared": True},
-                        "got": {
-                            "missing_slots": [],
-                            "session_cleared": False,
-                            "session_state": session_state,
-                        },
-                        "session_before": None,
-                        "session_after": session_state,
-                        "merged_luma_response": None,
-                        "final_plan": {},
-                        "facts": {},
-                    }
-                    print(f"\n{'='*70}")
-                    print(
-                        f"FAIL_SNAPSHOT: scenario={scenario_name} turn=FINAL user_id={user_id}"
+                    error_msg = "Session not cleared after planning complete (missing_slots=[])"
+                    _print_failure(
+                        scenario_name,
+                        "FINAL",
+                        user_id,
+                        error_msg,
+                        expected={"missing_slots": [], "session_cleared": True},
+                        got={"session_cleared": False},
+                        session_after=session_state,
+                        verbose=verbose,
+                        full_snapshot={"session_state": session_state} if verbose else None,
                     )
-                    print(f"{'='*70}")
-                    print(json.dumps(fail_snapshot, indent=2, default=str))
-                    print(f"{'='*70}\n")
                     return False, error_msg, user_id
 
         if verbose:
@@ -705,42 +781,29 @@ def _test_scenario(
         return True, None, user_id
 
     except (AssertionError, Exception) as e:
-        # Print FAIL_SNAPSHOT on exception/assertion
-        # Try to capture last turn's state if available
         session_state_before = None
-        session_state_after = None
-        merged_luma_response_for_snapshot = None
-        plan_for_snapshot = {}
-        facts_for_snapshot = {}
-
         try:
             session_state_before = get_session(user_id)
-            # For exceptions, we might not have turn data, but try to get what we can
         except Exception:
             pass
-
-        fail_snapshot = {
-            "expected": "Exception occurred - no expected data available",
-            "got": {"error": str(e)},
-            "session_before": session_state_before,
-            "session_after": session_state_after,
-            "merged_luma_response": merged_luma_response_for_snapshot,
-            "final_plan": plan_for_snapshot,
-            "facts": facts_for_snapshot,
-        }
-
-        print(f"\n{'='*70}")
-        print(
-            f"FAIL_SNAPSHOT: scenario={scenario_name} turn=EXCEPTION user_id={user_id}"
-        )
-        print(f"{'='*70}")
-        print(json.dumps(fail_snapshot, indent=2, default=str))
-        print(f"{'='*70}\n")
 
         import traceback
 
         tb = traceback.format_exc()
-        return False, f"Exception in scenario {scenario_id}: {str(e)}\n{tb}", user_id
+        error_msg = f"Exception in scenario {scenario_id}: {str(e)}"
+        _print_failure(
+            scenario_name,
+            "EXCEPTION",
+            user_id,
+            str(e),
+            expected="(exception — see error message)",
+            got={"error": str(e)},
+            session_before=session_state_before,
+            verbose=verbose,
+        )
+        if verbose:
+            print(tb)
+        return False, f"{error_msg}\n{tb}", user_id
     finally:
         # Always clear session after test
         clear_session(user_id)
@@ -904,7 +967,7 @@ if PYTEST_AVAILABLE:
     @pytest.fixture(scope="session")
     def all_scenarios_fixture():
         """Pytest fixture for all scenarios (session-scoped)."""
-        return followup_scenarios + planning_edges_scenarios
+        return planning_scenarios
 
     @pytest.fixture(scope="function", autouse=True)
     def cleanup_sessions():
@@ -915,7 +978,7 @@ if PYTEST_AVAILABLE:
     # Generate test parameters from all scenarios
     def _generate_scenario_params():
         """Generate pytest parameters from scenarios."""
-        all_scenarios = followup_scenarios + planning_edges_scenarios
+        all_scenarios = planning_scenarios
         params = []
         for index, scenario in enumerate(all_scenarios, start=1):
             scenario_name = scenario.get("name", f"scenario_{index}")
@@ -973,10 +1036,17 @@ Examples:
         nargs="*",
         help="Scenario IDs to run (single, comma-separated, or range like 30-33)",
     )
-    parser.add_argument("--verbose", "-v", action="store_true", help="Verbose output")
+    parser.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Verbose output (full session dumps and failure snapshots)",
+    )
     parser.add_argument("-o", "--output", type=str, help="Save output to file")
 
     args = parser.parse_args()
+
+    configure_test_logging(verbose=args.verbose)
 
     # Set up output redirection if -o is provided
     output_file = args.output
@@ -995,7 +1065,7 @@ Examples:
         scenario_ids = parse_scenario_args(args.scenarios)
 
         # Combine all scenarios
-        all_scenarios = followup_scenarios + planning_edges_scenarios
+        all_scenarios = planning_scenarios
 
         # Filter scenarios
         scenarios_to_run = filter_scenarios_by_id(all_scenarios, scenario_ids)
@@ -1018,7 +1088,7 @@ Examples:
                 print("CORE PLANNING TEST SUITE")
                 print("=" * 70)
                 print(
-                    f"Total scenarios: {len(all_scenarios)} (followup: {len(followup_scenarios)}, planning_edges: {len(planning_edges_scenarios)})"
+                    f"Total scenarios: {len(all_scenarios)}"
                 )
                 if len(scenarios_to_run) != len(all_scenarios):
                     print(

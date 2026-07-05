@@ -23,6 +23,66 @@ from core.routing import get_action_name, get_template_key
 logger = logging.getLogger(__name__)
 
 
+def _resolve_confirmation_state(
+    luma_response: Dict[str, Any],
+    session_state: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """Resolve confirmation_state from response booking or persisted session."""
+    from core.session.confirmation_gate import get_confirmation_state
+
+    confirmation_state = get_confirmation_state(luma_response)
+    if confirmation_state is not None or not session_state:
+        return confirmation_state
+    return get_confirmation_state(session_state)
+
+
+def _ensure_booking_on_response(luma_response: Dict[str, Any]) -> Dict[str, Any]:
+    booking = luma_response.get("booking")
+    if not isinstance(booking, dict):
+        booking = {}
+        luma_response["booking"] = booking
+    return booking
+
+
+def _maybe_enter_booking_confirmation_pending(
+    intent_name: Optional[str],
+    luma_response: Dict[str, Any],
+    *,
+    missing_slots: List[str],
+    needs_clarification: bool,
+    availability_resolved: bool,
+    confirmation_state: Optional[str],
+    session_state: Optional[Dict[str, Any]] = None,
+) -> Optional[str]:
+    """When CREATE_APPOINTMENT is commit-ready, require explicit confirmation first."""
+    if intent_name != "CREATE_APPOINTMENT":
+        return confirmation_state
+    if confirmation_state is not None:
+        return confirmation_state
+    if missing_slots or needs_clarification or not availability_resolved:
+        return confirmation_state
+
+    from core.orchestration.temporal_proposal import has_bound_booking_datetime
+
+    effective_slots = luma_response.get("_effective_collected_slots")
+    if effective_slots is None:
+        effective_slots = luma_response.get("slots", {})
+    if not has_bound_booking_datetime(
+        effective_slots, session_state, luma_response
+    ):
+        return confirmation_state
+
+    from core.session.confirmation_gate import set_confirmation_state
+
+    _ensure_booking_on_response(luma_response)
+    set_confirmation_state(luma_response, "pending")
+    logger.info(
+        "[BOOKING_CONFIRMATION] CREATE_APPOINTMENT commit-ready — "
+        "setting confirmation_state=pending"
+    )
+    return "pending"
+
+
 def _extract_missing_slots(luma_response: Dict[str, Any]) -> List[str]:
     """
     Extract missing slots from Luma response.
@@ -473,12 +533,9 @@ def build_decision_plan(
     missing_slots = _extract_missing_slots(luma_response)
 
     logger.debug(
-        f"[MISSING_SLOTS_TRACE] build_decision_plan: AFTER _extract_missing_slots, "
-        f"intent={intent_name}, "
-        f"missing_slots={missing_slots}, "
-        f"missing_slots_length={len(missing_slots)}, "
-        f"luma_response.missing_slots={luma_response.get('missing_slots')}, "
-        f"luma_response.issues={luma_response.get('issues')}"
+        "[PLAN_BUILDER_INPUT] intent=%s missing=%s",
+        intent_name,
+        missing_slots,
     )
 
     # Soft prioritization of awaiting_slot (optional, backward compatible)
@@ -497,10 +554,17 @@ def build_decision_plan(
 
     # Determine status
     needs_clarification = luma_response.get("needs_clarification", False)
-    booking = luma_response.get("booking", {})
-    confirmation_state = (
-        booking.get("confirmation_state") if isinstance(booking, dict) else None
+    confirmation_state = _resolve_confirmation_state(luma_response, session_state)
+    confirmation_state = _maybe_enter_booking_confirmation_pending(
+        intent_name,
+        luma_response,
+        missing_slots=missing_slots,
+        needs_clarification=needs_clarification,
+        availability_resolved=availability_resolved,
+        confirmation_state=confirmation_state,
+        session_state=session_state,
     )
+    booking = luma_response.get("booking", {})
 
     # Extract active_capability from multiple sources (preserve if already set)
     # Priority: 1) existing plan in luma_response, 2) session_state, 3) facts/context
@@ -577,10 +641,22 @@ def build_decision_plan(
                 f"active_capability={active_capability}, intent={intent_name}, next_action={next_action}"
             )
 
+    # Compute executable_actions before status determination — a satisfied executable_with
+    # subset allows READY even when required slots (date/time) are still missing.
+    _ea_slots = luma_response.get("_effective_collected_slots")
+    if _ea_slots is None:
+        _ea_slots = luma_response.get("slots", {})
+    executable_actions: List[str] = []
+    if intent_name and intent_name != "UNKNOWN":
+        from core.planning.policy.action_policy import load_planning_policy, plan_intent
+        _ea_policy = load_planning_policy()
+        _ea_result = plan_intent(intent_name, _ea_slots, _ea_policy)
+        executable_actions = _ea_result.get("executable_actions", [])
+
     logger.debug(
         f"[BUILD_PLAN] intent={intent_name} missing_slots={missing_slots} "
         f"needs_clarification={needs_clarification} confirmation_state={confirmation_state} "
-        f"active_capability={active_capability}"
+        f"active_capability={active_capability} executable_actions={executable_actions}"
     )
 
     # CRITICAL PLANNING INVARIANT: UNKNOWN intent ALWAYS requires clarification
@@ -590,12 +666,20 @@ def build_decision_plan(
             f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because intent=UNKNOWN "
             f"(UNKNOWN always requires clarification)"
         )
-    # CRITICAL: If missing_slots is non-empty, status MUST be NEEDS_CLARIFICATION
     elif missing_slots:
-        status = "NEEDS_CLARIFICATION"
-        logger.debug(
-            f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots={missing_slots}"
-        )
+        if executable_actions:
+            # executable_with subset satisfied — proceed to exploratory action;
+            # missing required slots (date/time) come from availability results.
+            status = "READY"
+            logger.debug(
+                f"[BUILD_PLAN] Setting status=READY: executable_with satisfied "
+                f"(missing_slots={missing_slots}, executable_actions={executable_actions})"
+            )
+        else:
+            status = "NEEDS_CLARIFICATION"
+            logger.debug(
+                f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because missing_slots={missing_slots}"
+            )
     elif needs_clarification:
         status = "NEEDS_CLARIFICATION"
         logger.debug(
@@ -622,17 +706,11 @@ def build_decision_plan(
     allowed_actions: List[str] = []
     blocked_actions: List[str] = []
 
-    # Get executable_actions from planner (ONLY source of truth for partial execution)
-    executable_actions = []
-    if intent_name:
-        from core.planning.policy.action_policy import load_planning_policy, plan_intent
+    effective_slots = luma_response.get("_effective_collected_slots")
+    if effective_slots is None:
+        effective_slots = luma_response.get("slots", {})
 
-        effective_slots = luma_response.get("_effective_collected_slots")
-        if effective_slots is None:
-            effective_slots = luma_response.get("slots", {})
-        policy = load_planning_policy()
-        planner_result = plan_intent(intent_name, effective_slots, policy)
-        executable_actions = planner_result.get("executable_actions", [])
+    # executable_actions already computed above before status determination
 
     # CRITICAL: Allow exploratory actions even when planning slots are incomplete
     # Only block committing actions when missing_slots exist
@@ -648,11 +726,28 @@ def build_decision_plan(
 
         # Commit action blocking rules
         if commit_action:
-            if needs_clarification:
-                # Luma explicitly says needs clarification - block commit
+            from core.orchestration.temporal_proposal import has_bound_booking_datetime
+
+            datetime_bound = has_bound_booking_datetime(
+                effective_slots, session_state, luma_response
+            )
+            needs_bound_datetime = intent_name == "CREATE_APPOINTMENT" and not datetime_bound
+            needs_user_confirmation = (
+                intent_name == "CREATE_APPOINTMENT"
+                and confirmation_state != "confirmed"
+            )
+            if (
+                needs_clarification
+                or not availability_resolved
+                or needs_bound_datetime
+                or needs_user_confirmation
+            ):
+                # Block commit when clarification needed, availability not resolved,
+                # CREATE_APPOINTMENT lacks a confirmed datetime binding, or user
+                # has not confirmed the booking yet.
                 blocked_actions.append(commit_action)
             else:
-                # All slots filled and no clarification needed - allow commit
+                # All slots filled, no clarification needed, availability resolved - allow commit
                 allowed_actions.append(commit_action)
 
     # Deduplicate
@@ -671,11 +766,6 @@ def build_decision_plan(
     stage = None
     action = None
     action_branch = None
-
-    # Get slots for policy selection
-    effective_slots = luma_response.get("_effective_collected_slots")
-    if effective_slots is None:
-        effective_slots = luma_response.get("slots", {})
 
     # POLICY-DRIVEN SELECTION: Always use select_next_execution_step
     # This is the single source of truth for action selection
@@ -730,10 +820,42 @@ def build_decision_plan(
                 f"This may indicate a missing or incomplete policy configuration."
             )
             # Use first executable action as fallback
-            if executable_actions:
-                action = executable_actions[0]
-                action_branch = "fallback_executable"
-                stage = "AVAILABILITY"  # Default for exploratory actions
+            if (
+                intent_name == "CREATE_APPOINTMENT"
+                and confirmation_state == "pending"
+                and commit_action
+            ):
+                action = commit_action
+                action_branch = "awaiting_confirmation"
+                stage = "CONFIRM"
+            elif executable_actions:
+                fallback_action = executable_actions[0]
+                if (
+                    fallback_action == "SEARCH_AVAILABILITY"
+                    and availability_resolved
+                    and intent_name == "CREATE_APPOINTMENT"
+                ):
+                    from core.orchestration.temporal_proposal import (
+                        has_bound_booking_datetime,
+                    )
+
+                    if not has_bound_booking_datetime(
+                        effective_slots, session_state, luma_response
+                    ):
+                        action = None
+                        action_branch = "availability_searched_awaiting_time"
+                    else:
+                        action = fallback_action
+                        action_branch = "fallback_executable"
+                        stage = "AVAILABILITY"
+                else:
+                    action = fallback_action
+                    action_branch = "fallback_executable"
+                    stage = "AVAILABILITY"  # Default for exploratory actions
+            elif commit_action and commit_action in blocked_actions:
+                action = commit_action
+                action_branch = "awaiting_confirmation"
+                stage = "CONFIRM"
             elif commit_action and commit_action in allowed_actions:
                 action = commit_action
                 action_branch = "fallback_commit"
@@ -741,7 +863,15 @@ def build_decision_plan(
 
     # If still no action selected (e.g., UNKNOWN intent), set defaults
     if action is None:
-        if executable_actions:
+        if (
+            intent_name == "CREATE_APPOINTMENT"
+            and confirmation_state == "pending"
+            and commit_action
+        ):
+            action = commit_action
+            action_branch = "awaiting_confirmation"
+            stage = "CONFIRM"
+        elif executable_actions:
             action = executable_actions[0]
             action_branch = "fallback_executable"
             stage = "AVAILABILITY"

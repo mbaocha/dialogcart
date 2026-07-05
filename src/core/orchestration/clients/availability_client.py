@@ -52,14 +52,15 @@ class AvailabilityClient(BaseClient):
         organization_id: int,
         *,
         service_id: int,
-        date: str,
+        date: Optional[str] = None,
         extra_params: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         params: Dict[str, Any] = {
             "organization_id": organization_id,
             "service_id": service_id,
-            "date": date,
         }
+        if date:
+            params["date"] = date
         if extra_params:
             params.update(extra_params)
         return self._request(

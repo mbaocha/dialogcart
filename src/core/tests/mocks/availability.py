@@ -28,7 +28,7 @@ DEFAULT_SERVICE_DURATION_MINUTES = 60
 def mock_get_service_availability(
     organization_id: int,
     service_id: int,
-    date: str,
+    date: Optional[str] = None,
     time_constraint: Optional[Dict[str, Any]] = None,
     extra_params: Optional[Dict[str, Any]] = None,
     **kwargs,
@@ -75,15 +75,16 @@ def mock_get_service_availability(
         # Default to 10:00 if no time constraint
         hour, minute = 10, 0
 
-    # Parse date and create datetime
+    # Parse date and create datetime (default when omitted — matches optional-date API)
+    effective_date = date or "2026-07-02"
     try:
-        date_obj = datetime.strptime(date, "%Y-%m-%d")
+        date_obj = datetime.strptime(effective_date, "%Y-%m-%d")
     except ValueError:
         # Fallback: try other date formats
         try:
-            date_obj = datetime.strptime(date, "%Y-%m-%dT%H:%M:%S")
+            date_obj = datetime.strptime(effective_date, "%Y-%m-%dT%H:%M:%S")
         except ValueError:
-            logger.warning(f"Could not parse date '{date}', using default")
+            logger.warning(f"Could not parse date '{effective_date}', using default")
             date_obj = datetime(2026, 1, 16)
 
     # Create start datetime
@@ -98,7 +99,7 @@ def mock_get_service_availability(
     end_iso = end_datetime.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     logger.debug(
-        f"[MOCK] Service availability: date={date}, start={start_iso}, end={end_iso}"
+        f"[MOCK] Service availability: date={effective_date}, start={start_iso}, end={end_iso}"
     )
 
     return {"slots": [{"start": start_iso, "end": end_iso, "available": True}]}

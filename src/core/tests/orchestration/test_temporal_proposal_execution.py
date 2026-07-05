@@ -14,9 +14,59 @@ from core.orchestration.temporal_proposal import (
     apply_confirmed_datetime,
     apply_time_constraint_to_missing_slots,
     datetime_range_from_availability_result,
+    enrich_last_execution_result,
+    get_cached_availability_offers,
     resolve_execution_proposals,
     slots_for_availability_search,
+    strip_unconfirmed_temporal_slots,
+    temporal_slots_confirmed,
+    try_bind_offered_time_selection,
 )
+from core.rendering.availability_renderer import build_presented_availability
+
+
+# ---------------------------------------------------------------------------
+# strip_unconfirmed_temporal_slots
+# ---------------------------------------------------------------------------
+
+
+class TestStripUnconfirmedTemporalSlots:
+    def test_strips_date_and_time_for_create_appointment(self):
+        slots = {
+            "service_id": "haircut",
+            "date": "2026-01-14",
+            "time": "15:00",
+        }
+        result = strip_unconfirmed_temporal_slots(slots, "CREATE_APPOINTMENT", {})
+        assert result == {"service_id": "haircut"}
+
+    def test_preserves_temporal_when_confirmed_via_bound_slots(self):
+        slots = {"service_id": "haircut", "date": "2026-01-14", "time": "15:00"}
+        session = {
+            "slots": {"service_id": "haircut", "date": "2026-01-14", "time": "15:00"},
+            "resolved_datetime_range": {
+                "start": "2026-01-14T15:00:00Z",
+                "end": "2026-01-14T16:00:00Z",
+            },
+        }
+        result = strip_unconfirmed_temporal_slots(slots, "CREATE_APPOINTMENT", session)
+        assert result["date"] == "2026-01-14"
+        assert result["time"] == "15:00"
+
+    def test_strips_temporal_when_only_fingerprint_present(self):
+        slots = {"service_id": "haircut", "date": "2026-01-14", "time": "15:00"}
+        session = {"availability_fingerprint": "haircut|2026-01-14|15:00"}
+        result = strip_unconfirmed_temporal_slots(slots, "CREATE_APPOINTMENT", session)
+        assert result == {"service_id": "haircut"}
+
+    def test_noop_for_other_intents(self):
+        slots = {"service_id": "room", "start_date": "2026-01-14"}
+        result = strip_unconfirmed_temporal_slots(slots, "CREATE_RESERVATION", {})
+        assert result == slots
+
+    def test_temporal_slots_confirmed_with_resolved_range(self):
+        session = {"resolved_datetime_range": {"start": "2026-01-14T15:00:00Z"}}
+        assert temporal_slots_confirmed(session) is True
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +128,260 @@ class TestSlotsForAvailabilitySearch:
         original = dict(slots)
         slots_for_availability_search(slots, self._date_p("2026-01-14"))
         assert slots == original
+
+
+# ---------------------------------------------------------------------------
+# try_bind_offered_time_selection
+# ---------------------------------------------------------------------------
+
+
+class TestTryBindOfferedTimeSelection:
+    def test_binds_matching_offered_time(self):
+        session = {
+            "last_execution_result": {
+                "type": "availability",
+                "status": "success",
+                "slots": [
+                    {
+                        "starts_at": "2026-07-06T09:00:00Z",
+                        "ends_at": "2026-07-06T09:30:00Z",
+                    }
+                ],
+            }
+        }
+        result = try_bind_offered_time_selection(
+            {"service_id": "premium haircut"},
+            session,
+            date_proposal={"mode": "single_day", "start": "2026-07-06"},
+            time_proposal={"mode": "exact", "value": "9:00 AM"},
+        )
+        assert result is not None
+        assert result["slots"]["date"] == "2026-07-06"
+        assert result["slots"]["time"] == "09:00"
+        assert result["resolved_datetime_range"]["start"] == "2026-07-06T09:00:00Z"
+
+    def test_rejects_time_not_in_offers(self):
+        session = {
+            "last_execution_result": {
+                "type": "availability",
+                "status": "success",
+                "slots": [
+                    {
+                        "starts_at": "2026-07-06T09:00:00Z",
+                        "ends_at": "2026-07-06T09:30:00Z",
+                    }
+                ],
+            }
+        }
+        result = try_bind_offered_time_selection(
+            {"service_id": "premium haircut"},
+            session,
+            date_proposal={"mode": "single_day", "start": "2026-07-06"},
+            time_proposal={"mode": "exact", "value": "2:00 PM"},
+        )
+        assert result is None
+
+    def test_binds_latest_presented_date_not_stale_date_proposal(self):
+        """User picks from July 3 offers; stale date_proposal must not force July 6."""
+        session = {
+            "last_execution_result": {
+                "type": "availability",
+                "status": "success",
+                "search_date": "2026-07-03",
+                "slots": [
+                    {
+                        "starts_at": "2026-07-03T09:00:00Z",
+                        "ends_at": "2026-07-03T09:30:00Z",
+                    },
+                    {
+                        "starts_at": "2026-07-03T09:30:00Z",
+                        "ends_at": "2026-07-03T10:00:00Z",
+                    },
+                ],
+            }
+        }
+        result = try_bind_offered_time_selection(
+            {"service_id": "premium haircut", "date": "2026-07-06"},
+            session,
+            date_proposal={"mode": "single_day", "start": "2026-07-06"},
+            time_proposal={"mode": "exact", "value": "9:00"},
+        )
+        assert result is not None
+        assert result["slots"]["date"] == "2026-07-03"
+        assert result["slots"]["time"] == "09:00"
+
+    def test_new_search_replaces_historical_offers_for_binding(self):
+        """After searching July 6, binding 9:00 must use July 6 not earlier July 3."""
+        july6_slots = [
+            {
+                "starts_at": "2026-07-06T09:00:00Z",
+                "ends_at": "2026-07-06T09:30:00Z",
+            }
+        ]
+        session = {
+            "last_execution_result": enrich_last_execution_result(
+                {
+                    "type": "availability",
+                    "status": "success",
+                    "slots": july6_slots,
+                },
+                search_date="2026-07-06",
+            ),
+            "presented_availability": build_presented_availability(
+                july6_slots, search_date="2026-07-06"
+            ),
+        }
+        result = try_bind_offered_time_selection(
+            {"service_id": "premium haircut"},
+            session,
+            date_proposal={"mode": "single_day", "start": "2026-07-03"},
+            time_proposal={"mode": "exact", "value": "9:00"},
+        )
+        assert result is not None
+        assert result["slots"]["date"] == "2026-07-06"
+
+    def test_binds_only_presented_slots_not_full_search_result(self):
+        """Time in full API result but not shown must not auto-bind."""
+        full_slots = [
+            {"starts_at": "2026-07-09T02:00:00Z", "ends_at": "2026-07-09T02:30:00Z"},
+            {"starts_at": "2026-07-09T03:00:00Z", "ends_at": "2026-07-09T03:30:00Z"},
+            {"starts_at": "2026-07-09T11:00:00Z", "ends_at": "2026-07-09T11:30:00Z"},
+            {"starts_at": "2026-07-09T17:00:00Z", "ends_at": "2026-07-09T17:30:00Z"},
+        ]
+        presented = build_presented_availability(
+            [
+                full_slots[0],
+                full_slots[1],
+                full_slots[3],
+            ],
+            search_date="2026-07-09",
+        )
+        session = {
+            "last_execution_result": {
+                "type": "availability",
+                "status": "success",
+                "search_date": "2026-07-09",
+                "slots": full_slots,
+            },
+            "presented_availability": presented,
+        }
+        # 11am exists in full result but was not presented
+        assert try_bind_offered_time_selection(
+            {"service_id": "premium haircut"},
+            session,
+            time_proposal={"mode": "exact", "value": "11am"},
+        ) is None
+        # Presented 5pm binds
+        result = try_bind_offered_time_selection(
+            {"service_id": "premium haircut"},
+            session,
+            time_proposal={"mode": "exact", "value": "5pm"},
+        )
+        assert result is not None
+        assert result["slots"]["date"] == "2026-07-09"
+        assert result["slots"]["time"] == "17:00"
+
+    def test_legacy_fallback_caps_to_presentation_size(self):
+        """Without presented_availability, only the UI-sized prefix is selectable."""
+        slots = [
+            {
+                "starts_at": f"2026-07-06T{h:02d}:00:00Z",
+                "ends_at": f"2026-07-06T{h:02d}:30:00Z",
+            }
+            for h in range(9, 18)
+        ]
+        session = {
+            "last_execution_result": {
+                "type": "availability",
+                "status": "success",
+                "search_date": "2026-07-06",
+                "slots": slots,
+            }
+        }
+        # First 6 hours (9-14) are presented; 16:00 is not
+        assert try_bind_offered_time_selection(
+            {"service_id": "premium haircut"},
+            session,
+            time_proposal={"mode": "exact", "value": "4pm"},
+        ) is None
+        result = try_bind_offered_time_selection(
+            {"service_id": "premium haircut"},
+            session,
+            time_proposal={"mode": "exact", "value": "9am"},
+        )
+        assert result is not None
+        assert result["slots"]["time"] == "09:00"
+
+
+class TestGetCachedAvailabilityOffers:
+    def test_prefers_presented_availability(self):
+        session = {
+            "last_execution_result": {
+                "type": "availability",
+                "status": "success",
+                "search_date": "2026-07-09",
+                "slots": [
+                    {"starts_at": "2026-07-09T09:00:00Z", "ends_at": "2026-07-09T09:30:00Z"},
+                    {"starts_at": "2026-07-09T11:00:00Z", "ends_at": "2026-07-09T11:30:00Z"},
+                ],
+            },
+            "presented_availability": {
+                "search_date": "2026-07-09",
+                "slots": [
+                    {"starts_at": "2026-07-09T09:00:00Z", "ends_at": "2026-07-09T09:30:00Z"},
+                ],
+            },
+        }
+        offers = get_cached_availability_offers(session)
+        assert len(offers) == 1
+        assert offers[0]["starts_at"].startswith("2026-07-09T09:00")
+
+    def test_filters_to_search_date_only(self):
+        session = {
+            "last_execution_result": {
+                "type": "availability",
+                "status": "success",
+                "search_date": "2026-07-03",
+                "slots": [
+                    {"starts_at": "2026-07-06T09:00:00Z", "ends_at": "2026-07-06T09:30:00Z"},
+                    {"starts_at": "2026-07-03T09:00:00Z", "ends_at": "2026-07-03T09:30:00Z"},
+                    {"starts_at": "2026-07-03T09:30:00Z", "ends_at": "2026-07-03T10:00:00Z"},
+                ],
+            }
+        }
+        offers = get_cached_availability_offers(session)
+        assert len(offers) == 2
+        assert all("2026-07-03" in (o.get("starts_at") or "") for o in offers)
+
+    def test_enrich_keeps_full_slots_and_safe_search_date(self):
+        payload = enrich_last_execution_result(
+            {
+                "type": "availability",
+                "status": "success",
+                "slots": [
+                    {"starts_at": "2026-07-06T09:00:00Z", "ends_at": "2026-07-06T09:30:00Z"},
+                    {"starts_at": "2026-07-03T09:00:00Z", "ends_at": "2026-07-03T09:30:00Z"},
+                ],
+            },
+            search_date="2026-07-03",
+        )
+        assert payload["search_date"] == "2026-07-03"
+        # Full latest search retained for diagnostics; bind uses presented_availability.
+        assert len(payload["slots"]) == 2
+
+    def test_enrich_prefers_offer_date_when_plan_date_matches_nothing(self):
+        payload = enrich_last_execution_result(
+            {
+                "type": "availability",
+                "status": "success",
+                "slots": [
+                    {"starts_at": "2026-07-03T16:00:00Z", "ends_at": "2026-07-03T16:30:00Z"},
+                ],
+            },
+            search_date="2026-07-06",
+        )
+        assert payload["search_date"] == "2026-07-03"
+        assert len(payload["slots"]) == 1
 
 
 # ---------------------------------------------------------------------------

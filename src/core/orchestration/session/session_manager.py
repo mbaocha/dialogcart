@@ -37,6 +37,16 @@ _in_memory_sessions: Dict[str, Dict[str, Any]] = {}
 SESSION_TTL_SECONDS_FALLBACK = 30 * 60  # 30 minutes for in-memory fallback
 
 
+def _normalize_loaded_session(session_state: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize confirmation_state on load/save (booking is canonical)."""
+    try:
+        from core.session.confirmation_gate import normalize_confirmation_state
+
+        return normalize_confirmation_state(session_state)
+    except Exception:
+        return session_state
+
+
 def _get_redis_url():
     """
     Get Redis URL from environment variable or config file fallback.
@@ -199,6 +209,7 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
                 logger.debug("[SESSION_LOAD] not found in Redis: user_id=%s", user_id)
                 return None
             session_state = json.loads(raw)
+            session_state = _normalize_loaded_session(session_state)
             logger.debug(
                 "[SESSION_LOAD] found in Redis: user_id=%s intent_name=%r status=%r",
                 user_id,
@@ -224,6 +235,7 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
             logger.debug("[SESSION_LOAD] expired in-memory: user_id=%s", user_id)
             return None
         session_state = {k: v for k, v in session_data.items() if not k.startswith("_")}
+        session_state = _normalize_loaded_session(session_state)
         logger.debug(
             "[SESSION_LOAD] found in-memory: user_id=%s intent_name=%r status=%r",
             user_id,
@@ -260,6 +272,8 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
         user_id,
         session_state.get("slot_attempts"),
     )
+
+    _normalize_loaded_session(session_state)
 
     # HARD GUARD: Ensure session_state["facts"] is always present as a dict before saving
     # This invariant must hold for all sessions, especially those with active_capability

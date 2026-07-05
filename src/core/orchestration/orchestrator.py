@@ -51,6 +51,7 @@ from core.orchestration.nlu import (
     process_luma_response,
 )
 from core.orchestration.persistence.durable_intents import is_durable_intent
+from core.rendering.availability_renderer import build_availability_render_request
 from core.rendering.llm_renderer import LlmRenderRequest, render_llm
 from core.routing.workflows import get_workflow
 
@@ -238,10 +239,26 @@ def _inject_rendering_text(
         last_filled = (session_state or {}).get("last_filled_slot") if session_state else None
         ack_note = f" Start by briefly acknowledging you received {last_filled}." if last_filled and attempt_count < 1 else ""
         retry_note = " The user was already asked — rephrase naturally." if attempt_count >= 1 else ""
+        service_candidates = (
+            decision.get("service_candidates")
+            or decision.get("facts", {}).get("service_candidates")
+            or []
+        )
+        if "service_id" in missing_slots:
+            # Service is the primary blocker — only ask for service, not date/time
+            render_missing = ["service_id"]
+            if service_candidates:
+                candidates_str = ", ".join(f'"{c}"' for c in service_candidates)
+                service_hint = f" Present these options for them to choose from: {candidates_str}."
+            else:
+                service_hint = ""
+        else:
+            render_missing = missing_slots
+            service_hint = ""
         render_instruction = (
             f"The user wants to {intent_name.lower().replace('_', ' ')}. "
-            f"Ask them for: {', '.join(missing_slots)}.{ack_note}{retry_note} "
-            "Be natural and brief."
+            f"Ask ONLY for these specific missing fields (nothing else): {', '.join(render_missing)}.{service_hint}{ack_note}{retry_note} "
+            "Do not ask for any other information. Be natural and brief."
         )
         conversation_history = (session_state or {}).get("messages", [])
         rendered_text = render_llm(LlmRenderRequest(
@@ -255,6 +272,49 @@ def _inject_rendering_text(
         logger.warning(
             f"Failed to render clarification text: {e}. "
             f"Rendering is best-effort and will be omitted."
+        )
+
+
+def _inject_availability_text(
+    result: Dict[str, Any],
+    decision: Optional[Dict[str, Any]],
+    execution_result: Dict[str, Any],
+    session_state: Optional[Dict[str, Any]] = None,
+) -> None:
+    if (
+        execution_result.get("type") != "availability"
+        or execution_result.get("status") != "success"
+    ):
+        return
+    try:
+        conversation_history = (session_state or {}).get("messages", [])
+        render_request = build_availability_render_request(
+            decision,
+            execution_result,
+            structured_context=_structured_context_from_decision(decision or {}),
+            conversation_history=conversation_history,
+        )
+        if not render_request:
+            return
+        rendered_text = render_llm(render_request)
+        if rendered_text:
+            from core.rendering.booking_confirmation_renderer import (
+                prefix_with_revision_acknowledgement,
+            )
+
+            revision_summary = None
+            merged = result.get("_merged_luma_response")
+            if isinstance(merged, dict):
+                revision_summary = merged.get("_revision_summary")
+            rendered_text = prefix_with_revision_acknowledgement(
+                rendered_text, revision_summary
+            )
+            result["text"] = rendered_text
+            if isinstance(result.get("outcome"), dict):
+                result["outcome"]["text"] = rendered_text
+    except Exception as e:
+        logger.debug(
+            "Failed to render availability text: %s. Rendering is best-effort.", e
         )
 
 
@@ -757,6 +817,7 @@ def handle_message(
         # Preserve rendered text if present in plan (from plan_message)
         if "text" in plan:
             response["text"] = plan["text"]
+        response["_merged_luma_response"] = plan.get("_merged_luma_response")
         response.setdefault("ui_actions", [])
         return response
 
@@ -865,6 +926,7 @@ def handle_message(
             # Preserve rendered text if present in plan (from plan_message)
             if "text" in plan:
                 response["text"] = plan["text"]
+            response["_merged_luma_response"] = plan.get("_merged_luma_response")
             response.setdefault("ui_actions", [])
             return response
 
@@ -891,6 +953,24 @@ def handle_message(
 
             # Update plan with organization_id
             plan["slots"] = slots
+
+            # Resolve SKU → catalog item id for execution (slots.service_id stays tenant string)
+            try:
+                from core.orchestration.catalog_resolver import (
+                    load_sku_to_catalog_id_for_org,
+                )
+
+                _org_for_catalog = int(
+                    slots.get("organization_id") or organization_id or 1
+                )
+                plan["sku_to_catalog_id"] = load_sku_to_catalog_id_for_org(
+                    _org_for_catalog, organization_client
+                )
+            except Exception as e:
+                logger.debug(
+                    "Could not load sku_to_catalog_id for execution: %s", e
+                )
+                plan.setdefault("sku_to_catalog_id", {})
 
             # Update plan action to match selected step
             plan["action"] = action
@@ -1128,7 +1208,7 @@ def handle_message(
 
                     if availability_fingerprint:
                         execution_result["availability_fingerprint"] = availability_fingerprint
-                        _persist_to_session(
+                        session_state = _persist_to_session(
                             session_store, user_id, session_state or {},
                             "availability_fingerprint", availability_fingerprint,
                         )
@@ -1139,45 +1219,36 @@ def handle_message(
                         )
 
                     from core.orchestration.temporal_proposal import (
-                        apply_confirmed_datetime,
-                        resolve_execution_proposals,
+                        enrich_last_execution_result,
+                    )
+                    from core.rendering.availability_renderer import (
+                        build_presented_availability,
                     )
 
-                    _exec_proposals = resolve_execution_proposals(plan, session_state)
-                    confirmed_slots = apply_confirmed_datetime(
-                        slots,
-                        _exec_proposals["date_proposal"],
-                        _exec_proposals["time_proposal"],
+                    search_date = None
+                    if slots.get("date"):
+                        search_date = str(slots["date"]).split("T")[0].split(" ")[0]
+                    last_execution_payload = enrich_last_execution_result(
+                        execution_result, search_date=search_date
                     )
-                    slots.clear()
-                    slots.update(confirmed_slots)
-                    plan["slots"] = confirmed_slots
-
-                # Capture datetime_range when SEARCH_AVAILABILITY succeeds so
-                # CONFIRM_APPOINTMENT can reuse the validated range next turn.
-                from core.orchestration.temporal_proposal import (
-                    build_datetime_range_from_slots,
-                    datetime_range_from_availability_result,
-                )
-
-                resolved_datetime_range = build_datetime_range_from_slots(
-                    slots, execution_result
-                )
-                if not resolved_datetime_range:
-                    resolved_datetime_range = datetime_range_from_availability_result(
-                        execution_result
+                    presented_payload = build_presented_availability(
+                        execution_result.get("slots") or [],
+                        search_date=last_execution_payload.get("search_date")
+                        or search_date,
                     )
-
-                if resolved_datetime_range:
-                    _persist_to_session(
-                        session_store, user_id, session_state or {},
-                        "resolved_datetime_range", resolved_datetime_range,
+                    session_state = _persist_to_session(
+                        session_store,
+                        user_id,
+                        session_state or {},
+                        "last_execution_result",
+                        last_execution_payload,
                     )
-                    execution_result["resolved_datetime_range"] = resolved_datetime_range
-                    logger.debug(
-                        "[DATETIME_RANGE] start=%s end=%s",
-                        resolved_datetime_range.get("start"),
-                        resolved_datetime_range.get("end"),
+                    session_state = _persist_to_session(
+                        session_store,
+                        user_id,
+                        session_state or {},
+                        "presented_availability",
+                        presented_payload,
                     )
 
                 # Return execution result
@@ -1257,10 +1328,13 @@ def handle_message(
                     "plan": plan,
                 }
                 result.setdefault("ui_actions", [])
+                result["_merged_luma_response"] = plan.get("_merged_luma_response")
 
-                # Inject outcome rendering text (if EXECUTED)
                 decision = plan.get("_decision")
                 if decision:
+                    _inject_availability_text(
+                        result, decision, execution_result, session_state
+                    )
                     _inject_outcome_text(result, decision, execution_result)
 
                 return result
@@ -1462,6 +1536,9 @@ def plan_message(
             _prop_val = merged_luma_response.get(_prop_key)
             if _prop_val is not None:
                 planning_result[_prop_key] = _prop_val
+
+    # Carry merged_luma_response so handle_message can persist conversation memory.
+    planning_result["_merged_luma_response"] = result.get("_merged_luma_response")
 
     # Preserve rendered clarification text if present
     # Text is injected at top level of result by _inject_rendering_text

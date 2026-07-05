@@ -42,6 +42,11 @@ def test_build_date_proposal_from_facts():
     assert proposal == {"mode": "single_day", "start": "2026-01-14"}
 
 
+def test_build_date_proposal_from_singular_date_fact():
+    proposal = build_date_proposal({"date": "2026-07-03"})
+    assert proposal == {"mode": "single_day", "start": "2026-07-03"}
+
+
 def test_expand_slots_for_planning_uses_proposals():
     expanded = expand_slots_for_planning(
         {"service_id": "haircut"},

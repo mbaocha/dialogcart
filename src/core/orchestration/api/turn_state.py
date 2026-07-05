@@ -183,10 +183,12 @@ def finalize_turn_state(
             missing_slots = [s for s in missing_slots if s != "time"]
 
     if existing_missing_slots is not None and existing_missing_slots != missing_slots:
-        logger.info(
-            f"[MISSING_SLOTS_TRACE] finalize_turn_state: Recomputed missing_slots "
-            f"(ignored stale existing={existing_missing_slots}), intent={intent_name}, "
-            f"missing_slots={missing_slots}"
+        logger.debug(
+            "[FINALIZE_TURN_STATE] recomputed missing_slots from current slots "
+            "(intent=%s stale=%s computed=%s)",
+            intent_name,
+            existing_missing_slots,
+            missing_slots,
         )
 
     from core.planning.orchestration.missing_slots import (
@@ -199,8 +201,11 @@ def finalize_turn_state(
         required_slots = []
 
     logger.debug(
-        f"[MISSING_SLOTS_TRACE] finalize_turn_state: intent={intent_name} "
-        f"required={required_slots} collected={sorted(collected_slot_names)} missing={missing_slots}"
+        "[FINALIZE_TURN_STATE] intent=%s required=%s collected=%s missing=%s",
+        intent_name,
+        required_slots,
+        sorted(collected_slot_names),
+        missing_slots,
     )
 
     # Build effective_collected_slots from merged_session_slots
@@ -216,7 +221,7 @@ def finalize_turn_state(
     if intent_name == "UNKNOWN":
         status = "NEEDS_CLARIFICATION"
         logger.info(
-            f"[FINALIZE_TURN_STATE] UNKNOWN intent - forcing NEEDS_CLARIFICATION regardless of missing_slots"
+            "[FINALIZE_TURN_STATE] UNKNOWN intent - forcing NEEDS_CLARIFICATION regardless of missing_slots"
         )
     elif len(missing_slots) > 0:
         # Missing slots exist - must be NEEDS_CLARIFICATION
@@ -227,11 +232,12 @@ def finalize_turn_state(
         status = "READY"
 
     logger.info(
-        f"[FINALIZE_TURN_STATE] intent={intent_name}, "
-        f"collected_slots={sorted(collected_slot_names)}, "
-        f"effective_slots={sorted(effective_collected_slots.keys())}, "
-        f"missing_slots={missing_slots}, "
-        f"status={status}"
+        "[FINALIZE_TURN_STATE] intent=%s collected_slots=%s effective_slots=%s missing_slots=%s status=%s",
+        intent_name,
+        sorted(collected_slot_names),
+        sorted(effective_collected_slots.keys()),
+        missing_slots,
+        status,
     )
 
     return {

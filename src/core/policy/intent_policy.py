@@ -478,6 +478,13 @@ def select_next_execution_step(
                 if confirmation_state != "confirmed":
                     # Not confirmed - skip APPLY_MODIFICATION, will select SEARCH_AVAILABILITY
                     continue
+        elif intent_upper == "CREATE_APPOINTMENT":
+            if action == "SEARCH_AVAILABILITY":
+                if availability_resolved:
+                    continue
+            elif action == "CONFIRM_APPOINTMENT":
+                if confirmation_state != "confirmed":
+                    continue
         else:
             # For other intents, check if this step should be blocked by availability_resolved status
             # SEARCH_AVAILABILITY should only run if availability_resolved == False
@@ -565,9 +572,9 @@ def validate_policy_completeness() -> List[str]:
                     if mode == "committing":
                         committing_steps.append(action_name)
 
-            if len(committing_steps) == 0:
+            if len(committing_steps) == 0 and is_durable:
                 errors.append(
-                    f"Intent '{intent_name}': must have exactly one execution step with mode=committing, found 0"
+                    f"Intent '{intent_name}': durable intent must have exactly one execution step with mode=committing, found 0"
                 )
             elif len(committing_steps) > 1:
                 errors.append(

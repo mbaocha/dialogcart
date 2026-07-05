@@ -21,9 +21,30 @@ import core.app  # noqa: F401
 from core.orchestration.api.capability_boundary import apply_capability_to_result
 from core.orchestration.api.session_merge import build_session_state_from_outcome
 from core.orchestration.errors import ContractViolation, UpstreamError
+from core.orchestration.execution.clients.availability_client import AvailabilityClient
+from core.orchestration.execution.clients.booking_client import BookingClient
 from core.orchestration.orchestrator import handle_message
 from core.orchestration.session import clear_session, get_session, save_session
 from core.rendering.llm_renderer import LlmRenderRequest, render_llm
+
+# Module-level execution clients — core owns these; callers pass text only.
+_availability_client = AvailabilityClient()
+_booking_client = BookingClient()
+
+
+class _SessionStore:
+    """Thin adapter so orchestrator can persist execution artifacts between turns."""
+
+    @staticmethod
+    def get_session(user_id: str):
+        return get_session(user_id)
+
+    @staticmethod
+    def save_session(user_id: str, session_state: dict) -> None:
+        save_session(user_id, session_state)
+
+
+_session_store = _SessionStore()
 
 # Extension runners (optional) — single integration point between core and extensions.
 # Core never imports adapters/handlers or branches on their names.
@@ -70,6 +91,7 @@ class MessageResponse(BaseModel):
 
     success: bool
     outcome: Optional[dict] = None
+    text: Optional[str] = None
     error: Optional[str] = None
     message: Optional[str] = None
 
@@ -82,7 +104,8 @@ async def post_message(request: MessageRequest):
     Session handling:
     - Loads session at request start (if status == "NEEDS_CLARIFICATION")
     - Merges session state with Luma response (handled in handle_message)
-    - Saves session if outcome.status == "NEEDS_CLARIFICATION" or "AWAITING_CAPABILITY"
+    - Saves session if outcome.status == "NEEDS_CLARIFICATION", "AWAITING_CONFIRMATION",
+      or "AWAITING_CAPABILITY"
     - Preserves session if outcome.status == "READY"
 
     Capability handling:
@@ -150,6 +173,9 @@ async def post_message(request: MessageRequest):
             organization_id=request.organization_id,
             session_state=session_state,
             transaction_id=transaction_id,
+            availability_client=_availability_client,
+            booking_client=_booking_client,
+            session_store=_session_store,
         )
 
         # Capability boundary (single owner: API layer, not turn_planner)
@@ -237,50 +263,79 @@ async def post_message(request: MessageRequest):
         # Handle session persistence after response
         if outcome and isinstance(outcome, dict):
             outcome_status = outcome.get("status")
+            merged_luma_response = result.get("_merged_luma_response")
+            previous_session = _raw_session or session_state
+            persistence_outcome = dict(outcome)
+            if not persistence_outcome.get("intent_name") and not persistence_outcome.get(
+                "intent"
+            ):
+                plan_for_intent = result.get("plan", {})
+                if isinstance(plan_for_intent, dict):
+                    plan_intent = plan_for_intent.get("intent_name") or plan_for_intent.get(
+                        "intent"
+                    )
+                    if plan_intent:
+                        persistence_outcome["intent_name"] = plan_intent
 
-            if outcome_status in ("NEEDS_CLARIFICATION", "AWAITING_CAPABILITY"):
-                # Save session state for follow-up
-                # Extract merged Luma response from result (private field)
-                merged_luma_response = result.get("_merged_luma_response")
-                # Pass previous session state for context (intent change detection, etc.)
+            if outcome_status in (
+                "NEEDS_CLARIFICATION",
+                "AWAITING_CONFIRMATION",
+                "AWAITING_CAPABILITY",
+                "READY",
+                "EXECUTED",
+                "success",
+            ):
                 new_session_state = build_session_state_from_outcome(
-                    outcome,
+                    persistence_outcome,
                     outcome_status,
                     merged_luma_response,
-                    session_state,
+                    previous_session,
                     request.user_id,
                 )
-                if new_session_state:
+                if new_session_state is None and outcome_status in (
+                    "READY",
+                    "EXECUTED",
+                    "success",
+                ):
+                    # Preserve chat history for terminal/execution outcomes when
+                    # no durable session payload was produced.
+                    new_session_state = previous_session or {}
+
+                if new_session_state is not None:
                     from core.orchestration.nlu.conversation_memory import (
                         append_messages_turn,
                     )
 
                     new_session_state = append_messages_turn(
-                        new_session_state, request.text, result.get("text") or outcome.get("text")
+                        new_session_state,
+                        request.text,
+                        result.get("text") or outcome.get("text"),
                     )
                     save_session(request.user_id, new_session_state)
+                    log_event = (
+                        "session_preserved_on_ready"
+                        if outcome_status == "READY"
+                        else "[session] save"
+                    )
                     logger.info(
-                        "[session] save",
+                        log_event,
                         extra={
                             "user_id": request.user_id,
                             "transaction_id": transaction_id,
-                            "intent": new_session_state.get("intent"),
+                            "intent": new_session_state.get("intent_name")
+                            or new_session_state.get("intent"),
                             "status": new_session_state.get("status"),
                             "missing_slots": new_session_state.get("missing_slots", []),
+                            "slots": list((new_session_state.get("slots") or {}).keys()),
                         },
                     )
 
-                    # Wire slot_attempts into decision for test/API access
-                    # slot_attempts is incremented in build_session_state_from_outcome
-                    # and stored in outcome.facts, but decision was set earlier
-                    # Update decision.facts to match outcome.facts for consistency
                     decision = result.get("_decision")
                     if decision and isinstance(decision, dict):
                         if "facts" not in decision:
                             decision["facts"] = {}
                         if not isinstance(decision["facts"], dict):
                             decision["facts"] = {}
-                        # Copy slot_attempts from outcome.facts (updated by build_session_state_from_outcome)
                         if "facts" in outcome and isinstance(outcome["facts"], dict):
                             slot_attempts = outcome["facts"].get("slot_attempts")
                             if slot_attempts is not None:
@@ -289,26 +344,16 @@ async def post_message(request: MessageRequest):
                                     if isinstance(slot_attempts, dict)
                                     else slot_attempts
                                 )
-            elif outcome_status == "READY":
-                # Preserve intent + slots for follow-up modifications ("make it 4pm").
-                # Also append messages to the existing session so conversation history
-                # is available on the next turn regardless of outcome type.
-                from core.orchestration.nlu.conversation_memory import append_messages_turn
-
-                _ready_base = _raw_session or {}
-                _ready_session = append_messages_turn(
-                    _ready_base, request.text, result.get("text") or outcome.get("text")
-                )
-                save_session(request.user_id, _ready_session)
-                logger.info(
-                    f"session_preserved_on_ready user_id={request.user_id} transaction_id={transaction_id} "
-                    f"(session preserved for follow-up modifications)"
-                )
 
         # Convert to response model
+        outcome_for_response = result.get("outcome")
+        response_text = result.get("text")
+        if not response_text and isinstance(outcome_for_response, dict):
+            response_text = outcome_for_response.get("text")
         return MessageResponse(
             success=result.get("success", False),
-            outcome=result.get("outcome"),
+            outcome=outcome_for_response,
+            text=response_text,
             error=result.get("error"),
             message=result.get("message"),
         )
@@ -328,3 +373,16 @@ async def post_message(request: MessageRequest):
             status_code=500,
             detail={"success": False, "error": "internal_error", "message": str(e)},
         )
+
+
+@router.get("/session/{user_id}")
+async def get_user_session(user_id: str):
+    """Return persisted session for a user (debug / chat REPL status command)."""
+    return {"session": get_session(user_id)}
+
+
+@router.delete("/session/{user_id}")
+async def delete_user_session(user_id: str):
+    """Clear persisted session for a user (chat REPL reset command)."""
+    clear_session(user_id)
+    return {"success": True}

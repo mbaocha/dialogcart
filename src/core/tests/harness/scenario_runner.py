@@ -190,6 +190,16 @@ def _persist_session_for_next_turn(
     if "action" in plan_obj:
         session_state["action"] = plan_obj.get("action")
 
+    outcome_booking = outcome.get("booking") if isinstance(outcome, dict) else None
+    if isinstance(outcome_booking, dict) and outcome_booking.get("confirmation_state"):
+        session_state["confirmation_state"] = outcome_booking["confirmation_state"]
+        session_state["booking"] = {
+            "confirmation_state": outcome_booking["confirmation_state"]
+        }
+    elif normalized.get("status") == "AWAITING_CONFIRMATION":
+        session_state["confirmation_state"] = "pending"
+        session_state["booking"] = {"confirmation_state": "pending"}
+
     if isinstance(execution_result, dict):
         if execution_result.get("availability_fingerprint"):
             session_state["availability_fingerprint"] = execution_result[

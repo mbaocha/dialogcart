@@ -73,6 +73,25 @@ def _build_user_message(request: LlmRenderRequest) -> str:
     if evidence_lines:
         parts.append("Evidence:\n" + "\n".join(evidence_lines))
 
+    availability = request.facts.get("availability")
+    if isinstance(availability, dict):
+        avail_lines: List[str] = []
+        service_name = availability.get("service_name")
+        if service_name:
+            avail_lines.append(f"Service: {service_name}")
+        date_label = availability.get("date")
+        if date_label:
+            avail_lines.append(f"Date: {date_label}")
+        times = availability.get("times") or []
+        if times:
+            avail_lines.append("Available times:")
+            avail_lines.extend(f"- {t}" for t in times)
+        more_count = availability.get("more_count") or 0
+        if more_count:
+            avail_lines.append(f"(+ {more_count} more times not shown)")
+        if avail_lines:
+            parts.append("Availability:\n" + "\n".join(avail_lines))
+
     return "\n\n".join(parts)
 
 
