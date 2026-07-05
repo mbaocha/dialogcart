@@ -684,26 +684,19 @@ def handle_message(
         }
         return {"success": True, "outcome": hd_outcome, "result": hd_outcome}
 
-    # POLICY-DRIVEN EXECUTION ELIGIBILITY
-    # Execution eligibility is driven by action-level policy, not planning completeness
-    # - Exploratory actions execute when their action-level required_slots are satisfied
-    # - Committing actions require planning completeness (plan.status == READY)
+    # Execution uses plan.action only (policy-selected; nullable when nothing runs).
     plan_status = plan.get("status")
     intent_name = plan.get("intent_name") or plan.get("intent")
     plan_action = plan.get("action")
-    executable_actions = plan.get("executable_actions", [])
     slots = plan.get("slots", {})
 
-    # Get execution steps from policy to check action-level requirements
     from core.policy.intent_policy import get_execution_steps
 
     steps = get_execution_steps(intent_name)
 
-    # Check if the planned action or any executable action can execute
     can_execute = False
     execution_step = None
 
-    # Check plan_action first (if set)
     if plan_action:
         for step in steps:
             if step.get("action") == plan_action:
@@ -711,53 +704,20 @@ def handle_message(
                 mode = step.get("mode", "exploratory")
                 required_slots = step.get("required_slots", [])
 
-                # Check if action-level required_slots are satisfied
                 action_slots_satisfied = all(
                     slot_name in slots and slots[slot_name] is not None
                     for slot_name in required_slots
                 )
 
                 if mode == "exploratory":
-                    # Exploratory actions execute when their required_slots are satisfied
-                    # regardless of plan status or missing planning slots
                     if plan_action == "FETCH_BOOKING":
-                        # Planning may label the turn FETCH_BOOKING while still missing
-                        # booking_id — do not call the API until an id/code is present.
                         can_execute = bool(
                             slots.get("booking_id") or slots.get("booking_code")
                         )
                     else:
                         can_execute = action_slots_satisfied
                 else:
-                    # Committing actions require planning completeness
                     can_execute = plan_status == "READY" and action_slots_satisfied
-                break
-
-    # If plan_action can't execute, check executable_actions
-    if not can_execute and executable_actions:
-        for action_name in executable_actions:
-            for step in steps:
-                if step.get("action") == action_name:
-                    mode = step.get("mode", "exploratory")
-                    required_slots = step.get("required_slots", [])
-
-                    # Check if action-level required_slots are satisfied
-                    action_slots_satisfied = all(
-                        slot_name in slots and slots[slot_name] is not None
-                        for slot_name in required_slots
-                    )
-
-                    if mode == "exploratory" and action_slots_satisfied:
-                        if action_name == "FETCH_BOOKING" and not (
-                            slots.get("booking_id") or slots.get("booking_code")
-                        ):
-                            continue
-                        # Found an executable exploratory action
-                        execution_step = step
-                        plan_action = action_name
-                        can_execute = True
-                        break
-            if can_execute:
                 break
 
     # Block execution if no eligible action found
@@ -765,7 +725,7 @@ def handle_message(
         logger.debug(
             f"Skipping execution: No eligible action found. "
             f"plan_status={plan_status}, plan_action={plan_action}, "
-            f"executable_actions={executable_actions}, missing_slots={plan.get('missing_slots', [])}"
+            f"missing_slots={plan.get('missing_slots', [])}"
         )
         # Build outcome from decision (canonical builder)
         # decision should always be available from plan_message()

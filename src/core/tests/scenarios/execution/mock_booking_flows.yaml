@@ -16,7 +16,8 @@ scenarios:
       - sentence: "2pm"
         expect:
           status: AWAITING_CONFIRMATION
-          action: CONFIRM_APPOINTMENT
+          stage: CONFIRM
+          awaiting: USER_CONFIRMATION
           intent_preserved: true
       - sentence: "yes"
         expect:
@@ -33,12 +34,14 @@ scenarios:
       - sentence: "book a haircut tomorrow at 2pm"
         expect:
           status: AWAITING_CONFIRMATION
-          action: CONFIRM_APPOINTMENT
+          stage: CONFIRM
+          awaiting: USER_CONFIRMATION
           missing_slots: []
       - sentence: "actually make it 3pm"
         expect:
           status: AWAITING_CONFIRMATION
-          action: CONFIRM_APPOINTMENT
+          stage: CONFIRM
+          awaiting: USER_CONFIRMATION
           intent_preserved: true
       - sentence: "yes"
         expect:
@@ -55,7 +58,8 @@ scenarios:
       - sentence: "book haircut tomorrow by 2pm"
         expect:
           status: AWAITING_CONFIRMATION
-          action: CONFIRM_APPOINTMENT
+          stage: CONFIRM
+          awaiting: USER_CONFIRMATION
           missing_slots: []
 
   - name: appointment_date_then_service_then_time
@@ -75,7 +79,8 @@ scenarios:
       - sentence: "3pm"
         expect:
           status: AWAITING_CONFIRMATION
-          action: CONFIRM_APPOINTMENT
+          stage: CONFIRM
+          awaiting: USER_CONFIRMATION
           intent_preserved: true
 
   - name: appointment_hours_detour_then_confirm
@@ -87,7 +92,8 @@ scenarios:
       - sentence: "book a haircut tomorrow at 2pm"
         expect:
           status: AWAITING_CONFIRMATION
-          action: CONFIRM_APPOINTMENT
+          stage: CONFIRM
+          awaiting: USER_CONFIRMATION
           missing_slots: []
       - sentence: "what time do you open?"
         expect:
@@ -98,7 +104,8 @@ scenarios:
       - sentence: "actually make it 3pm"
         expect:
           status: AWAITING_CONFIRMATION
-          action: CONFIRM_APPOINTMENT
+          stage: CONFIRM
+          awaiting: USER_CONFIRMATION
           intent_preserved: true
       - sentence: "yes"
         expect:
@@ -120,7 +127,8 @@ scenarios:
       - sentence: "around 2pm"
         expect:
           status: AWAITING_CONFIRMATION
-          action: CONFIRM_APPOINTMENT
+          stage: CONFIRM
+          awaiting: USER_CONFIRMATION
           intent_preserved: true
       - sentence: "yes"
         expect:
@@ -148,7 +156,8 @@ scenarios:
       - sentence: "2pm"
         expect:
           status: AWAITING_CONFIRMATION
-          action: CONFIRM_APPOINTMENT
+          stage: CONFIRM
+          awaiting: USER_CONFIRMATION
           intent_preserved: true
       - sentence: "yes"
         expect:
@@ -209,12 +218,14 @@ scenarios:
       - sentence: "book a haircut friday at 2pm"
         expect:
           status: AWAITING_CONFIRMATION
-          action: CONFIRM_APPOINTMENT
+          stage: CONFIRM
+          awaiting: USER_CONFIRMATION
           missing_slots: []
       - sentence: "no saturday instead"
         expect:
           status: AWAITING_CONFIRMATION
-          action: CONFIRM_APPOINTMENT
+          stage: CONFIRM
+          awaiting: USER_CONFIRMATION
           intent_preserved: true
       - sentence: "yes"
         expect:
@@ -231,7 +242,8 @@ scenarios:
       - sentence: "book a haircut tomorrow at 2pm"
         expect:
           status: AWAITING_CONFIRMATION
-          action: CONFIRM_APPOINTMENT
+          stage: CONFIRM
+          awaiting: USER_CONFIRMATION
           missing_slots: []
       - sentence: "what time do you open?"
         expect:
@@ -255,7 +267,8 @@ scenarios:
       - sentence: "book a haircut tomorrow at 2pm"
         expect:
           status: AWAITING_CONFIRMATION
-          action: CONFIRM_APPOINTMENT
+          stage: CONFIRM
+          awaiting: USER_CONFIRMATION
           missing_slots: []
       - sentence: "yes"
         expect:
@@ -288,12 +301,14 @@ scenarios:
       - sentence: "book a haircut tomorrow at 2pm"
         expect:
           status: AWAITING_CONFIRMATION
-          action: CONFIRM_APPOINTMENT
+          stage: CONFIRM
+          awaiting: USER_CONFIRMATION
           missing_slots: []
       - sentence: "change it to a massage tomorrow at 2pm"
         expect:
           status: AWAITING_CONFIRMATION
-          action: CONFIRM_APPOINTMENT
+          stage: CONFIRM
+          awaiting: USER_CONFIRMATION
           intent_preserved: true
       - sentence: "yes"
         expect:

@@ -142,13 +142,12 @@ def test_commit_gated_workflow_pending_then_confirmed():
     assert result_pending["success"] is True
     plan = result_pending["result"]
 
-    # Note: When slots are missing, status is NEEDS_CLARIFICATION, not AWAITING_CONFIRMATION
-    # The system prioritizes slot collection over confirmation when slots are missing
-    # Assert: NEEDS_CLARIFICATION status (slots are missing: date, service_id, time)
-    assert plan["status"] == "NEEDS_CLARIFICATION"
+    # When executable_with is satisfied (service_id present), planner may be READY
+    # with SEARCH as the execution action while time is still missing.
+    assert plan["status"] == "READY"
+    assert plan.get("action") == "SEARCH_AVAILABILITY"
     assert "missing_slots" in plan
-    # The system computes missing_slots from required slots, not just from Luma response
-    assert len(plan["missing_slots"]) > 0
+    assert "time" in plan["missing_slots"]
 
     # Note: Rendering requires template_key for clarification outcomes
     # Skip rendering test for now since plan structure doesn't include template_key
@@ -282,10 +281,11 @@ def test_commit_gated_workflow_blocked_when_needs_clarification():
     # Assert: No commit action executed
     mock_booking_client.create_booking.assert_not_called()
 
-    # Assert: NEEDS_CLARIFICATION outcome returned (not AWAITING_CONFIRMATION)
+    # Assert: exploratory SEARCH allowed; commit blocked (no booking API call)
     assert result["success"] is True
     plan = result["result"]
-    assert plan["status"] == "NEEDS_CLARIFICATION"
+    assert plan["status"] == "READY"
+    assert plan.get("action") == "SEARCH_AVAILABILITY"
     # Plan structure may not have template_key - it's in the clarification outcome if needed
 
     # Note: Rendering requires template_key for clarification outcomes
@@ -355,11 +355,11 @@ def test_commit_gated_workflow_fallback_actions_allowed():
     mock_booking_client.create_booking.assert_not_called()
 
     # Assert: NEEDS_CLARIFICATION status (slots are missing, so confirmation is not possible)
-    # Note: The system prioritizes slot collection over confirmation when slots are missing
-    # Even if confirmation_state="pending", missing slots cause NEEDS_CLARIFICATION
+    # Note: When executable_with is satisfied, status is READY with SEARCH execution action
     assert result["success"] is True
     plan = result["result"]
-    assert plan["status"] == "NEEDS_CLARIFICATION"
+    assert plan["status"] == "READY"
+    assert plan.get("action") == "SEARCH_AVAILABILITY"
 
     # Assert: missing_slots is present in plan
     assert "missing_slots" in plan

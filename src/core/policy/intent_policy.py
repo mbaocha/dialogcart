@@ -328,7 +328,7 @@ def get_execution_steps(intent_name: str) -> List[Dict[str, Any]]:
         - required_slots: List of required slot names for this step
         - optional_slots: List of optional slot names for this step
         - resolves: List of what this step resolves (e.g., ["availability"])
-        - requires: List of prerequisites (e.g., ["availability_resolved"])
+        - requires: List of business fact prerequisites (e.g., ["availability_ready"])
         - client: Client name required for this step (e.g., "availability_client")
     """
     # Normalize intent name
@@ -364,6 +364,32 @@ def get_execution_steps(intent_name: str) -> List[Dict[str, Any]]:
     return steps
 
 
+def _evaluate_step_requirement(requirement: str, *, flags: Dict[str, Any]) -> bool:
+    """Return True when a policy ``requires`` business-fact token is satisfied."""
+    _BUSINESS_FACT_KEYS = frozenset(
+        {
+            "availability_check_required",
+            "availability_ready",
+            "booking_identification_required",
+            "booking_identified",
+            "booking_hold_required",
+            "booking_hold_ready",
+            "time_selection_required",
+            "time_selection_ready",
+            "user_confirmation_required",
+            "user_confirmation_satisfied",
+        }
+    )
+    if requirement in _BUSINESS_FACT_KEYS:
+        return bool(flags.get(requirement, False))
+
+    logger.warning(
+        "Unknown policy requirement %r — treating as unsatisfied (fail closed)",
+        requirement,
+    )
+    return False
+
+
 def select_next_execution_step(
     intent_name: str, slots: Dict[str, Any], flags: Optional[Dict[str, Any]] = None
 ) -> Optional[Dict[str, Any]]:
@@ -371,19 +397,16 @@ def select_next_execution_step(
     Select the next execution step to execute based on policy and current state.
 
     Selection rules (from policy):
-    - SEARCH_AVAILABILITY is selected if:
-        - availability_resolved == False (or not set)
-        - required_slots for SEARCH_AVAILABILITY are satisfied
-    - CONFIRM_APPOINTMENT is selected if:
-        - availability_resolved == True
-        - planning.required_slots are satisfied
+    - Each step in intent_policy.yaml is evaluated in order.
+    - Exploratory steps require their step required_slots plus all ``requires`` business facts.
+    - Committing steps require planning.required_slots plus all ``requires`` business facts.
 
     Args:
         intent_name: Intent name (e.g., "CREATE_APPOINTMENT")
         slots: Current collected slots dictionary
-        flags: Optional flags dictionary with:
-            - availability_resolved: Boolean indicating if availability has been resolved
-            - confirmation_state: String indicating confirmation state ("confirmed", "pending", None)
+        flags: Optional flags dictionary from build_policy_execution_flags(), including
+            business facts (availability_ready, user_confirmation_satisfied, etc.) and
+            runtime flags (availability_resolved, confirmation_state, etc.)
 
     Returns:
         Selected execution step dictionary (same format as get_execution_steps),
@@ -403,7 +426,7 @@ def select_next_execution_step(
         # No execution steps defined in policy - return None
         return None
 
-    # Extract flags
+    # Extract flags for debug logging
     availability_resolved = flags.get("availability_resolved", False)
     confirmation_state = flags.get("confirmation_state")
 
@@ -433,70 +456,24 @@ def select_next_execution_step(
                 continue
         else:
             # Exploratory steps only need their own required_slots
-            # SPECIAL CASE: FETCH_BOOKING can run even when booking_id is missing
-            # (it's the step that helps us GET the booking_id)
-            if action == "FETCH_BOOKING":
-                # Skip FETCH_BOOKING once booking_id is already collected — user provided
-                # it directly, so there is no need to stage the fetch. The next step
-                # (CONFIRM_CANCELLATION, SEARCH_AVAILABILITY, etc.) runs instead.
-                if "booking_id" in collected_slot_names:
-                    continue
-                # booking_id still unknown: keep FETCH_BOOKING as the staged plan action.
-            else:
-                required_slots_set = set(required_slots)
-                if not required_slots_set.issubset(collected_slot_names):
-                    # Required slots not satisfied - skip this step
-                    continue
+            required_slots_set = set(required_slots)
+            if not required_slots_set.issubset(collected_slot_names):
+                continue
 
         # Check prerequisites (requires)
-        if "availability_resolved" in requires:
-            if not availability_resolved:
-                # Prerequisite not met - skip this step
-                continue
-
-        if "booking_hold_created" in requires:
-            booking_hold_created = flags.get("booking_hold_created")
-            if booking_hold_created is None:
-                booking_hold_created = "booking_id" in collected_slot_names
-            if not booking_hold_created:
-                continue
-
-        # Hold already placed — advance to FINALIZE_RESERVATION instead of re-running hold
-        if action == "CREATE_BOOKING_HOLD" and "booking_id" in collected_slot_names:
+        requirements_met = True
+        for requirement in requires:
+            if not _evaluate_step_requirement(requirement, flags=flags):
+                requirements_met = False
+                break
+        if not requirements_met:
             continue
-
-        # MODIFY_BOOKING and MODIFY_RESERVATION sequencing: SEARCH_AVAILABILITY runs when confirmation_state is None
-        # APPLY_MODIFICATION runs when confirmation_state == "confirmed"
-        if intent_upper in ("MODIFY_BOOKING", "MODIFY_RESERVATION"):
-            if action == "SEARCH_AVAILABILITY":
-                # SEARCH_AVAILABILITY should run when not confirmed (to get confirmation)
-                if confirmation_state == "confirmed":
-                    # Already confirmed - skip SEARCH_AVAILABILITY, will select APPLY_MODIFICATION
-                    continue
-            elif action == "APPLY_MODIFICATION":
-                # APPLY_MODIFICATION should only run when confirmed
-                if confirmation_state != "confirmed":
-                    # Not confirmed - skip APPLY_MODIFICATION, will select SEARCH_AVAILABILITY
-                    continue
-        elif intent_upper == "CREATE_APPOINTMENT":
-            if action == "SEARCH_AVAILABILITY":
-                if availability_resolved:
-                    continue
-            elif action == "CONFIRM_APPOINTMENT":
-                if confirmation_state != "confirmed":
-                    continue
-        else:
-            # For other intents, check if this step should be blocked by availability_resolved status
-            # SEARCH_AVAILABILITY should only run if availability_resolved == False
-            if action == "SEARCH_AVAILABILITY":
-                if availability_resolved:
-                    # Availability already resolved - don't search again
-                    continue
 
         # This step is ready - return it
         logger.debug(
             f"Selected execution step: {action} for intent {intent_upper} "
             f"(availability_resolved={availability_resolved}, "
+            f"availability_check_required={flags.get('availability_check_required')}, "
             f"confirmation_state={confirmation_state}, "
             f"collected_slots={collected_slot_names}, mode={mode})"
         )

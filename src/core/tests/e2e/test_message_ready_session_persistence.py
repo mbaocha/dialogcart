@@ -90,20 +90,15 @@ def _executed_success_after_premium_outcome():
     }
 
 
-def test_ready_outcome_persists_service_id_slots(user_id):
+def test_ready_outcome_persists_service_id_slots(user_id, api_client):
     """Simulate turn 2 (premium → SEARCH_AVAILABILITY): slots must survive on disk."""
-    from fastapi.testclient import TestClient
-
-    from core.orchestration.api.main import app
-
     save_session(user_id, _turn1_session())
 
     with patch(
         "core.orchestration.api.message.handle_message",
         return_value=_ready_after_premium_outcome(),
     ):
-        client = TestClient(app)
-        resp = client.post(
+        resp = api_client.post(
             "/api/message",
             json={"user_id": user_id, "text": "premium", "organization_id": 1},
         )
@@ -119,20 +114,15 @@ def test_ready_outcome_persists_service_id_slots(user_id):
     assert any(m.get("role") == "user" and m.get("text") == "premium" for m in messages)
 
 
-def test_executed_success_outcome_persists_service_id_slots(user_id):
+def test_executed_success_outcome_persists_service_id_slots(user_id, api_client):
     """Availability execution with status=success must still persist merged booking slots."""
-    from fastapi.testclient import TestClient
-
-    from core.orchestration.api.main import app
-
     save_session(user_id, _turn1_session())
 
     with patch(
         "core.orchestration.api.message.handle_message",
         return_value=_executed_success_after_premium_outcome(),
     ):
-        client = TestClient(app)
-        resp = client.post(
+        resp = api_client.post(
             "/api/message",
             json={"user_id": user_id, "text": "premium", "organization_id": 1},
         )
@@ -194,7 +184,7 @@ def _awaiting_confirmation_after_time_bind_outcome():
             "plan": {
                 "status": "AWAITING_CONFIRMATION",
                 "stage": "CONFIRM",
-                "action": "CONFIRM_APPOINTMENT",
+                "action": None,
                 "intent_name": "CREATE_APPOINTMENT",
                 "awaiting": "USER_CONFIRMATION",
             },
@@ -222,20 +212,15 @@ def _awaiting_confirmation_after_time_bind_outcome():
     }
 
 
-def test_awaiting_confirmation_outcome_persists_bound_datetime_and_pending(user_id):
+def test_awaiting_confirmation_outcome_persists_bound_datetime_and_pending(user_id, api_client):
     """Time-bind turn (AWAITING_CONFIRMATION) must persist slots and confirmation_state."""
-    from fastapi.testclient import TestClient
-
-    from core.orchestration.api.main import app
-
     save_session(user_id, _session_after_availability_search())
 
     with patch(
         "core.orchestration.api.message.handle_message",
         return_value=_awaiting_confirmation_after_time_bind_outcome(),
     ):
-        client = TestClient(app)
-        resp = client.post(
+        resp = api_client.post(
             "/api/message",
             json={"user_id": user_id, "text": "2.30pm", "organization_id": 1},
         )

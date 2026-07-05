@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 
 import pytest
 
+from core.planning.facts import build_policy_execution_flags
 from core.policy.intent_policy import (
     get_planning_required_slots,
     select_next_execution_step,
@@ -129,7 +130,15 @@ class TestCommittingStepInvariants:
 
             # Test with missing required slots
             incomplete_slots = {}
-            flags = {"availability_resolved": True, "confirmation_state": "confirmed"}
+            flags = build_policy_execution_flags(
+                intent_name=intent_name,
+                slots=incomplete_slots,
+                availability_resolved=True,
+                confirmation_state="confirmed",
+            )
+            flags["availability_ready"] = True
+            flags["user_confirmation_satisfied"] = True
+            flags["booking_hold_ready"] = True
 
             selected_step = select_next_execution_step(
                 intent_name, incomplete_slots, flags
@@ -153,8 +162,8 @@ class TestCommittingStepInvariants:
             "MODIFY_RESERVATION",
         ],
     )
-    def test_committing_step_requires_availability_resolved(self, intent_name):
-        """Committing steps that require availability_resolved cannot execute without it."""
+    def test_committing_step_requires_availability_ready(self, intent_name):
+        """Committing steps that require availability_ready cannot execute without it."""
         policy = _load_intent_policy()
         intent_config = policy.get(intent_name)
 
@@ -174,33 +183,40 @@ class TestCommittingStepInvariants:
         for step_name, step_config in committing_steps:
             requires = step_config.get("requires", [])
 
-            if "availability_resolved" not in requires:
-                continue  # Skip steps that don't require availability_resolved
+            if "availability_ready" not in requires:
+                continue  # Skip steps that don't require availability_ready
 
             # Get required slots for this intent
             required_slots = get_planning_required_slots(intent_name)
 
-            # Test with all required slots but availability_resolved=False
+            # Test with all required slots but availability_ready=False
             complete_slots = {slot: f"test_{slot}" for slot in required_slots}
-            flags = {"availability_resolved": False, "confirmation_state": "confirmed"}
+            flags = build_policy_execution_flags(
+                intent_name=intent_name,
+                slots=complete_slots,
+                availability_resolved=False,
+                confirmation_state="confirmed",
+            )
+            flags["availability_ready"] = False
+            flags["user_confirmation_satisfied"] = True
 
             selected_step = select_next_execution_step(
                 intent_name, complete_slots, flags
             )
 
-            # The committing step should not be selected when availability_resolved=False
+            # The committing step should not be selected when availability_ready=False
             if selected_step and selected_step.get("action") == step_name:
                 pytest.fail(
                     f"Policy incorrectly selected committing step {step_name} for {intent_name} "
-                    f"when availability_resolved=False"
+                    f"when availability_ready=False"
                 )
 
     @pytest.mark.parametrize(
         "intent_name",
         ["CREATE_APPOINTMENT", "MODIFY_BOOKING", "MODIFY_RESERVATION"],
     )
-    def test_committing_step_requires_confirmation_state_confirmed(self, intent_name):
-        """Committing steps that require confirmation_state_confirmed cannot execute without it."""
+    def test_committing_step_requires_user_confirmation_satisfied(self, intent_name):
+        """Committing steps that require user_confirmation_satisfied cannot execute without it."""
         policy = _load_intent_policy()
         intent_config = policy.get(intent_name)
 
@@ -220,25 +236,33 @@ class TestCommittingStepInvariants:
         for step_name, step_config in committing_steps:
             requires = step_config.get("requires", [])
 
-            if "confirmation_state_confirmed" not in requires:
-                continue  # Skip steps that don't require confirmation_state_confirmed
+            if "user_confirmation_satisfied" not in requires:
+                continue  # Skip steps that don't require user_confirmation_satisfied
 
             # Get required slots for this intent
             required_slots = get_planning_required_slots(intent_name)
 
-            # Test with all required slots but confirmation_state != "confirmed"
+            # Test with all required slots but user not confirmed
             complete_slots = {slot: f"test_{slot}" for slot in required_slots}
-            flags = {"availability_resolved": True, "confirmation_state": "pending"}
+            flags = build_policy_execution_flags(
+                intent_name=intent_name,
+                slots=complete_slots,
+                availability_resolved=True,
+                confirmation_state="pending",
+            )
+            flags["availability_ready"] = True
+            flags["user_confirmation_satisfied"] = False
+            flags["time_selection_ready"] = True
 
             selected_step = select_next_execution_step(
                 intent_name, complete_slots, flags
             )
 
-            # The committing step should not be selected when confirmation_state != "confirmed"
+            # The committing step should not be selected when user_confirmation_satisfied=False
             if selected_step and selected_step.get("action") == step_name:
                 pytest.fail(
                     f"Policy incorrectly selected committing step {step_name} for {intent_name} "
-                    f"when confirmation_state != 'confirmed'"
+                    f"when user_confirmation_satisfied=False"
                 )
 
 
@@ -279,7 +303,17 @@ class TestIdempotencyGuard:
             complete_slots = {slot: f"test_{slot}" for slot in required_slots}
 
             # Set up flags for committing step
-            flags = {"availability_resolved": True, "confirmation_state": "confirmed"}
+            flags = build_policy_execution_flags(
+                intent_name=intent_name,
+                slots=complete_slots,
+                availability_resolved=True,
+                confirmation_state="confirmed",
+            )
+            flags["availability_ready"] = True
+            flags["user_confirmation_satisfied"] = True
+            flags["booking_hold_ready"] = True
+            flags["time_selection_ready"] = True
+            flags["booking_identified"] = True
 
             # First execution - should select committing step
             selected_step = select_next_execution_step(

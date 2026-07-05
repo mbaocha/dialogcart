@@ -7,6 +7,7 @@ Usage:
     python core/tests/test.py --category execution
     RUN_REAL_LUMA_E2E=true python core/tests/test.py --category smoke
     python core/tests/test.py --category unit
+    python core/tests/test.py --category e2e
     python core/tests/test.py --list
 """
 
@@ -35,6 +36,7 @@ TEST_CATEGORIES = {
     "planning": "core/tests/planning",
     "execution": "core/tests/execution",
     "smoke": "core/tests/smoke",
+    "e2e": "core/tests/e2e",
     "orchestration": "core/tests/orchestration",
     "session": "core/tests/session",
     "rendering": "core/tests/rendering",

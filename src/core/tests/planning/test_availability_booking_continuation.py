@@ -439,8 +439,9 @@ def test_e2e_july6_search_fingerprint_and_time_selection_confirm():
     assert result4.get("success") is True, result4.get("error")
     plan4 = result4.get("plan") or result4.get("result", {})
     assert plan4.get("status") == "AWAITING_CONFIRMATION"
-    assert plan4.get("action") == "CONFIRM_APPOINTMENT"
-    assert plan4.get("action") != "SEARCH_AVAILABILITY"
+    assert plan4.get("awaiting") == "USER_CONFIRMATION"
+    assert plan4.get("stage") == "CONFIRM"
+    assert plan4.get("action") is None
     mock_booking_client.create_booking.assert_not_called()
 
     slots4 = plan4.get("slots", {})

@@ -4,7 +4,7 @@ Integration tests: RAG / HANDLER_DELEGATED path.
 Covers:
 - Turn 1: GENERAL_INQUIRY → HANDLER_DELEGATED; handler returns render_instruction + facts
 - Turn 2: session.conversation → luma.resolve called with conversation_context
-- Session: messages appended after HANDLER_DELEGATED turn (via API endpoint)
+- Session: messages appended after HANDLER_DELEGATED turn (see core/tests/e2e/)
 - Booking intent: CREATE_APPOINTMENT → NOT HANDLER_DELEGATED
 - Missing organization_id → no HTTP call to commerce
 """
@@ -17,7 +17,7 @@ import pytest
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.nlu import LumaClient
 from core.orchestration.orchestrator import handle_message
-from core.orchestration.session import clear_session, get_session
+from core.orchestration.session import clear_session
 
 os.environ.setdefault("CORE_EXECUTION_MODE", "test")
 
@@ -80,7 +80,7 @@ class TestRagHandlerIntegration:
         from extensions.handlers.bootstrap import register_default_handlers
         register_default_handlers()
         for uid in ("test-rag-t1", "test-rag-t1b", "test-rag-t2", "test-rag-t3",
-                    "test-rag-noid", "test-rag-sess"):
+                    "test-rag-noid"):
             clear_session(uid)
 
     # ------------------------------------------------------------------
@@ -175,51 +175,6 @@ class TestRagHandlerIntegration:
         assert conv_ctx.get("last_intent") == "GENERAL_INQUIRY"
         assert conv_ctx.get("last_search_query") == "return policies"
         assert len(conv_ctx.get("turns", [])) == 1
-
-    # ------------------------------------------------------------------
-    # Session — messages appended via API endpoint
-    # ------------------------------------------------------------------
-
-    def test_session_messages_appended_after_handler_delegated(self):
-        """After HANDLER_DELEGATED turn via the API, session.messages has user+assistant."""
-        from fastapi.testclient import TestClient
-        from core.orchestration.api.main import app
-
-        uid = "test-rag-sess"
-        _delegated_result = {
-            "success": True,
-            "outcome": {
-                "status": "HANDLER_DELEGATED",
-                "active_handler": "rag",
-                "search_query": "business hours",
-                "intent_name": "GENERAL_INQUIRY",
-                "slots": {},
-            },
-            "_merged_luma_response": None,
-            "message": None,
-            "error": None,
-        }
-
-        with patch(
-            "core.orchestration.api.message.handle_message", return_value=_delegated_result
-        ), patch(
-            "extensions.handlers.adapters.rag.FaqClient"
-        ) as MockFaqClient, patch(
-            "core.orchestration.api.message.render_llm", return_value="We are open Mon–Fri 9am–6pm."
-        ):
-            MockFaqClient.return_value.retrieve.return_value = _FAQ_DATA
-            client = TestClient(app)
-            resp = client.post(
-                "/api/message",
-                json={"user_id": uid, "text": "what are your hours?", "organization_id": 1},
-            )
-
-        assert resp.status_code == 200
-        session = get_session(uid)
-        assert session is not None, "Session must be saved after HANDLER_DELEGATED turn"
-        messages = session.get("messages") or []
-        assert any(m.get("role") == "user" for m in messages)
-        assert any(m.get("role") == "assistant" for m in messages)
 
     # ------------------------------------------------------------------
     # Missing organization_id — no HTTP call to commerce

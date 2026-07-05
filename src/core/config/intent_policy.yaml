@@ -15,6 +15,7 @@
 # - execution: Defines execution actions with their requirements and sequencing
 #   - Each step has: mode (exploratory | committing), required_slots, optional_slots,
 #     resolves, requires, client
+#   - requires: business facts (derived at runtime) that must be true to select the step
 
 intents:
   CREATE_APPOINTMENT:
@@ -39,6 +40,8 @@ intents:
         optional_slots:
           - date
           - time
+        requires:
+          - availability_check_required
         resolves:
           - availability
         client: availability_client
@@ -50,8 +53,9 @@ intents:
           - date
           - time
         requires:
-          - availability_resolved
-          - confirmation_state_confirmed
+          - availability_ready
+          - time_selection_ready
+          - user_confirmation_satisfied
         client: booking_client
 
   CREATE_RESERVATION:
@@ -73,6 +77,8 @@ intents:
           - service_id
         optional_slots:
           - date_range
+        requires:
+          - availability_check_required
         resolves:
           - availability
         client: availability_client
@@ -83,7 +89,7 @@ intents:
           - service_id
           - date_range
         requires:
-          - availability_resolved
+          - booking_hold_required
         client: booking_client
       FINALIZE_RESERVATION:
         mode: exploratory
@@ -91,7 +97,7 @@ intents:
           - booking_id
           - booking_code
         requires:
-          - booking_hold_created
+          - booking_hold_ready
         client: booking_client
 
   MODIFY_BOOKING:
@@ -111,6 +117,8 @@ intents:
       FETCH_BOOKING:
         mode: exploratory
         required_slots: []
+        requires:
+          - booking_identification_required
         resolves:
           - booking_id
         client: booking_client
@@ -123,7 +131,8 @@ intents:
           - time
           - date_range
         requires:
-          - booking_id_resolved
+          - booking_identified
+          - availability_check_required
         resolves:
           - availability
         client: availability_client
@@ -137,8 +146,8 @@ intents:
           - time
           - date_range
         requires:
-          - availability_resolved
-          - confirmation_state_confirmed
+          - availability_ready
+          - user_confirmation_satisfied
         client: booking_client
 
   MODIFY_RESERVATION:
@@ -158,6 +167,8 @@ intents:
       FETCH_BOOKING:
         mode: exploratory
         required_slots: []
+        requires:
+          - booking_identification_required
         resolves:
           - booking_id
         client: booking_client
@@ -170,7 +181,8 @@ intents:
           - end_date
           - date_range
         requires:
-          - booking_id_resolved
+          - booking_identified
+          - availability_check_required
         resolves:
           - availability
         client: availability_client
@@ -183,8 +195,8 @@ intents:
           - end_date
           - date_range
         requires:
-          - availability_resolved
-          - confirmation_state_confirmed
+          - availability_ready
+          - user_confirmation_satisfied
         client: booking_client
 
   CANCEL_BOOKING:
@@ -201,6 +213,8 @@ intents:
       FETCH_BOOKING:
         mode: exploratory
         required_slots: []
+        requires:
+          - booking_identification_required
         resolves:
           - booking_id
         client: booking_client
@@ -210,7 +224,7 @@ intents:
           - booking_id
         optional_slots: []
         requires:
-          - booking_id_resolved
+          - booking_identified
         client: booking_client
 
   CHECK_AVAILABILITY:
@@ -234,6 +248,8 @@ intents:
           - date
           - time
           - date_range
+        requires:
+          - availability_check_required
         resolves:
           - availability
         client: availability_client
@@ -251,7 +267,8 @@ intents:
       FETCH_BOOKING:
         mode: exploratory
         required_slots: []
+        requires:
+          - booking_identification_required
         resolves:
           - booking_id
         client: booking_client
-

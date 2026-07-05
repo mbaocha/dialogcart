@@ -76,12 +76,28 @@ def assert_turn_expectations(
             f"got {actual_status}"
         )
 
+    if "stage" in expectations:
+        expected_stage = expectations["stage"]
+        actual_stage = plan.get("stage") or normalized.get("stage")
+        assert actual_stage == expected_stage, (
+            f"[{scenario_name}] Turn {turn_number}: Expected stage {expected_stage}, "
+            f"got {actual_stage}"
+        )
+
+    if "awaiting" in expectations:
+        expected_awaiting = expectations["awaiting"]
+        actual_awaiting = normalized.get("awaiting") or plan.get("awaiting")
+        assert actual_awaiting == expected_awaiting, (
+            f"[{scenario_name}] Turn {turn_number}: Expected awaiting {expected_awaiting}, "
+            f"got {actual_awaiting}"
+        )
+
     if "action" in expectations:
         expected_action = expectations["action"]
         actual_action = plan.get("action")
         assert actual_action == expected_action, (
-            f"[{scenario_name}] Turn {turn_number}: Expected action {expected_action}, "
-            f"got {actual_action}"
+            f"[{scenario_name}] Turn {turn_number}: Expected action {expected_action!r}, "
+            f"got {actual_action!r}"
         )
 
     if assert_missing_slots and "missing_slots" in expectations:

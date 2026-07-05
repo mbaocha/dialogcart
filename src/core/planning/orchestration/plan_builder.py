@@ -10,6 +10,8 @@ This module is pure and side-effect free:
 
 Responsibilities:
 - Building decision plans with status, allowed_actions, blocked_actions, awaiting
+- plan.action is the policy-selected execution step only (nullable when nothing runs)
+- plan.stage is derived from execution action or status (presentation phase)
 - All intent-specific logic comes from intent_policy.yaml via select_next_execution_step
 """
 
@@ -433,38 +435,14 @@ def _enforce_committing_step_invariants(
     )
 
     # Invariant 2: All requires must be satisfied
-    availability_resolved = flags.get("availability_resolved", False)
-    confirmation_state = flags.get("confirmation_state")
+    from core.policy.intent_policy import _evaluate_step_requirement
 
     for requirement in requires:
-        if requirement == "availability_resolved":
-            assert availability_resolved, (
-                f"Invariant violation: Cannot execute committing step {action} for {intent_name}. "
-                f"Requirement 'availability_resolved' not satisfied (availability_resolved={availability_resolved})"
-            )
-        elif requirement == "booking_hold_created":
-            # booking_hold_created means booking_id must be present (created by CREATE_BOOKING_HOLD)
-            assert (
-                "booking_id" in effective_slots
-                and effective_slots.get("booking_id") is not None
-            ), (
-                f"Invariant violation: Cannot execute committing step {action} for {intent_name}. "
-                f"Requirement 'booking_hold_created' not satisfied (booking_id not in slots or None)"
-            )
-        elif requirement == "confirmation_state_confirmed":
-            assert confirmation_state == "confirmed", (
-                f"Invariant violation: Cannot execute committing step {action} for {intent_name}. "
-                f"Requirement 'confirmation_state_confirmed' not satisfied (confirmation_state={confirmation_state})"
-            )
-        elif requirement == "booking_id_resolved":
-            # booking_id_resolved means booking_id must be present and non-None
-            assert (
-                "booking_id" in effective_slots
-                and effective_slots.get("booking_id") is not None
-            ), (
-                f"Invariant violation: Cannot execute committing step {action} for {intent_name}. "
-                f"Requirement 'booking_id_resolved' not satisfied (booking_id not in slots or None)"
-            )
+        satisfied = _evaluate_step_requirement(requirement, flags=flags)
+        assert satisfied, (
+            f"Invariant violation: Cannot execute committing step {action} for {intent_name}. "
+            f"Requirement {requirement!r} not satisfied (flags={flags})"
+        )
 
     # Invariant 3: Idempotency guard - cannot execute same committing step twice in same session
     if session_state:
@@ -476,6 +454,59 @@ def _enforce_committing_step_invariants(
             )
             # Note: We log a warning but don't assert - idempotency is handled at execution layer
             # This is just a guard to catch programming errors
+
+
+def _build_policy_execution_flags(
+    *,
+    intent_name: str,
+    effective_slots: Dict[str, Any],
+    luma_response: Dict[str, Any],
+    session_state: Optional[Dict[str, Any]],
+    missing_slots: List[str],
+    needs_clarification: bool,
+    availability_resolved: bool,
+    confirmation_state: Optional[str],
+) -> Dict[str, Any]:
+    from core.planning.facts import build_policy_execution_flags
+
+    return build_policy_execution_flags(
+        intent_name=intent_name,
+        slots=effective_slots,
+        session_state=session_state,
+        luma_response=luma_response,
+        missing_slots=missing_slots,
+        needs_clarification=needs_clarification,
+        availability_resolved=availability_resolved,
+        confirmation_state=confirmation_state,
+    )
+
+
+def _stage_for_execution_action(
+    action: Optional[str], selected_step: Dict[str, Any]
+) -> Optional[str]:
+    """Map a policy-selected execution action to a presentation stage."""
+    if action == "FETCH_BOOKING":
+        return "IDENTIFY"
+    if action == "SEARCH_AVAILABILITY":
+        return "AVAILABILITY"
+    if action in (
+        "CONFIRM_APPOINTMENT",
+        "FINALIZE_RESERVATION",
+        "APPLY_MODIFICATION",
+        "CONFIRM_CANCELLATION",
+    ):
+        return "CONFIRM"
+    mode = selected_step.get("mode", "exploratory")
+    return "AVAILABILITY" if mode == "exploratory" else "CONFIRM"
+
+
+def _derive_stage_from_status(status: str) -> Optional[str]:
+    """Derive presentation stage when no execution action is selected."""
+    if status == "AWAITING_CONFIRMATION":
+        return "CONFIRM"
+    if status == "NEEDS_CLARIFICATION":
+        return "AVAILABILITY"
+    return None
 
 
 def build_decision_plan(
@@ -613,11 +644,16 @@ def build_decision_plan(
         if intent_name:
             from core.policy.intent_policy import select_next_execution_step
 
-            flags = {
-                "availability_resolved": availability_resolved,
-                "confirmation_state": confirmation_state,
-                "booking_hold_created": bool(effective_slots.get("booking_id")),
-            }
+            flags = _build_policy_execution_flags(
+                intent_name=intent_name,
+                effective_slots=effective_slots,
+                luma_response=luma_response,
+                session_state=session_state,
+                missing_slots=missing_slots,
+                needs_clarification=needs_clarification,
+                availability_resolved=availability_resolved,
+                confirmation_state=confirmation_state,
+            )
             selected_step = select_next_execution_step(
                 intent_name, effective_slots, flags
             )
@@ -762,21 +798,24 @@ def build_decision_plan(
     else:
         awaiting = None
 
-    # Derive stage and action using policy as the single source of truth
+    # Execution action: policy-selected only (nullable when nothing should execute).
     stage = None
     action = None
     action_branch = None
 
-    # POLICY-DRIVEN SELECTION: Always use select_next_execution_step
-    # This is the single source of truth for action selection
     if intent_name and intent_name != "UNKNOWN":
         from core.policy.intent_policy import select_next_execution_step
 
-        flags = {
-            "availability_resolved": availability_resolved,
-            "confirmation_state": confirmation_state,
-            "booking_hold_created": bool(effective_slots.get("booking_id")),
-        }
+        flags = _build_policy_execution_flags(
+            intent_name=intent_name,
+            effective_slots=effective_slots,
+            luma_response=luma_response,
+            session_state=session_state,
+            missing_slots=missing_slots,
+            needs_clarification=needs_clarification,
+            availability_resolved=availability_resolved,
+            confirmation_state=confirmation_state,
+        )
 
         selected_step = select_next_execution_step(intent_name, effective_slots, flags)
 
@@ -784,27 +823,11 @@ def build_decision_plan(
             action = selected_step.get("action")
             action_branch = "policy"
 
-            # Enforce runtime invariants for committing steps
             _enforce_committing_step_invariants(
                 intent_name, selected_step, effective_slots, flags, session_state
             )
 
-            # Determine stage based on action
-            if action == "FETCH_BOOKING":
-                stage = "IDENTIFY"
-            elif action == "SEARCH_AVAILABILITY":
-                stage = "AVAILABILITY"
-            elif action in (
-                "CONFIRM_APPOINTMENT",
-                "FINALIZE_RESERVATION",
-                "APPLY_MODIFICATION",
-                "CONFIRM_CANCELLATION",
-            ):
-                stage = "CONFIRM"
-            else:
-                # Default based on mode
-                mode = selected_step.get("mode", "exploratory")
-                stage = "AVAILABILITY" if mode == "exploratory" else "CONFIRM"
+            stage = _stage_for_execution_action(action, selected_step)
 
             logger.info(
                 f"[PLAN_SELECTION] Policy-driven selection: intent={intent_name}, "
@@ -813,71 +836,14 @@ def build_decision_plan(
                 f"rule=select_next_execution_step"
             )
         else:
-            # Policy returned None - this should not happen for valid intents
-            # Log warning but don't fail - allow graceful degradation
-            logger.warning(
-                f"[PLAN_SELECTION] Policy returned None for intent={intent_name}. "
-                f"This may indicate a missing or incomplete policy configuration."
+            action_branch = "no_execution_step"
+            logger.debug(
+                f"[PLAN_SELECTION] No execution step for intent={intent_name} "
+                f"(status={status}, awaiting={awaiting})"
             )
-            # Use first executable action as fallback
-            if (
-                intent_name == "CREATE_APPOINTMENT"
-                and confirmation_state == "pending"
-                and commit_action
-            ):
-                action = commit_action
-                action_branch = "awaiting_confirmation"
-                stage = "CONFIRM"
-            elif executable_actions:
-                fallback_action = executable_actions[0]
-                if (
-                    fallback_action == "SEARCH_AVAILABILITY"
-                    and availability_resolved
-                    and intent_name == "CREATE_APPOINTMENT"
-                ):
-                    from core.orchestration.temporal_proposal import (
-                        has_bound_booking_datetime,
-                    )
 
-                    if not has_bound_booking_datetime(
-                        effective_slots, session_state, luma_response
-                    ):
-                        action = None
-                        action_branch = "availability_searched_awaiting_time"
-                    else:
-                        action = fallback_action
-                        action_branch = "fallback_executable"
-                        stage = "AVAILABILITY"
-                else:
-                    action = fallback_action
-                    action_branch = "fallback_executable"
-                    stage = "AVAILABILITY"  # Default for exploratory actions
-            elif commit_action and commit_action in blocked_actions:
-                action = commit_action
-                action_branch = "awaiting_confirmation"
-                stage = "CONFIRM"
-            elif commit_action and commit_action in allowed_actions:
-                action = commit_action
-                action_branch = "fallback_commit"
-                stage = "CONFIRM"
-
-    # If still no action selected (e.g., UNKNOWN intent), set defaults
-    if action is None:
-        if (
-            intent_name == "CREATE_APPOINTMENT"
-            and confirmation_state == "pending"
-            and commit_action
-        ):
-            action = commit_action
-            action_branch = "awaiting_confirmation"
-            stage = "CONFIRM"
-        elif executable_actions:
-            action = executable_actions[0]
-            action_branch = "fallback_executable"
-            stage = "AVAILABILITY"
-        else:
-            action_branch = "no_action"
-            stage = None
+    if stage is None:
+        stage = _derive_stage_from_status(status)
 
     logger.debug(
         f"[PLAN_FINAL_DECISION] intent_name={intent_name}, "
