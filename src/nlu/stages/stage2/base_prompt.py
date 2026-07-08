@@ -177,6 +177,7 @@ def build_tool(
     include_search_query: bool = False,
     include_validated_intent: bool = True,
     include_service_candidates: bool = False,
+    include_operation: bool = False,
 ) -> dict:
     """Build a Stage 2 tool schema for a specific group."""
     props: dict = {}
@@ -225,6 +226,17 @@ def build_tool(
             ),
         }
         required.append("service_candidates")
+
+    if include_operation:
+        props["operation"] = {
+            "type": ["string", "null"],
+            "enum": ["browse_next", "browse_previous", None],
+            "description": (
+                "Set when the user is navigating previously presented availability "
+                "(browse_next or browse_previous). Null for new availability searches."
+            ),
+        }
+        required.append("operation")
 
     return {
         "name": name,

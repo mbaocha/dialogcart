@@ -529,9 +529,12 @@ python luma/api.py
 | File | Description |
 |------|-------------|
 | `README.md` | This file - main documentation |
+| `NLU_CONTRACT.md` | Luma/Core boundary — intents, operations, facts |
 | `test.py` | Full pipeline test runner |
 | `api.py` | REST API implementation |
 | `cli/interactive.py` | Interactive CLI |
+
+Core availability interaction contract (operation field, utterance mapping): [`../core/orchestration/contracts/AVAILABILITY_INTERACTION_CONTRACT.md`](../core/orchestration/contracts/AVAILABILITY_INTERACTION_CONTRACT.md).
 
 ---
 

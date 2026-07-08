@@ -1,8 +1,48 @@
 """Parity tests: SEARCH_AVAILABILITY driven by availability_check_required business fact."""
 
-from core.orchestration.availability_fingerprint import compute_availability_fingerprint
+from core.orchestration.availability_fingerprint import (
+    build_availability_fingerprint_slots,
+    compute_availability_fingerprint,
+)
 from core.planning.facts import build_policy_execution_flags
 from core.policy.intent_policy import select_next_execution_step
+
+
+def _availability_cache_session(
+    slots,
+    *,
+    intent_name="CREATE_APPOINTMENT",
+    organization_id=None,
+    session_state=None,
+    luma_response=None,
+):
+    session_state = dict(session_state or {})
+    luma_response = luma_response or {}
+    fp_slots = build_availability_fingerprint_slots(
+        slots,
+        intent_name=intent_name,
+        organization_id=organization_id,
+        luma_response=luma_response,
+        session_state=session_state,
+    )
+    search_date = fp_slots.get("date")
+    return {
+        **session_state,
+        "availability_fingerprint": compute_availability_fingerprint(
+            fp_slots, intent_name=intent_name
+        ),
+        "last_execution_result": {
+            "type": "availability",
+            "status": "success",
+            "slots": [
+                {
+                    "starts_at": f"{search_date or '2026-07-10'}T14:00:00Z",
+                    "ends_at": f"{search_date or '2026-07-10'}T14:30:00Z",
+                }
+            ],
+            "search_date": search_date,
+        },
+    }
 
 
 def _flags(
@@ -44,11 +84,7 @@ class TestSearchBusinessFactParity:
             "date": "2026-07-10",
             "organization_id": "org-1",
         }
-        session = {
-            "availability_fingerprint": compute_availability_fingerprint(
-                slots, intent_name="CREATE_APPOINTMENT"
-            )
-        }
+        session = _availability_cache_session(slots)
         step, flags = _select(
             "CREATE_APPOINTMENT",
             slots,
@@ -64,11 +100,7 @@ class TestSearchBusinessFactParity:
             "date": "2026-07-10",
             "organization_id": "org-1",
         }
-        session = {
-            "availability_fingerprint": compute_availability_fingerprint(
-                original, intent_name="CREATE_APPOINTMENT"
-            )
-        }
+        session = _availability_cache_session(original, intent_name="CREATE_APPOINTMENT")
         revised = {**original, "service_id": "svc-spa"}
         step, flags = _select(
             "CREATE_APPOINTMENT",
@@ -86,11 +118,7 @@ class TestSearchBusinessFactParity:
             "date": "2026-07-10",
             "organization_id": "org-1",
         }
-        session = {
-            "availability_fingerprint": compute_availability_fingerprint(
-                original, intent_name="CREATE_APPOINTMENT"
-            )
-        }
+        session = _availability_cache_session(original, intent_name="CREATE_APPOINTMENT")
         revised = {**original, "date": "2026-07-15"}
         step, flags = _select(
             "CREATE_APPOINTMENT",
@@ -108,11 +136,7 @@ class TestSearchBusinessFactParity:
             "date": "2026-07-10",
             "organization_id": "org-1",
         }
-        session = {
-            "availability_fingerprint": compute_availability_fingerprint(
-                slots, intent_name="CREATE_APPOINTMENT"
-            )
-        }
+        session = _availability_cache_session(slots)
         step, flags = _select(
             "CREATE_APPOINTMENT",
             slots,
@@ -122,7 +146,7 @@ class TestSearchBusinessFactParity:
         assert flags["availability_check_required"] is False
         assert step is None or step["action"] != "SEARCH_AVAILABILITY"
 
-    def test_bound_datetime_skips_search(self):
+    def test_bound_datetime_without_evidence_still_requires_search(self):
         slots = {
             "service_id": "svc-haircut",
             "date": "2026-07-10",
@@ -132,10 +156,11 @@ class TestSearchBusinessFactParity:
         step, flags = _select(
             "CREATE_APPOINTMENT",
             slots,
-            availability_resolved=True,
+            availability_resolved=False,
         )
-        assert flags["availability_check_required"] is False
-        assert step is None or step["action"] != "SEARCH_AVAILABILITY"
+        assert flags["availability_check_required"] is True
+        assert step is not None
+        assert step["action"] == "SEARCH_AVAILABILITY"
 
     def test_create_reservation_search_uses_business_fact(self):
         slots = {
@@ -154,11 +179,7 @@ class TestSearchBusinessFactParity:
             "date_range": {"start": "2026-07-10", "end": "2026-07-12"},
             "organization_id": "org-1",
         }
-        session = {
-            "availability_fingerprint": compute_availability_fingerprint(
-                slots, intent_name="CREATE_RESERVATION"
-            )
-        }
+        session = _availability_cache_session(slots, intent_name="CREATE_RESERVATION")
         step, flags = _select(
             "CREATE_RESERVATION",
             slots,
@@ -187,11 +208,7 @@ class TestSearchBusinessFactParity:
             "date": "2026-07-10",
             "time": "14:00",
         }
-        session = {
-            "availability_fingerprint": compute_availability_fingerprint(
-                slots, intent_name="MODIFY_BOOKING"
-            )
-        }
+        session = _availability_cache_session(slots, intent_name="MODIFY_BOOKING")
         step, flags = _select(
             "MODIFY_BOOKING",
             slots,
@@ -210,11 +227,7 @@ class TestSearchBusinessFactParity:
             "time": "14:00",
             "organization_id": "org-1",
         }
-        session = {
-            "availability_fingerprint": compute_availability_fingerprint(
-                slots, intent_name="MODIFY_BOOKING"
-            )
-        }
+        session = _availability_cache_session(slots, intent_name="MODIFY_BOOKING")
         step, flags = _select(
             "MODIFY_BOOKING",
             slots,

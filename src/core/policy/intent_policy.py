@@ -390,6 +390,120 @@ def _evaluate_step_requirement(requirement: str, *, flags: Dict[str, Any]) -> bo
     return False
 
 
+def evaluate_execution_step_candidates(
+    intent_name: str, slots: Dict[str, Any], flags: Optional[Dict[str, Any]] = None
+) -> tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
+    """
+    Evaluate every policy execution step and return the selected step plus
+    per-candidate evaluation detail for decision tracing.
+    """
+    if flags is None:
+        flags = {}
+
+    intent_upper = intent_name.upper() if intent_name else None
+    if not intent_upper:
+        return None, []
+
+    steps = get_execution_steps(intent_name)
+    if not steps:
+        return None, []
+
+    collected_slot_names = set(
+        slot_name for slot_name, slot_value in slots.items() if slot_value is not None
+    )
+    planning_required_slots = get_planning_required_slots(intent_name)
+    planning_required_slots_set = set(planning_required_slots)
+
+    selected_step: Optional[Dict[str, Any]] = None
+    candidates: List[Dict[str, Any]] = []
+
+    for step in steps:
+        action = step.get("action")
+        required_slots = step.get("required_slots", [])
+        requires = step.get("requires", [])
+        mode = step.get("mode", "exploratory")
+
+        blocking_requirements: List[str] = []
+        missing_requirements: List[str] = []
+        failed_predicates: List[Dict[str, Any]] = []
+        missing_slots: List[str] = []
+        matched = True
+        reason_code = "STEP_SELECTED"
+        reason_text = f"Execution step {action!r} is eligible"
+
+        if mode == "committing":
+            missing_planning = sorted(
+                planning_required_slots_set - collected_slot_names
+            )
+            if missing_planning:
+                matched = False
+                missing_slots = missing_planning
+                reason_code = "SLOTS_INCOMPLETE"
+                reason_text = (
+                    f"Committing step {action!r} blocked by missing planning slots"
+                )
+                failed_predicates.append(
+                    {
+                        "predicate": "planning.required_slots ⊆ collected_slots",
+                        "actual": sorted(collected_slot_names),
+                        "reason_code": "SLOTS_INCOMPLETE",
+                    }
+                )
+        else:
+            required_slots_set = set(required_slots)
+            missing_step_slots = sorted(required_slots_set - collected_slot_names)
+            if missing_step_slots:
+                matched = False
+                missing_slots = missing_step_slots
+                reason_code = "SLOTS_INCOMPLETE"
+                reason_text = (
+                    f"Exploratory step {action!r} blocked by missing step slots"
+                )
+                failed_predicates.append(
+                    {
+                        "predicate": f"step.required_slots({required_slots}) ⊆ collected_slots",
+                        "actual": sorted(collected_slot_names),
+                        "reason_code": "SLOTS_INCOMPLETE",
+                    }
+                )
+
+        for requirement in requires:
+            if not _evaluate_step_requirement(requirement, flags=flags):
+                matched = False
+                missing_requirements.append(requirement)
+                blocking_requirements.append(requirement)
+                reason_code = "REQUIREMENT_UNSATISFIED"
+                reason_text = (
+                    f"Step {action!r} blocked by unsatisfied requirement "
+                    f"{requirement!r}"
+                )
+                failed_predicates.append(
+                    {
+                        "predicate": f"flags[{requirement!r}] == true",
+                        "actual": flags.get(requirement),
+                        "reason_code": "REQUIREMENT_UNSATISFIED",
+                    }
+                )
+
+        candidates.append(
+            {
+                "id": action or "unknown",
+                "matched": matched,
+                "reason_code": reason_code,
+                "reason_text": reason_text,
+                "blocking_requirements": blocking_requirements,
+                "missing_requirements": missing_requirements,
+                "failed_predicates": failed_predicates,
+                "missing_slots": missing_slots,
+            }
+        )
+
+        if matched and selected_step is None:
+            selected_step = step
+
+    return selected_step, candidates
+
+
 def select_next_execution_step(
     intent_name: str, slots: Dict[str, Any], flags: Optional[Dict[str, Any]] = None
 ) -> Optional[Dict[str, Any]]:
@@ -415,72 +529,29 @@ def select_next_execution_step(
     if flags is None:
         flags = {}
 
-    # Normalize intent name
     intent_upper = intent_name.upper() if intent_name else None
     if not intent_upper:
         return None
 
-    # Get available execution steps
-    steps = get_execution_steps(intent_name)
-    if not steps:
-        # No execution steps defined in policy - return None
+    selected_step, _ = evaluate_execution_step_candidates(intent_name, slots, flags)
+    if selected_step is None:
         return None
 
-    # Extract flags for debug logging
+    action = selected_step.get("action")
     availability_resolved = flags.get("availability_resolved", False)
     confirmation_state = flags.get("confirmation_state")
-
-    # Get collected slot names (non-None values)
     collected_slot_names = set(
         slot_name for slot_name, slot_value in slots.items() if slot_value is not None
     )
-
-    # For CONFIRM_APPOINTMENT, we need to check planning.required_slots, not just step.required_slots
-    planning_required_slots = get_planning_required_slots(intent_name)
-    planning_required_slots_set = set(planning_required_slots)
-
-    # Evaluate each step to see if it's ready
-    for step in steps:
-        action = step.get("action")
-        required_slots = step.get("required_slots", [])
-        requires = step.get("requires", [])
-
-        # For committing steps (like CONFIRM_APPOINTMENT), check planning completeness
-        # For exploratory steps (like SEARCH_AVAILABILITY), check step-specific slots
-        mode = step.get("mode", "exploratory")
-
-        if mode == "committing":
-            # Committing steps require all planning.required_slots to be satisfied
-            if not planning_required_slots_set.issubset(collected_slot_names):
-                # Planning completeness not satisfied - skip this step
-                continue
-        else:
-            # Exploratory steps only need their own required_slots
-            required_slots_set = set(required_slots)
-            if not required_slots_set.issubset(collected_slot_names):
-                continue
-
-        # Check prerequisites (requires)
-        requirements_met = True
-        for requirement in requires:
-            if not _evaluate_step_requirement(requirement, flags=flags):
-                requirements_met = False
-                break
-        if not requirements_met:
-            continue
-
-        # This step is ready - return it
-        logger.debug(
-            f"Selected execution step: {action} for intent {intent_upper} "
-            f"(availability_resolved={availability_resolved}, "
-            f"availability_check_required={flags.get('availability_check_required')}, "
-            f"confirmation_state={confirmation_state}, "
-            f"collected_slots={collected_slot_names}, mode={mode})"
-        )
-        return step
-
-    # No step is ready
-    return None
+    logger.debug(
+        f"Selected execution step: {action} for intent {intent_upper} "
+        f"(availability_resolved={availability_resolved}, "
+        f"availability_check_required={flags.get('availability_check_required')}, "
+        f"confirmation_state={confirmation_state}, "
+        f"collected_slots={collected_slot_names}, "
+        f"mode={selected_step.get('mode', 'exploratory')})"
+    )
+    return selected_step
 
 
 def validate_policy_completeness() -> List[str]:

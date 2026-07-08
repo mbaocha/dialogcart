@@ -1,0 +1,263 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://dialogcart.dev/schemas/decision-trace/v1.1.json",
+  "title": "DialogCartDecisionTrace",
+  "type": "object",
+  "required": ["version", "turn", "root_id", "records", "edges", "summary"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": "1.1" },
+    "turn": {
+      "type": "object",
+      "required": ["user_id", "text"],
+      "additionalProperties": false,
+      "properties": {
+        "user_id": { "type": "string" },
+        "text": { "type": "string" },
+        "transaction_id": { "type": "string" }
+      }
+    },
+    "root_id": { "type": ["string", "null"] },
+    "records": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/TraceRecord" }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/GraphEdge" }
+    },
+    "summary": { "$ref": "#/$defs/DecisionSummary" },
+    "first_failed_invariant": { "type": ["string", "null"] },
+    "timing_ms": { "type": "number", "minimum": 0 },
+    "stage_timings": {
+      "type": "object",
+      "additionalProperties": { "type": "number", "minimum": 0 }
+    },
+    "session_changes": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/SessionChange" }
+    },
+    "view": { "type": "string" }
+  },
+  "$defs": {
+    "Subsystem": {
+      "type": "string",
+      "enum": ["api", "session", "planning", "orchestration", "execution"]
+    },
+    "RecordKind": {
+      "type": "string",
+      "enum": ["evidence", "decision", "mutation"]
+    },
+    "GraphEdge": {
+      "type": "object",
+      "required": ["from", "to", "kind"],
+      "additionalProperties": false,
+      "properties": {
+        "from": { "type": "string", "minLength": 1 },
+        "to": { "type": "string", "minLength": 1 },
+        "kind": {
+          "type": "string",
+          "enum": ["child", "depends_on", "causes"]
+        }
+      }
+    },
+    "FailedPredicate": {
+      "type": "object",
+      "required": ["predicate", "reason_code"],
+      "additionalProperties": false,
+      "properties": {
+        "predicate": { "type": "string" },
+        "actual": {},
+        "reason_code": { "type": "string" }
+      }
+    },
+    "Candidate": {
+      "type": "object",
+      "required": ["id", "matched", "reason_code", "reason_text"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string" },
+        "matched": { "type": "boolean" },
+        "reason_code": { "type": "string" },
+        "reason_text": { "type": "string" },
+        "blocking_requirements": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "missing_requirements": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "failed_predicates": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/FailedPredicate" }
+        },
+        "satisfied_requirements": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "missing_slots": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "IgnoredInput": {
+      "type": "object",
+      "required": ["reason_code", "reason_text"],
+      "additionalProperties": false,
+      "properties": {
+        "reason_code": { "type": "string" },
+        "reason_text": { "type": "string" }
+      }
+    },
+    "InvariantResult": {
+      "type": "object",
+      "required": ["invariant_id", "invariant_ok"],
+      "additionalProperties": false,
+      "properties": {
+        "invariant_id": { "type": "string" },
+        "invariant_ok": { "type": "boolean" },
+        "message": { "type": "string" }
+      }
+    },
+    "EvidenceRecord": {
+      "type": "object",
+      "required": ["id", "kind", "subsystem", "evidence_type", "facts"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "const": "evidence" },
+        "subsystem": { "$ref": "#/$defs/Subsystem" },
+        "evidence_type": { "type": "string", "minLength": 1 },
+        "observed_at_stage": { "type": "string" },
+        "facts": { "type": "object" },
+        "source": { "type": "string" },
+        "child_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "DecisionRecord": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "subsystem",
+        "decision_type",
+        "winner",
+        "reason_code",
+        "reason_text"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "const": "decision" },
+        "subsystem": { "$ref": "#/$defs/Subsystem" },
+        "decision_type": { "type": "string", "minLength": 1 },
+        "winner": {},
+        "reason_code": { "type": "string", "minLength": 1 },
+        "reason_text": { "type": "string" },
+        "candidates": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Candidate" }
+        },
+        "inputs_evaluated": { "type": "object" },
+        "inputs_ignored": {
+          "type": "object",
+          "additionalProperties": { "$ref": "#/$defs/IgnoredInput" }
+        },
+        "depends_on": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "child_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "invariants": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/InvariantResult" }
+        },
+        "skipped": { "type": "boolean" },
+        "supersedes_id": { "type": ["string", "null"] },
+        "category": { "type": "string" }
+      }
+    },
+    "MutationRecord": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "subsystem",
+        "decision_id",
+        "field",
+        "previous",
+        "new",
+        "reason_code",
+        "reason_text",
+        "sequence"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "kind": { "const": "mutation" },
+        "subsystem": { "$ref": "#/$defs/Subsystem" },
+        "decision_id": { "type": "string", "minLength": 1 },
+        "field": { "type": "string", "minLength": 1 },
+        "previous": {},
+        "new": {},
+        "reason_code": { "type": "string", "minLength": 1 },
+        "reason_text": { "type": "string" },
+        "presentation_only": { "type": "boolean" },
+        "sequence": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "TraceRecord": {
+      "oneOf": [
+        { "$ref": "#/$defs/EvidenceRecord" },
+        { "$ref": "#/$defs/DecisionRecord" },
+        { "$ref": "#/$defs/MutationRecord" }
+      ]
+    },
+    "WhyChainStep": {
+      "type": "object",
+      "required": ["step", "id"],
+      "additionalProperties": true,
+      "properties": {
+        "step": {
+          "type": "string",
+          "enum": ["evidence", "decision", "mutation", "outcome"]
+        },
+        "id": { "type": "string" }
+      }
+    },
+    "DecisionSummary": {
+      "type": "object",
+      "required": ["outcome", "why_text", "why_chain"],
+      "additionalProperties": false,
+      "properties": {
+        "outcome": { "type": "object" },
+        "why_text": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "why_chain": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/WhyChainStep" }
+        }
+      }
+    },
+    "SessionChange": {
+      "type": "object",
+      "required": ["field", "previous", "new"],
+      "additionalProperties": false,
+      "properties": {
+        "field": { "type": "string" },
+        "previous": {},
+        "new": {}
+      }
+    }
+  }
+}

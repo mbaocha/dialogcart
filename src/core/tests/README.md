@@ -13,6 +13,13 @@ core/tests/
   execution/        # mock booking + commit flows
   smoke/            # unified YAML smoke runner
   e2e/              # REST API tests (POST /api/message via TestClient)
+    framework/      # reusable DSL (conversation.py, runner.py, fixtures.py, trace_helpers.py)
+    scenarios/      # declarative scenario catalogues (booking.py)
+    test_booking.py # parameterized booking + time-resolution scenarios
+    test_browsing.py
+    test_tracing.py
+    test_session.py
+    test_rag.py
   orchestration/    # unit tests
   session/
   rendering/
@@ -51,5 +58,5 @@ python core/tests/test.py --list
 | Planning | `planning/` | status, action, missing_slots, multi-turn slots |
 | Execution | `execution/` | handle_message + mock booking/availability |
 | Smoke | `smoke/` | All YAML scenarios under `scenarios/smoke/` |
-| E2E (API) | `e2e/` | POST /api/message via TestClient |
+| E2E (API) | `e2e/` | Capability runners over `framework/` + `scenarios/` — booking, browsing, tracing, session, RAG |
 | Unit | orchestration, session, rendering, … | Fast mocked tests |

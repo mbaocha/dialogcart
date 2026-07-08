@@ -15,6 +15,25 @@ script_dir = Path(__file__).parent.resolve()
 mock_config = type("MockConfig", (), {"DEBUG_ENABLED": False})()
 sys.modules["luma"] = type("MockLuma", (), {})()
 sys.modules["luma.config"] = mock_config
+sys.modules["luma.config.core"] = type(
+    "MockCore",
+    (),
+    {
+        "STATUS_NEEDS_CLARIFICATION": "needs_clarification",
+        "STATUS_READY": "ready",
+    },
+)()
+
+# Load availability_operations (dependency of reservation_intent_resolver)
+ops_path = script_dir / "availability_operations.py"
+spec_ops = importlib.util.spec_from_file_location(
+    "luma.grouping.availability_operations", ops_path
+)
+ops_module = importlib.util.module_from_spec(spec_ops)
+ops_module.__package__ = "luma.grouping"
+ops_module.__name__ = "luma.grouping.availability_operations"
+sys.modules["luma.grouping.availability_operations"] = ops_module
+spec_ops.loader.exec_module(ops_module)
 
 # Load reservation_intent_resolver module
 resolver_path = script_dir / "reservation_intent_resolver.py"
@@ -55,7 +74,7 @@ def test_payment_intent():
     ]
 
     for sentence, entities in test_cases:
-        intent, confidence = resolve_intent(sentence, entities)
+        intent, confidence, operation = resolve_intent(sentence, entities)
         assert intent == PAYMENT, f"Expected PAYMENT, got {intent} for '{sentence}'"
         assert confidence >= 0.9, f"Expected high confidence for payment"
 
@@ -73,7 +92,7 @@ def test_cancel_booking_intent():
     ]
 
     for sentence, entities in test_cases:
-        intent, confidence = resolve_intent(sentence, entities)
+        intent, confidence, operation = resolve_intent(sentence, entities)
         assert (
             intent == CANCEL_BOOKING
         ), f"Expected CANCEL_BOOKING, got {intent} for '{sentence}'"
@@ -94,7 +113,7 @@ def test_modify_booking_intent():
     ]
 
     for sentence, entities in test_cases:
-        intent, confidence = resolve_intent(sentence, entities)
+        intent, confidence, operation = resolve_intent(sentence, entities)
         assert (
             intent == MODIFY_BOOKING
         ), f"Expected MODIFY_BOOKING, got {intent} for '{sentence}'"
@@ -166,7 +185,7 @@ def test_create_booking_intent():
     ]
 
     for sentence, entities, min_conf in test_cases:
-        intent, confidence = resolve_intent(sentence, entities)
+        intent, confidence, operation = resolve_intent(sentence, entities)
         assert (
             intent == CREATE_BOOKING
         ), f"Expected CREATE_BOOKING, got {intent} for '{sentence}'"
@@ -205,13 +224,35 @@ def test_availability_intent():
     ]
 
     for sentence, entities in test_cases:
-        intent, confidence = resolve_intent(sentence, entities)
+        intent, confidence, operation = resolve_intent(sentence, entities)
         assert (
             intent == AVAILABILITY
         ), f"Expected AVAILABILITY, got {intent} for '{sentence}'"
         assert confidence >= 0.8, f"Expected medium+ confidence for availability"
+        assert operation is None, f"Expected no browse operation for '{sentence}'"
 
     print("  [OK] AVAILABILITY intent: PASSED")
+
+
+def test_availability_browse_operations():
+    """Test AVAILABILITY + structured operation for pagination utterances."""
+    browse_cases = [
+        ("show more", "browse_next"),
+        ("show additional times", "browse_next"),
+        ("next page", "browse_next"),
+        ("later times", "browse_next"),
+        ("previous page", "browse_previous"),
+        ("earlier times", "browse_previous"),
+    ]
+    for sentence, expected_operation in browse_cases:
+        intent, confidence, operation = resolve_intent(sentence, {})
+        assert intent == AVAILABILITY, f"Expected AVAILABILITY for '{sentence}'"
+        assert operation == expected_operation, (
+            f"operation for '{sentence}': got {operation!r}, expected {expected_operation!r}"
+        )
+        assert confidence >= 0.9
+
+    print("  [OK] AVAILABILITY browse operations: PASSED")
 
 
 def test_booking_inquiry_intent():
@@ -226,7 +267,7 @@ def test_booking_inquiry_intent():
     ]
 
     for sentence, entities in test_cases:
-        intent, confidence = resolve_intent(sentence, entities)
+        intent, confidence, operation = resolve_intent(sentence, entities)
         assert (
             intent == BOOKING_INQUIRY
         ), f"Expected BOOKING_INQUIRY, got {intent} for '{sentence}'"
@@ -252,7 +293,7 @@ def test_details_intent():
     ]
 
     for sentence, entities in test_cases:
-        intent, confidence = resolve_intent(sentence, entities)
+        intent, confidence, operation = resolve_intent(sentence, entities)
         assert intent == DETAILS, f"Expected DETAILS, got {intent} for '{sentence}'"
         assert confidence >= 0.8, f"Expected medium+ confidence for details"
 
@@ -275,7 +316,7 @@ def test_quote_intent():
     ]
 
     for sentence, entities in test_cases:
-        intent, confidence = resolve_intent(sentence, entities)
+        intent, confidence, operation = resolve_intent(sentence, entities)
         assert intent == QUOTE, f"Expected QUOTE, got {intent} for '{sentence}'"
         assert confidence >= 0.8, f"Expected medium+ confidence for quote"
 
@@ -318,7 +359,7 @@ def test_discovery_intent():
     ]
 
     for sentence, entities in test_cases:
-        intent, confidence = resolve_intent(sentence, entities)
+        intent, confidence, operation = resolve_intent(sentence, entities)
         assert intent == DISCOVERY, f"Expected DISCOVERY, got {intent} for '{sentence}'"
         assert confidence >= 0.8, f"Expected medium+ confidence for discovery"
 
@@ -336,7 +377,7 @@ def test_recommendation_intent():
     ]
 
     for sentence, entities in test_cases:
-        intent, confidence = resolve_intent(sentence, entities)
+        intent, confidence, operation = resolve_intent(sentence, entities)
         assert (
             intent == RECOMMENDATION
         ), f"Expected RECOMMENDATION, got {intent} for '{sentence}'"
@@ -354,7 +395,7 @@ def test_unknown_intent():
     ]
 
     for sentence, entities in test_cases:
-        intent, confidence = resolve_intent(sentence, entities)
+        intent, confidence, operation = resolve_intent(sentence, entities)
         assert intent == UNKNOWN, f"Expected UNKNOWN, got {intent} for '{sentence}'"
 
     print("  [OK] UNKNOWN intent: PASSED")
@@ -368,7 +409,7 @@ def test_rule_priority():
         "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}],
     }
-    intent, _ = resolve_intent(sentence, entities)
+    intent, _, _ = resolve_intent(sentence, entities)
     assert intent == PAYMENT, "Payment should win over booking"
 
     # Cancel should win over booking
@@ -377,7 +418,7 @@ def test_rule_priority():
         "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}],
     }
-    intent, _ = resolve_intent(sentence, entities)
+    intent, _, _ = resolve_intent(sentence, entities)
     assert intent == CANCEL_BOOKING, "Cancel should win over booking"
 
     # Modify should win over booking
@@ -386,13 +427,13 @@ def test_rule_priority():
         "business_categories": [{"text": "haircut"}],
         "dates": [{"text": "tomorrow"}],
     }
-    intent, _ = resolve_intent(sentence, entities)
+    intent, _, _ = resolve_intent(sentence, entities)
     assert intent == MODIFY_BOOKING, "Modify should win over booking"
 
     # Booking inquiry should win over availability
     sentence = "when is my appointment available"
     entities = {}
-    intent, _ = resolve_intent(sentence, entities)
+    intent, _, _ = resolve_intent(sentence, entities)
     assert intent == BOOKING_INQUIRY, "Booking inquiry should win over availability"
 
     print("  [OK] Rule priority: PASSED")
@@ -411,6 +452,7 @@ def main():
     test_modify_booking_intent()
     test_create_booking_intent()
     test_availability_intent()
+    test_availability_browse_operations()
     test_booking_inquiry_intent()
     test_details_intent()
     test_quote_intent()

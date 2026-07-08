@@ -41,7 +41,8 @@ Response contract (mirrors luma /resolve):
             "booking_id": str | null
         },
         "time_constraint": {...} | null,    # only when a time window is present
-        "search_query": str | null          # only for RAG intents
+        "search_query": str | null,         # only for RAG intents
+        "operation": str | null             # structured interaction subtype (e.g. browse_next)
     }
 
 Fields that must NOT appear (luma contract):
@@ -93,6 +94,8 @@ def resolve():
         response["search_query"] = result.search_query
     if result.service_candidates:
         response["service_candidates"] = result.service_candidates
+    if result.operation is not None:
+        response["operation"] = result.operation
 
     return jsonify(response)
 

@@ -457,11 +457,11 @@ class LumaPipeline:
             # Use osentence from extraction_result (typo-corrected, extraction-normalized)
             # Fallback to raw text if osentence is not available
             osentence = extraction_result.get("osentence", text)
-            intent, confidence = self.intent_resolver.resolve_intent(
+            intent, confidence, operation = self.intent_resolver.resolve_intent(
                 osentence, extraction_result, booking_mode=effective_booking_mode
             )
             intent_resp = self.intent_resolver._build_response(
-                intent, confidence, extraction_result
+                intent, confidence, extraction_result, operation=operation
             )
         # Invariant: intent_resp is a dict with intent and confidence keys
         assert isinstance(intent_resp, dict), "intent_resp must be a dict"

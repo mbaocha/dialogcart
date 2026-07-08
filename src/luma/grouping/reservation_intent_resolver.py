@@ -20,6 +20,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 import yaml
 
 from ..config.core import STATUS_NEEDS_CLARIFICATION, STATUS_READY
+from .availability_operations import detect_availability_operation
 
 # Canonical intents
 DISCOVERY = "DISCOVERY"
@@ -289,7 +290,7 @@ class ReservationIntentResolver:
 
     def resolve_intent(
         self, osentence: str, entities: Dict[str, Any], booking_mode: str = "service"
-    ) -> Tuple[str, float]:
+    ) -> Tuple[str, float, Optional[str]]:
         """
         Resolve intent from original user sentence and extracted entities.
 
@@ -298,6 +299,7 @@ class ReservationIntentResolver:
            - If MODIFY signal detected → MODIFY_BOOKING (bypasses ALL other logic)
            - If CANCEL signal detected → CANCEL_BOOKING (bypasses ALL other logic)
            - NO service requirement, NO CREATE evaluation, NO BOOKING_INQUIRY fallback
+        0b. Availability browse operation → AVAILABILITY + operation (browse_next/previous)
         1. Lock booking intent by booking_mode (final, cannot be overridden)
            - booking_mode="service" → CREATE_APPOINTMENT
            - booking_mode="reservation" → CREATE_RESERVATION
@@ -311,13 +313,13 @@ class ReservationIntentResolver:
             booking_mode: "service" (appointments) or "reservation" (reservations)
 
         Returns:
-            Tuple of (intent, confidence_score)
+            Tuple of (intent, confidence_score, operation)
             intent: One of the canonical intents or UNKNOWN
             confidence: Heuristic confidence score (0.75-0.95)
+            operation: Optional availability operation (browse_next, browse_previous)
         """
         if not osentence:
-            resp = self._build_response(UNKNOWN, LOW_CONFIDENCE, entities)
-            return resp["intent"], resp["confidence"]
+            return self._return_resolved(UNKNOWN, LOW_CONFIDENCE, entities)
 
         # osentence is already typo-corrected and extraction-normalized
         # Tokenize osentence directly for booking verb detection (preserves typo corrections)
@@ -399,8 +401,7 @@ class ReservationIntentResolver:
                 f"[INTENT_RESOLVER] MODIFY signal detected - absolute override to MODIFY_BOOKING "
                 f"(bypassing all CREATE logic, service checks, and slot validation)"
             )
-            resp = self._build_response(MODIFY_BOOKING, HIGH_CONFIDENCE, entities)
-            return resp["intent"], resp["confidence"]
+            return self._return_resolved(MODIFY_BOOKING, HIGH_CONFIDENCE, entities)
 
         # If CANCEL signal is detected, intent MUST be CANCEL_BOOKING (absolute override)
         if cancel_signal_present:
@@ -408,8 +409,23 @@ class ReservationIntentResolver:
                 f"[INTENT_RESOLVER] CANCEL signal detected - absolute override to CANCEL_BOOKING "
                 f"(bypassing all CREATE logic, service checks, and slot validation)"
             )
-            resp = self._build_response(CANCEL_BOOKING, HIGH_CONFIDENCE, entities)
-            return resp["intent"], resp["confidence"]
+            return self._return_resolved(CANCEL_BOOKING, HIGH_CONFIDENCE, entities)
+
+        # ============================================================
+        # STEP 0b: AVAILABILITY BROWSE OPERATION (presentation-only NLU)
+        # ============================================================
+        availability_operation = detect_availability_operation(normalized_sentence)
+        if availability_operation:
+            logger.info(
+                "[INTENT_RESOLVER] Availability browse operation=%s",
+                availability_operation,
+            )
+            return self._return_resolved(
+                AVAILABILITY,
+                HIGH_CONFIDENCE,
+                entities,
+                operation=availability_operation,
+            )
 
         # ============================================================
         # STEP 1: DETERMINE LOCKED BOOKING INTENT (from booking_mode)
@@ -459,7 +475,7 @@ class ReservationIntentResolver:
         if signal_matching_intents:
             selected_intent = self._select_best_signal_match(signal_matching_intents)
             if selected_intent:
-                resp = self._build_response(
+                return self._return_resolved(
                     selected_intent,
                     (
                         HIGH_CONFIDENCE
@@ -468,7 +484,6 @@ class ReservationIntentResolver:
                     ),
                     entities,
                 )
-                return resp["intent"], resp["confidence"]
 
         # ============================================================
         # STEP 3: EXPLICIT INTENT SIGNAL CHECK (locked booking intent only)
@@ -514,10 +529,9 @@ class ReservationIntentResolver:
                     "has_booking_verb": has_booking_verb,
                 },
             )
-            resp = self._build_response(
+            return self._return_resolved(
                 locked_booking_intent, MEDIUM_CONFIDENCE, entities
             )
-            return resp["intent"], resp["confidence"]
 
         # ============================================================
         # STEP 4: STATELESS INTENT PROMOTION (UNKNOWN → CREATE_*)
@@ -553,17 +567,22 @@ class ReservationIntentResolver:
                     "booking_verb_present": True,
                 },
             )
-            resp = self._build_response(
+            return self._return_resolved(
                 locked_booking_intent, MEDIUM_CONFIDENCE, entities
             )
-            return resp["intent"], resp["confidence"]
 
         # No explicit booking signals and no promotion rule matched - return UNKNOWN
-        # Fragmentary inputs without explicit intent signals must return UNKNOWN
-        # Luma never infers intent from previous turns or slot presence alone
-        # Service-only, date-only, time-only, or service+date without booking verb → UNKNOWN
-        resp = self._build_response(UNKNOWN, LOW_CONFIDENCE, entities)
-        return resp["intent"], resp["confidence"]
+        return self._return_resolved(UNKNOWN, LOW_CONFIDENCE, entities)
+
+    def _return_resolved(
+        self,
+        intent: str,
+        confidence: float,
+        entities: Dict[str, Any],
+        operation: Optional[str] = None,
+    ) -> Tuple[str, float, Optional[str]]:
+        """Normalize resolve_intent return shape (intent, confidence, operation)."""
+        return intent, confidence, operation
 
     def _normalize_sentence(self, sentence: str) -> str:
         """Lowercase and strip punctuation to a whitespace-separated string."""
@@ -889,7 +908,11 @@ class ReservationIntentResolver:
         return False
 
     def _build_response(
-        self, intent: str, confidence: float, entities: Dict[str, Any]
+        self,
+        intent: str,
+        confidence: float,
+        entities: Dict[str, Any],
+        operation: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Build structured response with clarification metadata.
@@ -936,10 +959,13 @@ class ReservationIntentResolver:
             "confidence": confidence,
             "status": status,
             "missing_slots": missing_slots,
+            **({"operation": operation} if operation else {}),
         }
 
 
-def resolve_intent(osentence: str, entities: Dict[str, Any]) -> Tuple[str, float]:
+def resolve_intent(
+    osentence: str, entities: Dict[str, Any]
+) -> Tuple[str, float, Optional[str]]:
     """
     Convenience function for resolving intent.
 
@@ -950,7 +976,7 @@ def resolve_intent(osentence: str, entities: Dict[str, Any]) -> Tuple[str, float
         entities: Extraction output with service_families, dates, times, etc.
 
     Returns:
-        Tuple of (intent, confidence_score)
+        Tuple of (intent, confidence_score, operation)
     """
     resolver = ReservationIntentResolver()
     return resolver.resolve_intent(osentence, entities)

@@ -90,9 +90,8 @@ except Exception:
 def configure_test_logging(verbose: bool = False) -> None:
     """Silence orchestrator trace logs during E2E runs unless --verbose.
 
-    Core uses logger.error() for [FLOW_TRACE], [SESSION_RESET_WRITER], etc.
-    Those write to stderr, so shell redirects like ``> out.out`` still flood
-    the terminal unless stderr is merged or logging is quieted here.
+    Core uses verbose orchestrator logs at debug level; Decision Trace is the
+    primary debugging tool. configure_test_logging quiets stderr during E2E runs.
     """
     level = logging.INFO if verbose else logging.CRITICAL
     logging.basicConfig(level=level, format="%(message)s", force=True)

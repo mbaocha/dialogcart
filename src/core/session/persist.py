@@ -63,9 +63,60 @@ from core.session.appointment_extensions import apply_create_appointment_extensi
 from core.session.intent_persist import (
     resolve_durable_intent_for_session,
     resolve_final_intent_name,
+    should_clear_session_on_executed,
     should_clear_session_on_ready,
 )
 from core.session.missing_slots import resolve_missing_slots_for_persist
+
+
+def _normalize_execution_outcome(
+    outcome: Dict[str, Any],
+    previous_session_state: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Promote execution artifact fields into the shape persistence expects."""
+    normalized = dict(outcome)
+
+    facts = normalized.get("facts")
+    if isinstance(facts, dict):
+        if not normalized.get("intent_name") and not normalized.get("intent"):
+            intent_from_facts = facts.get("intent_name")
+            if intent_from_facts:
+                normalized["intent_name"] = intent_from_facts
+        fact_slots = facts.get("slots")
+        if isinstance(fact_slots, dict) and fact_slots:
+            slots = dict(normalized.get("slots") or {})
+            slots.update(fact_slots)
+            normalized["slots"] = slots
+
+    plan = normalized.get("plan")
+    if isinstance(plan, dict):
+        plan_slots = plan.get("slots")
+        if isinstance(plan_slots, dict) and plan_slots:
+            slots = dict(normalized.get("slots") or {})
+            slots.update(plan_slots)
+            normalized["slots"] = slots
+        if not normalized.get("intent_name") and not normalized.get("intent"):
+            plan_intent = plan.get("intent_name") or plan.get("intent")
+            if plan_intent:
+                normalized["intent_name"] = plan_intent
+
+    for key in ("booking_id", "booking_code"):
+        value = normalized.get(key)
+        if value:
+            slots = dict(normalized.get("slots") or {})
+            slots.setdefault(key, value)
+            normalized["slots"] = slots
+
+    if not normalized.get("intent_name") and not normalized.get("intent"):
+        if isinstance(previous_session_state, dict):
+            previous_intent = previous_session_state.get(
+                "intent_name"
+            ) or previous_session_state.get("intent")
+            if previous_intent:
+                normalized["intent_name"] = previous_intent
+
+    return normalized
+
 
 def build_session_state_from_outcome(
     outcome: Dict[str, Any],
@@ -92,17 +143,9 @@ def build_session_state_from_outcome(
         previous_session_state: Optional previous session state (unused, for compatibility)
 
     Returns:
-        Session state dictionary (WITH missing_slots if present) or None if status is READY
+        Session state dictionary (WITH missing_slots if present), or None when the
+        lifecycle rules clear session (ephemeral READY / ephemeral EXECUTED).
     """
-    # SESSION LIFECYCLE RULE: Clear session only on EXECUTED status
-    # EXECUTED means the intent was successfully executed and the session should be cleared
-    # READY status does NOT clear session - it means slots are ready but execution hasn't happened yet
-    # Empty/error Luma responses should preserve session state regardless of status
-
-    # EXECUTED status always clears session
-    if outcome_status == "EXECUTED":
-        return None
-
     # If merged_luma_response is None (empty/error Luma response), preserve previous session state
     # This handles cases where Luma API errors or empty responses occur
     # The orchestrator should have already handled this case, but we need to ensure session is preserved
@@ -126,6 +169,9 @@ def build_session_state_from_outcome(
             f"[SESSION_MERGE] outcome is None or not a dict: {outcome}"
         )
         return None
+
+    if outcome_status == "EXECUTED":
+        outcome = _normalize_execution_outcome(outcome, previous_session_state)
 
     # DIAGNOSTIC: Log what's in outcome and merged_luma_response at entry
     logger.debug(
@@ -238,6 +284,12 @@ def build_session_state_from_outcome(
 
     should_clear, _clear_reason = should_clear_session_on_ready(outcome_status, intent_name)
     if should_clear:
+        return None
+
+    should_clear_executed, _executed_clear_reason = should_clear_session_on_executed(
+        outcome_status, intent_name
+    )
+    if should_clear_executed:
         return None
 
     # Resolve missing_slots (single source of truth)
@@ -529,14 +581,21 @@ def build_session_state_from_outcome(
         session_state.get("action"),
     )
 
-    # LOG 4 — SESSION WRITE (immediately after persistence)
-    turn_logger.info(
-        json.dumps(
-            {"turn": "SESSION_WRITE", "session": session_state},
-            ensure_ascii=True,
-            default=str,
+    # LOG 4 — SESSION WRITE (compact; full state is in decision trace when enabled)
+    from core.tracing.decision_trace import is_decision_trace_enabled
+    from core.tracing.server_log import compact_session_snapshot
+
+    if not is_decision_trace_enabled():
+        turn_logger.info(
+            json.dumps(
+                {
+                    "turn": "SESSION_WRITE",
+                    "session": compact_session_snapshot(session_state),
+                },
+                ensure_ascii=True,
+                default=str,
+            )
         )
-    )
 
     if merged_luma_response and isinstance(merged_luma_response, dict):
         date_constraint = merged_luma_response.get("date_constraint")
@@ -827,5 +886,37 @@ def build_session_state_from_outcome(
         conv = merged_luma_response.get("_conversation")
         if conv and isinstance(conv, dict):
             session_state["conversation"] = conv
+
+    # Transient per-turn browse signals — never durable session state.
+    session_state.pop("availability_browse", None)
+    session_state.pop("operation", None)
+    facts = session_state.get("facts")
+    if isinstance(facts, dict):
+        facts.pop("availability_browse", None)
+        facts.pop("operation", None)
+
+    from core.tracing.invariant_trace import trace_stage
+    from core.tracing.stage_checks import check_persistence
+
+    trace_stage(
+        "persistence",
+        lambda: check_persistence(
+            session_state=session_state,
+            outcome=outcome,
+            previous_session=previous_session_state,
+        ),
+        allowed_mutations=[
+            "session.slots",
+            "session.missing_slots",
+            "session.status",
+            "session.intent_name",
+        ],
+        state_snapshot={
+            "intent": session_state.get("intent_name") or session_state.get("intent"),
+            "status": session_state.get("status"),
+            "missing_slots": session_state.get("missing_slots"),
+            "slot_keys": sorted((session_state.get("slots") or {}).keys()),
+        },
+    )
 
     return session_state

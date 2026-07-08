@@ -1,0 +1,1883 @@
+{
+  "success": true,
+  "outcome": {
+    "type": "availability",
+    "status": "success",
+    "slots": [],
+    "availability_fingerprint": "1f85e04f841c9fad8c156d941e8da812de8b7526950fc40499312653a0e65c72",
+    "plan": {
+      "status": "READY",
+      "stage": "AVAILABILITY",
+      "action": "SEARCH_AVAILABILITY"
+    }
+  },
+  "text": null,
+  "error": null,
+  "message": null,
+  "invariant_trace": null,
+  "decision_trace": {
+    "version": "1.1",
+    "turn": {
+      "user_id": "trace-premium-raw2",
+      "text": "premium",
+      "transaction_id": "f6bdbd85-f9f0-4a1e-bfb8-acfa795668b2"
+    },
+    "root_id": "decision.turn.outcome",
+    "records": [
+      {
+        "id": "evidence.confirmation.state",
+        "kind": "evidence",
+        "subsystem": "session",
+        "evidence_type": "CONFIRMATION_STATE",
+        "facts": {
+          "confirmation_state": null,
+          "status": "NEEDS_CLARIFICATION",
+          "intent_name": "CREATE_APPOINTMENT",
+          "gate_open": false
+        },
+        "child_ids": [],
+        "source": "session_state",
+        "observed_at_stage": "confirmation"
+      },
+      {
+        "id": "decision.confirmation.gate_open",
+        "kind": "decision",
+        "subsystem": "session",
+        "decision_type": "CONFIRMATION_GATE_OPEN",
+        "winner": "closed",
+        "reason_code": "CONFIRMATION_GATE_CLOSED",
+        "reason_text": "Confirmation gate is closed",
+        "depends_on": [
+          "evidence.confirmation.state"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "category": "routing",
+        "inputs_evaluated": {
+          "confirmation_state": null,
+          "status": "NEEDS_CLARIFICATION",
+          "intent_name": "CREATE_APPOINTMENT"
+        }
+      },
+      {
+        "id": "evidence.luma.raw_intent",
+        "kind": "evidence",
+        "subsystem": "orchestration",
+        "evidence_type": "LUMA_RAW_INTENT",
+        "facts": {
+          "raw_intent": "CORRECTION",
+          "has_revision": false
+        },
+        "child_ids": [],
+        "source": "luma_response",
+        "observed_at_stage": "confirmation"
+      },
+      {
+        "id": "decision.confirmation.classify_turn",
+        "kind": "decision",
+        "subsystem": "session",
+        "decision_type": "CONFIRMATION_CLASSIFY",
+        "winner": "NONE",
+        "reason_code": "INPUT_IGNORED_NOT_APPLICABLE",
+        "reason_text": "Confirmation gate not active for this turn",
+        "depends_on": [
+          "decision.confirmation.gate_open",
+          "evidence.luma.raw_intent"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": true,
+        "supersedes_id": null,
+        "category": "routing"
+      },
+      {
+        "id": "evidence.session.durable_flow",
+        "kind": "evidence",
+        "subsystem": "session",
+        "evidence_type": "DURABLE_FLOW",
+        "facts": {
+          "intent_name": "CREATE_APPOINTMENT",
+          "session_reset_occurred": false,
+          "has_session_slots": false
+        },
+        "child_ids": [],
+        "source": "should_merge_session_context",
+        "observed_at_stage": "merge"
+      },
+      {
+        "id": "decision.merge.eligibility",
+        "kind": "decision",
+        "subsystem": "session",
+        "decision_type": "MERGE_ELIGIBILITY",
+        "winner": "merge",
+        "reason_code": "MERGE_ELIGIBLE",
+        "reason_text": "Durable session flow eligible for merge",
+        "depends_on": [
+          "evidence.session.durable_flow"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "category": "routing",
+        "inputs_evaluated": {
+          "intent_name": "CREATE_APPOINTMENT",
+          "session_reset_occurred": false,
+          "has_session_slots": false
+        }
+      },
+      {
+        "id": "evidence.time_proposal",
+        "kind": "evidence",
+        "subsystem": "orchestration",
+        "evidence_type": "TIME_PROPOSAL",
+        "facts": {
+          "time_proposal": {
+            "mode": "exact",
+            "value": "09:00"
+          },
+          "time_constraint": {
+            "end": "09:00",
+            "label": null,
+            "mode": "exact",
+            "start": "09:00"
+          },
+          "user_time_raw": "09:00",
+          "user_time_norm": null,
+          "expected_date": null
+        },
+        "child_ids": [],
+        "source": "luma_response",
+        "observed_at_stage": "merge"
+      },
+      {
+        "id": "evidence.presented.offers",
+        "kind": "evidence",
+        "subsystem": "session",
+        "evidence_type": "PRESENTED_OFFERS",
+        "facts": {
+          "offer_count": 0,
+          "offer_starts": [],
+          "search_date": null
+        },
+        "child_ids": [],
+        "source": "presented_availability",
+        "observed_at_stage": "merge"
+      },
+      {
+        "id": "decision.merge.bind_time",
+        "kind": "decision",
+        "subsystem": "orchestration",
+        "decision_type": "BIND_TIME",
+        "winner": "skipped",
+        "reason_code": "BIND_NO_PRESENTED_OFFERS",
+        "reason_text": "No presented offers to bind against",
+        "depends_on": [
+          "evidence.time_proposal",
+          "evidence.presented.offers"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": true,
+        "supersedes_id": null,
+        "category": "routing",
+        "candidates": [
+          {
+            "id": "no_offers",
+            "matched": false,
+            "reason_code": "BIND_NO_PRESENTED_OFFERS",
+            "reason_text": "No presented availability offers"
+          }
+        ],
+        "inputs_evaluated": {
+          "skip_reason": "no_offers"
+        }
+      },
+      {
+        "id": "evidence.merge.slot_diff",
+        "kind": "evidence",
+        "subsystem": "session",
+        "evidence_type": "SLOT_DIFF",
+        "facts": {
+          "added": [
+            "service_id"
+          ],
+          "preserved": [],
+          "updated": [],
+          "dropped": []
+        },
+        "child_ids": [],
+        "source": "merge_luma_with_session",
+        "observed_at_stage": "merge"
+      },
+      {
+        "id": "decision.merge.slot_additive",
+        "kind": "decision",
+        "subsystem": "session",
+        "decision_type": "SLOT_ADDITIVE_MERGE",
+        "winner": {
+          "added": [
+            "service_id"
+          ],
+          "updated": [],
+          "preserved_count": 0
+        },
+        "reason_code": "SLOT_ADDITIVE_MERGE",
+        "reason_text": "Merged session and Luma slots with additive precedence",
+        "depends_on": [
+          "decision.merge.eligibility",
+          "evidence.merge.slot_diff",
+          "decision.merge.bind_time"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "category": "routing",
+        "candidates": [
+          {
+            "id": "preserve_durable",
+            "matched": false,
+            "reason_code": "SLOT_PRESERVED_DURABLE",
+            "reason_text": "Existing session slot values preserved unless explicitly updated"
+          },
+          {
+            "id": "additive_luma",
+            "matched": true,
+            "reason_code": "SLOT_ADDITIVE_MERGE",
+            "reason_text": "New Luma entities merged additively"
+          }
+        ],
+        "inputs_evaluated": {
+          "session_slot_keys": [],
+          "merged_slot_keys": [
+            "service_id"
+          ]
+        }
+      },
+      {
+        "id": "mutation.slots_service_id.1",
+        "kind": "mutation",
+        "subsystem": "session",
+        "decision_id": "decision.merge.slot_additive",
+        "field": "slots.service_id",
+        "previous": null,
+        "new": "premium haircut",
+        "reason_code": "SLOT_ADDITIVE_MERGE",
+        "reason_text": "Merged slot 'service_id'",
+        "sequence": 0
+      },
+      {
+        "id": "evidence.fingerprint.slots",
+        "kind": "evidence",
+        "subsystem": "orchestration",
+        "evidence_type": "FINGERPRINT_SLOTS",
+        "facts": {
+          "criteria_slot_keys": [
+            "date",
+            "organization_id",
+            "service_id"
+          ],
+          "criteria_slots": {
+            "service_id": "premium haircut",
+            "date": "2026-01-14",
+            "organization_id": 1
+          },
+          "intent_name": "CREATE_APPOINTMENT",
+          "ignored_fields": [
+            "time",
+            "time_proposal",
+            "page_index",
+            "presented_availability"
+          ]
+        },
+        "child_ids": [],
+        "source": "build_availability_fingerprint_slots",
+        "observed_at_stage": "fingerprint"
+      },
+      {
+        "id": "evidence.fingerprint.computed",
+        "kind": "evidence",
+        "subsystem": "orchestration",
+        "evidence_type": "FINGERPRINT_COMPUTED",
+        "facts": {
+          "fingerprint_hash": "1f85e04f841c9fad",
+          "fingerprint_full": "1f85e04f841c9fad8c156d941e8da812de8b7526950fc40499312653a0e65c72",
+          "skipped": false
+        },
+        "child_ids": [],
+        "source": "compute_availability_fingerprint",
+        "observed_at_stage": "fingerprint"
+      },
+      {
+        "id": "evidence.fingerprint.stored",
+        "kind": "evidence",
+        "subsystem": "session",
+        "evidence_type": "FINGERPRINT_STORED",
+        "facts": {
+          "fingerprint_hash": null,
+          "fingerprint_full": null,
+          "present": false
+        },
+        "child_ids": [],
+        "source": "session_state",
+        "observed_at_stage": "fingerprint"
+      },
+      {
+        "id": "decision.fingerprint.trust",
+        "kind": "decision",
+        "subsystem": "orchestration",
+        "decision_type": "FINGERPRINT_TRUST",
+        "winner": "stale",
+        "reason_code": "FINGERPRINT_MISMATCH",
+        "reason_text": "Stored fingerprint missing or does not match current criteria",
+        "depends_on": [
+          "evidence.fingerprint.slots",
+          "evidence.fingerprint.computed",
+          "evidence.fingerprint.stored"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "category": "inference",
+        "candidates": [
+          {
+            "id": "bound_datetime",
+            "matched": false,
+            "reason_code": "BOUND_DATETIME_BYPASS",
+            "reason_text": "Datetime already bound on slots/session"
+          },
+          {
+            "id": "fingerprint_match",
+            "matched": false,
+            "reason_code": "FINGERPRINT_MISMATCH",
+            "reason_text": "Search-criteria fingerprint comparison"
+          },
+          {
+            "id": "confirm_continuation",
+            "matched": false,
+            "reason_code": "CONFIRM_CONTINUATION_BYPASS",
+            "reason_text": "User confirmed after availability search"
+          }
+        ],
+        "inputs_evaluated": {
+          "availability_resolved": false,
+          "has_bound_datetime": false,
+          "confirm_continuation": false,
+          "matched": false,
+          "changed_fields": []
+        },
+        "inputs_ignored": {
+          "slots.time": {
+            "reason_code": "INPUT_IGNORED_NOT_APPLICABLE",
+            "reason_text": "Time selection excluded from fingerprint criteria"
+          }
+        }
+      },
+      {
+        "id": "evidence.facts.inputs",
+        "kind": "evidence",
+        "subsystem": "planning",
+        "evidence_type": "FACTS_INPUTS",
+        "facts": {
+          "intent_name": "CREATE_APPOINTMENT",
+          "slot_keys": [
+            "service_id"
+          ],
+          "missing_slots": [],
+          "needs_clarification": false,
+          "confirmation_state": null,
+          "organization_id": 1,
+          "stored_fingerprint_present": false
+        },
+        "child_ids": [],
+        "source": "business_fact_registry",
+        "observed_at_stage": "business_facts"
+      },
+      {
+        "id": "decision.facts.derive_all",
+        "kind": "decision",
+        "subsystem": "planning",
+        "decision_type": "DERIVE_BUSINESS_FACTS",
+        "winner": {
+          "availability_check_required": true,
+          "availability_ready": false,
+          "booking_identification_required": false,
+          "booking_identified": false,
+          "booking_hold_required": false,
+          "booking_hold_ready": false,
+          "time_selection_required": true,
+          "time_selection_ready": false,
+          "user_confirmation_required": false,
+          "user_confirmation_satisfied": false
+        },
+        "reason_code": "FACTS_DERIVED",
+        "reason_text": "Derived planner business facts for policy execution flags",
+        "depends_on": [
+          "evidence.facts.inputs",
+          "decision.fingerprint.trust"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "category": "inference",
+        "inputs_evaluated": {
+          "intent_name": "CREATE_APPOINTMENT",
+          "missing_slots": [],
+          "needs_clarification": false,
+          "confirmation_state": null
+        }
+      },
+      {
+        "id": "decision.facts.availability_ready",
+        "kind": "decision",
+        "subsystem": "planning",
+        "decision_type": "AVAILABILITY_READY",
+        "winner": false,
+        "reason_code": "AVAILABILITY_NOT_READY",
+        "reason_text": "Availability not yet resolved for current search criteria",
+        "depends_on": [
+          "decision.facts.derive_all",
+          "evidence.facts.inputs",
+          "decision.fingerprint.trust"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "category": "inference",
+        "candidates": [
+          {
+            "id": "availability_ready",
+            "matched": false,
+            "reason_code": "AVAILABILITY_NOT_READY",
+            "reason_text": "Fingerprint match, bound datetime, or continuation bypass"
+          }
+        ]
+      },
+      {
+        "id": "decision.facts.availability_check_required",
+        "kind": "decision",
+        "subsystem": "planning",
+        "decision_type": "AVAILABILITY_CHECK_REQUIRED",
+        "winner": true,
+        "reason_code": "AVAILABILITY_CHECK_REQUIRED",
+        "reason_text": "SEARCH_AVAILABILITY prerequisites met and check still required",
+        "depends_on": [
+          "decision.facts.derive_all",
+          "evidence.facts.inputs",
+          "decision.fingerprint.trust"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "category": "inference"
+      },
+      {
+        "id": "decision.facts.time_selection_ready",
+        "kind": "decision",
+        "subsystem": "planning",
+        "decision_type": "TIME_SELECTION_READY",
+        "winner": false,
+        "reason_code": "TIME_SELECTION_NOT_READY",
+        "reason_text": "Booking datetime not yet bound",
+        "depends_on": [
+          "decision.facts.derive_all",
+          "evidence.facts.inputs",
+          "decision.fingerprint.trust"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "category": "inference"
+      },
+      {
+        "id": "decision.facts.user_confirmation_required",
+        "kind": "decision",
+        "subsystem": "planning",
+        "decision_type": "USER_CONFIRMATION_REQUIRED",
+        "winner": false,
+        "reason_code": "INPUT_IGNORED_NOT_APPLICABLE",
+        "reason_text": "User confirmation not required",
+        "depends_on": [
+          "decision.facts.derive_all",
+          "evidence.facts.inputs",
+          "decision.fingerprint.trust"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "category": "inference",
+        "candidates": [
+          {
+            "id": "clarification_blocks",
+            "matched": false,
+            "reason_code": "CLARIFICATION_REQUIRED",
+            "reason_text": "Clarification or missing slots block confirmation requirement"
+          },
+          {
+            "id": "confirmation_pending",
+            "matched": false,
+            "reason_code": "CONFIRMATION_REQUIRED",
+            "reason_text": "Confirmation gate already pending"
+          }
+        ]
+      },
+      {
+        "id": "evidence.planning.missing_slots",
+        "kind": "evidence",
+        "subsystem": "planning",
+        "evidence_type": "PLANNING_INPUTS",
+        "facts": {
+          "intent_name": "CREATE_APPOINTMENT",
+          "missing_slots": [],
+          "needs_clarification": false,
+          "confirmation_state": null,
+          "availability_resolved": false,
+          "executable_actions": [
+            "SEARCH_AVAILABILITY"
+          ],
+          "collected_slot_keys": [
+            "service_id"
+          ]
+        },
+        "child_ids": [],
+        "source": "plan_builder",
+        "observed_at_stage": "planning"
+      },
+      {
+        "id": "evidence.policy.steps",
+        "kind": "evidence",
+        "subsystem": "planning",
+        "evidence_type": "POLICY_EXECUTION_STEPS",
+        "facts": {
+          "intent_name": "CREATE_APPOINTMENT",
+          "steps": [
+            {
+              "action": "SEARCH_AVAILABILITY",
+              "mode": "exploratory",
+              "required_slots": [
+                "service_id"
+              ],
+              "requires": [
+                "availability_check_required"
+              ]
+            },
+            {
+              "action": "CONFIRM_APPOINTMENT",
+              "mode": "committing",
+              "required_slots": [
+                "service_id",
+                "date",
+                "time"
+              ],
+              "requires": [
+                "availability_ready",
+                "time_selection_ready",
+                "user_confirmation_satisfied"
+              ]
+            }
+          ]
+        },
+        "child_ids": [],
+        "source": "intent_policy.yaml",
+        "observed_at_stage": "planning"
+      },
+      {
+        "id": "evidence.facts.business",
+        "kind": "evidence",
+        "subsystem": "planning",
+        "evidence_type": "BUSINESS_FACTS",
+        "facts": {
+          "availability_resolved": false,
+          "confirmation_state": null,
+          "availability_check_required": true,
+          "availability_ready": false,
+          "booking_identification_required": false,
+          "booking_identified": false,
+          "booking_hold_required": false,
+          "booking_hold_ready": false,
+          "time_selection_required": true,
+          "time_selection_ready": false,
+          "user_confirmation_required": false,
+          "user_confirmation_satisfied": false
+        },
+        "child_ids": [],
+        "source": "build_policy_execution_flags",
+        "observed_at_stage": "planning"
+      },
+      {
+        "id": "decision.planner.status",
+        "kind": "decision",
+        "subsystem": "planning",
+        "decision_type": "PLAN_STATUS",
+        "winner": "READY",
+        "reason_code": "STATUS_READY",
+        "reason_text": "Plan status is READY",
+        "depends_on": [
+          "evidence.planning.missing_slots",
+          "evidence.policy.steps",
+          "evidence.facts.business"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "category": "routing",
+        "candidates": [
+          {
+            "id": "READY",
+            "matched": true,
+            "reason_code": "STATUS_READY",
+            "reason_text": "Planning inputs complete"
+          }
+        ],
+        "inputs_evaluated": {
+          "intent_name": "CREATE_APPOINTMENT",
+          "missing_slots": [],
+          "needs_clarification": false,
+          "confirmation_state": null,
+          "active_capability": null,
+          "executable_actions": [
+            "SEARCH_AVAILABILITY"
+          ]
+        },
+        "inputs_ignored": {
+          "facts.operation": {
+            "reason_code": "INPUT_IGNORED_NOT_APPLICABLE",
+            "reason_text": "No browse operation detected for this turn"
+          },
+          "context.operation": {
+            "reason_code": "INPUT_IGNORED_NOT_APPLICABLE",
+            "reason_text": "No browse operation detected for this turn"
+          },
+          "date_constraint": {
+            "reason_code": "INPUT_IGNORED_NOT_APPLICABLE",
+            "reason_text": "Field not consulted by planner routing"
+          },
+          "_conversation": {
+            "reason_code": "INPUT_IGNORED_NOT_APPLICABLE",
+            "reason_text": "Field not consulted by planner routing"
+          },
+          "_source_text": {
+            "reason_code": "INPUT_IGNORED_NOT_APPLICABLE",
+            "reason_text": "Field not consulted by planner routing"
+          },
+          "date_proposal": {
+            "reason_code": "INPUT_IGNORED_NOT_APPLICABLE",
+            "reason_text": "Field not consulted by planner routing"
+          },
+          "time_proposal": {
+            "reason_code": "INPUT_IGNORED_NOT_APPLICABLE",
+            "reason_text": "Field not consulted by planner routing"
+          },
+          "_raw_luma_response": {
+            "reason_code": "INPUT_IGNORED_NOT_APPLICABLE",
+            "reason_text": "Field not consulted by planner routing"
+          },
+          "_raw_luma_slots": {
+            "reason_code": "INPUT_IGNORED_NOT_APPLICABLE",
+            "reason_text": "Field not consulted by planner routing"
+          },
+          "time_constraint": {
+            "reason_code": "INPUT_IGNORED_NOT_APPLICABLE",
+            "reason_text": "Field not consulted by planner routing"
+          }
+        }
+      },
+      {
+        "id": "decision.planner.clarification",
+        "kind": "decision",
+        "subsystem": "planning",
+        "decision_type": "CLARIFICATION",
+        "winner": "skip",
+        "reason_code": "INPUT_IGNORED_NOT_APPLICABLE",
+        "reason_text": "Clarification path not taken",
+        "depends_on": [
+          "decision.planner.status",
+          "evidence.planning.missing_slots",
+          "evidence.policy.steps",
+          "evidence.facts.business"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": true,
+        "supersedes_id": null,
+        "category": "routing"
+      },
+      {
+        "id": "decision.planner.confirmation",
+        "kind": "decision",
+        "subsystem": "planning",
+        "decision_type": "CONFIRMATION",
+        "winner": "skip",
+        "reason_code": "INPUT_IGNORED_NOT_APPLICABLE",
+        "reason_text": "Confirmation path not taken",
+        "depends_on": [
+          "decision.planner.status",
+          "evidence.planning.missing_slots",
+          "evidence.policy.steps",
+          "evidence.facts.business"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": true,
+        "supersedes_id": null,
+        "category": "routing"
+      },
+      {
+        "id": "decision.planner.select_action",
+        "kind": "decision",
+        "subsystem": "planning",
+        "decision_type": "PLAN_ACTION",
+        "winner": "SEARCH_AVAILABILITY",
+        "reason_code": "STEP_SELECTED",
+        "reason_text": "Selected execution action 'SEARCH_AVAILABILITY'",
+        "depends_on": [
+          "decision.planner.status",
+          "evidence.facts.business",
+          "evidence.policy.steps",
+          "evidence.planning.missing_slots",
+          "decision.facts.derive_all",
+          "decision.fingerprint.trust"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "category": "routing",
+        "candidates": [
+          {
+            "id": "SEARCH_AVAILABILITY",
+            "matched": true,
+            "reason_code": "STEP_SELECTED",
+            "reason_text": "Execution step 'SEARCH_AVAILABILITY' is eligible"
+          },
+          {
+            "id": "CONFIRM_APPOINTMENT",
+            "matched": false,
+            "reason_code": "REQUIREMENT_UNSATISFIED",
+            "reason_text": "Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied'",
+            "blocking_requirements": [
+              "availability_ready",
+              "time_selection_ready",
+              "user_confirmation_satisfied"
+            ],
+            "missing_requirements": [
+              "availability_ready",
+              "time_selection_ready",
+              "user_confirmation_satisfied"
+            ],
+            "failed_predicates": [
+              {
+                "predicate": "planning.required_slots \u2286 collected_slots",
+                "reason_code": "SLOTS_INCOMPLETE",
+                "actual": [
+                  "service_id"
+                ]
+              },
+              {
+                "predicate": "flags['availability_ready'] == true",
+                "reason_code": "REQUIREMENT_UNSATISFIED",
+                "actual": false
+              },
+              {
+                "predicate": "flags['time_selection_ready'] == true",
+                "reason_code": "REQUIREMENT_UNSATISFIED",
+                "actual": false
+              },
+              {
+                "predicate": "flags['user_confirmation_satisfied'] == true",
+                "reason_code": "REQUIREMENT_UNSATISFIED",
+                "actual": false
+              }
+            ],
+            "missing_slots": [
+              "date",
+              "time"
+            ]
+          }
+        ],
+        "inputs_evaluated": {
+          "intent_name": "CREATE_APPOINTMENT",
+          "collected_slot_keys": [
+            "service_id"
+          ],
+          "flags": {
+            "availability_resolved": false,
+            "confirmation_state": null,
+            "availability_check_required": true,
+            "availability_ready": false,
+            "booking_identification_required": false,
+            "booking_identified": false,
+            "booking_hold_required": false,
+            "booking_hold_ready": false,
+            "time_selection_required": true,
+            "time_selection_ready": false,
+            "user_confirmation_required": false,
+            "user_confirmation_satisfied": false
+          }
+        }
+      },
+      {
+        "id": "mutation.plan_action.2",
+        "kind": "mutation",
+        "subsystem": "planning",
+        "decision_id": "decision.planner.select_action",
+        "field": "plan.action",
+        "previous": null,
+        "new": "SEARCH_AVAILABILITY",
+        "reason_code": "STEP_SELECTED",
+        "reason_text": "Plan action set to 'SEARCH_AVAILABILITY'",
+        "sequence": 1,
+        "presentation_only": true
+      },
+      {
+        "id": "decision.planner.select_stage",
+        "kind": "decision",
+        "subsystem": "planning",
+        "decision_type": "SELECT_STAGE",
+        "winner": "AVAILABILITY",
+        "reason_code": "STAGE_DERIVED_FROM_ACTION",
+        "reason_text": "Stage 'AVAILABILITY' derived from action 'SEARCH_AVAILABILITY'",
+        "depends_on": [
+          "decision.planner.select_action",
+          "decision.planner.status"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "category": "routing",
+        "inputs_evaluated": {
+          "action": "SEARCH_AVAILABILITY",
+          "status": "READY",
+          "stage_from_action": true
+        }
+      },
+      {
+        "id": "mutation.plan_stage.3",
+        "kind": "mutation",
+        "subsystem": "planning",
+        "decision_id": "decision.planner.select_stage",
+        "field": "plan.stage",
+        "previous": null,
+        "new": "AVAILABILITY",
+        "reason_code": "STAGE_DERIVED_FROM_ACTION",
+        "reason_text": "Stage 'AVAILABILITY' derived from action 'SEARCH_AVAILABILITY'",
+        "sequence": 2,
+        "presentation_only": true
+      },
+      {
+        "id": "mutation.plan_status.4",
+        "kind": "mutation",
+        "subsystem": "planning",
+        "decision_id": "decision.planner.status",
+        "field": "plan.status",
+        "previous": null,
+        "new": "READY",
+        "reason_code": "STATUS_READY",
+        "reason_text": "Plan status is READY",
+        "sequence": 3,
+        "presentation_only": true
+      },
+      {
+        "id": "decision.planner.execution_route",
+        "kind": "decision",
+        "subsystem": "planning",
+        "decision_type": "EXECUTION_ROUTE",
+        "winner": "plan_execution",
+        "reason_code": "EXECUTION_ROUTE_PLAN",
+        "reason_text": "Normal plan execution routing",
+        "depends_on": [
+          "decision.planner.select_action",
+          "decision.planner.status"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "category": "routing",
+        "inputs_evaluated": {
+          "browse_operation": null,
+          "plan_action": "SEARCH_AVAILABILITY",
+          "plan_status": "READY",
+          "time_selection_ready": false
+        }
+      },
+      {
+        "id": "evidence.session.cache",
+        "kind": "evidence",
+        "subsystem": "session",
+        "evidence_type": "SESSION_CACHE",
+        "facts": {
+          "last_execution_type": null,
+          "last_execution_status": null,
+          "cached_slot_count": 0,
+          "page_index": null
+        },
+        "child_ids": [],
+        "source": "session_state",
+        "observed_at_stage": "pagination"
+      },
+      {
+        "id": "decision.pagination.handle_turn",
+        "kind": "decision",
+        "subsystem": "orchestration",
+        "decision_type": "PAGINATION_HANDLE",
+        "winner": "skipped",
+        "reason_code": "PAGINATION_SKIPPED",
+        "reason_text": "Pagination not handled: browse_not_detected",
+        "depends_on": [
+          "evidence.session.cache"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": true,
+        "supersedes_id": null,
+        "category": "presentation",
+        "inputs_evaluated": {
+          "skip_reason": "browse_not_detected"
+        }
+      },
+      {
+        "id": "decision.execution.eligibility",
+        "kind": "decision",
+        "subsystem": "execution",
+        "decision_type": "EXECUTE_PLAN_ACTION",
+        "winner": "execute",
+        "reason_code": "PLAN_ACTION_PRESENT",
+        "reason_text": "Executing plan action 'SEARCH_AVAILABILITY'",
+        "depends_on": [
+          "decision.planner.select_action"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "inputs_evaluated": {
+          "plan_status": "READY",
+          "plan_action": "SEARCH_AVAILABILITY",
+          "can_execute": true,
+          "missing_slots": []
+        }
+      },
+      {
+        "id": "decision.persist.reload_verify",
+        "kind": "decision",
+        "subsystem": "session",
+        "decision_type": "RELOAD_VERIFY",
+        "winner": "match",
+        "reason_code": "RELOAD_MATCH",
+        "reason_text": "Reloaded session matches saved session",
+        "depends_on": [],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "inputs_evaluated": {
+          "intent": "CREATE_APPOINTMENT",
+          "status": "READY",
+          "slot_keys": [
+            "service_id"
+          ]
+        }
+      },
+      {
+        "id": "decision.persist.save",
+        "kind": "decision",
+        "subsystem": "session",
+        "decision_type": "PERSIST_SAVE",
+        "winner": "save",
+        "reason_code": "PERSIST_SAVE_APPLIED",
+        "reason_text": "Session persisted for outcome status 'success'",
+        "depends_on": [
+          "decision.execution.eligibility"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "inputs_evaluated": {
+          "outcome_status": "success",
+          "intent": "CREATE_APPOINTMENT",
+          "status": "READY"
+        }
+      },
+      {
+        "id": "decision.turn.outcome",
+        "kind": "decision",
+        "subsystem": "api",
+        "decision_type": "TURN_OUTCOME",
+        "winner": {
+          "status": "success",
+          "stage": "AVAILABILITY",
+          "action": "SEARCH_AVAILABILITY",
+          "intent": "CREATE_APPOINTMENT"
+        },
+        "reason_code": "TURN_OUTCOME_EXECUTED",
+        "reason_text": "Turn completed with an execution artifact",
+        "depends_on": [
+          "decision.execution.eligibility",
+          "decision.persist.save",
+          "decision.persist.reload_verify",
+          "decision.planner.status",
+          "decision.planner.clarification",
+          "decision.planner.confirmation",
+          "decision.planner.select_action",
+          "decision.planner.select_stage",
+          "decision.planner.execution_route",
+          "decision.facts.derive_all",
+          "decision.facts.availability_ready",
+          "decision.facts.availability_check_required",
+          "decision.facts.time_selection_ready",
+          "decision.facts.user_confirmation_required",
+          "decision.fingerprint.trust",
+          "decision.merge.eligibility",
+          "decision.merge.slot_additive",
+          "decision.pagination.handle_turn",
+          "decision.confirmation.gate_open",
+          "decision.confirmation.classify_turn",
+          "decision.merge.bind_time"
+        ],
+        "child_ids": [],
+        "invariants": [],
+        "skipped": false,
+        "supersedes_id": null,
+        "inputs_evaluated": {
+          "success": true,
+          "error": null
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "evidence.confirmation.state",
+        "to": "decision.confirmation.gate_open",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.confirmation.gate_open",
+        "to": "decision.confirmation.classify_turn",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.luma.raw_intent",
+        "to": "decision.confirmation.classify_turn",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.session.durable_flow",
+        "to": "decision.merge.eligibility",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.time_proposal",
+        "to": "decision.merge.bind_time",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.presented.offers",
+        "to": "decision.merge.bind_time",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.merge.eligibility",
+        "to": "decision.merge.slot_additive",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.merge.slot_diff",
+        "to": "decision.merge.slot_additive",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.merge.bind_time",
+        "to": "decision.merge.slot_additive",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.merge.slot_additive",
+        "to": "mutation.slots_service_id.1",
+        "kind": "causes"
+      },
+      {
+        "from": "evidence.fingerprint.slots",
+        "to": "decision.fingerprint.trust",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.fingerprint.computed",
+        "to": "decision.fingerprint.trust",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.fingerprint.stored",
+        "to": "decision.fingerprint.trust",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.facts.inputs",
+        "to": "decision.facts.derive_all",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.fingerprint.trust",
+        "to": "decision.facts.derive_all",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.facts.derive_all",
+        "to": "decision.facts.availability_ready",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.facts.inputs",
+        "to": "decision.facts.availability_ready",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.fingerprint.trust",
+        "to": "decision.facts.availability_ready",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.facts.derive_all",
+        "to": "decision.facts.availability_check_required",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.facts.inputs",
+        "to": "decision.facts.availability_check_required",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.fingerprint.trust",
+        "to": "decision.facts.availability_check_required",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.facts.derive_all",
+        "to": "decision.facts.time_selection_ready",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.facts.inputs",
+        "to": "decision.facts.time_selection_ready",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.fingerprint.trust",
+        "to": "decision.facts.time_selection_ready",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.facts.derive_all",
+        "to": "decision.facts.user_confirmation_required",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.facts.inputs",
+        "to": "decision.facts.user_confirmation_required",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.fingerprint.trust",
+        "to": "decision.facts.user_confirmation_required",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.planning.missing_slots",
+        "to": "decision.planner.status",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.policy.steps",
+        "to": "decision.planner.status",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.facts.business",
+        "to": "decision.planner.status",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.planner.status",
+        "to": "decision.planner.clarification",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.planning.missing_slots",
+        "to": "decision.planner.clarification",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.policy.steps",
+        "to": "decision.planner.clarification",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.facts.business",
+        "to": "decision.planner.clarification",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.planner.status",
+        "to": "decision.planner.confirmation",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.planning.missing_slots",
+        "to": "decision.planner.confirmation",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.policy.steps",
+        "to": "decision.planner.confirmation",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.facts.business",
+        "to": "decision.planner.confirmation",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.planner.status",
+        "to": "decision.planner.select_action",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.facts.business",
+        "to": "decision.planner.select_action",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.policy.steps",
+        "to": "decision.planner.select_action",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.planning.missing_slots",
+        "to": "decision.planner.select_action",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.facts.derive_all",
+        "to": "decision.planner.select_action",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.fingerprint.trust",
+        "to": "decision.planner.select_action",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.planner.select_action",
+        "to": "mutation.plan_action.2",
+        "kind": "causes"
+      },
+      {
+        "from": "decision.planner.select_action",
+        "to": "decision.planner.select_stage",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.planner.status",
+        "to": "decision.planner.select_stage",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.planner.select_stage",
+        "to": "mutation.plan_stage.3",
+        "kind": "causes"
+      },
+      {
+        "from": "decision.planner.status",
+        "to": "mutation.plan_status.4",
+        "kind": "causes"
+      },
+      {
+        "from": "decision.planner.select_action",
+        "to": "decision.planner.execution_route",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.planner.status",
+        "to": "decision.planner.execution_route",
+        "kind": "depends_on"
+      },
+      {
+        "from": "evidence.session.cache",
+        "to": "decision.pagination.handle_turn",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.planner.select_action",
+        "to": "decision.execution.eligibility",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.execution.eligibility",
+        "to": "decision.persist.save",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.execution.eligibility",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.persist.save",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.persist.reload_verify",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.planner.status",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.planner.clarification",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.planner.confirmation",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.planner.select_action",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.planner.select_stage",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.planner.execution_route",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.facts.derive_all",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.facts.availability_ready",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.facts.availability_check_required",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.facts.time_selection_ready",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.facts.user_confirmation_required",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.fingerprint.trust",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.merge.eligibility",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.merge.slot_additive",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.pagination.handle_turn",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.confirmation.gate_open",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.confirmation.classify_turn",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      },
+      {
+        "from": "decision.merge.bind_time",
+        "to": "decision.turn.outcome",
+        "kind": "depends_on"
+      }
+    ],
+    "summary": {
+      "outcome": {
+        "status": "success",
+        "stage": "AVAILABILITY",
+        "action": "SEARCH_AVAILABILITY",
+        "intent": "CREATE_APPOINTMENT"
+      },
+      "why_text": [
+        "Turn completed with an execution artifact",
+        "Confirmation gate is closed",
+        "Confirmation gate not active for this turn",
+        "Durable session flow eligible for merge",
+        "No presented offers to bind against",
+        "Merged session and Luma slots with additive precedence",
+        "Stored fingerprint missing or does not match current criteria",
+        "Derived planner business facts for policy execution flags"
+      ],
+      "why_chain": [
+        {
+          "step": "evidence",
+          "id": "evidence.confirmation.state",
+          "evidence_type": "CONFIRMATION_STATE",
+          "facts": {
+            "confirmation_state": null,
+            "status": "NEEDS_CLARIFICATION",
+            "intent_name": "CREATE_APPOINTMENT",
+            "gate_open": false
+          }
+        },
+        {
+          "step": "evidence",
+          "id": "evidence.luma.raw_intent",
+          "evidence_type": "LUMA_RAW_INTENT",
+          "facts": {
+            "raw_intent": "CORRECTION",
+            "has_revision": false
+          }
+        },
+        {
+          "step": "evidence",
+          "id": "evidence.session.durable_flow",
+          "evidence_type": "DURABLE_FLOW",
+          "facts": {
+            "intent_name": "CREATE_APPOINTMENT",
+            "session_reset_occurred": false,
+            "has_session_slots": false
+          }
+        },
+        {
+          "step": "evidence",
+          "id": "evidence.time_proposal",
+          "evidence_type": "TIME_PROPOSAL",
+          "facts": {
+            "time_proposal": {
+              "mode": "exact",
+              "value": "09:00"
+            },
+            "time_constraint": {
+              "end": "09:00",
+              "label": null,
+              "mode": "exact",
+              "start": "09:00"
+            },
+            "user_time_raw": "09:00",
+            "user_time_norm": null,
+            "expected_date": null
+          }
+        },
+        {
+          "step": "evidence",
+          "id": "evidence.presented.offers",
+          "evidence_type": "PRESENTED_OFFERS",
+          "facts": {
+            "offer_count": 0,
+            "offer_starts": [],
+            "search_date": null
+          }
+        },
+        {
+          "step": "evidence",
+          "id": "evidence.merge.slot_diff",
+          "evidence_type": "SLOT_DIFF",
+          "facts": {
+            "added": [
+              "service_id"
+            ],
+            "preserved": [],
+            "updated": [],
+            "dropped": []
+          }
+        },
+        {
+          "step": "evidence",
+          "id": "evidence.fingerprint.slots",
+          "evidence_type": "FINGERPRINT_SLOTS",
+          "facts": {
+            "criteria_slot_keys": [
+              "date",
+              "organization_id",
+              "service_id"
+            ],
+            "criteria_slots": {
+              "service_id": "premium haircut",
+              "date": "2026-01-14",
+              "organization_id": 1
+            },
+            "intent_name": "CREATE_APPOINTMENT",
+            "ignored_fields": [
+              "time",
+              "time_proposal",
+              "page_index",
+              "presented_availability"
+            ]
+          }
+        },
+        {
+          "step": "evidence",
+          "id": "evidence.fingerprint.computed",
+          "evidence_type": "FINGERPRINT_COMPUTED",
+          "facts": {
+            "fingerprint_hash": "1f85e04f841c9fad",
+            "fingerprint_full": "1f85e04f841c9fad8c156d941e8da812de8b7526950fc40499312653a0e65c72",
+            "skipped": false
+          }
+        },
+        {
+          "step": "evidence",
+          "id": "evidence.fingerprint.stored",
+          "evidence_type": "FINGERPRINT_STORED",
+          "facts": {
+            "fingerprint_hash": null,
+            "fingerprint_full": null,
+            "present": false
+          }
+        },
+        {
+          "step": "evidence",
+          "id": "evidence.facts.inputs",
+          "evidence_type": "FACTS_INPUTS",
+          "facts": {
+            "intent_name": "CREATE_APPOINTMENT",
+            "slot_keys": [
+              "service_id"
+            ],
+            "missing_slots": [],
+            "needs_clarification": false,
+            "confirmation_state": null,
+            "organization_id": 1,
+            "stored_fingerprint_present": false
+          }
+        },
+        {
+          "step": "evidence",
+          "id": "evidence.planning.missing_slots",
+          "evidence_type": "PLANNING_INPUTS",
+          "facts": {
+            "intent_name": "CREATE_APPOINTMENT",
+            "missing_slots": [],
+            "needs_clarification": false,
+            "confirmation_state": null,
+            "availability_resolved": false,
+            "executable_actions": [
+              "SEARCH_AVAILABILITY"
+            ],
+            "collected_slot_keys": [
+              "service_id"
+            ]
+          }
+        },
+        {
+          "step": "evidence",
+          "id": "evidence.policy.steps",
+          "evidence_type": "POLICY_EXECUTION_STEPS",
+          "facts": {
+            "intent_name": "CREATE_APPOINTMENT",
+            "steps": [
+              {
+                "action": "SEARCH_AVAILABILITY",
+                "mode": "exploratory",
+                "required_slots": [
+                  "service_id"
+                ],
+                "requires": [
+                  "availability_check_required"
+                ]
+              },
+              {
+                "action": "CONFIRM_APPOINTMENT",
+                "mode": "committing",
+                "required_slots": [
+                  "service_id",
+                  "date",
+                  "time"
+                ],
+                "requires": [
+                  "availability_ready",
+                  "time_selection_ready",
+                  "user_confirmation_satisfied"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "step": "evidence",
+          "id": "evidence.facts.business",
+          "evidence_type": "BUSINESS_FACTS",
+          "facts": {
+            "availability_resolved": false,
+            "confirmation_state": null,
+            "availability_check_required": true,
+            "availability_ready": false,
+            "booking_identification_required": false,
+            "booking_identified": false,
+            "booking_hold_required": false,
+            "booking_hold_ready": false,
+            "time_selection_required": true,
+            "time_selection_ready": false,
+            "user_confirmation_required": false,
+            "user_confirmation_satisfied": false
+          }
+        },
+        {
+          "step": "evidence",
+          "id": "evidence.session.cache",
+          "evidence_type": "SESSION_CACHE",
+          "facts": {
+            "last_execution_type": null,
+            "last_execution_status": null,
+            "cached_slot_count": 0,
+            "page_index": null
+          }
+        },
+        {
+          "step": "decision",
+          "id": "decision.confirmation.gate_open",
+          "decision_type": "CONFIRMATION_GATE_OPEN",
+          "winner": "closed",
+          "reason_code": "CONFIRMATION_GATE_CLOSED"
+        },
+        {
+          "step": "decision",
+          "id": "decision.confirmation.classify_turn",
+          "decision_type": "CONFIRMATION_CLASSIFY",
+          "winner": "NONE",
+          "reason_code": "INPUT_IGNORED_NOT_APPLICABLE"
+        },
+        {
+          "step": "decision",
+          "id": "decision.merge.eligibility",
+          "decision_type": "MERGE_ELIGIBILITY",
+          "winner": "merge",
+          "reason_code": "MERGE_ELIGIBLE"
+        },
+        {
+          "step": "decision",
+          "id": "decision.merge.bind_time",
+          "decision_type": "BIND_TIME",
+          "winner": "skipped",
+          "reason_code": "BIND_NO_PRESENTED_OFFERS"
+        },
+        {
+          "step": "decision",
+          "id": "decision.merge.slot_additive",
+          "decision_type": "SLOT_ADDITIVE_MERGE",
+          "winner": {
+            "added": [
+              "service_id"
+            ],
+            "updated": [],
+            "preserved_count": 0
+          },
+          "reason_code": "SLOT_ADDITIVE_MERGE"
+        },
+        {
+          "step": "decision",
+          "id": "decision.fingerprint.trust",
+          "decision_type": "FINGERPRINT_TRUST",
+          "winner": "stale",
+          "reason_code": "FINGERPRINT_MISMATCH"
+        },
+        {
+          "step": "decision",
+          "id": "decision.facts.derive_all",
+          "decision_type": "DERIVE_BUSINESS_FACTS",
+          "winner": {
+            "availability_check_required": true,
+            "availability_ready": false,
+            "booking_identification_required": false,
+            "booking_identified": false,
+            "booking_hold_required": false,
+            "booking_hold_ready": false,
+            "time_selection_required": true,
+            "time_selection_ready": false,
+            "user_confirmation_required": false,
+            "user_confirmation_satisfied": false
+          },
+          "reason_code": "FACTS_DERIVED"
+        },
+        {
+          "step": "decision",
+          "id": "decision.facts.availability_ready",
+          "decision_type": "AVAILABILITY_READY",
+          "winner": false,
+          "reason_code": "AVAILABILITY_NOT_READY"
+        },
+        {
+          "step": "decision",
+          "id": "decision.facts.availability_check_required",
+          "decision_type": "AVAILABILITY_CHECK_REQUIRED",
+          "winner": true,
+          "reason_code": "AVAILABILITY_CHECK_REQUIRED"
+        },
+        {
+          "step": "decision",
+          "id": "decision.facts.time_selection_ready",
+          "decision_type": "TIME_SELECTION_READY",
+          "winner": false,
+          "reason_code": "TIME_SELECTION_NOT_READY"
+        },
+        {
+          "step": "decision",
+          "id": "decision.facts.user_confirmation_required",
+          "decision_type": "USER_CONFIRMATION_REQUIRED",
+          "winner": false,
+          "reason_code": "INPUT_IGNORED_NOT_APPLICABLE"
+        },
+        {
+          "step": "decision",
+          "id": "decision.planner.status",
+          "decision_type": "PLAN_STATUS",
+          "winner": "READY",
+          "reason_code": "STATUS_READY"
+        },
+        {
+          "step": "decision",
+          "id": "decision.planner.clarification",
+          "decision_type": "CLARIFICATION",
+          "winner": "skip",
+          "reason_code": "INPUT_IGNORED_NOT_APPLICABLE"
+        },
+        {
+          "step": "decision",
+          "id": "decision.planner.confirmation",
+          "decision_type": "CONFIRMATION",
+          "winner": "skip",
+          "reason_code": "INPUT_IGNORED_NOT_APPLICABLE"
+        },
+        {
+          "step": "decision",
+          "id": "decision.planner.select_action",
+          "decision_type": "PLAN_ACTION",
+          "winner": "SEARCH_AVAILABILITY",
+          "reason_code": "STEP_SELECTED"
+        },
+        {
+          "step": "decision",
+          "id": "decision.planner.select_stage",
+          "decision_type": "SELECT_STAGE",
+          "winner": "AVAILABILITY",
+          "reason_code": "STAGE_DERIVED_FROM_ACTION"
+        },
+        {
+          "step": "decision",
+          "id": "decision.planner.execution_route",
+          "decision_type": "EXECUTION_ROUTE",
+          "winner": "plan_execution",
+          "reason_code": "EXECUTION_ROUTE_PLAN"
+        },
+        {
+          "step": "decision",
+          "id": "decision.pagination.handle_turn",
+          "decision_type": "PAGINATION_HANDLE",
+          "winner": "skipped",
+          "reason_code": "PAGINATION_SKIPPED"
+        },
+        {
+          "step": "decision",
+          "id": "decision.execution.eligibility",
+          "decision_type": "EXECUTE_PLAN_ACTION",
+          "winner": "execute",
+          "reason_code": "PLAN_ACTION_PRESENT"
+        },
+        {
+          "step": "decision",
+          "id": "decision.persist.reload_verify",
+          "decision_type": "RELOAD_VERIFY",
+          "winner": "match",
+          "reason_code": "RELOAD_MATCH"
+        },
+        {
+          "step": "decision",
+          "id": "decision.persist.save",
+          "decision_type": "PERSIST_SAVE",
+          "winner": "save",
+          "reason_code": "PERSIST_SAVE_APPLIED"
+        },
+        {
+          "step": "decision",
+          "id": "decision.turn.outcome",
+          "decision_type": "TURN_OUTCOME",
+          "winner": {
+            "status": "success",
+            "stage": "AVAILABILITY",
+            "action": "SEARCH_AVAILABILITY",
+            "intent": "CREATE_APPOINTMENT"
+          },
+          "reason_code": "TURN_OUTCOME_EXECUTED"
+        },
+        {
+          "step": "mutation",
+          "id": "mutation.slots_service_id.1",
+          "field": "slots.service_id",
+          "previous": null,
+          "new": "premium haircut",
+          "reason_code": "SLOT_ADDITIVE_MERGE"
+        },
+        {
+          "step": "mutation",
+          "id": "mutation.plan_action.2",
+          "field": "plan.action",
+          "previous": null,
+          "new": "SEARCH_AVAILABILITY",
+          "reason_code": "STEP_SELECTED"
+        },
+        {
+          "step": "mutation",
+          "id": "mutation.plan_stage.3",
+          "field": "plan.stage",
+          "previous": null,
+          "new": "AVAILABILITY",
+          "reason_code": "STAGE_DERIVED_FROM_ACTION"
+        },
+        {
+          "step": "mutation",
+          "id": "mutation.plan_status.4",
+          "field": "plan.status",
+          "previous": null,
+          "new": "READY",
+          "reason_code": "STATUS_READY"
+        }
+      ]
+    },
+    "first_failed_invariant": null,
+    "timing_ms": 3205
+  }
+}

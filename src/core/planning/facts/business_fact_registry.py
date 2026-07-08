@@ -38,6 +38,7 @@ class BusinessFacts:
     time_selection_ready: bool
     user_confirmation_required: bool
     user_confirmation_satisfied: bool
+    awaiting_user_confirmation: bool
 
 
 @dataclass(frozen=True)
@@ -51,6 +52,31 @@ class PlanningFactContext:
     missing_slots: Optional[List[str]] = None
     needs_clarification: bool = False
     confirmation_state: Optional[str] = None
+    organization_id: Optional[int] = None
+
+
+def derive_user_confirmation_satisfied(
+    confirmation_state: Optional[str],
+    luma_response: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """True when the user has accepted an outstanding booking confirmation.
+
+    Encapsulates persisted ``confirmation_state`` and the turn-level gate ACCEPT
+    signal (``_confirm_booking_continuation``) so planners reason about business
+    semantics only.
+    """
+    if confirmation_state == "confirmed":
+        return True
+    if isinstance(luma_response, dict) and _user_accepted_booking_confirmation(
+        luma_response
+    ):
+        return True
+    return False
+
+
+def _user_accepted_booking_confirmation(luma_response: Dict[str, Any]) -> bool:
+    """Turn-level ACCEPT at the booking confirmation gate (pre-persist)."""
+    return bool(luma_response.get("_confirm_booking_continuation"))
 
 
 def derive_business_facts(context: PlanningFactContext) -> BusinessFacts:
@@ -64,13 +90,16 @@ def derive_business_facts(context: PlanningFactContext) -> BusinessFacts:
     confirmation_state = context.confirmation_state
     if confirmation_state is None:
         confirmation_state = _resolve_confirmation_state(session_state, luma_response)
-    user_confirmation_satisfied = confirmation_state == "confirmed"
+    user_confirmation_satisfied = derive_user_confirmation_satisfied(
+        confirmation_state, luma_response
+    )
 
     availability_ready = _derive_availability_ready(
         intent_name=intent_name,
         slots=slots,
         session_state=session_state,
         luma_response=luma_response,
+        organization_id=context.organization_id,
     )
     availability_check_required = _derive_availability_check_required(
         intent_name=intent_name,
@@ -105,12 +134,17 @@ def derive_business_facts(context: PlanningFactContext) -> BusinessFacts:
 
     user_confirmation_required = _derive_user_confirmation_required(
         intent_name=intent_name,
+        slots=slots,
         confirmation_state=confirmation_state,
         missing_slots=missing_slots,
         needs_clarification=context.needs_clarification,
         availability_ready=availability_ready,
         time_selection_ready=time_selection_ready,
         user_confirmation_satisfied=user_confirmation_satisfied,
+    )
+
+    awaiting_user_confirmation = (
+        user_confirmation_required and not user_confirmation_satisfied
     )
 
     facts = BusinessFacts(
@@ -124,12 +158,44 @@ def derive_business_facts(context: PlanningFactContext) -> BusinessFacts:
         time_selection_ready=time_selection_ready,
         user_confirmation_required=user_confirmation_required,
         user_confirmation_satisfied=user_confirmation_satisfied,
+        awaiting_user_confirmation=awaiting_user_confirmation,
     )
     logger.debug(
         "[BUSINESS_FACTS] intent=%s facts=%s",
         intent_name,
         facts,
     )
+    from core.tracing.invariant_trace import trace_stage
+    from core.tracing.stage_checks import check_business_facts
+
+    try:
+        from core.tracing.decision_trace import measure_stage
+    except ImportError:
+        from contextlib import contextmanager
+
+        @contextmanager
+        def measure_stage(_stage: str):  # type: ignore[misc]
+            yield
+
+    with measure_stage("business_facts"):
+        trace_stage(
+            "business_facts",
+            lambda: check_business_facts(facts=facts, intent_name=intent_name),
+            state_snapshot={
+                "intent": intent_name,
+                "availability_ready": facts.availability_ready,
+                "availability_check_required": facts.availability_check_required,
+                "user_confirmation_required": facts.user_confirmation_required,
+                "user_confirmation_satisfied": facts.user_confirmation_satisfied,
+                "awaiting_user_confirmation": facts.awaiting_user_confirmation,
+            },
+        )
+        try:
+            from core.tracing.facts import emit_business_facts_trace
+
+            emit_business_facts_trace(context, facts)
+        except ImportError:
+            pass
     return facts
 
 
@@ -144,6 +210,7 @@ def build_policy_execution_flags(
     availability_resolved: bool = False,
     confirmation_state: Optional[str] = None,
     booking_hold_created: Optional[bool] = None,
+    organization_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Build selector flags including derived business facts for one planning cycle."""
     facts = derive_business_facts(
@@ -155,6 +222,7 @@ def build_policy_execution_flags(
             missing_slots=missing_slots,
             needs_clarification=needs_clarification,
             confirmation_state=confirmation_state,
+            organization_id=organization_id,
         )
     )
     if booking_hold_created is None:
@@ -173,30 +241,66 @@ def build_policy_execution_flags(
         "time_selection_ready": facts.time_selection_ready,
         "user_confirmation_required": facts.user_confirmation_required,
         "user_confirmation_satisfied": facts.user_confirmation_satisfied,
+        "awaiting_user_confirmation": facts.awaiting_user_confirmation,
     }
 
 
-def _derive_availability_ready(
+def _successful_availability_execution(
+    session_state: Optional[Dict[str, Any]],
+) -> bool:
+    """True when session holds a successful availability search result."""
+    if not isinstance(session_state, dict):
+        return False
+    last = session_state.get("last_execution_result")
+    if not isinstance(last, dict):
+        return False
+    if last.get("type") != "availability":
+        return False
+    if last.get("status") != "success":
+        return False
+    slots = last.get("slots")
+    return isinstance(slots, list) and len(slots) > 0
+
+
+def _has_resolved_datetime_selection(
+    session_state: Optional[Dict[str, Any]],
+    luma_response: Dict[str, Any],
+) -> bool:
+    """True when the user confirmed a concrete slot (post-search binding)."""
+    for source in (luma_response, session_state):
+        if not isinstance(source, dict):
+            continue
+        resolved = source.get("resolved_datetime_range")
+        if isinstance(resolved, dict) and resolved.get("start"):
+            return True
+        facts = source.get("facts")
+        if isinstance(facts, dict):
+            facts_resolved = facts.get("resolved_datetime_range")
+            if isinstance(facts_resolved, dict) and facts_resolved.get("start"):
+                return True
+    return False
+
+
+def evaluate_availability_evidence_ready(
     *,
     intent_name: str,
     slots: Dict[str, Any],
     session_state: Optional[Dict[str, Any]],
     luma_response: Dict[str, Any],
+    organization_id: Optional[int] = None,
 ) -> bool:
-    """True when availability outcome is trustworthy for current booking parameters.
+    """True when availability was searched for current criteria or a slot was confirmed.
 
-    Mirrors availability_resolved derivation in luma_response_processor without
-    mutating planner state.
+    Proposal-expanded date/time and co-present slots.date/time alone are not
+    sufficient — require a successful availability cache and fingerprint match,
+    or a resolved_datetime_range from presented-offer binding.
     """
     from core.orchestration.availability_fingerprint import (
+        build_availability_fingerprint_slots,
         slots_match_availability_fingerprint,
     )
-    from core.orchestration.temporal_proposal import (
-        expand_slots_for_planning,
-        has_bound_booking_datetime,
-    )
 
-    if has_bound_booking_datetime(slots, session_state, luma_response):
+    if _has_resolved_datetime_selection(session_state, luma_response):
         return True
 
     stored_fingerprint = None
@@ -204,28 +308,39 @@ def _derive_availability_ready(
         stored_fingerprint = session_state.get("availability_fingerprint")
 
     facts_obj = luma_response.get("facts")
-    fingerprint_slots = expand_slots_for_planning(
+    fingerprint_slots = build_availability_fingerprint_slots(
         slots,
-        date_proposal=luma_response.get("date_proposal"),
-        time_proposal=luma_response.get("time_proposal"),
-        date_constraint=luma_response.get("date_constraint"),
-        nlu_facts=facts_obj if isinstance(facts_obj, dict) else None,
-        time_constraint=luma_response.get("time_constraint"),
         intent_name=intent_name,
+        organization_id=organization_id,
+        luma_response=luma_response,
+        session_state=session_state,
+        nlu_facts=facts_obj if isinstance(facts_obj, dict) else None,
     )
 
-    if slots_match_availability_fingerprint(
+    fingerprint_matched = slots_match_availability_fingerprint(
         fingerprint_slots, stored_fingerprint, intent_name=intent_name
-    ):
+    )
+    if fingerprint_matched and _successful_availability_execution(session_state):
         return True
 
-    if luma_response.get("_confirm_booking_continuation"):
+    # MODIFY / reservation flows may carry booking_id without service_id; bound
+    # datetime still indicates a prior search+selection for non-appointment creates.
+    if intent_name != "CREATE_APPOINTMENT":
+        from core.orchestration.temporal_proposal import has_bound_booking_datetime
+
+        if has_bound_booking_datetime(slots, session_state, luma_response):
+            return True
+
+    if derive_user_confirmation_satisfied(
+        _resolve_confirmation_state(session_state, luma_response),
+        luma_response,
+    ):
         stored_range = (
             session_state.get("resolved_datetime_range")
             if isinstance(session_state, dict)
             else None
         )
-        if stored_fingerprint:
+        if stored_fingerprint and _successful_availability_execution(session_state):
             return True
         if isinstance(stored_range, dict) and stored_range.get("start"):
             return True
@@ -237,6 +352,24 @@ def _derive_availability_ready(
             return True
 
     return False
+
+
+def _derive_availability_ready(
+    *,
+    intent_name: str,
+    slots: Dict[str, Any],
+    session_state: Optional[Dict[str, Any]],
+    luma_response: Dict[str, Any],
+    organization_id: Optional[int] = None,
+) -> bool:
+    """True when availability outcome is trustworthy for current booking parameters."""
+    return evaluate_availability_evidence_ready(
+        intent_name=intent_name,
+        slots=slots,
+        session_state=session_state,
+        luma_response=luma_response,
+        organization_id=organization_id,
+    )
 
 
 def _intent_has_availability_search(intent_name: str) -> bool:
@@ -357,6 +490,7 @@ def _resolve_confirmation_state(
 def _derive_user_confirmation_required(
     *,
     intent_name: str,
+    slots: Dict[str, Any],
     confirmation_state: Optional[str],
     missing_slots: List[str],
     needs_clarification: bool,
@@ -366,11 +500,16 @@ def _derive_user_confirmation_required(
 ) -> bool:
     if user_confirmation_satisfied:
         return False
+
+    if intent_name == "CREATE_APPOINTMENT" and _derive_booking_identified(slots):
+        return False
+
     if confirmation_state == "pending":
         return True
 
     if intent_name == "CREATE_APPOINTMENT":
         return _create_appointment_commit_ready_for_confirmation(
+            slots=slots,
             missing_slots=missing_slots,
             needs_clarification=needs_clarification,
             availability_ready=availability_ready,
@@ -394,6 +533,7 @@ def _derive_user_confirmation_required(
 
 def _create_appointment_commit_ready_for_confirmation(
     *,
+    slots: Dict[str, Any],
     missing_slots: List[str],
     needs_clarification: bool,
     availability_ready: bool,
@@ -401,6 +541,8 @@ def _create_appointment_commit_ready_for_confirmation(
     confirmation_state: Optional[str],
 ) -> bool:
     """Business view of commit-ready CREATE_APPOINTMENT awaiting explicit confirmation."""
+    if _derive_booking_identified(slots):
+        return False
     if confirmation_state is not None:
         return False
     if missing_slots or needs_clarification:

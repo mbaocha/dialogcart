@@ -216,12 +216,14 @@ class ResponseBuilder:
         intent_payload: Dict[str, Any],
         facts: Optional[Dict[str, Any]] = None,
         debug_data: Optional[Dict[str, Any]] = None,
+        operation: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Build the final API response body from extracted facts and intent only.
 
         Response is built ONLY from:
         - intent (name + confidence)
+        - operation (optional availability interaction, e.g. browse_next)
         - facts (dates, times, date_time_pairs, service_id, booking_id)
 
         Does NOT use:
@@ -235,15 +237,19 @@ class ResponseBuilder:
             intent_payload: Intent payload dict with name and confidence
             facts: Optional facts dict (dates[], times[], date_time_pairs[], service_id, booking_id)
             debug_data: Optional debug data (pipeline results)
+            operation: Optional availability operation (browse_next, browse_previous)
 
         Returns:
             Complete API response body dict with intent and facts only
         """
-        # EXTRACTION-ONLY: Only output intent and facts
+        # EXTRACTION-ONLY: Only output intent, optional operation, and facts
         # Luma is a pure fact extractor - no semantic fields (status, missing_slots, clarification, booking block)
         response_body = {
             "intent": intent_payload,
         }
+
+        if operation:
+            response_body["operation"] = operation
 
         # Use pre-aggregated facts if provided
         # Facts should always be provided from resolve_service.py via aggregate_extraction_facts

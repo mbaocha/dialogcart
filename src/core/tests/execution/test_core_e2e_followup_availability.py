@@ -255,8 +255,7 @@ def test_core_e2e_followup_availability_time_provided_later():
     assert call_args.kwargs["organization_id"] == 1
     assert call_args.kwargs["service_id"] == "haircut"
     assert call_args.kwargs["date"] == "2026-01-16"
-    assert "extra_params" in call_args.kwargs
-    assert call_args.kwargs["extra_params"]["time_constraint"]["mode"] == "exact"
+    assert call_args.kwargs.get("extra_params") is None
 
     # Assert execution result structure
     assert execution_result_turn2 is not None, "Turn 2: Expected execution result"

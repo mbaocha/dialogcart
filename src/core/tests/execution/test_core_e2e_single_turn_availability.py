@@ -129,19 +129,18 @@ def test_core_e2e_single_turn_availability():
     plan = result.get("plan")
     execution_result = result.get("result")
 
-    # Step 4: Assert planning result
+    # Step 4: Assert planning result (post-resolution: confirmation path, no further execution)
     assert plan is not None
-    assert (
-        plan.get("action") == "SEARCH_AVAILABILITY"
-    ), f"Expected action SEARCH_AVAILABILITY, got {plan.get('action')}"
     assert plan.get("intent_name") == "CREATE_APPOINTMENT"
-    assert plan.get("stage") is not None
+    assert plan.get("time_match_outcome") == "TIME_MATCH_EXACT"
+    assert plan.get("action") is None
+    assert plan.get("status") == "AWAITING_CONFIRMATION"
     assert "slots" in plan
     assert plan["slots"].get("service_id") == "haircut"
     assert plan["slots"].get("date") == "2026-01-16"
-    assert (
-        plan["slots"].get("time") == "3pm"
-    ), f"Expected raw time '3pm', got {plan['slots'].get('time')}"
+    assert plan["slots"].get("time") == "15:00", (
+        "Exact time match binds normalized HH:MM to durable slots"
+    )
     # Assert normalized time in time_constraint
     assert "time_constraint" in plan
     assert (
@@ -156,13 +155,13 @@ def test_core_e2e_single_turn_availability():
     assert call_args.kwargs["organization_id"] == 1
     assert call_args.kwargs["service_id"] == "haircut"
     assert call_args.kwargs["date"] == "2026-01-16"
-    assert "extra_params" in call_args.kwargs
-    assert call_args.kwargs["extra_params"]["time_constraint"]["mode"] == "exact"
+    assert call_args.kwargs.get("extra_params") is None
 
     # Step 6: Assert execution result structure
     assert execution_result is not None
     assert execution_result.get("type") == "availability"
     assert execution_result.get("status") == "success"
+    assert execution_result.get("time_resolution", {}).get("outcome") == "TIME_MATCH_EXACT"
     assert "slots" in execution_result
 
     # Step 7: Assert returned slots are normalized

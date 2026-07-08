@@ -3927,6 +3927,7 @@ def resolve_message(
             intent_payload=intent_payload,
             facts=facts_for_response,
             debug_data=results if debug_mode else None,
+            operation=intent_resp.get("operation"),
         )
 
         # Add time_constraint to response payload (shadow output - no behavior change)

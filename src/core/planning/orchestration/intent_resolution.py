@@ -144,7 +144,7 @@ def resolve_effective_intent(
                         f"(luma_intent={luma_intent_name}, user_id={user_id}{log_transaction_id})"
                     )
                     # Return immediately with recovered durable intent - no further processing needed
-                    logger.error(
+                    logger.debug(
                         f"[SESSION_RESET_WRITER] WRITER=early_return_durable_recovery value=False "
                         f"location=line_113_early_return reason=durable_intent_recovered "
                         f"session_intent={session_intent_str} user_id={user_id}{log_transaction_id}"
@@ -159,7 +159,7 @@ def resolve_effective_intent(
     # Resolve effective_intent using session
     effective_intent = luma_intent_name
     session_reset_occurred = False
-    logger.error(
+    logger.debug(
         f"[SESSION_RESET_WRITER] WRITER=initial_default value=False "
         f"location=line_122_default reason=initial_assignment "
         f"luma_intent={luma_intent_name} user_id={user_id}{log_transaction_id}"
@@ -342,7 +342,7 @@ def resolve_effective_intent(
                     clear_session(user_id)
                     session_state = None
                     session_reset_occurred = True
-                    logger.error(
+                    logger.debug(
                         f"[SESSION_RESET_WRITER] WRITER=canonical_domain_switch value=True "
                         f"location=line_210_canonical_switch reason=domain_switch_detected "
                         f"old={session_intent_str} new={effective_intent} "
@@ -496,7 +496,7 @@ def resolve_effective_intent(
                         # CRITICAL: Set session_reset_occurred = False to allow merge
                         effective_intent = luma_intent_name
                         session_reset_occurred = False
-                        logger.error(
+                        logger.debug(
                             f"[SESSION_RESET_WRITER] WRITER=unknown_to_concrete_materialization value=False "
                             f"location=line_274_materialization reason=UNKNOWN_to_concrete_upgrade "
                             f"prior={session_intent_str} new={luma_intent_name} "
@@ -518,7 +518,7 @@ def resolve_effective_intent(
                         clear_session(user_id)
                         session_state = None
                         session_reset_occurred = True
-                        logger.error(
+                        logger.debug(
                             f"[SESSION_RESET_WRITER] WRITER=concrete_to_concrete_reset value=True "
                             f"location=line_287_intent_switch reason=true_intent_switch "
                             f"old={session_intent_str} new={luma_intent_name} "
@@ -536,7 +536,7 @@ def resolve_effective_intent(
                     session_intent_field = (
                         session_state.get("intent") if session_state else None
                     )
-                    logger.error(
+                    logger.debug(
                         f"[INTENT_RESOLVE] prior={session_intent_str} new={luma_intent_name} "
                         f"reset={session_reset_occurred} reason={branch_name} "
                         f"session.intent_name={session_intent_name_field} session.intent={session_intent_field} "
@@ -605,13 +605,13 @@ def resolve_effective_intent(
                 pass
 
     # DEBUG: Log final intent resolution result before returning
-    logger.error(
+    logger.debug(
         f"[SESSION_RESET_WRITER] FINAL_VALUE={session_reset_occurred} "
         f"effective_intent={effective_intent} "
         f"location=line_337_before_return "
         f"user_id={user_id}{log_transaction_id}"
     )
-    logger.error(
+    logger.debug(
         f"[INTENT_RESOLVE] RETURNING effective_intent={effective_intent} "
         f"session_reset_occurred={session_reset_occurred} "
         f"user_id={user_id}{log_transaction_id}"

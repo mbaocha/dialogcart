@@ -9,10 +9,11 @@ It receives HTTP requests and delegates to the orchestrator.
 
 import json
 import logging
+import os
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 # Ensure environment variables are loaded at startup
@@ -94,10 +95,14 @@ class MessageResponse(BaseModel):
     text: Optional[str] = None
     error: Optional[str] = None
     message: Optional[str] = None
+    invariant_trace: Optional[dict] = None
+    decision_trace: Optional[dict] = None
+    decision_trace_text: Optional[str] = None
+    trace_view: Optional[str] = None
 
 
 @router.post("/message", response_model=MessageResponse)
-async def post_message(request: MessageRequest):
+async def post_message(request: MessageRequest, http_request: Request):
     """
     Process a user message through the orchestration pipeline.
 
@@ -132,25 +137,75 @@ async def post_message(request: MessageRequest):
             )
 
     try:
+        from core.tracing.decision_trace import (
+            TRACE_ENV_VAR as DECISION_TRACE_ENV_VAR,
+            TRACE_HEADER as DECISION_TRACE_HEADER,
+            TRACE_QUERY_PARAM as DECISION_TRACE_QUERY_PARAM,
+            TurnTrace,
+            finalize_turn_trace as finalize_decision_trace,
+            is_decision_trace_enabled,
+            clear_request_decision_trace_context,
+            set_request_decision_trace_enabled,
+            trace_to_dict,
+            measure_stage,
+        )
+        from core.tracing.views import (
+            build_trace_response_fields,
+            resolve_trace_view,
+        )
+        from core.tracing.server_log import log_decision_trace_text
+        from core.tracing.spine import (
+            emit_persist_save_for_outcome,
+            emit_reload_verify,
+            emit_turn_outcome,
+        )
+        from core.tracing.invariant_trace import (
+            TurnInvariantTrace,
+            finalize_turn_trace,
+            is_trace_enabled,
+            trace_stage,
+        )
+        from core.tracing.stage_checks import check_reload_session, check_save_session
+
+        query_trace = http_request.query_params.get(DECISION_TRACE_QUERY_PARAM)
+        trace_enabled, trace_view = resolve_trace_view(
+            query_trace=query_trace,
+            header_value=http_request.headers.get(DECISION_TRACE_HEADER),
+            env_enabled=os.getenv(DECISION_TRACE_ENV_VAR, "").strip().lower()
+            in {"1", "true", "yes", "on"},
+        )
+        decision_trace_enabled = trace_enabled
+        set_request_decision_trace_enabled(decision_trace_enabled, view=trace_view)
+
+        if is_trace_enabled():
+            TurnInvariantTrace.defer_finalize(True)
+
         # Generate transaction_id if not provided (per-request tracing only)
         transaction_id = request.transaction_id or str(uuid.uuid4())
+
+        if decision_trace_enabled:
+            TurnTrace.begin(
+                user_id=request.user_id,
+                text=request.text,
+                transaction_id=transaction_id,
+            )
 
         # Load session at request start
         session_state = get_session(request.user_id)
         # Keep the unfiltered session so HANDLER_DELEGATED can preserve booking state
         _raw_session = session_state
 
-        # Explicit session load logging
-        logger.info(
-            "[session] load",
-            extra={
-                "user_id": request.user_id,
-                "transaction_id": transaction_id,
-                "found": session_state is not None,
-                "status": session_state.get("status") if session_state else None,
-                "intent": session_state.get("intent") if session_state else None,
-            },
-        )
+        if not decision_trace_enabled:
+            logger.info(
+                "[session] load",
+                extra={
+                    "user_id": request.user_id,
+                    "transaction_id": transaction_id,
+                    "found": session_state is not None,
+                    "status": session_state.get("status") if session_state else None,
+                    "intent": session_state.get("intent") if session_state else None,
+                },
+            )
 
         # Only consider session if status == "NEEDS_CLARIFICATION" or "AWAITING_CAPABILITY"
         # AWAITING_CAPABILITY sessions need to be loaded to preserve active_capability
@@ -193,7 +248,38 @@ async def post_message(request: MessageRequest):
                 transaction_id=transaction_id,
             )
             if early is not None:
-                return MessageResponse(**early)
+                invariant_trace = (
+                    finalize_turn_trace() if is_trace_enabled() else None
+                )
+                if invariant_trace:
+                    early["invariant_trace"] = invariant_trace
+                decision_trace_fields = {
+                    "trace_view": trace_view,
+                    "decision_trace": None,
+                    "decision_trace_text": None,
+                }
+                if decision_trace_enabled:
+                    early_outcome = early.get("outcome")
+                    emit_persist_save_for_outcome(
+                        outcome_status=(
+                            early_outcome.get("status")
+                            if isinstance(early_outcome, dict)
+                            else None
+                        ),
+                        saved=False,
+                    )
+                    emit_turn_outcome(
+                        outcome=early_outcome,
+                        success=early.get("success", False),
+                    )
+                    frozen_trace = finalize_decision_trace()
+                    if frozen_trace is not None:
+                        decision_trace_fields = build_trace_response_fields(
+                            trace_to_dict(frozen_trace),
+                            trace_view,
+                        )
+                log_decision_trace_text(logger, decision_trace_fields)
+                return MessageResponse(**early, **decision_trace_fields)
             outcome = result.get("outcome")
 
         # Handle HANDLER_DELEGATED — invoke registered intent handler (e.g. RAG)
@@ -261,101 +347,194 @@ async def post_message(request: MessageRequest):
             )
 
         # Handle session persistence after response
+        session_saved = False
+        saved_session_state = None
         if outcome and isinstance(outcome, dict):
-            outcome_status = outcome.get("status")
-            merged_luma_response = result.get("_merged_luma_response")
-            previous_session = _raw_session or session_state
-            persistence_outcome = dict(outcome)
-            if not persistence_outcome.get("intent_name") and not persistence_outcome.get(
-                "intent"
-            ):
-                plan_for_intent = result.get("plan", {})
-                if isinstance(plan_for_intent, dict):
-                    plan_intent = plan_for_intent.get("intent_name") or plan_for_intent.get(
-                        "intent"
-                    )
-                    if plan_intent:
-                        persistence_outcome["intent_name"] = plan_intent
+            with measure_stage("persistence"):
+                outcome_status = outcome.get("status")
+                merged_luma_response = result.get("_merged_luma_response")
+                previous_session = _raw_session or session_state
+                persistence_outcome = dict(outcome)
+                if not persistence_outcome.get("intent_name") and not persistence_outcome.get(
+                    "intent"
+                ):
+                    plan_for_intent = result.get("plan", {})
+                    if isinstance(plan_for_intent, dict):
+                        plan_intent = plan_for_intent.get("intent_name") or plan_for_intent.get(
+                            "intent"
+                        )
+                        if plan_intent:
+                            persistence_outcome["intent_name"] = plan_intent
 
-            if outcome_status in (
-                "NEEDS_CLARIFICATION",
-                "AWAITING_CONFIRMATION",
-                "AWAITING_CAPABILITY",
-                "READY",
-                "EXECUTED",
-                "success",
-            ):
-                new_session_state = build_session_state_from_outcome(
-                    persistence_outcome,
-                    outcome_status,
-                    merged_luma_response,
-                    previous_session,
-                    request.user_id,
-                )
-                if new_session_state is None and outcome_status in (
+                browse_pagination = result.get("availability_pagination")
+                if isinstance(browse_pagination, dict) and not persistence_outcome.get(
+                    "availability_pagination"
+                ):
+                    persistence_outcome["availability_pagination"] = browse_pagination
+
+                if outcome_status in (
+                    "NEEDS_CLARIFICATION",
+                    "AWAITING_CONFIRMATION",
+                    "AWAITING_CAPABILITY",
                     "READY",
                     "EXECUTED",
                     "success",
                 ):
-                    # Preserve chat history for terminal/execution outcomes when
-                    # no durable session payload was produced.
-                    new_session_state = previous_session or {}
+                    new_session_state = build_session_state_from_outcome(
+                        persistence_outcome,
+                        outcome_status,
+                        merged_luma_response,
+                        previous_session,
+                        request.user_id,
+                        session_store=_session_store,
+                    )
+                    if new_session_state is None and outcome_status in ("READY", "success"):
+                        # Preserve chat history when no durable session payload was produced.
+                        # EXECUTED durable intents must rebuild via build_session_state_from_outcome.
+                        new_session_state = previous_session or {}
 
-                if new_session_state is not None:
-                    from core.orchestration.nlu.conversation_memory import (
-                        append_messages_turn,
-                    )
+                    if new_session_state is not None:
+                        from core.orchestration.nlu.conversation_memory import (
+                            append_messages_turn,
+                        )
 
-                    new_session_state = append_messages_turn(
-                        new_session_state,
-                        request.text,
-                        result.get("text") or outcome.get("text"),
-                    )
-                    save_session(request.user_id, new_session_state)
-                    log_event = (
-                        "session_preserved_on_ready"
-                        if outcome_status == "READY"
-                        else "[session] save"
-                    )
-                    logger.info(
-                        log_event,
-                        extra={
-                            "user_id": request.user_id,
-                            "transaction_id": transaction_id,
-                            "intent": new_session_state.get("intent_name")
-                            or new_session_state.get("intent"),
-                            "status": new_session_state.get("status"),
-                            "missing_slots": new_session_state.get("missing_slots", []),
-                            "slots": list((new_session_state.get("slots") or {}).keys()),
-                        },
-                    )
+                        new_session_state = append_messages_turn(
+                            new_session_state,
+                            request.text,
+                            result.get("text") or outcome.get("text"),
+                        )
+                        save_session(request.user_id, new_session_state)
+                        session_saved = True
+                        saved_session_state = new_session_state
+                        if is_trace_enabled():
+                            trace_stage(
+                                "save_session",
+                                lambda: check_save_session(
+                                    saved=True, user_id=request.user_id
+                                ),
+                                state_snapshot={
+                                    "intent": new_session_state.get("intent_name")
+                                    or new_session_state.get("intent"),
+                                    "status": new_session_state.get("status"),
+                                },
+                            )
+                            reloaded_state = get_session(request.user_id)
+                            trace_stage(
+                                "reload_session",
+                                lambda: check_reload_session(
+                                    saved_state=new_session_state,
+                                    reloaded_state=reloaded_state,
+                                    user_id=request.user_id,
+                                ),
+                                state_snapshot={
+                                    "reloaded": reloaded_state is not None,
+                                },
+                            )
+                        if decision_trace_enabled:
+                            reloaded_state = get_session(request.user_id)
+                            emit_reload_verify(
+                                saved_state=new_session_state,
+                                reloaded_state=reloaded_state,
+                            )
+                        log_event = (
+                            "session_preserved_on_ready"
+                            if outcome_status == "READY"
+                            else "[session] save"
+                        )
+                        if not decision_trace_enabled:
+                            logger.info(
+                                log_event,
+                                extra={
+                                    "user_id": request.user_id,
+                                    "transaction_id": transaction_id,
+                                    "intent": new_session_state.get("intent_name")
+                                    or new_session_state.get("intent"),
+                                    "status": new_session_state.get("status"),
+                                    "missing_slots": new_session_state.get("missing_slots", []),
+                                    "slots": list((new_session_state.get("slots") or {}).keys()),
+                                },
+                            )
 
-                    decision = result.get("_decision")
-                    if decision and isinstance(decision, dict):
-                        if "facts" not in decision:
-                            decision["facts"] = {}
-                        if not isinstance(decision["facts"], dict):
-                            decision["facts"] = {}
-                        if "facts" in outcome and isinstance(outcome["facts"], dict):
-                            slot_attempts = outcome["facts"].get("slot_attempts")
-                            if slot_attempts is not None:
-                                decision["facts"]["slot_attempts"] = (
-                                    slot_attempts.copy()
-                                    if isinstance(slot_attempts, dict)
-                                    else slot_attempts
-                                )
+                        decision = result.get("_decision")
+                        if decision and isinstance(decision, dict):
+                            if "facts" not in decision:
+                                decision["facts"] = {}
+                            if not isinstance(decision["facts"], dict):
+                                decision["facts"] = {}
+                            if "facts" in outcome and isinstance(outcome["facts"], dict):
+                                slot_attempts = outcome["facts"].get("slot_attempts")
+                                if slot_attempts is not None:
+                                    decision["facts"]["slot_attempts"] = (
+                                        slot_attempts.copy()
+                                        if isinstance(slot_attempts, dict)
+                                        else slot_attempts
+                                    )
+
+                if decision_trace_enabled:
+                    emit_persist_save_for_outcome(
+                        outcome_status=outcome_status,
+                        saved=session_saved,
+                        new_session_state=saved_session_state,
+                    )
+        elif decision_trace_enabled:
+            emit_persist_save_for_outcome(
+                outcome_status=None,
+                saved=False,
+            )
 
         # Convert to response model
         outcome_for_response = result.get("outcome")
+        if isinstance(outcome_for_response, dict):
+            outcome_for_response = dict(outcome_for_response)
+            browse_pagination = result.get("availability_pagination")
+            if isinstance(browse_pagination, dict):
+                outcome_for_response.setdefault(
+                    "availability_pagination", browse_pagination
+                )
         response_text = result.get("text")
         if not response_text and isinstance(outcome_for_response, dict):
             response_text = outcome_for_response.get("text")
+
+        invariant_trace = None
+        if is_trace_enabled():
+            invariant_trace = finalize_turn_trace()
+
+        decision_trace_fields = {
+            "trace_view": trace_view if decision_trace_enabled else None,
+            "decision_trace": None,
+            "decision_trace_text": None,
+        }
+        if decision_trace_enabled:
+            emit_turn_outcome(
+                outcome=outcome_for_response,
+                success=result.get("success", False),
+                handler_delegated=(
+                    isinstance(outcome_for_response, dict)
+                    and outcome_for_response.get("status") == "HANDLER_DELEGATED"
+                ),
+                result=result,
+                inputs_evaluated={
+                    "success": result.get("success", False),
+                    "error": result.get("error"),
+                },
+            )
+            frozen_trace = finalize_decision_trace()
+            if frozen_trace is not None:
+                decision_trace_fields = build_trace_response_fields(
+                    trace_to_dict(frozen_trace),
+                    trace_view,
+                )
+
+        log_decision_trace_text(logger, decision_trace_fields)
+
         return MessageResponse(
             success=result.get("success", False),
             outcome=outcome_for_response,
             text=response_text,
             error=result.get("error"),
             message=result.get("message"),
+            invariant_trace=invariant_trace,
+            **decision_trace_fields,
         )
 
     except ContractViolation as e:
@@ -373,6 +552,13 @@ async def post_message(request: MessageRequest):
             status_code=500,
             detail={"success": False, "error": "internal_error", "message": str(e)},
         )
+    finally:
+        try:
+            from core.tracing.decision_trace import clear_request_decision_trace_context
+
+            clear_request_decision_trace_context()
+        except ImportError:
+            pass
 
 
 @router.get("/session/{user_id}")

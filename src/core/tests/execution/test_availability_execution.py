@@ -58,7 +58,7 @@ def test_search_availability_happy_path_service():
     Assert:
     - availability_client.get_service_availability() called once
     - payload includes: organization_id, service_id, date
-    - time_from / time_to derived from time_constraint
+    - time_constraint is not sent to the availability endpoint
     - returned Core result includes: available_slots[], each slot has start_at, end_at, staff_id preserved
     """
     # Create mock client
@@ -88,7 +88,6 @@ def test_search_availability_happy_path_service():
         organization_id=1,
         service_id="haircut",
         date="2026-01-16",
-        extra_params={"time_constraint": slots["time_constraint"]},
     )
 
     # Assert client was called correctly

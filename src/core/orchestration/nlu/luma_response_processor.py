@@ -574,6 +574,7 @@ def process_luma_response(
     domain: str,
     user_id: str,
     session_state: Optional[Dict[str, Any]] = None,
+    organization_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Process Luma response and produce a decision plan.
@@ -987,9 +988,10 @@ def process_luma_response(
     # Determine availability_resolved using slot-fingerprint-based comparison
     # Availability is resolved only if it was checked for the exact same slot combination
     from core.orchestration.availability_fingerprint import (
+        build_availability_fingerprint_slots,
         compute_availability_fingerprint,
-        slots_match_availability_fingerprint,
     )
+    from core.orchestration.temporal_proposal import has_bound_booking_datetime
 
     # Get stored fingerprint from session (set when SEARCH_AVAILABILITY executed successfully)
     stored_fingerprint = None
@@ -1000,35 +1002,24 @@ def process_luma_response(
     # Use effective_collected_slots as it represents the authoritative slot state
     current_slots = effective_collected_slots
 
-    # Compare fingerprints using proposal-expanded slots so a new exact time_proposal
-    # (or date_proposal) invalidates a prior SEARCH_AVAILABILITY fingerprint.
-    from core.orchestration.temporal_proposal import (
-        expand_slots_for_planning,
-        has_bound_booking_datetime,
+    from core.planning.facts import evaluate_availability_evidence_ready
+
+    availability_resolved = evaluate_availability_evidence_ready(
+        intent_name=intent_name or "",
+        slots=current_slots,
+        session_state=session_state,
+        luma_response=luma_response,
+        organization_id=organization_id,
     )
 
-    availability_resolved = has_bound_booking_datetime(
-        current_slots, session_state, luma_response
-    )
-
-    fingerprint_slots = expand_slots_for_planning(
+    fingerprint_slots = build_availability_fingerprint_slots(
         current_slots,
-        date_proposal=luma_response.get("date_proposal"),
-        time_proposal=luma_response.get("time_proposal"),
-        date_constraint=luma_response.get("date_constraint"),
-        nlu_facts=facts_obj if isinstance(facts_obj, dict) else None,
-        time_constraint=luma_response.get("time_constraint"),
         intent_name=intent_name,
+        organization_id=organization_id,
+        luma_response=luma_response,
+        session_state=session_state,
+        nlu_facts=facts_obj if isinstance(facts_obj, dict) else None,
     )
-
-    # Fingerprint scope is conditional on time presence:
-    # - Without time: {organization_id, service_id, date}
-    # - With time: {organization_id, service_id, date, time}
-    # This ensures availability is re-checked when time is introduced
-    if not availability_resolved:
-        availability_resolved = slots_match_availability_fingerprint(
-            fingerprint_slots, stored_fingerprint, intent_name=intent_name
-        )
 
     # User said "yes" to confirm after a successful availability search — treat
     # availability as resolved for this turn so policy selects APPLY_* / CONFIRM_*
@@ -1066,6 +1057,34 @@ def process_luma_response(
     current_fingerprint = compute_availability_fingerprint(
         fingerprint_slots, intent_name=intent_name
     )
+    fingerprint_matched = bool(
+        stored_fingerprint
+        and current_fingerprint
+        and stored_fingerprint == current_fingerprint
+    )
+    continuation_bypass = bool(
+        luma_response.get("_confirm_booking_continuation")
+        and availability_resolved
+        and not fingerprint_matched
+    )
+    try:
+        from core.tracing.fingerprint import emit_fingerprint_trace
+
+        emit_fingerprint_trace(
+            fingerprint_slots=fingerprint_slots,
+            stored_fingerprint=stored_fingerprint,
+            current_fingerprint=current_fingerprint,
+            availability_resolved=availability_resolved,
+            intent_name=intent_name or "",
+            has_bound_datetime=has_bound_booking_datetime(
+                current_slots, session_state, luma_response
+            ),
+            confirm_continuation=bool(luma_response.get("_confirm_booking_continuation")),
+            continuation_bypass=continuation_bypass,
+            matched=fingerprint_matched,
+        )
+    except ImportError:
+        pass
     logger.debug(
         f"[AVAILABILITY_FINGERPRINT] intent={intent_name}, "
         f"current_fingerprint={current_fingerprint}, "
@@ -1085,6 +1104,36 @@ def process_luma_response(
         domain,
         availability_resolved=availability_resolved,
         session_state=session_state,
+        organization_id=organization_id,
+    )
+
+    from core.tracing.invariant_trace import trace_stage
+    from core.tracing.stage_checks import check_fingerprint, check_planner
+
+    trace_stage(
+        "planner",
+        lambda: check_planner(plan=plan),
+        allowed_mutations=["plan.status", "plan.stage", "plan.action"],
+        forbidden_mutations=["plan.text", "plan.ui_actions", "plan.ui_hint"],
+        state_snapshot={
+            "status": plan.get("status"),
+            "stage": plan.get("stage"),
+            "action": plan.get("action"),
+            "missing_slots": plan.get("missing_slots"),
+        },
+    )
+    trace_stage(
+        "fingerprint",
+        lambda: check_fingerprint(
+            stored_fingerprint=stored_fingerprint,
+            current_fingerprint=current_fingerprint,
+            availability_ready=availability_resolved,
+        ),
+        state_snapshot={
+            "stored_fingerprint": stored_fingerprint,
+            "current_fingerprint": current_fingerprint,
+            "availability_resolved": availability_resolved,
+        },
     )
 
     if isinstance(luma_response_for_plan.get("booking"), dict):
@@ -1298,6 +1347,10 @@ def process_luma_response(
         facts["date_proposal"] = luma_response["date_proposal"]
     if luma_response.get("time_proposal") is not None:
         facts["time_proposal"] = luma_response["time_proposal"]
+    if luma_response.get("time_match_outcome") is not None:
+        facts["time_match_outcome"] = luma_response["time_match_outcome"]
+    if luma_response.get("time_resolution") is not None:
+        facts["time_resolution"] = luma_response["time_resolution"]
 
     logger.debug(
         "[FACTS_SUMMARY] intent=%s slot_keys=%s missing=%s",
@@ -1373,6 +1426,11 @@ def process_luma_response(
         "facts": facts,
         "service_candidates": luma_response.get("service_candidates") or [],
     }
+    if isinstance(plan, dict):
+        if plan.get("time_match_outcome") is not None:
+            decision_result["time_match_outcome"] = plan["time_match_outcome"]
+        if plan.get("time_resolution") is not None:
+            decision_result["time_resolution"] = plan["time_resolution"]
 
     logger.info(
         "[DECISION_RESULT] intent=%s status=%s stage=%s action=%s missing=%s",

@@ -63,6 +63,43 @@ def set_confirmation_state(
     return state
 
 
+def has_committed_create_appointment(
+    slots: Optional[Dict[str, Any]],
+) -> bool:
+    """True when CREATE_APPOINTMENT slots carry a persisted booking_id (post-commit)."""
+    if not isinstance(slots, dict):
+        return False
+    booking_id = slots.get("booking_id")
+    return booking_id is not None and booking_id != ""
+
+
+def consume_confirmation_state(
+    state: Optional[Dict[str, Any]],
+    *,
+    reason: str = "",
+) -> Dict[str, Any]:
+    """Clear confirmation_state from session or merged-response dict (booking mirrors too)."""
+    if not isinstance(state, dict):
+        return {}
+    set_confirmation_state(state, None)
+    if reason:
+        logger.debug(
+            "[BOOKING_CONFIRMATION] consume_confirmation_state reason=%s", reason)
+    return state
+
+
+def consume_create_appointment_confirmation(
+    session_state: Dict[str, Any],
+    merged_luma_response: Optional[Dict[str, Any]] = None,
+    *,
+    reason: str = "commit_consumed",
+) -> None:
+    """Successful CREATE_APPOINTMENT commit consumes pre-commit confirmation."""
+    consume_confirmation_state(session_state, reason=reason)
+    if isinstance(merged_luma_response, dict):
+        consume_confirmation_state(merged_luma_response, reason=reason)
+
+
 def normalize_confirmation_state(
     state: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
@@ -72,7 +109,8 @@ def normalize_confirmation_state(
 
     booking = state.get("booking")
     booking_state = (
-        booking.get("confirmation_state") if isinstance(booking, dict) else None
+        booking.get("confirmation_state") if isinstance(
+            booking, dict) else None
     )
     top_state = state.get("confirmation_state")
 
@@ -267,9 +305,11 @@ def detect_booking_revision(
 
         time_proposal = exact_time_proposal_from_luma(luma_response)
         if time_proposal and time_proposal.get("value"):
-            new_time = _normalize_time_for_fingerprint(time_proposal.get("value"))
+            new_time = _normalize_time_for_fingerprint(
+                time_proposal.get("value"))
             if new_time:
-                current_time = _normalize_time_for_fingerprint(session_slots.get("time"))
+                current_time = _normalize_time_for_fingerprint(
+                    session_slots.get("time"))
                 if not current_time or new_time != current_time:
                     time_changed = True
                     changes.append(
@@ -328,7 +368,8 @@ def is_confirmation_gate_open(session_state: Optional[Dict[str, Any]]) -> bool:
     if not isinstance(session_state, dict):
         return False
 
-    intent_name = session_state.get("intent_name") or session_state.get("intent")
+    intent_name = session_state.get(
+        "intent_name") or session_state.get("intent")
     if isinstance(intent_name, dict):
         intent_name = intent_name.get("name")
     if not intent_name:
@@ -340,6 +381,12 @@ def is_confirmation_gate_open(session_state: Optional[Dict[str, Any]]) -> bool:
         if not get_intent_durable(intent_name):
             return False
     except Exception:
+        return False
+
+    if (
+        intent_name == "CREATE_APPOINTMENT"
+        and has_committed_create_appointment(session_state.get("slots"))
+    ):
         return False
 
     if session_state.get("status") == "AWAITING_CONFIRMATION":
@@ -422,7 +469,8 @@ def _raw_luma_intent_name(luma_response: Optional[Dict[str, Any]]) -> str:
 def _session_booking_intent(session_state: Optional[Dict[str, Any]]) -> str:
     if not isinstance(session_state, dict):
         return ""
-    intent_name = session_state.get("intent_name") or session_state.get("intent")
+    intent_name = session_state.get(
+        "intent_name") or session_state.get("intent")
     if isinstance(intent_name, dict):
         return intent_name.get("name") or ""
     return intent_name or ""

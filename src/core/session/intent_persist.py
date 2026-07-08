@@ -75,6 +75,32 @@ def resolve_durable_intent_for_session(
     return intent_name
 
 
+def should_clear_session_on_executed(
+    outcome_status: str, intent_name: str
+) -> Tuple[bool, Optional[str]]:
+    """
+    Return (should_clear, reason) for successful execution outcomes.
+
+    Durable booking intents rebuild session (post-commit artifacts, booking_id, etc.).
+    Ephemeral executed intents clear session as before.
+    """
+    if outcome_status != "EXECUTED":
+        return False, None
+    if intent_name and is_durable_intent(intent_name):
+        logger.info(
+            "[SESSION_LIFECYCLE] Rebuilding durable session after EXECUTED: intent=%s",
+            intent_name,
+        )
+        return False, None
+    if intent_name:
+        logger.info(
+            "[SESSION_LIFECYCLE] Clearing ephemeral session after EXECUTED: intent=%s",
+            intent_name,
+        )
+        return True, "ephemeral intent executed"
+    return False, None
+
+
 def should_clear_session_on_ready(
     outcome_status: str, intent_name: str
 ) -> Tuple[bool, Optional[str]]:

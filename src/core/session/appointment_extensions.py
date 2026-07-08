@@ -153,6 +153,82 @@ def _read_presented_availability_from_store(
     return presented if isinstance(presented, dict) else None
 
 
+def _read_availability_presentation_from_store(
+    session_store: Optional[Any], user_id: Optional[str]
+) -> Optional[Dict[str, Any]]:
+    """Read the freshest availability_presentation written during this request."""
+    presentation = _read_session_field_from_store(
+        session_store, user_id, "availability_presentation"
+    )
+    return presentation if isinstance(presentation, dict) else None
+
+
+def is_availability_browse_outcome(outcome: Optional[Dict[str, Any]]) -> bool:
+    """True when outcome is from cached availability pagination, not a fresh search."""
+    if not isinstance(outcome, dict):
+        return False
+    pagination = outcome.get("availability_pagination")
+    if not isinstance(pagination, dict):
+        return False
+    return pagination.get("direction") in ("next", "previous")
+
+
+def _apply_availability_browse_persistence(
+    session_state: Dict[str, Any],
+    *,
+    previous_session_state: Optional[Dict[str, Any]],
+    session_store: Optional[Any],
+    user_id: Optional[str],
+    outcome: Dict[str, Any],
+) -> None:
+    """Preserve full search cache and paginated presentation after a browse turn.
+
+    Browse responses carry a synthetic availability execution (page slice only).
+    They must not replace last_execution_result or reset page_index to 0.
+    """
+    pagination = outcome.get("availability_pagination") or {}
+    page_index = pagination.get("page_index")
+
+    full_last = _read_last_execution_result_from_store(session_store, user_id)
+    if not full_last and isinstance(previous_session_state, dict):
+        full_last = previous_session_state.get("last_execution_result")
+    if isinstance(full_last, dict):
+        session_state["last_execution_result"] = full_last
+        logger.info(
+            "[AVAILABILITY_BROWSE] Preserved full last_execution_result "
+            "(slots=%s, page_index=%s)",
+            len(full_last.get("slots") or []),
+            page_index,
+        )
+
+    fresh_presented = _read_presented_availability_from_store(
+        session_store, user_id)
+    if not fresh_presented and isinstance(previous_session_state, dict):
+        fresh_presented = previous_session_state.get("presented_availability")
+    if isinstance(fresh_presented, dict):
+        session_state["presented_availability"] = fresh_presented
+        logger.info(
+            "[AVAILABILITY_BROWSE] Persisted presented_availability "
+            "(slots=%s, page_index=%s)",
+            len(fresh_presented.get("slots") or []),
+            page_index,
+        )
+
+    fresh_presentation = _read_availability_presentation_from_store(
+        session_store, user_id
+    )
+    if not fresh_presentation and isinstance(previous_session_state, dict):
+        fresh_presentation = previous_session_state.get(
+            "availability_presentation")
+    if isinstance(fresh_presentation, dict):
+        session_state["availability_presentation"] = fresh_presentation
+        logger.info(
+            "[AVAILABILITY_BROWSE] Persisted availability_presentation "
+            "(page_index=%s)",
+            fresh_presentation.get("page_index"),
+        )
+
+
 def apply_create_appointment_extensions(
     session_state: Dict[str, Any],
     final_intent_name: Optional[str],
@@ -178,17 +254,28 @@ def apply_create_appointment_extensions(
     plan_obj = outcome.get("plan", {})
     if isinstance(plan_obj, dict) and plan_obj.get("_availability_planned"):
         session_state["availability_planned"] = True
-        logger.debug("[AVAILABILITY_PLANNED] Persisting availability_planned=true to session_state")
+        logger.debug(
+            "[AVAILABILITY_PLANNED] Persisting availability_planned=true to session_state")
     elif previous_session_state and previous_session_state.get("availability_planned"):
         session_state["availability_planned"] = True
         logger.debug(
             "[AVAILABILITY_PLANNED] Preserving availability_planned=true from previous session"
         )
 
-    exec_result = _extract_availability_execution_result(outcome)
-    if exec_result:
+    if is_availability_browse_outcome(outcome):
+        _apply_availability_browse_persistence(
+            session_state,
+            previous_session_state=previous_session_state,
+            session_store=session_store,
+            user_id=user_id,
+            outcome=outcome,
+        )
+    elif (exec_result := _extract_availability_execution_result(outcome)):
         from core.orchestration.temporal_proposal import enrich_last_execution_result
-        from core.rendering.availability_renderer import build_presented_availability
+        from core.rendering.availability_renderer import (
+            build_availability_presentation,
+            build_presented_availability,
+        )
 
         search_date = None
         plan_obj = outcome.get("plan")
@@ -197,20 +284,26 @@ def apply_create_appointment_extensions(
             plan_date = plan_slots.get("date")
             if isinstance(plan_date, str) and plan_date:
                 search_date = plan_date.split("T")[0].split(" ")[0]
+        raw_slots = exec_result.get("slots") or []
         session_state["last_execution_result"] = enrich_last_execution_result(
             exec_result, search_date=search_date
         )
         session_state["presented_availability"] = build_presented_availability(
-            exec_result.get("slots") or [],
-            search_date=session_state["last_execution_result"].get("search_date")
+            raw_slots,
+            search_date=session_state["last_execution_result"].get(
+                "search_date")
             or search_date,
         )
+        session_state["availability_presentation"] = build_availability_presentation(
+            raw_slots
+        )
         logger.debug(
-            "[AVAILABILITY_EXECUTED] Persisted last_execution_result and "
-            "presented_availability from current search"
+            "[AVAILABILITY_EXECUTED] Persisted last_execution_result, "
+            "presented_availability, and availability_presentation from current search"
         )
     else:
-        fresh_last_result = _read_last_execution_result_from_store(session_store, user_id)
+        fresh_last_result = _read_last_execution_result_from_store(
+            session_store, user_id)
         if fresh_last_result:
             session_state["last_execution_result"] = fresh_last_result
             logger.debug(
@@ -224,7 +317,8 @@ def apply_create_appointment_extensions(
                 "[AVAILABILITY_EXECUTED] Preserving last_execution_result from previous session"
             )
 
-        fresh_presented = _read_presented_availability_from_store(session_store, user_id)
+        fresh_presented = _read_presented_availability_from_store(
+            session_store, user_id)
         if fresh_presented:
             session_state["presented_availability"] = fresh_presented
             logger.debug(
@@ -238,6 +332,24 @@ def apply_create_appointment_extensions(
             )
             logger.debug(
                 "[AVAILABILITY_EXECUTED] Preserving presented_availability from previous session"
+            )
+
+        fresh_presentation = _read_availability_presentation_from_store(
+            session_store, user_id
+        )
+        if fresh_presentation:
+            session_state["availability_presentation"] = fresh_presentation
+            logger.debug(
+                "[AVAILABILITY_EXECUTED] Preserved availability_presentation from session_store"
+            )
+        elif previous_session_state and previous_session_state.get(
+            "availability_presentation"
+        ):
+            session_state["availability_presentation"] = previous_session_state.get(
+                "availability_presentation"
+            )
+            logger.debug(
+                "[AVAILABILITY_EXECUTED] Preserving availability_presentation from previous session"
             )
 
     if merged_luma_response and isinstance(merged_luma_response, dict):
@@ -271,6 +383,33 @@ def apply_create_appointment_extensions(
     normalize_confirmation_state(session_state)
 
 
+def _create_appointment_booking_id_from_context(
+    session_state: Dict[str, Any],
+    outcome: Dict[str, Any],
+) -> Optional[Any]:
+    """Resolve booking_id from persisted slots or the current turn execution outcome."""
+    slots = session_state.get("slots")
+    if isinstance(slots, dict) and slots.get("booking_id"):
+        return slots.get("booking_id")
+
+    if not isinstance(outcome, dict):
+        return None
+
+    for candidate in (outcome, outcome.get("result"), outcome.get("plan")):
+        if not isinstance(candidate, dict):
+            continue
+        candidate_slots = candidate.get("slots")
+        if isinstance(candidate_slots, dict) and candidate_slots.get("booking_id"):
+            return candidate_slots.get("booking_id")
+        if candidate.get("booking_id"):
+            return candidate.get("booking_id")
+
+    booking = outcome.get("booking")
+    if isinstance(booking, dict) and booking.get("id"):
+        return booking.get("id")
+    return None
+
+
 def _maybe_persist_booking_confirmation_pending(
     session_state: Dict[str, Any],
     merged_luma_response: Optional[Dict[str, Any]],
@@ -284,18 +423,42 @@ def _maybe_persist_booking_confirmation_pending(
     if isinstance(merged_luma_response, dict) and merged_luma_response.get(
         "_booking_confirmation_rejected"
     ):
-        from core.session.confirmation_gate import clear_pending_confirmation
+        from core.session.invalidation import InvalidationTrigger, apply_invalidation
 
-        clear_pending_confirmation(
-            session_state, clear_time=True, reason="reject_persist"
+        apply_invalidation(
+            session_state,
+            InvalidationTrigger.REJECT_CONFIRMATION,
+            reason="reject_persist",
         )
         return
 
     from core.session.confirmation_gate import (
+        consume_create_appointment_confirmation,
         get_confirmation_state,
+        has_committed_create_appointment,
         normalize_confirmation_state,
         set_confirmation_state,
     )
+
+    slots = session_state.get("slots", {})
+    if not isinstance(slots, dict):
+        slots = {}
+
+    booking_id = _create_appointment_booking_id_from_context(
+        session_state, outcome)
+    if booking_id and not slots.get("booking_id"):
+        slots = dict(slots)
+        slots["booking_id"] = booking_id
+        session_state["slots"] = slots
+
+    if has_committed_create_appointment(slots):
+        consume_create_appointment_confirmation(
+            session_state,
+            merged_luma_response,
+            reason="create_appointment_committed",
+        )
+        normalize_confirmation_state(session_state)
+        return
 
     current = get_confirmation_state(session_state)
     if current in ("pending", "confirmed"):
@@ -314,7 +477,6 @@ def _maybe_persist_booking_confirmation_pending(
         set_confirmation_state(session_state, incoming)
         return
 
-    slots = session_state.get("slots", {})
     if not all(slots.get(key) for key in ("service_id", "date", "time")):
         return
 

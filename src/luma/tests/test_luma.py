@@ -112,6 +112,16 @@ def assert_response(resp, expected):
         resp["intent"]["name"] == expected["intent"]
     ), f"Intent mismatch: got '{resp['intent']['name']}', expected '{expected['intent']}'"
 
+    if "operation" in expected:
+        assert resp.get("operation") == expected["operation"], (
+            f"operation mismatch: got {resp.get('operation')!r}, "
+            f"expected {expected['operation']!r}"
+        )
+    elif "operation" in resp:
+        assert resp["operation"] is None, (
+            f"unexpected operation in response: {resp['operation']!r}"
+        )
+
     # Enforce invariant: semantic fields must NOT be present
     assert "status" not in resp, "Luma must not output 'status' (semantic field)"
     assert (

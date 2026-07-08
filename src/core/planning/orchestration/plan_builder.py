@@ -46,6 +46,19 @@ def _ensure_booking_on_response(luma_response: Dict[str, Any]) -> Dict[str, Any]
     return booking
 
 
+def _exact_time_match_presenting_confirmation(
+    time_match_outcome: Optional[str],
+    *,
+    user_confirmation_satisfied: bool,
+) -> bool:
+    """TIME_MATCH_EXACT blocks commit only while the confirm prompt is outstanding."""
+    from core.orchestration.time_resolution import TIME_MATCH_EXACT
+
+    return (
+        time_match_outcome == TIME_MATCH_EXACT and not user_confirmation_satisfied
+    )
+
+
 def _maybe_enter_booking_confirmation_pending(
     intent_name: Optional[str],
     luma_response: Dict[str, Any],
@@ -59,6 +72,20 @@ def _maybe_enter_booking_confirmation_pending(
     """When CREATE_APPOINTMENT is commit-ready, require explicit confirmation first."""
     if intent_name != "CREATE_APPOINTMENT":
         return confirmation_state
+
+    from core.session.confirmation_gate import has_committed_create_appointment
+
+    effective_slots = luma_response.get("_effective_collected_slots")
+    if effective_slots is None:
+        effective_slots = luma_response.get("slots", {})
+    session_slots = (
+        session_state.get("slots") if isinstance(session_state, dict) else None
+    )
+    if has_committed_create_appointment(effective_slots) or has_committed_create_appointment(
+        session_slots
+    ):
+        return confirmation_state
+
     if confirmation_state is not None:
         return confirmation_state
     if missing_slots or needs_clarification or not availability_resolved:
@@ -66,18 +93,29 @@ def _maybe_enter_booking_confirmation_pending(
 
     from core.orchestration.temporal_proposal import has_bound_booking_datetime
 
-    effective_slots = luma_response.get("_effective_collected_slots")
-    if effective_slots is None:
-        effective_slots = luma_response.get("slots", {})
-    if not has_bound_booking_datetime(
+    bound_datetime = has_bound_booking_datetime(
         effective_slots, session_state, luma_response
-    ):
+    )
+    if not bound_datetime:
         return confirmation_state
 
     from core.session.confirmation_gate import set_confirmation_state
 
+    previous_state = confirmation_state
     _ensure_booking_on_response(luma_response)
     set_confirmation_state(luma_response, "pending")
+    try:
+        from core.tracing.confirmation import emit_confirmation_enter_pending_trace
+
+        emit_confirmation_enter_pending_trace(
+            entered=True,
+            previous_state=previous_state,
+            missing_slots=missing_slots,
+            availability_resolved=availability_resolved,
+            time_selection_ready=bound_datetime,
+        )
+    except ImportError:
+        pass
     logger.info(
         "[BOOKING_CONFIRMATION] CREATE_APPOINTMENT commit-ready — "
         "setting confirmation_state=pending"
@@ -111,7 +149,8 @@ def _extract_missing_slots(luma_response: Dict[str, Any]) -> List[str]:
         missing = []
         for slot_name, issue_value in issues.items():
             if issue_value == "missing" or (
-                isinstance(issue_value, dict) and issue_value.get("status") == "missing"
+                isinstance(issue_value, dict) and issue_value.get(
+                    "status") == "missing"
             ):
                 missing.append(slot_name)
         return missing
@@ -466,6 +505,7 @@ def _build_policy_execution_flags(
     needs_clarification: bool,
     availability_resolved: bool,
     confirmation_state: Optional[str],
+    organization_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     from core.planning.facts import build_policy_execution_flags
 
@@ -478,6 +518,7 @@ def _build_policy_execution_flags(
         needs_clarification=needs_clarification,
         availability_resolved=availability_resolved,
         confirmation_state=confirmation_state,
+        organization_id=organization_id,
     )
 
 
@@ -515,6 +556,7 @@ def build_decision_plan(
     domain: str,
     availability_resolved: bool = False,
     session_state: Optional[Dict[str, Any]] = None,
+    organization_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Build a decision plan from Luma response using intent_policy.yaml as the single source of truth.
@@ -585,7 +627,8 @@ def build_decision_plan(
 
     # Determine status
     needs_clarification = luma_response.get("needs_clarification", False)
-    confirmation_state = _resolve_confirmation_state(luma_response, session_state)
+    confirmation_state = _resolve_confirmation_state(
+        luma_response, session_state)
     confirmation_state = _maybe_enter_booking_confirmation_pending(
         intent_name,
         luma_response,
@@ -596,6 +639,22 @@ def build_decision_plan(
         session_state=session_state,
     )
     booking = luma_response.get("booking", {})
+
+    from core.orchestration.time_resolution import (
+        TIME_MATCH_EXACT,
+        TIME_MATCH_MISMATCH,
+    )
+
+    time_match_outcome = luma_response.get("time_match_outcome")
+    time_resolution = luma_response.get("time_resolution")
+    if not time_match_outcome and isinstance(time_resolution, dict):
+        time_match_outcome = time_resolution.get("outcome")
+
+    from core.planning.facts import derive_user_confirmation_satisfied
+
+    user_confirmation_satisfied = derive_user_confirmation_satisfied(
+        confirmation_state, luma_response
+    )
 
     # Extract active_capability from multiple sources (preserve if already set)
     # Priority: 1) existing plan in luma_response, 2) session_state, 3) facts/context
@@ -653,6 +712,7 @@ def build_decision_plan(
                 needs_clarification=needs_clarification,
                 availability_resolved=availability_resolved,
                 confirmation_state=confirmation_state,
+                organization_id=organization_id,
             )
             selected_step = select_next_execution_step(
                 intent_name, effective_slots, flags
@@ -702,6 +762,21 @@ def build_decision_plan(
             f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because intent=UNKNOWN "
             f"(UNKNOWN always requires clarification)"
         )
+    elif time_match_outcome == TIME_MATCH_MISMATCH:
+        status = "NEEDS_CLARIFICATION"
+        logger.debug(
+            "[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because "
+            "time_match_outcome=TIME_MATCH_MISMATCH"
+        )
+    elif _exact_time_match_presenting_confirmation(
+        time_match_outcome,
+        user_confirmation_satisfied=user_confirmation_satisfied,
+    ):
+        status = "AWAITING_CONFIRMATION"
+        logger.debug(
+            "[BUILD_PLAN] Setting status=AWAITING_CONFIRMATION because "
+            "time_match_outcome=TIME_MATCH_EXACT (confirmation prompt outstanding)"
+        )
     elif missing_slots:
         if executable_actions:
             # executable_with subset satisfied — proceed to exploratory action;
@@ -721,10 +796,11 @@ def build_decision_plan(
         logger.debug(
             f"[BUILD_PLAN] Setting status=NEEDS_CLARIFICATION because needs_clarification=True"
         )
-    elif confirmation_state == "pending":
+    elif confirmation_state == "pending" and not user_confirmation_satisfied:
         status = "AWAITING_CONFIRMATION"
         logger.debug(
-            f"[BUILD_PLAN] Setting status=AWAITING_CONFIRMATION because confirmation_state=pending"
+            "[BUILD_PLAN] Setting status=AWAITING_CONFIRMATION because "
+            "confirmation is outstanding (pending, not yet accepted)"
         )
     elif active_capability:
         status = "AWAITING_CAPABILITY"
@@ -770,7 +846,7 @@ def build_decision_plan(
             needs_bound_datetime = intent_name == "CREATE_APPOINTMENT" and not datetime_bound
             needs_user_confirmation = (
                 intent_name == "CREATE_APPOINTMENT"
-                and confirmation_state != "confirmed"
+                and not user_confirmation_satisfied
             )
             if (
                 needs_clarification
@@ -791,7 +867,9 @@ def build_decision_plan(
     blocked_actions = list(set(blocked_actions))
 
     # Determine awaiting
-    if confirmation_state == "pending":
+    if time_match_outcome == TIME_MATCH_MISMATCH:
+        awaiting = "TIME_SELECTION"
+    elif confirmation_state == "pending" and not user_confirmation_satisfied:
         awaiting = "USER_CONFIRMATION"
     elif active_capability:
         awaiting = "CAPABILITY"
@@ -802,6 +880,7 @@ def build_decision_plan(
     stage = None
     action = None
     action_branch = None
+    flags: Dict[str, Any] = {}
 
     if intent_name and intent_name != "UNKNOWN":
         from core.policy.intent_policy import select_next_execution_step
@@ -815,9 +894,11 @@ def build_decision_plan(
             needs_clarification=needs_clarification,
             availability_resolved=availability_resolved,
             confirmation_state=confirmation_state,
+            organization_id=organization_id,
         )
 
-        selected_step = select_next_execution_step(intent_name, effective_slots, flags)
+        selected_step = select_next_execution_step(
+            intent_name, effective_slots, flags)
 
         if selected_step:
             action = selected_step.get("action")
@@ -842,6 +923,26 @@ def build_decision_plan(
                 f"(status={status}, awaiting={awaiting})"
             )
 
+    if time_match_outcome == TIME_MATCH_MISMATCH:
+        action = None
+        action_branch = "time_match_mismatch"
+        stage = "AVAILABILITY"
+        logger.info(
+            "[PLAN_SELECTION] Forcing action=None for TIME_MATCH_MISMATCH "
+            "(conversational response required)"
+        )
+    elif _exact_time_match_presenting_confirmation(
+        time_match_outcome,
+        user_confirmation_satisfied=user_confirmation_satisfied,
+    ):
+        action = None
+        action_branch = "time_match_exact"
+        stage = "CONFIRM"
+        logger.info(
+            "[PLAN_SELECTION] Forcing action=None for TIME_MATCH_EXACT "
+            "(confirmation prompt outstanding — user has not accepted yet)"
+        )
+
     if stage is None:
         stage = _derive_stage_from_status(status)
 
@@ -865,6 +966,10 @@ def build_decision_plan(
         "executable_actions": executable_actions,
         "missing_slots": missing_slots,
     }
+    if time_match_outcome:
+        plan["time_match_outcome"] = time_match_outcome
+    if isinstance(time_resolution, dict):
+        plan["time_resolution"] = time_resolution
 
     # CRITICAL: Preserve active_capability if it was already set (from capability gating or previous planning)
     # active_capability is a first-class Plan field with same durability as status, stage, action
@@ -883,5 +988,26 @@ def build_decision_plan(
         logger.info(
             f"[BUILD_PLAN] Verified invariant: AWAITING_CAPABILITY has active_capability={plan.get('active_capability')}"
         )
+
+    stage_from_action = action_branch == "policy"
+    try:
+        from core.tracing.planner import emit_planner_decision_graph_from_plan_builder
+
+        emit_planner_decision_graph_from_plan_builder(
+            intent_name=intent_name,
+            luma_response=luma_response,
+            plan=plan,
+            flags=flags,
+            effective_slots=effective_slots,
+            missing_slots=missing_slots,
+            needs_clarification=needs_clarification,
+            confirmation_state=confirmation_state,
+            active_capability=active_capability,
+            executable_actions=executable_actions,
+            availability_resolved=availability_resolved,
+            stage_from_action=stage_from_action,
+        )
+    except ImportError:
+        pass
 
     return plan

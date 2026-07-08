@@ -1,9 +1,65 @@
 """Test doubles for Luma and catalog clients used across core tests."""
 
-from typing import Any, Dict, Optional
+import copy
+from typing import Any, Callable, Dict, Optional
 
 from core.orchestration.clients.catalog_client import CatalogClient
 from core.orchestration.nlu import LumaClient
+
+
+class ScriptedLumaClient(LumaClient):  # noqa: N801
+    __test__ = False
+
+    """LumaClient that returns pre-scripted responses keyed by exact user text."""
+
+    def __init__(
+        self,
+        scripts: Dict[str, Dict[str, Any]],
+        *,
+        fallback: Optional[LumaClient] = None,
+        normalize_key: Optional[Callable[[str], str]] = None,
+    ):
+        super().__init__()
+        self.scripts = scripts
+        self.fallback = fallback
+        self.normalize_key = normalize_key or (lambda text: text.strip().lower())
+        self.last_text: Optional[str] = None
+        self.last_response: Optional[Dict[str, Any]] = None
+
+    def resolve(
+        self,
+        user_id: str,
+        text: str,
+        domain: str = "service",
+        timezone: str = "UTC",
+        tenant_context: Optional[Dict[str, Any]] = None,
+        conversation_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        self.last_text = text
+        key = self.normalize_key(text)
+        if key in self.scripts:
+            response = copy.deepcopy(self.scripts[key])
+            self.last_response = response
+            return response
+        if self.fallback is not None:
+            response = self.fallback.resolve(
+                user_id,
+                text,
+                domain,
+                timezone,
+                tenant_context,
+                conversation_context=conversation_context,
+            )
+            self.last_response = response
+            return response
+        return super().resolve(
+            user_id,
+            text,
+            domain,
+            timezone,
+            tenant_context,
+            conversation_context=conversation_context,
+        )
 
 
 class TestLumaClient(LumaClient):  # noqa: N801

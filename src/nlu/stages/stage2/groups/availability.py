@@ -1,7 +1,7 @@
 """
 Stage 2 group: AVAILABILITY — handles AVAILABILITY (maps to CHECK_AVAILABILITY in policy).
 
-Slot focus: service_id, date(s), time.
+Slot focus: service_id, date(s), time, and browse operation when paginating results.
 """
 import logging
 import os
@@ -29,7 +29,29 @@ _TOOL = build_tool(
     include_time_constraint=True,
     include_validated_intent=True,
     include_service_candidates=True,
+    include_operation=True,
 )
+
+_VALID_OPERATIONS = frozenset({"browse_next", "browse_previous"})
+
+
+def _operation_rules() -> str:
+    return """── AVAILABILITY OPERATION ───────────────────────────────────────────────────
+Set operation when the user is navigating previously presented availability — not
+requesting a new search. Otherwise leave operation null.
+
+browse_next — user wants more times from a prior result:
+  "show more", "show me more times", "are there other slots?", "anything later?",
+  "what else do you have?"
+  → operation = "browse_next"
+  → dates[], times[], date_time_pairs[] must be empty; time_constraint = null
+
+browse_previous — user wants earlier times from a prior result:
+  "go back", "previous times", "show earlier"
+  → operation = "browse_previous"
+  → dates[], times[], date_time_pairs[] must be empty; time_constraint = null
+
+New availability queries (dates, services, "what times are free") → operation = null."""
 
 
 def _system_prompt(
@@ -50,6 +72,8 @@ Current date/time: {now}
 
 The user is asking about available time slots, not booking yet.
 Extract which service, date, and time window they want to check.
+
+{_operation_rules()}
 
 {service_rules(aliases)}
 
@@ -95,10 +119,20 @@ class AvailabilityGroupExtractor:
         return _empty(candidate_intent)
 
 
+def _normalize_operation(raw: Any) -> Optional[str]:
+    if raw is None:
+        return None
+    operation = str(raw).strip().lower().replace("-", "_")
+    if operation in _VALID_OPERATIONS:
+        return operation
+    return None
+
+
 def _merge(raw: Dict[str, Any], candidate_intent: str) -> Dict[str, Any]:
     validated = raw.get("validated_intent") or candidate_intent
     facts = raw.get("facts") or {}
-    return {
+    operation = _normalize_operation(raw.get("operation"))
+    result = {
         "intent": validated,
         "confidence": float(raw.get("confidence", 0.8)),
         "facts": {
@@ -112,6 +146,9 @@ def _merge(raw: Dict[str, Any], candidate_intent: str) -> Dict[str, Any]:
         "search_query": None,
         "service_candidates": raw.get("service_candidates") or [],
     }
+    if operation is not None:
+        result["operation"] = operation
+    return result
 
 
 def _empty(candidate_intent: str) -> Dict[str, Any]:

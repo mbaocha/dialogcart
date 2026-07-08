@@ -27,7 +27,6 @@ from nlu.pipeline import (  # noqa: E402
     _text_mentions_service,
 )
 
-
 @pytest.mark.parametrize(
     "text,expected",
     [

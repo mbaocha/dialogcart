@@ -51,7 +51,8 @@ def test_gate_open_when_bound_datetime_even_if_status_needs_clarification():
 
 def test_gate_closed_without_booking_session():
     assert is_confirmation_gate_open(None) is False
-    assert is_confirmation_gate_open({"intent_name": "CREATE_APPOINTMENT"}) is False
+    assert is_confirmation_gate_open(
+        {"intent_name": "CREATE_APPOINTMENT"}) is False
 
 
 def test_accept_on_confirm_action():
@@ -116,7 +117,8 @@ def test_revise_on_create_appointment_with_time_only():
 def test_none_when_gate_closed():
     action = classify_confirmation_gate_turn(
         {"intent": {"name": "REJECT_ACTION"}, "facts": {}},
-        {"intent_name": "CREATE_APPOINTMENT", "status": "NEEDS_CLARIFICATION", "slots": {}},
+        {"intent_name": "CREATE_APPOINTMENT",
+            "status": "NEEDS_CLARIFICATION", "slots": {}},
     )
     assert action == ConfirmationGateTurn.NONE
 
@@ -132,7 +134,8 @@ def test_none_for_unrelated_intent_while_pending():
 def test_same_service_id_echo_is_not_revision_alone():
     assert (
         has_revision_facts(
-            {"intent": {"name": "CORRECTION"}, "facts": {"service_id": "premium haircut"}}
+            {"intent": {"name": "CORRECTION"}, "facts": {
+                "service_id": "premium haircut"}}
         )
         is False
     )
@@ -277,7 +280,8 @@ def test_apply_service_revision_clears_service_and_availability():
         presented_availability={"search_date": "2026-07-06", "slots": []},
         availability_fingerprint="fp",
     )
-    apply_booking_revision(session, BookingRevision(service=True), reason="test")
+    apply_booking_revision(
+        session, BookingRevision(service=True), reason="test")
     assert "service_id" not in session["slots"]
     assert "date" not in session["slots"]
     assert "time" not in session["slots"]

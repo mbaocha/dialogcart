@@ -299,7 +299,12 @@ def run_pipeline(
     # Stage 2: Intent Resolution
     try:
         intent_resolver = ReservationIntentResolver()
-        intent, confidence = intent_resolver.resolve_intent(sentence, extraction_result)
+        intent, confidence, operation = intent_resolver.resolve_intent(
+            sentence, extraction_result
+        )
+        intent_resp = intent_resolver._build_response(
+            intent, confidence, extraction_result, operation=operation
+        )
         results["stages"]["intent"] = {"intent": intent, "confidence": confidence}
     except Exception as e:
         results["stages"]["intent"] = {"error": str(e)}

@@ -460,6 +460,7 @@ class PipelineResult:
     search_query: Optional[str] = None
     date_constraint: Optional[Dict[str, Any]] = None
     service_candidates: List[str] = field(default_factory=list)
+    operation: Optional[str] = None
 
 
 class _SemanticResultAdapter:
@@ -733,10 +734,12 @@ class NLUPipeline:
             slm, tenant_context, now, timezone, conversation_context
         )
         logger.info(
-            "[NLU_FINAL] text=%r intent=%r resolved_dates=%r date_time_pairs=%r times=%r "
-            "service_id=%r service_candidates=%r time_constraint=%r",
+            "[NLU_FINAL] text=%r intent=%r operation=%r resolved_dates=%r "
+            "date_time_pairs=%r times=%r service_id=%r service_candidates=%r "
+            "time_constraint=%r",
             text,
             result.intent.get("name"),
+            result.operation,
             result.facts.get("dates"),
             result.facts.get("date_time_pairs"),
             result.facts.get("times"),
@@ -881,6 +884,7 @@ class NLUPipeline:
         tc = decision.get("time_constraint")
         search_query = decision.get("search_query")
         service_candidates = decision.get("service_candidates") or []
+        operation = decision.get("operation")
 
         binding_intent = _resolve_calendar_binding_intent(
             intent, facts, conversation_context
@@ -968,4 +972,5 @@ class NLUPipeline:
             search_query=search_query,
             date_constraint=date_constraint,
             service_candidates=service_candidates,
+            operation=operation if isinstance(operation, str) else None,
         )

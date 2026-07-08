@@ -5,6 +5,8 @@ from core.planning.facts.business_fact_registry import (
     PlanningFactContext,
     build_policy_execution_flags,
     derive_business_facts,
+    derive_user_confirmation_satisfied,
+    evaluate_availability_evidence_ready,
 )
 
 __all__ = [
@@ -12,4 +14,6 @@ __all__ = [
     "PlanningFactContext",
     "build_policy_execution_flags",
     "derive_business_facts",
+    "derive_user_confirmation_satisfied",
+    "evaluate_availability_evidence_ready",
 ]

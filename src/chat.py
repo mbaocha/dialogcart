@@ -12,11 +12,14 @@ Usage:
     # Terminal 2 — chat REPL
     CORE_BASE_URL=http://localhost:8000 ORG_ID=1 python chat.py
     CORE_BASE_URL=http://localhost:8000 ORG_ID=1 python chat.py --user-id alice --debug
+    CORE_BASE_URL=http://localhost:8000 ORG_ID=1 python chat.py --user-id alice --trace
+    CORE_BASE_URL=http://localhost:8000 ORG_ID=1 python chat.py --user-id alice --trace reasoning
 
 In-session commands:
     quit / exit / q  - end the session
     reset            - clear session state and start fresh
     debug            - toggle verbose JSON output
+    trace            - toggle Decision Trace output
     status           - show current session state
 """
 
@@ -45,6 +48,11 @@ try:
             load_dotenv(env_path, override=False)
 except ImportError:
     pass
+
+try:
+    from core.tracing.views import format_trace_view_text
+except ImportError:
+    format_trace_view_text = None
 
 
 def _get_org_id() -> int:
@@ -141,7 +149,12 @@ def _post_message(
     domain: str,
     timezone: str,
     org_id: int,
+    trace: bool = False,
+    trace_view: str = "summary",
 ) -> dict:
+    params = {}
+    if trace:
+        params["trace"] = trace_view
     response = client.post(
         f"{core_url}/api/message",
         json={
@@ -151,6 +164,8 @@ def _post_message(
             "timezone": timezone,
             "organization_id": org_id,
         },
+        params=params,
+        headers={"X-Debug-Decision-Trace": "true"} if trace else {},
     )
     if response.is_success:
         return response.json()
@@ -209,7 +224,13 @@ def _print_catalog(org_id: int, domain: str) -> None:
         print(f"[catalog error] {e}")
 
 
-def chat_loop(user_id: str, timezone: str, debug: bool):
+def chat_loop(
+    user_id: str,
+    timezone: str,
+    debug: bool,
+    trace: bool = False,
+    trace_view: str = "summary",
+):
     org_id = _get_org_id()
     domain = _get_domain(org_id)
     core_url = _get_core_base_url()
@@ -219,7 +240,9 @@ def chat_loop(user_id: str, timezone: str, debug: bool):
     print("\nDialogCart Chat (HTTP → core API)")
     print(f"  core={core_url}  org={org_id}  domain={domain}  user={user_id}")
     print(f"  luma={luma_url}  internal={internal_url}")
-    print("  Commands: quit  reset  debug  status  catalog")
+    print("  Commands: quit  reset  debug  trace  status  catalog")
+    if trace:
+        print(f"  trace view: {trace_view}")
     print("-" * 50)
 
     with httpx.Client(timeout=60.0) as client:
@@ -260,6 +283,11 @@ def chat_loop(user_id: str, timezone: str, debug: bool):
                 print(f"[debug {'on' if debug else 'off'}]")
                 continue
 
+            if cmd == "trace":
+                trace = not trace
+                print(f"[trace {'on' if trace else 'off'}]")
+                continue
+
             if cmd == "status":
                 try:
                     sess = _get_session(client, core_url, user_id)
@@ -294,6 +322,8 @@ def chat_loop(user_id: str, timezone: str, debug: bool):
                     domain=domain,
                     timezone=timezone,
                     org_id=org_id,
+                    trace=trace,
+                    trace_view=trace_view,
                 )
             except httpx.ConnectError as e:
                 print(f"\n[error] Cannot reach core API at {core_url}: {e}")
@@ -308,6 +338,19 @@ def chat_loop(user_id: str, timezone: str, debug: bool):
 
             outcome = result.get("outcome") or {}
             response_text = _extract_text(result)
+
+            dt_text = result.get("decision_trace_text")
+            if trace and dt_text and format_trace_view_text is not None:
+                try:
+                    print("\n" + dt_text)
+                except Exception as e:
+                    print(f"[trace render error] {e}")
+            elif trace and result.get("decision_trace") and format_trace_view_text is not None:
+                try:
+                    view = result.get("trace_view") or "summary"
+                    print("\n" + format_trace_view_text(result["decision_trace"], view))
+                except Exception as e:
+                    print(f"[trace render error] {e}")
 
             if debug or not (result.get("text") or outcome.get("text")):
                 print("\n--- RESULT ---")
@@ -327,9 +370,26 @@ def main():
     )
     parser.add_argument("--timezone", default="UTC", help="Timezone (default: UTC)")
     parser.add_argument("--debug", action="store_true", help="Show debug JSON on each turn")
+    parser.add_argument(
+        "--trace",
+        nargs="?",
+        const="summary",
+        default=None,
+        metavar="VIEW",
+        choices=("summary", "reasoning", "forensic"),
+        help="Print decision trace after each turn (default view: summary). "
+        "VIEW may be summary, reasoning, or forensic.",
+    )
     args = parser.parse_args()
 
-    chat_loop(args.user_id, args.timezone, args.debug)
+    trace_view = args.trace or "summary"
+    chat_loop(
+        args.user_id,
+        args.timezone,
+        args.debug,
+        trace=args.trace is not None,
+        trace_view=trace_view,
+    )
 
 
 if __name__ == "__main__":

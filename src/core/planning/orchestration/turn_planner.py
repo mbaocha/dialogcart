@@ -212,7 +212,8 @@ def plan_turn(
 
     # Log sentence passed to Luma
     logger.info(
-        "Luma request payload: %s", json.dumps(luma_payload, ensure_ascii=False)
+        "Luma request payload: %s", json.dumps(
+            luma_payload, ensure_ascii=False)
     )
 
     # Store raw response for attachment to effective_response (must be accessible after try block)
@@ -220,14 +221,24 @@ def plan_turn(
     luma_response = None  # Initialize to None to handle exception cases
 
     try:
-        luma_response = luma_client.resolve(
-            user_id=user_id,
-            text=text,
-            domain=derived_domain,
-            timezone=timezone,
-            tenant_context=tenant_context,
-            conversation_context=conversation_context,
-        )
+        from core.tracing.decision_trace import measure_stage
+    except ImportError:
+        from contextlib import contextmanager
+
+        @contextmanager
+        def measure_stage(_stage: str):  # type: ignore[misc]
+            yield
+
+    try:
+        with measure_stage("luma"):
+            luma_response = luma_client.resolve(
+                user_id=user_id,
+                text=text,
+                domain=derived_domain,
+                timezone=timezone,
+                tenant_context=tenant_context,
+                conversation_context=conversation_context,
+            )
 
         # Store raw response for attachment to effective_response (must be accessible after try block)
         raw_luma_response_deep_copy = copy.deepcopy(luma_response)
@@ -235,22 +246,30 @@ def plan_turn(
         # LOG 2 — LUMA OUTPUT (right after luma.resolve)
         luma_intent_obj = luma_response.get("intent", {})
         luma_intent = (
-            luma_intent_obj.get("name", "") if isinstance(luma_intent_obj, dict) else ""
+            luma_intent_obj.get("name", "") if isinstance(
+                luma_intent_obj, dict) else ""
         )
         luma_slots = luma_response.get("slots", {})
         luma_missing_slots = luma_response.get("missing_slots", [])
-        turn_logger.info(
-            json.dumps(
-                {
-                    "turn": "LUMA",
-                    "intent": luma_intent,
-                    "slots": luma_slots,
-                    "missing_slots": luma_missing_slots,
-                },
-                ensure_ascii=True,
-                default=str,
+        try:
+            from core.tracing.decision_trace import is_decision_trace_enabled
+
+            _trace_on = is_decision_trace_enabled()
+        except ImportError:
+            _trace_on = False
+        if not _trace_on:
+            turn_logger.info(
+                json.dumps(
+                    {
+                        "turn": "LUMA",
+                        "intent": luma_intent,
+                        "slots": luma_slots,
+                        "missing_slots": luma_missing_slots,
+                    },
+                    ensure_ascii=True,
+                    default=str,
+                )
             )
-        )
 
         # ARCHITECTURAL INVARIANT: Create authoritative slot view BEFORE any processing
         # effective_turn_slots = merge(session_state.slots, raw_luma_response.slots)
@@ -286,7 +305,7 @@ def plan_turn(
                         f"session_slots={list(session_slots_for_merge.keys())}, "
                         f"effective_turn_slots={list(effective_turn_slots.keys())}"
                     )
-                    logger.error(f"[EFFECTIVE_TURN_SLOTS] {error_msg}")
+                    logger.debug(f"[EFFECTIVE_TURN_SLOTS] {error_msg}")
                     # In test mode, raise assertion
                     if os.getenv("PYTEST_CURRENT_TEST"):
                         raise AssertionError(error_msg)
@@ -322,10 +341,12 @@ def plan_turn(
             ]
             if any(w in text_l for w in weekday_keywords):
                 try:
-                    response_str = json.dumps(luma_response, indent=2, default=str, ensure_ascii=False)
+                    response_str = json.dumps(
+                        luma_response, indent=2, default=str, ensure_ascii=False)
                 except Exception:
                     response_str = repr(luma_response)
-                logger.debug("[DEBUG_LUMA_WEEKDAY] text=%r response=%s", text, response_str)
+                logger.debug(
+                    "[DEBUG_LUMA_WEEKDAY] text=%r response=%s", text, response_str)
 
     except UpstreamError as e:
         logger.error(
@@ -375,7 +396,8 @@ def plan_turn(
                     session_action = "SEARCH_AVAILABILITY"
                 elif not session_action and session_stage == "CONFIRM":
                     session_action = "CONFIRM_APPOINTMENT"
-                session_status = session_state.get("status", "NEEDS_CLARIFICATION")
+                session_status = session_state.get(
+                    "status", "NEEDS_CLARIFICATION")
                 # CRITICAL: Status must be NEEDS_CLARIFICATION if there are missing slots
                 # Do NOT use session_status if it's READY but there are missing slots
                 final_status = (
@@ -497,7 +519,8 @@ def plan_turn(
                     session_action = "SEARCH_AVAILABILITY"
                 elif not session_action and session_stage == "CONFIRM":
                     session_action = "CONFIRM_APPOINTMENT"
-                session_status = session_state.get("status", "NEEDS_CLARIFICATION")
+                session_status = session_state.get(
+                    "status", "NEEDS_CLARIFICATION")
                 # CRITICAL: Status must be NEEDS_CLARIFICATION if there are missing slots
                 # Do NOT use session_status if it's READY but there are missing slots
                 final_status = (
@@ -628,7 +651,8 @@ def plan_turn(
                     session_action = "SEARCH_AVAILABILITY"
                 elif not session_action and session_stage == "CONFIRM":
                     session_action = "CONFIRM_APPOINTMENT"
-                session_status = session_state.get("status", "NEEDS_CLARIFICATION")
+                session_status = session_state.get(
+                    "status", "NEEDS_CLARIFICATION")
                 # CRITICAL: Status must be NEEDS_CLARIFICATION if there are missing slots
                 # Do NOT use session_status if it's READY but there are missing slots
                 final_status = (
@@ -724,7 +748,8 @@ def plan_turn(
     # Extract Luma intent for logging (before intent resolution)
     luma_intent_obj = luma_response.get("intent", {})
     luma_intent_name = (
-        luma_intent_obj.get("name", "") if isinstance(luma_intent_obj, dict) else ""
+        luma_intent_obj.get("name", "") if isinstance(
+            luma_intent_obj, dict) else ""
     )
 
     # Resolve effective intent using new intent_resolution module
@@ -739,7 +764,7 @@ def plan_turn(
 
     # Track the source of session_reset_occurred
     session_reset_occurred_source = "resolve_effective_intent"
-    logger.error(
+    logger.debug(
         f"[SESSION_RESET_WRITER] RECEIVED_FROM_RESOLVER value={session_reset_occurred} "
         f"source={session_reset_occurred_source} "
         f"effective_intent={effective_intent} "
@@ -747,7 +772,7 @@ def plan_turn(
     )
 
     # DEBUG: Log result immediately after resolve_effective_intent returns
-    logger.error(
+    logger.debug(
         f"[ORCHESTRATOR] AFTER resolve_effective_intent: effective_intent={effective_intent} "
         f"session_reset_occurred={session_reset_occurred} "
         f"will_null_session_state={session_reset_occurred} "
@@ -770,7 +795,7 @@ def plan_turn(
 
         # Last 2 frames before this one
         call_stack = "".join(traceback.format_stack()[-3:-1])
-        logger.error(
+        logger.debug(
             f"[ORCHESTRATOR] SESSION_RESET_OCCURRED=True (but preserving session_state for capability reconciliation) "
             f"effective_intent={effective_intent} "
             f"original_session_intent={original_session_state.get('intent_name') if original_session_state else None} "
@@ -831,11 +856,10 @@ def plan_turn(
     # Confirmation gate: classify once (accept / reject / revise / none).
     from core.session.confirmation_gate import (
         ConfirmationGateTurn,
-        apply_booking_revision,
         classify_confirmation_gate_turn,
-        clear_pending_confirmation,
         detect_booking_revision,
     )
+    from core.session.invalidation import InvalidationTrigger, apply_invalidation
 
     _gate_session = (
         original_session_state
@@ -847,6 +871,35 @@ def plan_turn(
         _gate_booking_intent = _gate_booking_intent.get("name") or ""
     gate_action = classify_confirmation_gate_turn(luma_response, _gate_session)
     revision_summary_for_turn = None
+    try:
+        from core.session.confirmation_gate import get_confirmation_state, is_confirmation_gate_open
+        from core.tracing.confirmation import (
+            emit_confirmation_classify_trace,
+            emit_confirmation_gate_open_trace,
+        )
+
+        _gate_open = is_confirmation_gate_open(_gate_session)
+        _gate_intent = str(_gate_booking_intent)
+        _gate_open_id = emit_confirmation_gate_open_trace(
+            session_state=_gate_session,
+            gate_open=_gate_open,
+            intent_name=_gate_intent,
+            confirmation_state=get_confirmation_state(_gate_session),
+            status=_gate_session.get("status"),
+        )
+        emit_confirmation_classify_trace(
+            gate_action=gate_action.value,
+            gate_open=_gate_open,
+            raw_intent=luma_intent_name or "",
+            has_revision=bool(
+                detect_booking_revision(luma_response, _gate_session).any
+            )
+            if _gate_open
+            else False,
+            gate_open_id=_gate_open_id,
+        )
+    except ImportError:
+        pass
     logger.info(
         f"[CONFIRMATION_GATE] action={gate_action.value} "
         f"raw_intent={luma_intent_name!r} booking_intent={_gate_booking_intent!r} "
@@ -859,9 +912,9 @@ def plan_turn(
                 render_booking_confirmation_rejected,
             )
 
-            cleared = clear_pending_confirmation(
+            cleared = apply_invalidation(
                 dict(_gate_session),
-                clear_time=True,
+                InvalidationTrigger.REJECT_CONFIRMATION,
                 reason="reject",
             )
             session_slots = dict(cleared.get("slots") or {})
@@ -925,15 +978,22 @@ def plan_turn(
         revision = detect_booking_revision(luma_response, _gate_session)
         if revision.any:
             revision_summary_for_turn = revision.to_summary()
-            apply_booking_revision(cleared, revision, reason="gate_revise")
+            apply_invalidation(
+                cleared,
+                InvalidationTrigger.BOOKING_REVISION,
+                revision=revision,
+                reason="gate_revise",
+            )
             logger.info(
                 f"[CONFIRMATION_GATE] REVISE fields="
                 f"service={revision.service} date={revision.date} time={revision.time} "
                 f"for {_gate_booking_intent!r} (user_id={user_id}{log_transaction_id})"
             )
         else:
-            clear_pending_confirmation(
-                cleared, clear_time=True, reason="revise_fallback"
+            apply_invalidation(
+                cleared,
+                InvalidationTrigger.REVISE_FALLBACK,
+                reason="revise_fallback",
             )
             logger.info(
                 f"[CONFIRMATION_GATE] REVISE fallback clear_time for "
@@ -965,8 +1025,10 @@ def plan_turn(
                 _session_for_confirm = (
                     session_state if isinstance(session_state, dict) else {}
                 )
-                _session_booking_intent = _session_for_confirm.get("intent_name", "")
-                _session_confirmation = get_confirmation_state(_session_for_confirm)
+                _session_booking_intent = _session_for_confirm.get(
+                    "intent_name", "")
+                _session_confirmation = get_confirmation_state(
+                    _session_for_confirm)
                 if (
                     not confirm_booking_continuation
                     and effective_intent == "CONFIRM_ACTION"
@@ -1228,7 +1290,7 @@ def plan_turn(
             "intent_name"
         ) or original_session_state.get("intent")
         session_status_for_trace = original_session_state.get("status")
-    logger.error(
+    logger.debug(
         "[INTENT_TRACE_ORCHESTRATOR] BEFORE merge_luma_with_session: "
         f"effective_intent={effective_intent}, "
         f"effective_response['intent']['name']={effective_response.get('intent', {}).get('name', '')}, "
@@ -1283,7 +1345,8 @@ def plan_turn(
     is_session_intent_durable = False
     if session_intent_str_for_merge:
         try:
-            is_session_intent_durable = is_durable_intent(session_intent_str_for_merge)
+            is_session_intent_durable = is_durable_intent(
+                session_intent_str_for_merge)
         except (ImportError, Exception) as e:
             logger.warning(
                 f"Failed to check durable status for '{session_intent_str_for_merge}': {e}. "
@@ -1299,11 +1362,12 @@ def plan_turn(
         session_for_merge.get("intent_name") if session_for_merge else None
     )
     session_for_merge_slots = (
-        list(session_for_merge.get("slots", {}).keys()) if session_for_merge else []
+        list(session_for_merge.get("slots", {}).keys()
+             ) if session_for_merge else []
     )
 
     # CRITICAL: Final check - who last set session_reset_occurred?
-    logger.error(
+    logger.debug(
         f"[SESSION_RESET_WRITER] FINAL_CHECK_BEFORE_MERGE: "
         f"session_reset_occurred={session_reset_occurred} "
         f"source={session_reset_occurred_source} "
@@ -1322,7 +1386,25 @@ def plan_turn(
         session_reset_occurred=session_reset_occurred,
     )
 
-    logger.error(
+    try:
+        from core.tracing.merge import emit_merge_eligibility_trace
+
+        merge_ctx = session_for_merge if isinstance(
+            session_for_merge, dict) else {}
+        session_intent_for_eligibility = merge_ctx.get("intent_name") or ""
+        if isinstance(session_intent_for_eligibility, dict):
+            session_intent_for_eligibility = session_intent_for_eligibility.get(
+                "name") or ""
+        emit_merge_eligibility_trace(
+            eligible=should_merge_session,
+            session_reset_occurred=session_reset_occurred,
+            intent_name=str(session_intent_for_eligibility),
+            has_session_slots=bool(merge_ctx.get("slots")),
+        )
+    except ImportError:
+        pass
+
+    logger.debug(
         f"[ORCHESTRATOR] BEFORE should_merge_session: session_reset_occurred={session_reset_occurred} "
         f"session_for_merge_intent={session_for_merge_intent} "
         f"session_for_merge_slots={session_for_merge_slots} "
@@ -1333,7 +1415,7 @@ def plan_turn(
     )
 
     # DEBUG: Log final merge decision
-    logger.error(
+    logger.debug(
         f"[ORCHESTRATOR] should_merge_session={should_merge_session} "
         f"user_id={user_id}{log_transaction_id}"
     )
@@ -1347,9 +1429,19 @@ def plan_turn(
         prior_missing = session_for_merge.get("missing_slots", [])
         prior_slots = list(session_for_merge.get("slots", {}).keys())
 
-        effective_response = merge_luma_with_session(
-            effective_response, session_for_merge, planning_only=planning_only
-        )
+        try:
+            from core.tracing.decision_trace import measure_stage
+        except ImportError:
+            from contextlib import contextmanager
+
+            @contextmanager
+            def measure_stage(_stage: str):  # type: ignore[misc]
+                yield
+
+        with measure_stage("merge"):
+            effective_response = merge_luma_with_session(
+                effective_response, session_for_merge, planning_only=planning_only
+            )
 
         # CRITICAL: If CONFIRM_* intent was treated as continuation of durable session intent,
         # set confirmation_state to "confirmed" in the booking object
@@ -1434,7 +1526,8 @@ def plan_turn(
                     compute_missing_slots,
                 )
 
-                intent_name = effective_response.get("intent", {}).get("name", "")
+                intent_name = effective_response.get(
+                    "intent", {}).get("name", "")
                 slots = effective_response.get("slots", {})
                 time_constraint = effective_response.get("time_constraint")
                 if intent_name:
@@ -1460,7 +1553,8 @@ def plan_turn(
     merged_missing = effective_response.get("missing_slots", [])
     extracted_slots = [k for k in merged_slots.keys() if k not in prior_slots]
     remaining_missing = merged_missing
-    effective_intent_name = effective_response.get("intent", {}).get("name", "")
+    effective_intent_name = effective_response.get(
+        "intent", {}).get("name", "")
 
     logger.info(
         f"session_merged user_id={user_id}{log_transaction_id} "
@@ -1468,10 +1562,31 @@ def plan_turn(
         f"prior_missing_slots={prior_missing} extracted_slots={extracted_slots} remaining_missing_slots={remaining_missing}"
     )
 
+    from core.tracing.invariant_trace import trace_stage
+    from core.tracing.stage_checks import check_merge
+
+    trace_stage(
+        "merge",
+        lambda: check_merge(
+            effective_response=effective_response,
+            session_state=session_state,
+            prior_intent=prior_intent if isinstance(
+                prior_intent, str) else None,
+        ),
+        allowed_mutations=["slots", "missing_slots", "intent", "facts"],
+        forbidden_mutations=["session.durable_slots_unless_invalidation"],
+        state_snapshot={
+            "effective_intent": effective_intent_name,
+            "missing_slots": effective_response.get("missing_slots"),
+            "slot_keys": sorted(effective_response.get("slots", {}).keys()),
+        },
+    )
+
     # Verify intent before processing
     # Guard: effective_response must be a dict
     if not effective_response or not isinstance(effective_response, dict):
-        logger.error(f"effective_response is None or not a dict: {effective_response}")
+        logger.error(
+            f"effective_response is None or not a dict: {effective_response}")
         return {
             "success": False,
             "error": "internal_error",
@@ -1490,7 +1605,8 @@ def plan_turn(
         )
         # Force override as last resort
         effective_response["intent"] = {"name": session_state.get("intent")}
-        final_intent_check = effective_response.get("intent", {}).get("name", "")
+        final_intent_check = effective_response.get(
+            "intent", {}).get("name", "")
 
     logger.info(
         f"calling_process_luma_response user_id={user_id}{log_transaction_id} "
@@ -1500,7 +1616,8 @@ def plan_turn(
     # HARD INVARIANT: Planning must NEVER run with intent=UNKNOWN or empty when durable session intent exists
     # This ensures durable intents are preserved even if intent resolution failed or was overwritten
     planning_intent = effective_response.get("intent", {}).get("name", "")
-    effective_intent_for_planning = effective_response.get("_effective_intent", "")
+    effective_intent_for_planning = effective_response.get(
+        "_effective_intent", "")
 
     # If planning intent is UNKNOWN/empty but effective_intent exists, use effective_intent
     if (
@@ -1601,7 +1718,7 @@ def plan_turn(
             "intent_name"
         ) or session_state.get("intent")
         session_status_for_trace = session_state.get("status")
-    logger.error(
+    logger.debug(
         "[INTENT_TRACE_ORCHESTRATOR] BEFORE process_luma_response: "
         f"effective_response['intent']['name']={final_intent_check}, "
         f"effective_response['_effective_intent']={effective_response.get('_effective_intent', '')}, "
@@ -1635,7 +1752,8 @@ def plan_turn(
         else {}
     )
     raw_luma_intent_name = (
-        raw_luma_intent.get("name", "") if isinstance(raw_luma_intent, dict) else ""
+        raw_luma_intent.get("name", "") if isinstance(
+            raw_luma_intent, dict) else ""
     )
     source_text = effective_response.get("_source_text", text)
     # LUMA_RAW: Log raw Luma response (facts, intent, source_text)
@@ -1651,7 +1769,8 @@ def plan_turn(
         else {}
     )
     raw_luma_intent_name = (
-        raw_luma_intent.get("name", "") if isinstance(raw_luma_intent, dict) else ""
+        raw_luma_intent.get("name", "") if isinstance(
+            raw_luma_intent, dict) else ""
     )
     source_text = effective_response.get("_source_text", text)
     logger.info(
@@ -1685,14 +1804,29 @@ def plan_turn(
                 f"Failed to fetch organization data for capability evaluation: {e}"
             )
 
-    decision = process_luma_response(
-        effective_response, derived_domain, user_id, session_state=session_state
-    )
+    try:
+        from core.tracing.decision_trace import measure_stage as _measure_stage
+    except ImportError:
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _measure_stage(_stage: str):  # type: ignore[misc]
+            yield
+
+    with _measure_stage("planner"):
+        decision = process_luma_response(
+            effective_response,
+            derived_domain,
+            user_id,
+            session_state=session_state,
+            organization_id=organization_id,
+        )
 
     # Guard: decision must be a dict
     # CRITICAL: Missing slots are NEVER an error - always return a planning response
     if not decision or not isinstance(decision, dict):
-        logger.error(f"process_luma_response returned None or not a dict: {decision}")
+        logger.error(
+            f"process_luma_response returned None or not a dict: {decision}")
         # Even on error, return a minimal planning response (not an error)
         # This ensures planning always proceeds, even if process_luma_response fails
         intent_name = effective_response.get("intent", {}).get("name", "")
@@ -1789,10 +1923,12 @@ def plan_turn(
                         f"[ORG_HYDRATION] Fetching organization data for org_id={org_id_to_fetch} "
                         f"(source={org_id_source})"
                     )
-                    org_details = organization_client.get_details(org_id_to_fetch)
+                    org_details = organization_client.get_details(
+                        org_id_to_fetch)
                     if isinstance(org_details, dict):
                         # Organization data may be at top level or under "organization" key
-                        org_data = org_details.get("organization") or org_details
+                        org_data = org_details.get(
+                            "organization") or org_details
                         logger.info(
                             f"[ORG_HYDRATION] Successfully fetched organization data: "
                             f"payment_required={org_data.get('payment_required') if isinstance(org_data, dict) else 'N/A'}"
@@ -1939,7 +2075,8 @@ def plan_turn(
         # Normalized values remain internal-only for execution paths
         # This applies ONLY to planning_only responses - execution paths still use normalized values
         if effective_response and isinstance(effective_response, dict):
-            raw_luma_response = effective_response.get("_raw_luma_response", {})
+            raw_luma_response = effective_response.get(
+                "_raw_luma_response", {})
             if isinstance(raw_luma_response, dict):
                 raw_luma_facts = raw_luma_response.get("facts", {})
                 if isinstance(raw_luma_facts, dict) and raw_luma_facts:
@@ -2038,7 +2175,8 @@ def plan_turn(
         # When session_state exists, use session_state["facts"] as the primary source
         # This ensures capability completion facts (payment_satisfied) from previous turns are respected
         if session_state and isinstance(session_state.get("facts"), dict):
-            session_payment_satisfied = session_state["facts"].get("payment_satisfied")
+            session_payment_satisfied = session_state["facts"].get(
+                "payment_satisfied")
             if session_payment_satisfied is not None:
                 payment_satisfied = session_payment_satisfied
                 logger.info(
@@ -2054,7 +2192,7 @@ def plan_turn(
                 payment_satisfied = outcome_facts_payment_satisfied
 
         # INSTRUMENTATION: Log all three sources for debugging
-        logger.error(
+        logger.debug(
             f"[CAPABILITY_GATING_INSTRUMENTATION] payment_satisfied sources: "
             f"decision.facts={decision_facts_payment_satisfied}, "
             f"session_state.facts={session_facts_payment_satisfied}, "
@@ -2215,7 +2353,7 @@ def plan_turn(
             result["outcome"]["active_capability"] = populated_plan["active_capability"]
 
         # Store effective Luma response for session building (for test snapshots)
-        if effective_response and "_raw_luma_response" in effective_response:
+        if effective_response:
             result["_merged_luma_response"] = effective_response
 
         # Store decision for plan_message to access (for early return paths in handle_message)
@@ -2224,21 +2362,35 @@ def plan_turn(
         # DEBUG LOG: Finalization point (after all overrides, before PLAN_FINAL)
         # Track fingerprint-based availability resolution for debugging
         stored_fp = (
-            session_state.get("availability_fingerprint") if session_state else None
+            session_state.get(
+                "availability_fingerprint") if session_state else None
         )
         last_exec_result = (
-            session_state.get("last_execution_result") if session_state else None
+            session_state.get(
+                "last_execution_result") if session_state else None
         )
         from core.orchestration.availability_fingerprint import (
+            build_availability_fingerprint_slots,
             compute_availability_fingerprint,
         )
 
-        current_fp = (
-            compute_availability_fingerprint(slots, intent_name=intent_name)
+        fp_slots = (
+            build_availability_fingerprint_slots(
+                slots or {},
+                intent_name=intent_name,
+                organization_id=organization_id,
+                luma_response=effective_response,
+                session_state=session_state,
+            )
             if slots
+            else {}
+        )
+        current_fp = (
+            compute_availability_fingerprint(fp_slots, intent_name=intent_name)
+            if fp_slots
             else None
         )
-        logger.error(
+        logger.debug(
             f"[FINALIZATION_DECISION] BEFORE PLAN_FINAL (after all overrides): "
             f"intent={intent_name}, "
             f"plan.status={populated_plan.get('status')}, plan.stage={populated_plan.get('stage')}, plan.action={populated_plan.get('action')}, "
@@ -2252,11 +2404,11 @@ def plan_turn(
             f"slots service_id={slots.get('service_id') if isinstance(slots, dict) else None}, "
             f"date={slots.get('date') if isinstance(slots, dict) else None}, "
             f"time={slots.get('time') if isinstance(slots, dict) else None}, "
-            f"org_id={slots.get('organization_id') if isinstance(slots, dict) else None}"
+            f"org_id={fp_slots.get('organization_id') if isinstance(fp_slots, dict) else None}"
         )
 
         # GUARD LOG: Final plan values before return
-        logger.error(
+        logger.debug(
             "[PLAN_FINAL] stage=%s action=%s missing=%s slots=%s",
             populated_plan["stage"],
             populated_plan["action"],
@@ -2375,10 +2527,12 @@ def plan_turn(
 
             confirm_slots = outcome_dict.get("slots") or facts.get("slots", {})
             if isinstance(confirm_slots, dict):
-                confirmation_text = render_booking_confirmation_prompt(confirm_slots)
+                confirmation_text = render_booking_confirmation_prompt(
+                    confirm_slots)
                 revision_summary = None
                 if isinstance(effective_response, dict):
-                    revision_summary = effective_response.get("_revision_summary")
+                    revision_summary = effective_response.get(
+                        "_revision_summary")
                 confirmation_text = prefix_with_revision_acknowledgement(
                     confirmation_text, revision_summary
                 )
@@ -2444,7 +2598,8 @@ def plan_turn(
                     # Try to get intent_name from decision or effective_response
                     resolved_intent = decision.get("intent_name", "")
                     if not resolved_intent and effective_response:
-                        resolved_intent = effective_response.get("_effective_intent")
+                        resolved_intent = effective_response.get(
+                            "_effective_intent")
                     if not resolved_intent and effective_response:
                         intent_obj = effective_response.get("intent", {})
                         if isinstance(intent_obj, dict):
@@ -2736,4 +2891,3 @@ def plan_turn(
         "error": "internal_error",
         "message": f"Unexpected plan status: {plan_status}",
     }
-

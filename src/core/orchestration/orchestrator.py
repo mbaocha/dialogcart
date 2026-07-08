@@ -53,6 +53,7 @@ from core.orchestration.nlu import (
 from core.orchestration.persistence.durable_intents import is_durable_intent
 from core.rendering.availability_renderer import build_availability_render_request
 from core.rendering.llm_renderer import LlmRenderRequest, render_llm
+from core.orchestration.time_resolution import sync_execution_plan_from_time_resolution
 from core.routing.workflows import get_workflow
 
 logger = logging.getLogger(__name__)
@@ -208,6 +209,61 @@ def _inject_rendering_text(
     session_state: Optional[Dict[str, Any]] = None,
 ) -> None:
     try:
+        from core.tracing.decision_trace import measure_stage
+    except ImportError:
+        from contextlib import contextmanager
+
+        @contextmanager
+        def measure_stage(_stage: str):  # type: ignore[misc]
+            yield
+
+    with measure_stage("renderer"):
+        _inject_rendering_text_impl(
+            result, decision, session_state=session_state)
+
+
+def _inject_rendering_text_impl(
+    result: Dict[str, Any],
+    decision: Dict[str, Any],
+    session_state: Optional[Dict[str, Any]] = None,
+) -> None:
+    try:
+        from core.orchestration.time_resolution import (
+            TIME_MATCH_MISMATCH,
+            build_execution_result_for_time_resolution_render,
+        )
+
+        time_match_outcome = (
+            decision.get("time_match_outcome")
+            or decision.get("plan", {}).get("time_match_outcome")
+            or (decision.get("facts") or {}).get("time_match_outcome")
+        )
+        if time_match_outcome == TIME_MATCH_MISMATCH:
+            exec_payload = build_execution_result_for_time_resolution_render(
+                session_state,
+                time_resolution=(
+                    decision.get("time_resolution")
+                    or (decision.get("facts") or {}).get("time_resolution")
+                ),
+            )
+            if exec_payload:
+                conversation_history = (
+                    session_state or {}).get("messages", [])
+                render_request = build_availability_render_request(
+                    decision,
+                    exec_payload,
+                    structured_context=_structured_context_from_decision(
+                        decision),
+                    conversation_history=conversation_history,
+                )
+                if render_request:
+                    rendered_text = render_llm(render_request)
+                    if rendered_text:
+                        result["text"] = rendered_text
+                        if isinstance(result.get("outcome"), dict):
+                            result["outcome"]["text"] = rendered_text
+                    return
+
         decision["_session"] = session_state or {}
         if session_state and isinstance(session_state, dict):
             slot_attempts = session_state.get("slot_attempts")
@@ -235,8 +291,10 @@ def _inject_rendering_text(
         if not isinstance(slot_attempts, dict):
             slot_attempts = {}
         first_missing = missing_slots[0] if missing_slots else None
-        attempt_count = slot_attempts.get(first_missing, 0) if first_missing else 0
-        last_filled = (session_state or {}).get("last_filled_slot") if session_state else None
+        attempt_count = slot_attempts.get(
+            first_missing, 0) if first_missing else 0
+        last_filled = (session_state or {}).get(
+            "last_filled_slot") if session_state else None
         ack_note = f" Start by briefly acknowledging you received {last_filled}." if last_filled and attempt_count < 1 else ""
         retry_note = " The user was already asked — rephrase naturally." if attempt_count >= 1 else ""
         service_candidates = (
@@ -248,7 +306,8 @@ def _inject_rendering_text(
             # Service is the primary blocker — only ask for service, not date/time
             render_missing = ["service_id"]
             if service_candidates:
-                candidates_str = ", ".join(f'"{c}"' for c in service_candidates)
+                candidates_str = ", ".join(
+                    f'"{c}"' for c in service_candidates)
                 service_hint = f" Present these options for them to choose from: {candidates_str}."
             else:
                 service_hint = ""
@@ -263,7 +322,8 @@ def _inject_rendering_text(
         conversation_history = (session_state or {}).get("messages", [])
         rendered_text = render_llm(LlmRenderRequest(
             render_instruction=render_instruction,
-            facts={"structured_context": _structured_context_from_decision(decision)},
+            facts={
+                "structured_context": _structured_context_from_decision(decision)},
             conversation_history=conversation_history,
         ))
         if rendered_text:
@@ -291,7 +351,8 @@ def _inject_availability_text(
         render_request = build_availability_render_request(
             decision,
             execution_result,
-            structured_context=_structured_context_from_decision(decision or {}),
+            structured_context=_structured_context_from_decision(
+                decision or {}),
             conversation_history=conversation_history,
         )
         if not render_request:
@@ -345,7 +406,8 @@ def _inject_outcome_text(
             )
         rendered_text = render_llm(LlmRenderRequest(
             render_instruction=render_instruction,
-            facts={"structured_context": _structured_context_from_decision(decision)},
+            facts={
+                "structured_context": _structured_context_from_decision(decision)},
         ))
         if rendered_text:
             result["text"] = rendered_text
@@ -367,7 +429,8 @@ def _inject_system_text(result: Dict[str, Any], decision: Dict[str, Any]) -> Non
         )
         rendered_text = render_llm(LlmRenderRequest(
             render_instruction=render_instruction,
-            facts={"structured_context": _structured_context_from_decision(decision)},
+            facts={
+                "structured_context": _structured_context_from_decision(decision)},
         ))
         if rendered_text:
             result["text"] = rendered_text
@@ -479,11 +542,13 @@ def _persist_to_session(
     if session_store is not None:
         try:
             if hasattr(session_store, "get_session"):
-                current_session = session_store.get_session(user_id) or current_session
+                current_session = session_store.get_session(
+                    user_id) or current_session
             elif callable(session_store):
                 current_session = session_store(user_id) or current_session
         except Exception as e:
-            logger.debug("Failed to refresh session before persisting %s: %s", key, e)
+            logger.debug(
+                "Failed to refresh session before persisting %s: %s", key, e)
 
     current_session[key] = value
 
@@ -528,9 +593,59 @@ def _invoke_workflow_after_execute(
                 )
                 return outcome
     except Exception as e:
-        logger.debug(f"Error looking up workflow for intent '{intent_name}': {e}")
+        logger.debug(
+            f"Error looking up workflow for intent '{intent_name}': {e}")
 
     return outcome
+
+
+def _execution_spine_inputs(
+    *,
+    plan: Optional[Dict[str, Any]] = None,
+    plan_status: Optional[str] = None,
+    plan_action: Optional[str] = None,
+    can_execute: bool = False,
+) -> Dict[str, Any]:
+    plan_obj = plan if isinstance(plan, dict) else {}
+    return {
+        "plan_status": plan_status or plan_obj.get("status"),
+        "plan_action": plan_action if plan_action is not None else plan_obj.get("action"),
+        "can_execute": can_execute,
+        "missing_slots": plan_obj.get("missing_slots", []),
+    }
+
+
+def _return_with_execution_spine(
+    result: Dict[str, Any],
+    *,
+    pagination_handled: bool = False,
+    handler_delegated: bool = False,
+    planning_failed: bool = False,
+    plan: Optional[Dict[str, Any]] = None,
+    plan_status: Optional[str] = None,
+    plan_action: Optional[str] = None,
+    can_execute: bool = False,
+) -> Dict[str, Any]:
+    from core.tracing.spine import emit_execution_eligibility
+
+    emit_execution_eligibility(
+        pagination_handled=pagination_handled,
+        handler_delegated=handler_delegated,
+        planning_failed=planning_failed,
+        plan_status=plan_status or (
+            plan.get("status") if isinstance(plan, dict) else None),
+        plan_action=plan_action if plan_action is not None else (
+            plan.get("action") if isinstance(plan, dict) else None
+        ),
+        can_execute=can_execute,
+        inputs_evaluated=_execution_spine_inputs(
+            plan=plan,
+            plan_status=plan_status,
+            plan_action=plan_action,
+            can_execute=can_execute,
+        ),
+    )
+    return result
 
 
 def handle_message(
@@ -584,12 +699,35 @@ def handle_message(
     # Import execution dispatcher
     from core.orchestration.execution.dispatcher import execute
 
-    # LOG 1 — TURN INPUT (first line of handle_message)
-    turn_logger.info(
-        json.dumps(
-            {"turn": "INPUT", "user_id": user_id, "text": text}, ensure_ascii=True
-        )
+    from core.tracing.invariant_trace import (
+        TurnInvariantTrace,
+        attach_trace_to_result,
+        finalize_turn_trace,
+        trace_stage,
     )
+    from core.tracing.decision_trace import TurnTrace, is_decision_trace_enabled
+    from core.tracing.stage_checks import (
+        check_pagination,
+        check_session_load,
+        check_tool_execution,
+    )
+
+    # LOG 1 — TURN INPUT (suppressed when decision trace will be logged)
+    if not is_decision_trace_enabled():
+        turn_logger.info(
+            json.dumps(
+                {"turn": "INPUT", "user_id": user_id, "text": text}, ensure_ascii=True
+            )
+        )
+
+    TurnInvariantTrace.begin(user_id, text)
+    if is_decision_trace_enabled():
+        TurnTrace.begin(
+            user_id=user_id,
+            text=text,
+            transaction_id=str(kwargs.get("transaction_id") or ""),
+            force=True,
+        )
 
     # Get session state if session_store provided
     session_state = None
@@ -626,17 +764,41 @@ def handle_message(
                 f"[SESSION_FALLBACK] Could not load from default session store: {e}"
             )
 
-    # LOG 3 — SESSION READ (immediately after session_store.get_session)
-    turn_logger.info(
-        json.dumps(
-            {"turn": "SESSION_READ", "session": session_state},
-            ensure_ascii=True,
-            default=str,
+    # LOG 3 — SESSION READ (compact; full state is in decision trace when enabled)
+    from core.tracing.decision_trace import is_decision_trace_enabled as _trace_enabled
+    from core.tracing.server_log import compact_session_snapshot
+
+    if not _trace_enabled():
+        turn_logger.info(
+            json.dumps(
+                {
+                    "turn": "SESSION_READ",
+                    "session": compact_session_snapshot(session_state),
+                },
+                ensure_ascii=True,
+                default=str,
+            )
         )
-    )
 
     # INVARIANT GUARD: Payment capability requires persisted facts
     # This prevents silent regressions where payment_satisfied is lost
+    trace_stage(
+        "session_load",
+        lambda: check_session_load(
+            session_state=session_state, user_id=user_id),
+        allowed_mutations=[],
+        forbidden_mutations=["session.slots", "session.intent"],
+        state_snapshot={
+            "found": session_state is not None,
+            "status": session_state.get("status") if session_state else None,
+            "intent": (
+                session_state.get("intent_name") or session_state.get("intent")
+                if session_state
+                else None
+            ),
+            "slot_keys": sorted((session_state or {}).get("slots", {}).keys()),
+        },
+    )
     if session_state and isinstance(session_state, dict):
         active_capability = session_state.get("active_capability")
         if active_capability == "payment":
@@ -664,12 +826,18 @@ def handle_message(
 
     # Check if planning failed
     if not plan or plan.get("error"):
-        return {
+        failure = {
             "success": False,
             "error": plan.get("error", "planning_failed"),
             "message": plan.get("message", "Planning failed"),
             "plan": plan,
         }
+        attach_trace_to_result(failure)
+        return _return_with_execution_spine(
+            failure,
+            planning_failed=True,
+            plan=plan if isinstance(plan, dict) else None,
+        )
 
     # HANDLER_DELEGATED: an intent handler (e.g. RAG) will respond — bypass execution path
     if plan.get("status") == "HANDLER_DELEGATED":
@@ -682,7 +850,64 @@ def handle_message(
             "missing_slots": plan.get("missing_slots", []),
             "facts": plan.get("facts", {}),
         }
-        return {"success": True, "outcome": hd_outcome, "result": hd_outcome}
+        hd_response = {"success": True,
+                       "outcome": hd_outcome, "result": hd_outcome}
+        attach_trace_to_result(hd_response)
+        return _return_with_execution_spine(
+            hd_response,
+            handler_delegated=True,
+            plan=plan,
+        )
+
+    from core.orchestration.availability_pagination import (
+        try_handle_availability_browse_turn,
+    )
+
+    pagination_response = try_handle_availability_browse_turn(
+        plan=plan,
+        session_state=session_state,
+        session_store=session_store,
+        user_id=user_id,
+    )
+    if pagination_response is None:
+        trace_stage(
+            "pagination",
+            lambda: check_pagination(handled=False),
+            skipped=True,
+            forbidden_mutations=["booking.slots", "availability_fingerprint"],
+        )
+    if pagination_response is not None:
+        fp_before = (session_state or {}).get("availability_fingerprint")
+        fp_after = fp_before
+        trace_stage(
+            "pagination",
+            lambda: check_pagination(
+                handled=True,
+                fingerprint_before=fp_before,
+                fingerprint_after=fp_after,
+                search_executed=False,
+            ),
+            allowed_mutations=["availability_presentation",
+                               "presented_availability"],
+            forbidden_mutations=[
+                "booking.slots",
+                "availability_fingerprint",
+                "last_execution_result",
+            ],
+            state_snapshot={
+                "page_index": (pagination_response.get("availability_pagination") or {}).get(
+                    "page_index"
+                ),
+            },
+        )
+        attach_trace_to_result(pagination_response)
+        return _return_with_execution_spine(
+            pagination_response,
+            pagination_handled=True,
+            plan=plan,
+            plan_status=plan.get("status"),
+            plan_action=plan.get("action"),
+        )
 
     # Execution uses plan.action only (policy-selected; nullable when nothing runs).
     plan_status = plan.get("status")
@@ -712,7 +937,8 @@ def handle_message(
                 if mode == "exploratory":
                     if plan_action == "FETCH_BOOKING":
                         can_execute = bool(
-                            slots.get("booking_id") or slots.get("booking_code")
+                            slots.get("booking_id") or slots.get(
+                                "booking_code")
                         )
                     else:
                         can_execute = action_slots_satisfied
@@ -746,7 +972,8 @@ def handle_message(
             facts = {
                 "slots": plan_slots if isinstance(plan_slots, dict) else {},
                 "missing_slots": (
-                    plan_missing_slots if isinstance(plan_missing_slots, list) else []
+                    plan_missing_slots if isinstance(
+                        plan_missing_slots, list) else []
                 ),
             }
             outcome_dict = {
@@ -779,7 +1006,25 @@ def handle_message(
             response["text"] = plan["text"]
         response["_merged_luma_response"] = plan.get("_merged_luma_response")
         response.setdefault("ui_actions", [])
-        return response
+        trace_stage(
+            "tool_execution",
+            lambda: check_tool_execution(
+                plan_action=plan_action,
+                execution_result=None,
+                can_execute=False,
+            ),
+            skipped=not plan_action,
+            state_snapshot={"plan_action": plan_action,
+                            "can_execute": can_execute},
+        )
+        attach_trace_to_result(response)
+        return _return_with_execution_spine(
+            response,
+            plan=plan,
+            plan_status=plan_status,
+            plan_action=plan_action,
+            can_execute=False,
+        )
 
     logger.debug(
         f"Allowing action execution: plan_action={plan_action}, mode={execution_step.get('mode') if execution_step else 'unknown'}, "
@@ -877,7 +1122,8 @@ def handle_message(
                 }
             # Add active_capability if present in plan
             if plan.get("active_capability"):
-                outcome_dict["active_capability"] = plan.get("active_capability")
+                outcome_dict["active_capability"] = plan.get(
+                    "active_capability")
             response = {
                 "success": True,
                 "result": outcome_dict,
@@ -886,9 +1132,29 @@ def handle_message(
             # Preserve rendered text if present in plan (from plan_message)
             if "text" in plan:
                 response["text"] = plan["text"]
-            response["_merged_luma_response"] = plan.get("_merged_luma_response")
+            response["_merged_luma_response"] = plan.get(
+                "_merged_luma_response")
             response.setdefault("ui_actions", [])
-            return response
+            trace_stage(
+                "tool_execution",
+                lambda: check_tool_execution(
+                    plan_action=plan_action,
+                    execution_result=None,
+                    can_execute=False,
+                ),
+                state_snapshot={
+                    "plan_action": plan_action,
+                    "reason": "missing_execution_client",
+                },
+            )
+            attach_trace_to_result(response)
+            return _return_with_execution_spine(
+                response,
+                plan=plan,
+                plan_status=plan_status,
+                plan_action=plan_action,
+                can_execute=False,
+            )
 
         if execution_step and execution_client:
             # Ensure organization_id is in slots for execution
@@ -904,7 +1170,8 @@ def handle_message(
                     slots_for_availability_search,
                 )
 
-                _exec_proposals = resolve_execution_proposals(plan, session_state)
+                _exec_proposals = resolve_execution_proposals(
+                    plan, session_state)
                 slots = slots_for_availability_search(
                     slots,
                     _exec_proposals["date_proposal"],
@@ -957,7 +1224,8 @@ def handle_message(
                             )
                             if isinstance(org_details, dict):
                                 org_data = (
-                                    org_details.get("organization") or org_details
+                                    org_details.get(
+                                        "organization") or org_details
                                 )
                                 if org_data and isinstance(org_data, dict):
                                     if not plan_facts:
@@ -996,7 +1264,8 @@ def handle_message(
                                     or current_session
                                 )
                             elif callable(session_store):
-                                current_session = session_store(user_id) or current_session
+                                current_session = session_store(
+                                    user_id) or current_session
 
                             if isinstance(current_session, dict):
                                 resolved_datetime_range = current_session.get(
@@ -1021,12 +1290,16 @@ def handle_message(
                         )
 
             try:
+                import time as _time
+
+                _execution_started = _time.perf_counter()
                 # Execute the selected step
                 if client_name == "availability_client":
                     # For MODIFY_BOOKING, also pass booking_client to fetch service_id from booking
                     booking_client_for_execution = None
                     if intent_name == "MODIFY_BOOKING":
-                        booking_client_for_execution = kwargs.get("booking_client")
+                        booking_client_for_execution = kwargs.get(
+                            "booking_client")
                     execution_result = execute(
                         plan=plan,
                         availability_client=execution_client,
@@ -1038,7 +1311,8 @@ def handle_message(
                     )
                 else:
                     # Other clients not yet supported
-                    logger.warning(f"Execution for {client_name} not yet implemented")
+                    logger.warning(
+                        f"Execution for {client_name} not yet implemented")
                     # Build outcome from decision (canonical builder)
                     decision = plan.get("_decision")
                     if decision:
@@ -1084,11 +1358,17 @@ def handle_message(
                         outcome_dict["active_capability"] = plan.get(
                             "active_capability"
                         )
-                    return {
-                        "success": True,
-                        "result": outcome_dict,
-                        "outcome": outcome_dict,  # Alias for backward compatibility
-                    }
+                    return _return_with_execution_spine(
+                        {
+                            "success": True,
+                            "result": outcome_dict,
+                            "outcome": outcome_dict,
+                        },
+                        plan=plan,
+                        plan_status=plan_status,
+                        plan_action=plan_action,
+                        can_execute=False,
+                    )
 
                 # For CONFIRM_APPOINTMENT with EXECUTED status, preserve the action
                 # Do not override action - use plan.action directly
@@ -1154,16 +1434,29 @@ def handle_message(
                     and execution_result.get("status") == "success"
                 ):
                     from core.orchestration.availability_fingerprint import (
+                        build_availability_fingerprint_slots,
                         compute_availability_fingerprint,
+                    )
+                    from core.orchestration.temporal_proposal import (
+                        resolve_execution_proposals,
                     )
 
                     # Get intent_name from plan for fingerprint computation
-                    # CREATE_APPOINTMENT uses day-level fingerprint (service_id+date), others use exact (service_id+date+time)
-                    plan_intent_name = plan.get("intent_name") or plan.get("intent")
+                    plan_intent_name = plan.get(
+                        "intent_name") or plan.get("intent")
 
-                    # Compute fingerprint from current slots with intent_name
+                    _exec_proposals = resolve_execution_proposals(
+                        plan, session_state)
+                    fingerprint_slots = build_availability_fingerprint_slots(
+                        slots,
+                        intent_name=plan_intent_name,
+                        organization_id=organization_id,
+                        date_proposal=_exec_proposals["date_proposal"],
+                        time_proposal=_exec_proposals["time_proposal"],
+                        session_state=session_state,
+                    )
                     availability_fingerprint = compute_availability_fingerprint(
-                        slots, intent_name=plan_intent_name
+                        fingerprint_slots, intent_name=plan_intent_name
                     )
 
                     if availability_fingerprint:
@@ -1175,22 +1468,94 @@ def handle_message(
                         logger.debug(
                             "[AVAILABILITY_FINGERPRINT] fingerprint=%s service_id=%s date=%s time=%s",
                             availability_fingerprint,
-                            slots.get("service_id"), slots.get("date"), slots.get("time"),
+                            slots.get("service_id"), slots.get(
+                                "date"), slots.get("time"),
                         )
 
                     from core.orchestration.temporal_proposal import (
                         enrich_last_execution_result,
                     )
+                    from core.orchestration.time_resolution import (
+                        TIME_MATCH_EXACT,
+                        TIME_MATCH_MISMATCH,
+                        apply_time_match_exact_to_plan,
+                        apply_time_match_mismatch_to_plan,
+                        resolve_time_after_availability,
+                    )
                     from core.rendering.availability_renderer import (
+                        build_availability_presentation,
                         build_presented_availability,
                     )
 
                     search_date = None
                     if slots.get("date"):
-                        search_date = str(slots["date"]).split("T")[0].split(" ")[0]
+                        search_date = str(slots["date"]).split("T")[
+                            0].split(" ")[0]
+                    elif isinstance(_exec_proposals.get("date_proposal"), dict):
+                        _dp_start = _exec_proposals["date_proposal"].get(
+                            "start")
+                        if isinstance(_dp_start, str) and _dp_start:
+                            search_date = _dp_start.split("T")[0].split(" ")[0]
+
+                    _resolution_payload = resolve_time_after_availability(
+                        offers=execution_result.get("slots") or [],
+                        time_proposal=_exec_proposals.get("time_proposal"),
+                        date_proposal=_exec_proposals.get("date_proposal"),
+                        search_date=search_date,
+                        slots=slots,
+                    )
+                    _time_resolution = _resolution_payload.get(
+                        "time_resolution")
+                    if isinstance(_time_resolution, dict):
+                        execution_result["time_resolution"] = _time_resolution
+                    _bind_result = _resolution_payload.get("bind_result")
+                    _resolution_outcome = (
+                        _time_resolution.get("outcome")
+                        if isinstance(_time_resolution, dict)
+                        else None
+                    )
+                    if _resolution_outcome == TIME_MATCH_EXACT and isinstance(
+                        _bind_result, dict
+                    ) and _bind_result:
+                        execution_result["resolved_datetime_range"] = _bind_result.get(
+                            "resolved_datetime_range"
+                        )
+                        slots = _bind_result.get("slots") or slots
+                        plan["slots"] = slots
+                        apply_time_match_exact_to_plan(
+                            plan,
+                            bind_result=_bind_result,
+                            time_resolution=_time_resolution,
+                        )
+                        session_state = _persist_to_session(
+                            session_store,
+                            user_id,
+                            session_state or {},
+                            "resolved_datetime_range",
+                            _bind_result.get("resolved_datetime_range"),
+                        )
+                        try:
+                            from core.session.confirmation_gate import set_confirmation_state
+
+                            session_state = set_confirmation_state(
+                                session_state or {}, "pending"
+                            )
+                        except ImportError:
+                            pass
+                    elif _resolution_outcome == TIME_MATCH_MISMATCH and isinstance(
+                        _time_resolution, dict
+                    ):
+                        apply_time_match_mismatch_to_plan(
+                            plan,
+                            time_resolution=_time_resolution,
+                            time_proposal=_exec_proposals.get("time_proposal"),
+                        )
+
                     last_execution_payload = enrich_last_execution_result(
                         execution_result, search_date=search_date
                     )
+                    if isinstance(_time_resolution, dict):
+                        last_execution_payload["time_resolution"] = _time_resolution
                     presented_payload = build_presented_availability(
                         execution_result.get("slots") or [],
                         search_date=last_execution_payload.get("search_date")
@@ -1209,6 +1574,16 @@ def handle_message(
                         session_state or {},
                         "presented_availability",
                         presented_payload,
+                    )
+                    presentation_payload = build_availability_presentation(
+                        execution_result.get("slots") or []
+                    )
+                    session_state = _persist_to_session(
+                        session_store,
+                        user_id,
+                        session_state or {},
+                        "availability_presentation",
+                        presentation_payload,
                     )
 
                 # Return execution result
@@ -1242,7 +1617,8 @@ def handle_message(
                 decision = plan.get("_decision")
                 if decision:
                     # Use canonical builder to ensure plan structure is complete
-                    outcome_from_decision = build_outcome_from_decision(decision)
+                    outcome_from_decision = build_outcome_from_decision(
+                        decision)
                     # Merge plan structure into execution_result
                     if not isinstance(execution_result, dict):
                         execution_result = {}
@@ -1281,6 +1657,9 @@ def handle_message(
                         "action"
                     ) or plan.get("action")
 
+                sync_execution_plan_from_time_resolution(
+                    plan, execution_result)
+
                 result = {
                     "success": True,
                     "result": execution_result,
@@ -1288,7 +1667,8 @@ def handle_message(
                     "plan": plan,
                 }
                 result.setdefault("ui_actions", [])
-                result["_merged_luma_response"] = plan.get("_merged_luma_response")
+                result["_merged_luma_response"] = plan.get(
+                    "_merged_luma_response")
 
                 decision = plan.get("_decision")
                 if decision:
@@ -1297,15 +1677,63 @@ def handle_message(
                     )
                     _inject_outcome_text(result, decision, execution_result)
 
-                return result
+                trace_stage(
+                    "tool_execution",
+                    lambda er=execution_result: check_tool_execution(
+                        plan_action=plan_action,
+                        execution_result=er,
+                        can_execute=True,
+                    ),
+                    state_snapshot={
+                        "plan_action": plan_action,
+                        "execution_status": execution_result.get("status"),
+                        "execution_type": execution_result.get("type"),
+                    },
+                )
+                attach_trace_to_result(result)
+                try:
+                    from core.tracing.decision_trace import TurnTrace
+
+                    trace = TurnTrace.current()
+                    if trace is not None:
+                        trace.record_stage_timing(
+                            "execution",
+                            (_time.perf_counter() - _execution_started) * 1000.0,
+                        )
+                except ImportError:
+                    pass
+                return _return_with_execution_spine(
+                    result,
+                    plan=plan,
+                    plan_status=plan_status,
+                    plan_action=plan_action,
+                    can_execute=True,
+                )
             except Exception as e:
                 logger.error(f"Execution failed for action {action}: {e}")
-                return {
+                failure = {
                     "success": False,
                     "error": "execution_failed",
                     "message": str(e),
                     "plan": plan,
                 }
+                trace_stage(
+                    "tool_execution",
+                    lambda: check_tool_execution(
+                        plan_action=plan_action,
+                        execution_result=None,
+                        can_execute=True,
+                    ),
+                    state_snapshot={"error": str(e)},
+                )
+                attach_trace_to_result(failure)
+                return _return_with_execution_spine(
+                    failure,
+                    plan=plan,
+                    plan_status=plan_status,
+                    plan_action=plan_action,
+                    can_execute=True,
+                )
 
     # No execution step selected by policy - return planning outcome
     # Build outcome from decision (canonical builder)
@@ -1314,7 +1742,8 @@ def handle_message(
         outcome_dict = build_outcome_from_decision(decision)
     else:
         # Fallback: construct minimal outcome when decision is missing
-        logger.warning("Decision not available in plan, using fallback construction")
+        logger.warning(
+            "Decision not available in plan, using fallback construction")
         plan_slots = plan.get("slots", {})
         plan_missing_slots = plan.get("missing_slots", [])
         plan_obj = plan.get("plan", {})
@@ -1323,7 +1752,8 @@ def handle_message(
         facts = {
             "slots": plan_slots if isinstance(plan_slots, dict) else {},
             "missing_slots": (
-                plan_missing_slots if isinstance(plan_missing_slots, list) else []
+                plan_missing_slots if isinstance(
+                    plan_missing_slots, list) else []
             ),
         }
         outcome_dict = {
@@ -1352,7 +1782,13 @@ def handle_message(
         "outcome": outcome_dict,  # Alias for backward compatibility
     }
     result.setdefault("ui_actions", [])
-    return result
+    return _return_with_execution_spine(
+        result,
+        plan=plan,
+        plan_status=plan.get("status"),
+        plan_action=plan.get("action"),
+        can_execute=False,
+    )
 
 
 def plan_message(
@@ -1473,7 +1909,8 @@ def plan_message(
 
         # If not found, check raw_luma_response within effective_response
         if time_constraint is None:
-            raw_luma_response = merged_luma_response.get("_raw_luma_response", {})
+            raw_luma_response = merged_luma_response.get(
+                "_raw_luma_response", {})
             if isinstance(raw_luma_response, dict):
                 time_constraint = raw_luma_response.get("time_constraint")
 
@@ -1498,7 +1935,8 @@ def plan_message(
                 planning_result[_prop_key] = _prop_val
 
     # Carry merged_luma_response so handle_message can persist conversation memory.
-    planning_result["_merged_luma_response"] = result.get("_merged_luma_response")
+    planning_result["_merged_luma_response"] = result.get(
+        "_merged_luma_response")
 
     # Preserve rendered clarification text if present
     # Text is injected at top level of result by _inject_rendering_text

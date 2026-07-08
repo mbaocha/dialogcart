@@ -80,7 +80,8 @@ def _filter_offers_to_search_date(offers: list, search_date: str) -> list:
     for offer in offers:
         if not isinstance(offer, dict):
             continue
-        parsed = _parse_offer_start_parts(offer.get("starts_at") or offer.get("start"))
+        parsed = _parse_offer_start_parts(
+            offer.get("starts_at") or offer.get("start"))
         if parsed and parsed[0] == search_date:
             filtered.append(offer)
     return filtered
@@ -92,7 +93,8 @@ def _derive_presentation_date_from_offers(offers: list) -> Optional[str]:
     for offer in offers:
         if not isinstance(offer, dict):
             continue
-        parsed = _parse_offer_start_parts(offer.get("starts_at") or offer.get("start"))
+        parsed = _parse_offer_start_parts(
+            offer.get("starts_at") or offer.get("start"))
         if parsed:
             dates.add(parsed[0])
     if len(dates) == 1:
@@ -114,7 +116,8 @@ def _resolve_presentation_search_date(
     for offer in reversed(offers):
         if not isinstance(offer, dict):
             continue
-        parsed = _parse_offer_start_parts(offer.get("starts_at") or offer.get("start"))
+        parsed = _parse_offer_start_parts(
+            offer.get("starts_at") or offer.get("start"))
         if parsed:
             return parsed[0]
     return None
@@ -179,14 +182,14 @@ def get_presented_availability_offers(
 ) -> list:
     """Return slots the user was shown (selectable set for time binding)."""
     if not isinstance(session_state, dict):
-        logger.info("[TIME_SELECTION_OFFERS] no session_state")
+        logger.debug("[TIME_SELECTION_OFFERS] no session_state")
         return []
 
     presented = session_state.get("presented_availability")
     if isinstance(presented, dict):
         offers = presented.get("slots", [])
         if isinstance(offers, list) and offers:
-            logger.info(
+            logger.debug(
                 "[TIME_SELECTION_OFFERS] source=presented_availability "
                 "search_date=%s offers=%s offer_starts=%s",
                 presented.get("search_date"),
@@ -198,10 +201,11 @@ def get_presented_availability_offers(
     # Legacy sessions: approximate presentation from latest search (same cap as UI).
     last_result = session_state.get("last_execution_result")
     if not isinstance(last_result, dict):
-        logger.info("[TIME_SELECTION_OFFERS] no presented_availability or last_execution_result")
+        logger.debug(
+            "[TIME_SELECTION_OFFERS] no presented_availability or last_execution_result")
         return []
     if last_result.get("type") != "availability" or last_result.get("status") != "success":
-        logger.info(
+        logger.debug(
             "[TIME_SELECTION_OFFERS] last_execution_result not usable type=%s status=%s",
             last_result.get("type"),
             last_result.get("status"),
@@ -209,7 +213,7 @@ def get_presented_availability_offers(
         return []
     offers = last_result.get("slots", [])
     if not isinstance(offers, list) or not offers:
-        logger.info(
+        logger.debug(
             "[TIME_SELECTION_OFFERS] empty slots in last_execution_result "
             "search_date=%s",
             last_result.get("search_date"),
@@ -224,7 +228,8 @@ def get_presented_availability_offers(
             # Never bind against an emptied filter; fall back to offer-derived day.
             fallback_date = _derive_presentation_date_from_offers(offers)
             if fallback_date:
-                candidate = _filter_offers_to_search_date(offers, fallback_date)
+                candidate = _filter_offers_to_search_date(
+                    offers, fallback_date)
             else:
                 candidate = offers
             logger.warning(
@@ -240,7 +245,7 @@ def get_presented_availability_offers(
         candidate, search_date=presentation_date
     )
     presented_offers = presented_payload.get("slots") or []
-    logger.info(
+    logger.debug(
         "[TIME_SELECTION_OFFERS] source=legacy_last_execution_result "
         "presentation_date=%s presented=%s offer_starts=%s",
         presented_payload.get("search_date"),
@@ -299,7 +304,8 @@ def try_bind_offered_time_selection(
             user_time_raw = time_constraint.get("start")
 
     offers = get_presented_availability_offers(session_state)
-    logger.info(
+    slots_before = dict(slots or {})
+    logger.debug(
         "[TIME_SELECTION_BIND] attempt user_time_raw=%r time_proposal=%s "
         "time_constraint=%s date_proposal=%s slots.date=%s "
         "presented_search_date=%s presented_slots=%s "
@@ -311,16 +317,36 @@ def try_bind_offered_time_selection(
         (slots or {}).get("date") if isinstance(slots, dict) else None,
         presented.get("search_date") if isinstance(presented, dict) else None,
         _offer_start_summaries(offers),
-        last_result.get("search_date") if isinstance(last_result, dict) else None,
+        last_result.get("search_date") if isinstance(
+            last_result, dict) else None,
     )
 
     if not offers:
-        logger.info("[TIME_SELECTION_BIND] no presented offers to search; bind skipped")
+        logger.debug(
+            "[TIME_SELECTION_BIND] no presented offers to search; bind skipped")
+        _emit_bind_trace(
+            slots_before=slots_before,
+            bind_result=None,
+            skip_reason="no_offers",
+            time_proposal=time_proposal,
+            time_constraint=time_constraint,
+            offers=offers,
+            user_time_raw=user_time_raw,
+        )
         return None
 
     if not user_time_raw:
-        logger.info(
+        logger.debug(
             "[TIME_SELECTION_BIND] no exact user time from time_proposal/time_constraint"
+        )
+        _emit_bind_trace(
+            slots_before=slots_before,
+            bind_result=None,
+            skip_reason="no_user_time",
+            time_proposal=time_proposal,
+            time_constraint=time_constraint,
+            offers=offers,
+            user_time_raw=user_time_raw,
         )
         return None
 
@@ -328,9 +354,19 @@ def try_bind_offered_time_selection(
 
     user_time_norm = _normalize_time_for_fingerprint(user_time_raw)
     if not user_time_norm:
-        logger.info(
+        logger.debug(
             "[TIME_SELECTION_BIND] user time failed normalization user_time_raw=%r",
             user_time_raw,
+        )
+        _emit_bind_trace(
+            slots_before=slots_before,
+            bind_result=None,
+            skip_reason="normalize_failed",
+            time_proposal=time_proposal,
+            time_constraint=time_constraint,
+            offers=offers,
+            user_time_raw=user_time_raw,
+            user_time_norm=user_time_norm,
         )
         return None
 
@@ -343,7 +379,7 @@ def try_bind_offered_time_selection(
     if not expected_date:
         expected_date = _derive_presentation_date_from_offers(offers)
 
-    logger.info(
+    logger.debug(
         "[TIME_SELECTION_BIND] searching user_time_norm=%s expected_date=%s "
         "offers=%s offer_starts=%s",
         user_time_norm,
@@ -354,20 +390,21 @@ def try_bind_offered_time_selection(
 
     for offer in offers:
         if not isinstance(offer, dict):
-            logger.info("[TIME_SELECTION_BIND] reject reason=not_dict offer=%r", offer)
+            logger.debug(
+                "[TIME_SELECTION_BIND] reject reason=not_dict offer=%r", offer)
             continue
         start_raw = offer.get("starts_at") or offer.get("start")
         end_raw = offer.get("ends_at") or offer.get("end")
         parsed = _parse_offer_start_parts(start_raw)
         if not parsed:
-            logger.info(
+            logger.debug(
                 "[TIME_SELECTION_BIND] reject reason=parse_failed start_raw=%r",
                 start_raw,
             )
             continue
         offer_date, offer_time = parsed
         if offer_time != user_time_norm:
-            logger.info(
+            logger.debug(
                 "[TIME_SELECTION_BIND] reject reason=time_mismatch "
                 "offer_date=%s offer_time=%s user_time_norm=%s start_raw=%s",
                 offer_date,
@@ -377,7 +414,7 @@ def try_bind_offered_time_selection(
             )
             continue
         if expected_date and offer_date != expected_date:
-            logger.info(
+            logger.debug(
                 "[TIME_SELECTION_BIND] reject reason=date_mismatch "
                 "offer_date=%s expected_date=%s offer_time=%s start_raw=%s",
                 offer_date,
@@ -392,7 +429,8 @@ def try_bind_offered_time_selection(
         bound_slots["time"] = user_time_norm
         resolved_datetime_range = None
         if start_raw and end_raw:
-            resolved_datetime_range = {"start": str(start_raw), "end": str(end_raw)}
+            resolved_datetime_range = {
+                "start": str(start_raw), "end": str(end_raw)}
         else:
             resolved_datetime_range = build_datetime_range_from_slots(
                 bound_slots, session_state.get("last_execution_result")
@@ -400,7 +438,7 @@ def try_bind_offered_time_selection(
                 else None
             )
         if not resolved_datetime_range:
-            logger.info(
+            logger.debug(
                 "[TIME_SELECTION_BIND] reject reason=no_datetime_range "
                 "offer_date=%s offer_time=%s start_raw=%r end_raw=%r",
                 offer_date,
@@ -409,7 +447,7 @@ def try_bind_offered_time_selection(
                 end_raw,
             )
             return None
-        logger.info(
+        logger.debug(
             "[TIME_SELECTION_BIND] bound date=%s time=%s from offered availability "
             "start=%s end=%s",
             offer_date,
@@ -417,11 +455,23 @@ def try_bind_offered_time_selection(
             start_raw,
             end_raw,
         )
-        return {
+        result = {
             "slots": bound_slots,
             "resolved_datetime_range": resolved_datetime_range,
         }
-    logger.info(
+        _emit_bind_trace(
+            slots_before=slots_before,
+            bind_result=result,
+            time_proposal=time_proposal,
+            time_constraint=time_constraint,
+            offers=offers,
+            user_time_raw=user_time_raw,
+            user_time_norm=user_time_norm,
+            expected_date=expected_date,
+            matched_offer_start=str(start_raw),
+        )
+        return result
+    logger.debug(
         "[TIME_SELECTION_BIND] no match user_time_raw=%r user_time_norm=%s "
         "expected_date=%s offers=%s",
         user_time_raw,
@@ -429,7 +479,27 @@ def try_bind_offered_time_selection(
         expected_date,
         _offer_start_summaries(offers),
     )
+    _emit_bind_trace(
+        slots_before=slots_before,
+        bind_result=None,
+        skip_reason="time_mismatch",
+        time_proposal=time_proposal,
+        time_constraint=time_constraint,
+        offers=offers,
+        user_time_raw=user_time_raw,
+        user_time_norm=user_time_norm,
+        expected_date=expected_date,
+    )
     return None
+
+
+def _emit_bind_trace(**kwargs: Any) -> None:
+    try:
+        from core.tracing.binding import emit_bind_time_trace
+
+        emit_bind_time_trace(**kwargs)
+    except ImportError:
+        pass
 
 
 def strip_unconfirmed_temporal_slots(
@@ -515,6 +585,10 @@ def build_time_proposal(
     if isinstance(times, list) and times:
         return {"mode": "exact", "value": times[0]}
 
+    single_time = facts.get("time")
+    if single_time:
+        return {"mode": "exact", "value": single_time}
+
     if isinstance(time_constraint, dict):
         mode = time_constraint.get("mode")
         if mode == "exact" and time_constraint.get("start"):
@@ -540,13 +614,24 @@ def extract_nlu_proposals(
     facts = luma_response.get("facts", {})
     if not isinstance(facts, dict):
         facts = {}
+
+    explicit_time_proposal = luma_response.get("time_proposal")
+    if isinstance(explicit_time_proposal, dict):
+        time_proposal = explicit_time_proposal
+    else:
+        time_proposal = build_time_proposal(
+            facts, luma_response.get("time_constraint")
+        )
+        if not time_proposal:
+            slots = luma_response.get("slots")
+            if isinstance(slots, dict) and slots.get("time"):
+                time_proposal = {"mode": "exact", "value": slots["time"]}
+
     return {
         "date_proposal": build_date_proposal(
             facts, luma_response.get("date_constraint")
         ),
-        "time_proposal": build_time_proposal(
-            facts, luma_response.get("time_constraint")
-        ),
+        "time_proposal": time_proposal,
     }
 
 
@@ -584,8 +669,10 @@ def merge_session_proposals(
     facts = session_state.get("facts")
     if not isinstance(facts, dict):
         facts = {}
-    merged_date = session_state.get("date_proposal") or facts.get("date_proposal")
-    merged_time = session_state.get("time_proposal") or facts.get("time_proposal")
+    merged_date = session_state.get(
+        "date_proposal") or facts.get("date_proposal")
+    merged_time = session_state.get(
+        "time_proposal") or facts.get("time_proposal")
     if date_proposal:
         merged_date = date_proposal
     if time_proposal:
@@ -820,7 +907,8 @@ def build_datetime_range_from_slots(
             hour += 12
         elif is_am and hour == 12:
             hour = 0
-        start_dt = date_obj.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        start_dt = date_obj.replace(
+            hour=hour, minute=minute, second=0, microsecond=0)
     except (ValueError, IndexError, TypeError):
         return None
 

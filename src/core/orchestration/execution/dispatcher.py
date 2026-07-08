@@ -122,7 +122,6 @@ def _execute_search_availability(
 
     slots = plan.get("slots", {})
     intent_name = plan.get("intent_name", "")
-    time_constraint = plan.get("time_constraint")
 
     # Extract organization_id (required for all availability calls)
     organization_id = slots.get("organization_id")
@@ -137,7 +136,6 @@ def _execute_search_availability(
         return _execute_service_availability(
             organization_id=organization_id,
             slots=slots,
-            time_constraint=time_constraint,
             availability_client=availability_client,
             intent_name=intent_name,
             booking_client=booking_client,
@@ -148,7 +146,6 @@ def _execute_search_availability(
         return _execute_reservation_availability(
             organization_id=organization_id,
             slots=slots,
-            time_constraint=time_constraint,
             availability_client=availability_client,
         )
     elif intent_name in ("MODIFY_BOOKING", "MODIFY_RESERVATION"):
@@ -156,7 +153,6 @@ def _execute_search_availability(
         return _execute_service_availability(
             organization_id=organization_id,
             slots=slots,
-            time_constraint=time_constraint,
             availability_client=availability_client,
             intent_name=intent_name,
             booking_client=booking_client,
@@ -170,7 +166,6 @@ def _execute_search_availability(
         return _execute_service_availability(
             organization_id=organization_id,
             slots=slots,
-            time_constraint=time_constraint,
             availability_client=availability_client,
             intent_name=intent_name,
             booking_client=booking_client,
@@ -1131,7 +1126,6 @@ def _extract_datetime_from_slots(
 def _execute_service_availability(
     organization_id: int,
     slots: Dict[str, Any],
-    time_constraint: Optional[Dict[str, Any]],
     availability_client: Any,
     intent_name: Optional[str] = None,
     booking_client: Optional[Any] = None,
@@ -1143,7 +1137,6 @@ def _execute_service_availability(
     Args:
         organization_id: Organization ID
         slots: Slots dictionary (must include service_id and date)
-        time_constraint: Optional time constraint
         availability_client: Availability client instance
         intent_name: Optional intent name (needed for MODIFY_BOOKING to fetch service_id from booking)
         booking_client: Optional booking client instance (needed for MODIFY_BOOKING to fetch service_id from booking)
@@ -1221,11 +1214,6 @@ def _execute_service_availability(
         },
     )
 
-    # Build extra_params from time_constraint if present
-    extra_params: Optional[Dict[str, Any]] = None
-    if time_constraint:
-        extra_params = {"time_constraint": time_constraint}
-
     # Call availability client
 
     # Pass date=None if not present - availability client should handle this
@@ -1235,7 +1223,6 @@ def _execute_service_availability(
             organization_id=organization_id,
             service_id=api_service_id,
             date=date,  # Can be None - client should handle this
-            extra_params=extra_params,
         )
     except AttributeError as e:
         raise AttributeError(
@@ -1243,13 +1230,12 @@ def _execute_service_availability(
         ) from e
 
     # Normalize response
-    return _normalize_availability_response(response)
+    return _finalize_availability_search(response)
 
 
 def _execute_reservation_availability(
     organization_id: int,
     slots: Dict[str, Any],
-    time_constraint: Optional[Dict[str, Any]],
     availability_client: Any,
 ) -> Dict[str, Any]:
     """
@@ -1258,7 +1244,6 @@ def _execute_reservation_availability(
     Args:
         organization_id: Organization ID
         slots: Slots dictionary (must include start_date and end_date or date_range)
-        time_constraint: Optional time constraint
         availability_client: Availability client instance
 
     Returns:
@@ -1272,18 +1257,12 @@ def _execute_reservation_availability(
             "for reservation availability search"
         )
 
-    # Build extra_params from time_constraint if present
-    extra_params: Optional[Dict[str, Any]] = None
-    if time_constraint:
-        extra_params = {"time_constraint": time_constraint}
-
     # Call availability client
     try:
         response = availability_client.get_reservation_availability(
             organization_id=organization_id,
             start_date=start_date,
             end_date=end_date,
-            extra_params=extra_params,
         )
     except AttributeError as e:
         raise AttributeError(
@@ -1291,7 +1270,22 @@ def _execute_reservation_availability(
         ) from e
 
     # Normalize response
-    return _normalize_availability_response(response)
+    return _finalize_availability_search(response)
+
+
+def _finalize_availability_search(response: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize availability API response and emit availability.response trace."""
+    normalized = _normalize_availability_response(response)
+    try:
+        from core.tracing.availability import finalize_availability_response
+
+        finalize_availability_response(
+            raw_response=response,
+            normalized=normalized,
+        )
+    except ImportError:
+        pass
+    return normalized
 
 
 def _extract_date_from_slots(slots: Dict[str, Any]) -> Optional[str]:
