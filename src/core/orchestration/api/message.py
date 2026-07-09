@@ -20,7 +20,8 @@ from pydantic import BaseModel
 # Import app module which loads .env files
 import core.app  # noqa: F401
 from core.orchestration.api.capability_boundary import apply_capability_to_result
-from core.orchestration.api.session_merge import build_session_state_from_outcome
+from core.orchestration.api.session_merge import build_session_state_from_outcome  # noqa: F401 (re-exported for compat)
+from core.session.session_projector import SessionProjector as _SessionProjector
 from core.orchestration.errors import ContractViolation, UpstreamError
 from core.orchestration.execution.clients.availability_client import AvailabilityClient
 from core.orchestration.execution.clients.booking_client import BookingClient
@@ -31,6 +32,9 @@ from core.rendering.llm_renderer import LlmRenderRequest, render_llm
 # Module-level execution clients — core owns these; callers pass text only.
 _availability_client = AvailabilityClient()
 _booking_client = BookingClient()
+
+# Phase 2: SessionProjector owns session projection
+_session_projector = _SessionProjector()
 
 
 class _SessionStore:
@@ -380,7 +384,8 @@ async def post_message(request: MessageRequest, http_request: Request):
                     "EXECUTED",
                     "success",
                 ):
-                    new_session_state = build_session_state_from_outcome(
+                    # Phase 2: SessionProjector owns session projection
+                    new_session_state = _session_projector.project(
                         persistence_outcome,
                         outcome_status,
                         merged_luma_response,

@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest core/tests/ -q --ignore=core/tests/smoke -x)"
+    ]
+  }
+}

@@ -52,13 +52,11 @@ def plan_turn(
     planning_only: bool = False,
 ) -> Dict[str, Any]:
     """Run one planning turn (NLU through plan to outcome)."""
-    from core.orchestration.orchestrator import (
-        _build_planning_outcome,
-        _get_org_id_from_env,
-        _inject_rendering_text,
-        _inject_system_text,
-        build_outcome_from_decision,
-    )
+    # Phase 1: import from neutral modules — breaks the circular dependency
+    # with orchestrator.py (turn_planner no longer imports from orchestrator).
+    from core.engine.outcome_builder import _build_planning_outcome, build_outcome_from_decision
+    from core.config.org_resolver import _get_org_id_from_env
+    from core.rendering.response_renderer import _inject_rendering_text, _inject_system_text
 
     # Initialize default clients if not provided
     if luma_client is None:

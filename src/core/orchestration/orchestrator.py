@@ -56,6 +56,27 @@ from core.rendering.llm_renderer import LlmRenderRequest, render_llm
 from core.orchestration.time_resolution import sync_execution_plan_from_time_resolution
 from core.routing.workflows import get_workflow
 
+# ---------------------------------------------------------------------------
+# Phase 1: import from neutral modules (breaks the orchestrator ↔ turn_planner
+# circular dependency).  All names remain importable from this module so that
+# existing callers (availability_pagination, tests, etc.) are unaffected.
+# ---------------------------------------------------------------------------
+from core.engine.outcome_builder import (  # noqa: E402, F401
+    _build_planning_outcome,
+    build_outcome_from_decision,
+)
+from core.config.org_resolver import _get_org_id_from_env  # noqa: F401
+from core.rendering.response_renderer import (  # noqa: F401
+    _inject_rendering_text,
+    _inject_rendering_text_impl,
+    _inject_availability_text,
+    _inject_outcome_text,
+    _inject_system_text,
+    _structured_context_from_decision,
+)
+# Phase 2: _persist_to_session moved to session_ops; re-exported for backward compat
+from core.orchestration.session_ops import _persist_to_session  # noqa: F401
+
 logger = logging.getLogger(__name__)
 # Dedicated turn-level logger (clean, minimal logs - ONE log per section)
 turn_logger = logging.getLogger("core.turn_log")
@@ -70,372 +91,22 @@ logging.getLogger("core.nlu").setLevel(logging.ERROR)
 logging.getLogger("core.session_merge").setLevel(logging.ERROR)
 
 
-def _build_planning_outcome(
-    intent_name: str,
-    slots: Dict[str, Any],
-    missing_slots: List[str],
-    executable_actions: List[str],
-    dialog_instruction: Optional[Dict[str, Any]] = None,
-    status: str = "READY",
-) -> Dict[str, Any]:
-    """
-    Build planning-only outcome structure.
-
-    Core NEVER executes - only returns planning information.
-
-    Args:
-        intent_name: Intent name
-        slots: Collected slots
-        missing_slots: Missing required slots
-        executable_actions: Actions that can be executed with current slots
-        dialog_instruction: Optional dialog instruction (if status is NEEDS_CLARIFICATION)
-        status: Planning status (READY, NEEDS_CLARIFICATION, AWAITING_CONFIRMATION)
-
-    Returns:
-        Planning outcome dictionary matching core contract
-    """
-    outcome = {
-        "intent": intent_name,
-        "slots": slots,
-        "missing_slots": missing_slots,
-        "executable_actions": executable_actions,
-    }
-
-    if dialog_instruction:
-        outcome["dialog_instruction"] = dialog_instruction
-
-    return outcome
+# _build_planning_outcome — implemented in core.engine.outcome_builder; imported above
 
 
-def build_outcome_from_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Build outcome dictionary from decision object.
-
-    Unifies outcome construction across all return paths by extracting
-    all required fields from the decision object which contains the
-    authoritative planning state.
-
-    Args:
-        decision: Decision dictionary from process_luma_response containing:
-            - intent_name: Intent name
-            - plan: Plan dictionary with status, stage, action, etc.
-            - facts: Facts dictionary with slots, missing_slots, context
-
-    Returns:
-        Outcome dictionary with all required fields:
-            - intent_name: Intent name
-            - status: Planning status
-            - plan: Plan object with stage and action
-            - slots: Collected slots
-            - missing_slots: Missing required slots
-            - blocked_actions: Blocked actions list
-            - allowed_actions: Allowed actions list
-            - facts: Facts container
-    """
-    if not decision or not isinstance(decision, dict):
-        # Fallback for invalid decision
-        return {
-            "intent_name": "",
-            "status": "NEEDS_CLARIFICATION",
-            "plan": {"status": "NEEDS_CLARIFICATION", "stage": None, "action": None},
-            "slots": {},
-            "missing_slots": [],
-            "blocked_actions": [],
-            "allowed_actions": [],
-            "facts": {},
-        }
-
-    plan = decision.get("plan", {})
-    facts = decision.get("facts", {})
-    if not isinstance(facts, dict):
-        facts = {}
-
-    # Extract slots and missing_slots from facts
-    slots = facts.get("slots", {})
-    if not isinstance(slots, dict):
-        slots = {}
-    missing_slots = facts.get("missing_slots", [])
-    if not isinstance(missing_slots, list):
-        missing_slots = []
-
-    # Build plan object from decision.plan (authoritative source)
-    plan_obj = {
-        "status": plan.get("status", "NEEDS_CLARIFICATION"),
-        "stage": plan.get("stage"),
-        "action": plan.get("action"),
-    }
-
-    outcome = {
-        "intent_name": decision.get("intent_name", ""),
-        # Top-level status for compatibility
-        "status": plan.get("status", "NEEDS_CLARIFICATION"),
-        # Top-level stage (always from decision.plan)
-        "stage": plan.get("stage"),
-        # Top-level action (always from decision.plan)
-        "action": plan.get("action"),
-        "plan": plan_obj,  # Complete plan object with status, stage, action
-        "slots": slots,
-        "missing_slots": missing_slots,
-        "blocked_actions": plan.get("blocked_actions", []),
-        "allowed_actions": plan.get("allowed_actions", []),
-        "awaiting": plan.get("awaiting"),
-        "facts": facts,
-    }
-
-    # Add active_capability if present in plan
-    if plan.get("active_capability"):
-        outcome["active_capability"] = plan.get("active_capability")
-
-    return outcome
+# build_outcome_from_decision — implemented in core.engine.outcome_builder; imported above
 
 
-def _structured_context_from_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
-    org = {}
-    facts = decision.get("facts") if isinstance(decision, dict) else None
-    if isinstance(facts, dict):
-        org = facts.get("org") or {}
-    if not isinstance(org, dict):
-        org = {}
-    return {
-        "business_name": org.get("businessName") or org.get("business_name"),
-        "business_about": org.get("businessAbout") or org.get("about") or org.get("business_about"),
-        "business_phone": org.get("businessPhone") or org.get("business_phone"),
-    }
+# _structured_context_from_decision — implemented in core.rendering.response_renderer; imported above
 
 
-def _inject_rendering_text(
-    result: Dict[str, Any],
-    decision: Dict[str, Any],
-    session_state: Optional[Dict[str, Any]] = None,
-) -> None:
-    try:
-        from core.tracing.decision_trace import measure_stage
-    except ImportError:
-        from contextlib import contextmanager
-
-        @contextmanager
-        def measure_stage(_stage: str):  # type: ignore[misc]
-            yield
-
-    with measure_stage("renderer"):
-        _inject_rendering_text_impl(
-            result, decision, session_state=session_state)
+# _inject_rendering_text — implemented in core.rendering.response_renderer; imported above
 
 
-def _inject_rendering_text_impl(
-    result: Dict[str, Any],
-    decision: Dict[str, Any],
-    session_state: Optional[Dict[str, Any]] = None,
-) -> None:
-    try:
-        from core.orchestration.time_resolution import (
-            TIME_MATCH_MISMATCH,
-            build_execution_result_for_time_resolution_render,
-        )
-
-        time_match_outcome = (
-            decision.get("time_match_outcome")
-            or decision.get("plan", {}).get("time_match_outcome")
-            or (decision.get("facts") or {}).get("time_match_outcome")
-        )
-        if time_match_outcome == TIME_MATCH_MISMATCH:
-            exec_payload = build_execution_result_for_time_resolution_render(
-                session_state,
-                time_resolution=(
-                    decision.get("time_resolution")
-                    or (decision.get("facts") or {}).get("time_resolution")
-                ),
-            )
-            if exec_payload:
-                conversation_history = (
-                    session_state or {}).get("messages", [])
-                render_request = build_availability_render_request(
-                    decision,
-                    exec_payload,
-                    structured_context=_structured_context_from_decision(
-                        decision),
-                    conversation_history=conversation_history,
-                )
-                if render_request:
-                    rendered_text = render_llm(render_request)
-                    if rendered_text:
-                        result["text"] = rendered_text
-                        if isinstance(result.get("outcome"), dict):
-                            result["outcome"]["text"] = rendered_text
-                    return
-
-        decision["_session"] = session_state or {}
-        if session_state and isinstance(session_state, dict):
-            slot_attempts = session_state.get("slot_attempts")
-            if isinstance(slot_attempts, dict):
-                decision["slot_attempts"] = slot_attempts
-                facts = decision.get("facts", {})
-                if isinstance(facts, dict):
-                    facts["slot_attempts"] = slot_attempts
-
-        # missing_slots may live at top level, or nested in plan/facts
-        missing_slots = (
-            decision.get("missing_slots")
-            or decision.get("plan", {}).get("missing_slots")
-            or decision.get("facts", {}).get("missing_slots")
-            or []
-        )
-        if not missing_slots:
-            return
-        intent_name = (
-            decision.get("intent_name")
-            or decision.get("plan", {}).get("intent_name")
-            or "your request"
-        )
-        slot_attempts = decision.get("slot_attempts") or {}
-        if not isinstance(slot_attempts, dict):
-            slot_attempts = {}
-        first_missing = missing_slots[0] if missing_slots else None
-        attempt_count = slot_attempts.get(
-            first_missing, 0) if first_missing else 0
-        last_filled = (session_state or {}).get(
-            "last_filled_slot") if session_state else None
-        ack_note = f" Start by briefly acknowledging you received {last_filled}." if last_filled and attempt_count < 1 else ""
-        retry_note = " The user was already asked — rephrase naturally." if attempt_count >= 1 else ""
-        service_candidates = (
-            decision.get("service_candidates")
-            or decision.get("facts", {}).get("service_candidates")
-            or []
-        )
-        if "service_id" in missing_slots:
-            # Service is the primary blocker — only ask for service, not date/time
-            render_missing = ["service_id"]
-            if service_candidates:
-                candidates_str = ", ".join(
-                    f'"{c}"' for c in service_candidates)
-                service_hint = f" Present these options for them to choose from: {candidates_str}."
-            else:
-                service_hint = ""
-        else:
-            render_missing = missing_slots
-            service_hint = ""
-        render_instruction = (
-            f"The user wants to {intent_name.lower().replace('_', ' ')}. "
-            f"Ask ONLY for these specific missing fields (nothing else): {', '.join(render_missing)}.{service_hint}{ack_note}{retry_note} "
-            "Do not ask for any other information. Be natural and brief."
-        )
-        conversation_history = (session_state or {}).get("messages", [])
-        rendered_text = render_llm(LlmRenderRequest(
-            render_instruction=render_instruction,
-            facts={
-                "structured_context": _structured_context_from_decision(decision)},
-            conversation_history=conversation_history,
-        ))
-        if rendered_text:
-            result["text"] = rendered_text
-    except Exception as e:
-        logger.warning(
-            f"Failed to render clarification text: {e}. "
-            f"Rendering is best-effort and will be omitted."
-        )
-
-
-def _inject_availability_text(
-    result: Dict[str, Any],
-    decision: Optional[Dict[str, Any]],
-    execution_result: Dict[str, Any],
-    session_state: Optional[Dict[str, Any]] = None,
-) -> None:
-    if (
-        execution_result.get("type") != "availability"
-        or execution_result.get("status") != "success"
-    ):
-        return
-    try:
-        conversation_history = (session_state or {}).get("messages", [])
-        render_request = build_availability_render_request(
-            decision,
-            execution_result,
-            structured_context=_structured_context_from_decision(
-                decision or {}),
-            conversation_history=conversation_history,
-        )
-        if not render_request:
-            return
-        rendered_text = render_llm(render_request)
-        if rendered_text:
-            from core.rendering.booking_confirmation_renderer import (
-                prefix_with_revision_acknowledgement,
-            )
-
-            revision_summary = None
-            merged = result.get("_merged_luma_response")
-            if isinstance(merged, dict):
-                revision_summary = merged.get("_revision_summary")
-            rendered_text = prefix_with_revision_acknowledgement(
-                rendered_text, revision_summary
-            )
-            result["text"] = rendered_text
-            if isinstance(result.get("outcome"), dict):
-                result["outcome"]["text"] = rendered_text
-    except Exception as e:
-        logger.debug(
-            "Failed to render availability text: %s. Rendering is best-effort.", e
-        )
-
-
-def _inject_outcome_text(
-    result: Dict[str, Any], decision: Optional[Dict[str, Any]], outcome: Dict[str, Any]
-) -> None:
-    outcome_status = outcome.get("status")
-    if outcome_status not in ("EXECUTED", "FAILED"):
-        return
-
-    try:
-        intent_name = (
-            outcome.get("intent_name")
-            or (decision.get("intent_name") if decision else None)
-            or "your request"
-        )
-        booking_code = outcome.get("booking_code")
-        if outcome_status == "EXECUTED":
-            code_note = f" Booking reference: {booking_code}." if booking_code else ""
-            render_instruction = (
-                f"Tell the user their {intent_name.lower().replace('_', ' ')} was successful.{code_note} "
-                "Be warm and brief."
-            )
-        else:
-            render_instruction = (
-                f"Tell the user their {intent_name.lower().replace('_', ' ')} could not be completed. "
-                "Be empathetic and suggest they try again."
-            )
-        rendered_text = render_llm(LlmRenderRequest(
-            render_instruction=render_instruction,
-            facts={
-                "structured_context": _structured_context_from_decision(decision)},
-        ))
-        if rendered_text:
-            result["text"] = rendered_text
-    except Exception as e:
-        logger.debug(
-            f"Failed to render outcome text: {e}. "
-            f"Rendering is best-effort and will be omitted."
-        )
-
-
-def _inject_system_text(result: Dict[str, Any], decision: Dict[str, Any]) -> None:
-    try:
-        intent_name = decision.get("intent_name", "")
-        if not intent_name or intent_name.upper() not in ("GREETING", "WELCOME"):
-            return
-        render_instruction = (
-            "Greet the user warmly and let them know you can help with bookings "
-            "and related inquiries. Keep it brief and friendly."
-        )
-        rendered_text = render_llm(LlmRenderRequest(
-            render_instruction=render_instruction,
-            facts={
-                "structured_context": _structured_context_from_decision(decision)},
-        ))
-        if rendered_text:
-            result["text"] = rendered_text
-    except Exception:
-        pass
+# _inject_rendering_text_impl — implemented in core.rendering.response_renderer; imported above
+# _inject_availability_text   — implemented in core.rendering.response_renderer; imported above
+# _inject_outcome_text        — implemented in core.rendering.response_renderer; imported above
+# _inject_system_text         — implemented in core.rendering.response_renderer; imported above
 
 
 def _handle_non_core_intent(
@@ -514,54 +185,10 @@ def _handle_non_core_intent(
     }
 
 
-def _get_org_id_from_env() -> int:
-    """Return organization_id from ORG_ID env var with safe default."""
-    value = os.getenv("ORG_ID", "1")
-    try:
-        org_id = int(value)
-        if org_id <= 0:
-            raise ValueError("ORG_ID must be positive")
-        return org_id
-    except Exception:  # noqa: BLE001
-        logger.warning("Invalid ORG_ID env value '%s', defaulting to 1", value)
-        return 1
+# _get_org_id_from_env — implemented in core.config.org_resolver; imported above
 
 
-def _persist_to_session(
-    session_store: Optional[Any],
-    user_id: str,
-    current_session: Dict[str, Any],
-    key: str,
-    value: Any,
-) -> Dict[str, Any]:
-    """Write key=value into current_session and save to store if available.
-
-    Refreshes current_session from the store first so we don't clobber
-    concurrent writes.  Returns the (possibly refreshed) session dict.
-    """
-    if session_store is not None:
-        try:
-            if hasattr(session_store, "get_session"):
-                current_session = session_store.get_session(
-                    user_id) or current_session
-            elif callable(session_store):
-                current_session = session_store(user_id) or current_session
-        except Exception as e:
-            logger.debug(
-                "Failed to refresh session before persisting %s: %s", key, e)
-
-    current_session[key] = value
-
-    if session_store is not None:
-        try:
-            if hasattr(session_store, "save_session"):
-                session_store.save_session(user_id, current_session)
-            elif hasattr(session_store, "save"):
-                session_store.save(user_id, current_session)
-        except Exception as e:
-            logger.warning("Failed to persist %s to session_store: %s", key, e)
-
-    return current_session
+# _persist_to_session — implemented in core.orchestration.session_ops; imported above
 
 
 def _invoke_workflow_after_execute(
@@ -696,8 +323,16 @@ def handle_message(
         - If no execution: planning result (stage, action, slots, missing_slots, etc.)
         - On error: {"success": False, "error": "...", "message": "..."}
     """
-    # Import execution dispatcher
-    from core.orchestration.execution.dispatcher import execute
+    # Phase 2: execution, rendering, and availability go through their owners
+    from core.execution.action_runner import ActionRunner
+    from core.rendering.response_renderer import ResponseRenderer
+    from core.workflows.availability.workflow import AvailabilityWorkflow
+    from core.workflows.router import WorkflowRouter
+
+    _action_runner = ActionRunner()
+    _renderer = ResponseRenderer()
+    _availability_workflow = AvailabilityWorkflow()
+    _workflow_router = WorkflowRouter()
 
     from core.tracing.invariant_trace import (
         TurnInvariantTrace,
@@ -859,11 +494,7 @@ def handle_message(
             plan=plan,
         )
 
-    from core.orchestration.availability_pagination import (
-        try_handle_availability_browse_turn,
-    )
-
-    pagination_response = try_handle_availability_browse_turn(
+    pagination_response = _availability_workflow.try_handle_browse_turn(
         plan=plan,
         session_state=session_state,
         session_store=session_store,
@@ -1293,26 +924,27 @@ def handle_message(
                 import time as _time
 
                 _execution_started = _time.perf_counter()
-                # Execute the selected step
-                if client_name == "availability_client":
+                # Phase 2: WorkflowRouter selects route; ActionRunner owns execution
+                _route = _workflow_router.get_route(client_name)
+                if _route == "availability":
                     # For MODIFY_BOOKING, also pass booking_client to fetch service_id from booking
                     booking_client_for_execution = None
                     if intent_name == "MODIFY_BOOKING":
                         booking_client_for_execution = kwargs.get(
                             "booking_client")
-                    execution_result = execute(
+                    execution_result = _action_runner.run(
                         plan=plan,
                         availability_client=execution_client,
                         booking_client=booking_client_for_execution,
                     )
-                elif client_name == "booking_client":
-                    execution_result = execute(
+                elif _route == "booking":
+                    execution_result = _action_runner.run(
                         plan=plan, booking_client=execution_client
                     )
                 else:
-                    # Other clients not yet supported
+                    # Unrecognised route — execution not yet supported for this client
                     logger.warning(
-                        f"Execution for {client_name} not yet implemented")
+                        f"Execution for {client_name} not yet implemented (_route={_route})")
                     # Build outcome from decision (canonical builder)
                     decision = plan.get("_decision")
                     if decision:
@@ -1425,192 +1057,21 @@ def handle_message(
                             f"total_amount={total_amount}, currency={currency} to slots from CREATE_BOOKING_HOLD"
                         )
 
-                # Persist availability fingerprint when SEARCH_AVAILABILITY succeeds
-                # This enables slot-fingerprint-based availability resolution
-                # CRITICAL: Always attach fingerprint to execution_result, even when session_store is None
-                # This allows build_session_state_from_outcome() to preserve it across turns
+                # Phase 2: AvailabilityWorkflow owns all post-search processing
+                # (fingerprint, time resolution, presentation, session persistence)
                 if (
                     execution_result.get("type") == "availability"
                     and execution_result.get("status") == "success"
                 ):
-                    from core.orchestration.availability_fingerprint import (
-                        build_availability_fingerprint_slots,
-                        compute_availability_fingerprint,
-                    )
-                    from core.orchestration.temporal_proposal import (
-                        resolve_execution_proposals,
-                    )
-
-                    # Get intent_name from plan for fingerprint computation
-                    plan_intent_name = plan.get(
-                        "intent_name") or plan.get("intent")
-
-                    _exec_proposals = resolve_execution_proposals(
-                        plan, session_state)
-                    fingerprint_slots = build_availability_fingerprint_slots(
-                        slots,
-                        intent_name=plan_intent_name,
-                        organization_id=organization_id,
-                        date_proposal=_exec_proposals["date_proposal"],
-                        time_proposal=_exec_proposals["time_proposal"],
-                        session_state=session_state,
-                    )
-                    availability_fingerprint = compute_availability_fingerprint(
-                        fingerprint_slots, intent_name=plan_intent_name
-                    )
-
-                    if availability_fingerprint:
-                        execution_result["availability_fingerprint"] = availability_fingerprint
-                        session_state = _persist_to_session(
-                            session_store, user_id, session_state or {},
-                            "availability_fingerprint", availability_fingerprint,
-                        )
-                        logger.debug(
-                            "[AVAILABILITY_FINGERPRINT] fingerprint=%s service_id=%s date=%s time=%s",
-                            availability_fingerprint,
-                            slots.get("service_id"), slots.get(
-                                "date"), slots.get("time"),
-                        )
-
-                    from core.orchestration.temporal_proposal import (
-                        enrich_last_execution_result,
-                    )
-                    from core.orchestration.time_resolution import (
-                        TIME_MATCH_EXACT,
-                        TIME_MATCH_MISMATCH,
-                        apply_time_match_exact_to_plan,
-                        apply_time_match_mismatch_to_plan,
-                        resolve_time_after_availability,
-                    )
-                    from core.rendering.availability_renderer import (
-                        build_availability_presentation,
-                        build_presented_availability,
-                    )
-
-                    search_date = None
-                    if slots.get("date"):
-                        search_date = str(slots["date"]).split("T")[
-                            0].split(" ")[0]
-                    elif isinstance(_exec_proposals.get("date_proposal"), dict):
-                        _dp_start = _exec_proposals["date_proposal"].get(
-                            "start")
-                        if isinstance(_dp_start, str) and _dp_start:
-                            search_date = _dp_start.split("T")[0].split(" ")[0]
-
-                    _resolution_payload = resolve_time_after_availability(
-                        offers=execution_result.get("slots") or [],
-                        time_proposal=_exec_proposals.get("time_proposal"),
-                        date_proposal=_exec_proposals.get("date_proposal"),
-                        search_date=search_date,
+                    slots, session_state = _availability_workflow.process_search_result(
+                        execution_result=execution_result,
+                        plan=plan,
                         slots=slots,
+                        session_state=session_state,
+                        session_store=session_store,
+                        user_id=user_id,
+                        organization_id=organization_id,
                     )
-                    _time_resolution = _resolution_payload.get(
-                        "time_resolution")
-                    if isinstance(_time_resolution, dict):
-                        execution_result["time_resolution"] = _time_resolution
-                    _bind_result = _resolution_payload.get("bind_result")
-                    _resolution_outcome = (
-                        _time_resolution.get("outcome")
-                        if isinstance(_time_resolution, dict)
-                        else None
-                    )
-                    if _resolution_outcome == TIME_MATCH_EXACT and isinstance(
-                        _bind_result, dict
-                    ) and _bind_result:
-                        execution_result["resolved_datetime_range"] = _bind_result.get(
-                            "resolved_datetime_range"
-                        )
-                        slots = _bind_result.get("slots") or slots
-                        plan["slots"] = slots
-                        apply_time_match_exact_to_plan(
-                            plan,
-                            bind_result=_bind_result,
-                            time_resolution=_time_resolution,
-                        )
-                        session_state = _persist_to_session(
-                            session_store,
-                            user_id,
-                            session_state or {},
-                            "resolved_datetime_range",
-                            _bind_result.get("resolved_datetime_range"),
-                        )
-                        try:
-                            from core.session.confirmation_gate import set_confirmation_state
-
-                            session_state = set_confirmation_state(
-                                session_state or {}, "pending"
-                            )
-                        except ImportError:
-                            pass
-                    elif _resolution_outcome == TIME_MATCH_MISMATCH and isinstance(
-                        _time_resolution, dict
-                    ):
-                        apply_time_match_mismatch_to_plan(
-                            plan,
-                            time_resolution=_time_resolution,
-                            time_proposal=_exec_proposals.get("time_proposal"),
-                        )
-
-                    last_execution_payload = enrich_last_execution_result(
-                        execution_result, search_date=search_date
-                    )
-                    if isinstance(_time_resolution, dict):
-                        last_execution_payload["time_resolution"] = _time_resolution
-                    presented_payload = build_presented_availability(
-                        execution_result.get("slots") or [],
-                        search_date=last_execution_payload.get("search_date")
-                        or search_date,
-                    )
-                    session_state = _persist_to_session(
-                        session_store,
-                        user_id,
-                        session_state or {},
-                        "last_execution_result",
-                        last_execution_payload,
-                    )
-                    session_state = _persist_to_session(
-                        session_store,
-                        user_id,
-                        session_state or {},
-                        "presented_availability",
-                        presented_payload,
-                    )
-                    presentation_payload = build_availability_presentation(
-                        execution_result.get("slots") or []
-                    )
-                    session_state = _persist_to_session(
-                        session_store,
-                        user_id,
-                        session_state or {},
-                        "availability_presentation",
-                        presentation_payload,
-                    )
-
-                # Return execution result
-                # CRITICAL: Attach availability_fingerprint to plan for persistence
-                # This ensures fingerprint survives even when session_store is None
-                # and can be extracted by build_session_state_from_outcome() or test adapters
-                if (
-                    execution_result.get("type") == "availability"
-                    and execution_result.get("status") == "success"
-                ):
-                    # Attach availability_fingerprint if present
-                    if execution_result.get("availability_fingerprint"):
-                        plan["availability_fingerprint"] = execution_result.get(
-                            "availability_fingerprint"
-                        )
-                        logger.debug(
-                            f"[AVAILABILITY_FINGERPRINT] Attached to plan: {execution_result.get('availability_fingerprint')}"
-                        )
-
-                    # Also attach resolved_datetime_range to plan if present
-                    if execution_result.get("resolved_datetime_range"):
-                        plan["resolved_datetime_range"] = execution_result.get(
-                            "resolved_datetime_range"
-                        )
-                        logger.debug(
-                            f"[DATETIME_RANGE] Attached to plan: {execution_result.get('resolved_datetime_range').get('start')}"
-                        )
 
                 # Ensure execution_result includes plan structure (status, stage, action)
                 # Build from decision if available, otherwise use plan
@@ -1672,10 +1133,11 @@ def handle_message(
 
                 decision = plan.get("_decision")
                 if decision:
-                    _inject_availability_text(
+                    # Phase 2: ResponseRenderer owns rendering
+                    _renderer.render_availability(
                         result, decision, execution_result, session_state
                     )
-                    _inject_outcome_text(result, decision, execution_result)
+                    _renderer.render_outcome(result, decision, execution_result)
 
                 trace_stage(
                     "tool_execution",
