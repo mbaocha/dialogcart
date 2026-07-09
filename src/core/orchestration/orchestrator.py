@@ -64,6 +64,7 @@ from core.routing.workflows import get_workflow
 from core.engine.outcome_builder import (  # noqa: E402, F401
     _build_planning_outcome,
     build_outcome_from_decision,
+    build_planning_response_from_plan,
 )
 from core.config.org_resolver import _get_org_id_from_env  # noqa: F401
 from core.rendering.response_renderer import (  # noqa: F401
@@ -327,11 +328,13 @@ def handle_message(
     from core.execution.action_runner import ActionRunner
     from core.rendering.response_renderer import ResponseRenderer
     from core.workflows.availability.workflow import AvailabilityWorkflow
+    from core.workflows.booking.workflow import BookingWorkflow
     from core.workflows.router import WorkflowRouter
 
     _action_runner = ActionRunner()
     _renderer = ResponseRenderer()
     _availability_workflow = AvailabilityWorkflow()
+    _booking_workflow = BookingWorkflow()
     _workflow_router = WorkflowRouter()
 
     from core.tracing.invariant_trace import (
@@ -584,59 +587,8 @@ def handle_message(
             f"plan_status={plan_status}, plan_action={plan_action}, "
             f"missing_slots={plan.get('missing_slots', [])}"
         )
-        # Build outcome from decision (canonical builder)
-        # decision should always be available from plan_message()
-        decision = plan.get("_decision")
-        if decision:
-            outcome_dict = build_outcome_from_decision(decision)
-        else:
-            # Fallback: construct minimal outcome when decision is missing
-            # This should rarely happen if plan_message() is working correctly
-            logger.warning(
-                "Decision not available in plan, using fallback construction"
-            )
-            plan_slots = plan.get("slots", {})
-            plan_missing_slots = plan.get("missing_slots", [])
-            plan_obj = plan.get("plan", {})
-            if not isinstance(plan_obj, dict):
-                plan_obj = {}
-            facts = {
-                "slots": plan_slots if isinstance(plan_slots, dict) else {},
-                "missing_slots": (
-                    plan_missing_slots if isinstance(
-                        plan_missing_slots, list) else []
-                ),
-            }
-            outcome_dict = {
-                "status": plan.get("status")
-                or plan_obj.get("status", "NEEDS_CLARIFICATION"),
-                "awaiting": plan.get("awaiting"),
-                "allowed_actions": plan.get("allowed_actions", []),
-                "blocked_actions": plan.get("blocked_actions", []),
-                "facts": facts,
-                "intent_name": plan.get("intent_name") or plan.get("intent", ""),
-                "plan": {
-                    "status": plan_obj.get("status")
-                    or plan.get("status", "NEEDS_CLARIFICATION"),
-                    "stage": plan_obj.get("stage") or plan.get("stage"),
-                    "action": plan_obj.get("action") or plan.get("action"),
-                },
-                "slots": plan_slots,
-                "missing_slots": plan_missing_slots,
-            }
-        # Add active_capability if present in plan
-        if plan.get("active_capability"):
-            outcome_dict["active_capability"] = plan.get("active_capability")
-        response = {
-            "success": True,
-            "result": outcome_dict,
-            "outcome": outcome_dict,  # Alias for backward compatibility
-        }
-        # Preserve rendered text if present in plan (from plan_message)
-        if "text" in plan:
-            response["text"] = plan["text"]
-        response["_merged_luma_response"] = plan.get("_merged_luma_response")
-        response.setdefault("ui_actions", [])
+        # Phase 3A: consolidated fallback outcome construction
+        response = build_planning_response_from_plan(plan)
         trace_stage(
             "tool_execution",
             lambda: check_tool_execution(
@@ -712,60 +664,8 @@ def handle_message(
                 f"Execution step {action} requires {client_name}, but client not provided. "
                 "Returning planning outcome (likely clarification turn)."
             )
-            # Build outcome from decision (canonical builder)
-            decision = plan.get("_decision")
-            if decision:
-                outcome_dict = build_outcome_from_decision(decision)
-            else:
-                # Fallback: construct minimal outcome when decision is missing
-                logger.warning(
-                    "Decision not available in plan, using fallback construction"
-                )
-                plan_slots = plan.get("slots", {})
-                plan_missing_slots = plan.get("missing_slots", [])
-                plan_obj = plan.get("plan", {})
-                if not isinstance(plan_obj, dict):
-                    plan_obj = {}
-                facts = {
-                    "slots": plan_slots if isinstance(plan_slots, dict) else {},
-                    "missing_slots": (
-                        plan_missing_slots
-                        if isinstance(plan_missing_slots, list)
-                        else []
-                    ),
-                }
-                outcome_dict = {
-                    "status": plan.get("status")
-                    or plan_obj.get("status", "NEEDS_CLARIFICATION"),
-                    "awaiting": plan.get("awaiting"),
-                    "allowed_actions": plan.get("allowed_actions", []),
-                    "blocked_actions": plan.get("blocked_actions", []),
-                    "facts": facts,
-                    "intent_name": plan.get("intent_name") or plan.get("intent", ""),
-                    "plan": {
-                        "status": plan_obj.get("status")
-                        or plan.get("status", "NEEDS_CLARIFICATION"),
-                        "stage": plan_obj.get("stage") or plan.get("stage"),
-                        "action": plan_obj.get("action") or plan.get("action"),
-                    },
-                    "slots": plan_slots,
-                    "missing_slots": plan_missing_slots,
-                }
-            # Add active_capability if present in plan
-            if plan.get("active_capability"):
-                outcome_dict["active_capability"] = plan.get(
-                    "active_capability")
-            response = {
-                "success": True,
-                "result": outcome_dict,
-                "outcome": outcome_dict,  # Alias for backward compatibility
-            }
-            # Preserve rendered text if present in plan (from plan_message)
-            if "text" in plan:
-                response["text"] = plan["text"]
-            response["_merged_luma_response"] = plan.get(
-                "_merged_luma_response")
-            response.setdefault("ui_actions", [])
+            # Phase 3A: consolidated fallback outcome construction
+            response = build_planning_response_from_plan(plan)
             trace_stage(
                 "tool_execution",
                 lambda: check_tool_execution(
@@ -945,117 +845,22 @@ def handle_message(
                     # Unrecognised route — execution not yet supported for this client
                     logger.warning(
                         f"Execution for {client_name} not yet implemented (_route={_route})")
-                    # Build outcome from decision (canonical builder)
-                    decision = plan.get("_decision")
-                    if decision:
-                        outcome_dict = build_outcome_from_decision(decision)
-                    else:
-                        # Fallback: construct minimal outcome when decision is missing
-                        logger.warning(
-                            "Decision not available in plan, using fallback construction"
-                        )
-                        plan_slots = plan.get("slots", {})
-                        plan_missing_slots = plan.get("missing_slots", [])
-                        plan_obj = plan.get("plan", {})
-                        if not isinstance(plan_obj, dict):
-                            plan_obj = {}
-                        facts = {
-                            "slots": plan_slots if isinstance(plan_slots, dict) else {},
-                            "missing_slots": (
-                                plan_missing_slots
-                                if isinstance(plan_missing_slots, list)
-                                else []
-                            ),
-                        }
-                        outcome_dict = {
-                            "status": plan.get("status")
-                            or plan_obj.get("status", "NEEDS_CLARIFICATION"),
-                            "awaiting": plan.get("awaiting"),
-                            "allowed_actions": plan.get("allowed_actions", []),
-                            "blocked_actions": plan.get("blocked_actions", []),
-                            "facts": facts,
-                            "intent_name": plan.get("intent_name")
-                            or plan.get("intent", ""),
-                            "plan": {
-                                "status": plan_obj.get("status")
-                                or plan.get("status", "NEEDS_CLARIFICATION"),
-                                "stage": plan_obj.get("stage") or plan.get("stage"),
-                                "action": plan_obj.get("action") or plan.get("action"),
-                            },
-                            "slots": plan_slots,
-                            "missing_slots": plan_missing_slots,
-                        }
-                    # Add active_capability if present in plan
-                    if plan.get("active_capability"):
-                        outcome_dict["active_capability"] = plan.get(
-                            "active_capability"
-                        )
+                    # Phase 3A: consolidated fallback outcome construction
                     return _return_with_execution_spine(
-                        {
-                            "success": True,
-                            "result": outcome_dict,
-                            "outcome": outcome_dict,
-                        },
+                        build_planning_response_from_plan(plan),
                         plan=plan,
                         plan_status=plan_status,
                         plan_action=plan_action,
                         can_execute=False,
                     )
 
-                # For CONFIRM_APPOINTMENT with EXECUTED status, preserve the action
-                # Do not override action - use plan.action directly
-                if (
-                    execution_result.get("status") == "EXECUTED"
-                    and plan.get("action") == "CONFIRM_APPOINTMENT"
-                ):
-                    # Ensure plan action remains CONFIRM_APPOINTMENT (don't override)
-                    plan["action"] = "CONFIRM_APPOINTMENT"
-                    # Persist booking_id to slots for idempotency (prevent duplicate creation on next confirmation)
-                    booking_id = execution_result.get("booking_id")
-                    if booking_id:
-                        slots["booking_id"] = booking_id
-                        plan["slots"] = slots
-                        logger.debug(
-                            f"Persisted booking_id={booking_id} to slots for idempotency"
-                        )
-
-                # For FETCH_BOOKING with EXECUTED status, persist booking_id to slots
-                # This enables subsequent actions (e.g., CONFIRM_CANCELLATION) to use the fetched booking_id
-                if (
-                    execution_result.get("status") == "EXECUTED"
-                    and plan.get("action") == "FETCH_BOOKING"
-                ):
-                    booking_id = execution_result.get("booking_id")
-                    if booking_id:
-                        slots["booking_id"] = booking_id
-                        plan["slots"] = slots
-                        logger.debug(
-                            f"Persisted booking_id={booking_id} to slots from FETCH_BOOKING"
-                        )
-
-                # For CREATE_BOOKING_HOLD with EXECUTED status, persist booking_id and payment info to slots
-                # This enables capability evaluation to access booking_id before FINALIZE_RESERVATION
-                if (
-                    execution_result.get("status") == "EXECUTED"
-                    and plan.get("action") == "CREATE_BOOKING_HOLD"
-                ):
-                    booking_id = execution_result.get("booking_id")
-                    booking_code = execution_result.get("booking_code")
-                    total_amount = execution_result.get("total_amount")
-                    currency = execution_result.get("currency")
-                    if booking_id:
-                        slots["booking_id"] = booking_id
-                        if booking_code:
-                            slots["booking_code"] = booking_code
-                        if total_amount:
-                            slots["total_amount"] = total_amount
-                        if currency:
-                            slots["currency"] = currency
-                        plan["slots"] = slots
-                        logger.debug(
-                            f"Persisted booking_id={booking_id}, booking_code={booking_code}, "
-                            f"total_amount={total_amount}, currency={currency} to slots from CREATE_BOOKING_HOLD"
-                        )
+                # Phase 3A: BookingWorkflow owns post-execution slot propagation
+                slots = _booking_workflow.process_result(
+                    execution_result=execution_result,
+                    plan=plan,
+                    slots=slots,
+                    action=action,
+                )
 
                 # Phase 2: AvailabilityWorkflow owns all post-search processing
                 # (fingerprint, time resolution, presentation, session persistence)
