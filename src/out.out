@@ -1,130 +1,39 @@
 ============================= test session starts ==============================
-platform linux -- Python 3.10.13, pytest-9.0.2, pluggy-1.6.0 -- /home/mbaocha/.pyenv/versions/3.10.13/bin/python
-cachedir: .pytest_cache
+platform linux -- Python 3.10.13, pytest-9.0.2, pluggy-1.6.0
 rootdir: /mnt/c/Users/user/Documents/projects/dialogcart/dialogcart/src
 configfile: pytest.ini
 plugins: anyio-4.12.0
-collecting ... collected 30 items
+collected 339 items
 
-core/tests/e2e/test_booking.py::test_conversation_dsl_expect_aliases PASSED
-core/tests/e2e/test_booking.py::test_conversation_dsl_coerces_turn_shorthand PASSED
-core/tests/e2e/test_booking.py::test_booking_scenario[happy-path-create-appointment] PASSED
-core/tests/e2e/test_booking.py::test_booking_scenario[reject-then-revise-time] PASSED
-core/tests/e2e/test_booking.py::test_booking_scenario[unavailable-time-keeps-booking-flow] PASSED
-core/tests/e2e/test_booking.py::test_booking_scenario[service-revision-invalidates-availability] PASSED
-core/tests/e2e/test_booking.py::test_booking_scenario[date-revision-invalidates-availability] PASSED
-core/tests/e2e/test_booking.py::test_booking_scenario[tomorrow-by-9am-premium-exact] PASSED
-core/tests/e2e/test_booking.py::test_booking_scenario[tomorrow-by-12pm-premium-yes] PASSED
-core/tests/e2e/test_booking.py::test_booking_scenario[book-haircut-premium-10am-yes] PASSED
-core/tests/e2e/test_booking.py::test_booking_scenario[time-match-exact-same-turn] PASSED
-core/tests/e2e/test_booking.py::test_booking_scenario[time-match-mismatch-conversational] PASSED
-core/tests/e2e/test_booking.py::test_booking_scenario[empty-availability-no-slots] PASSED
-core/tests/e2e/test_booking.py::test_booking_scenario[mismatch-then-pick-alternative] PASSED
-core/tests/e2e/test_booking.py::test_booking_scenario[time-resolution-persists-across-turns] PASSED
-core/tests/e2e/test_browsing.py::test_browse_pagination_full_api_path_validation FAILED
-core/tests/e2e/test_browsing.py::test_show_more_times_paginates_existing_availability PASSED
-core/tests/e2e/test_browsing.py::test_show_more_at_last_page_says_no_more PASSED
-core/tests/e2e/test_browsing.py::test_previous_page_returns_earlier_availability PASSED
-core/tests/e2e/test_browsing.py::test_pagination_resets_on_service_change PASSED
-core/tests/e2e/test_browsing.py::test_pagination_resets_on_date_change PASSED
-core/tests/e2e/test_browsing.py::test_time_on_page_two_binds_not_page_one_slot PASSED
-core/tests/e2e/test_rag.py::test_session_messages_appended_after_handler_delegated PASSED
-core/tests/e2e/test_session.py::test_ready_outcome_persists_service_id_slots PASSED
-core/tests/e2e/test_session.py::test_executed_success_outcome_persists_service_id_slots PASSED
-core/tests/e2e/test_session.py::test_awaiting_confirmation_outcome_persists_bound_datetime_and_pending PASSED
-core/tests/e2e/test_tracing.py::test_decision_trace_spine_records 
+core/tests/orchestration/contracts/test_luma_contracts.py ......         [  1%]
+core/tests/orchestration/test_availability_fingerprint.py .....          [  3%]
+core/tests/orchestration/test_availability_pagination.py ..........      [  6%]
+core/tests/orchestration/test_availability_pagination_flow.py ........F. [  9%]
+.F                                                                       [  9%]
+core/tests/orchestration/test_catalog_resolver.py .....                  [ 11%]
+core/tests/orchestration/test_conversation_memory.py ................... [ 16%]
+.........                                                                [ 19%]
+core/tests/orchestration/test_decision_trace_pagination_dx.py 
 
 === Decision Trace Summary ===
-user_id: test-decision-trace
-text: 'book haircut'
+user_id: pagination-flow-user
+text: 'show more times'
 
 Outcome
-  status: 'success'
-  stage: 'AVAILABILITY'
-  action: 'SEARCH_AVAILABILITY'
-  intent: 'CREATE_APPOINTMENT'
+  (none)
 
 Why
-  - Turn completed with an execution artifact
-  - Confirmation gate is closed
-  - Confirmation gate not active for this turn
-  - Session merge skipped (no durable flow or reset occurred)
-  - Stored fingerprint missing or does not match current criteria
-  - Derived planner business facts for policy execution flags
-  - Availability not yet resolved for current search criteria
-  - SEARCH_AVAILABILITY prerequisites met and check still required
-
-Why chain (reason_code)
-  CONFIRMATION_GATE_CLOSED → INPUT_IGNORED_NOT_APPLICABLE → MERGE_SKIPPED → FINGERPRINT_MISMATCH → FACTS_DERIVED → AVAILABILITY_NOT_READY → AVAILABILITY_CHECK_REQUIRED → TIME_SELECTION_NOT_READY → STATUS_READY → STEP_SELECTED → STAGE_DERIVED_FROM_ACTION → EXECUTION_ROUTE_PLAN → PAGINATION_SKIPPED → PLAN_ACTION_PRESENT → RELOAD_MATCH → PERSIST_SAVE_APPLIED → TURN_OUTCOME_EXECUTED
-
-Failed invariants
-  none
-
-Winning decisions
-  decision.confirmation.gate_open [routing] CONFIRMATION_GATE_OPEN: winner='closed' (CONFIRMATION_GATE_CLOSED)
-  decision.merge.eligibility [routing] MERGE_ELIGIBILITY: winner='skip' (MERGE_SKIPPED)
-  decision.fingerprint.trust [inference] FINGERPRINT_TRUST: winner='stale' (FINGERPRINT_MISMATCH)
-  decision.facts.derive_all [inference] DERIVE_BUSINESS_FACTS: winner={"availability_check_required": true, "availability_ready": false, "booking_identification_required": false, "booking_identified": false, "booking_hold_required": false, "booking_hold_ready": false, "time_selection_required": true, "time_selection_ready": false, "user_confirmation_required": false, "user_confirmation_satisfied": false, "awaiting_user_confirmation": false} (FACTS_DERIVED)
-  decision.facts.availability_ready [inference] AVAILABILITY_READY: winner=False (AVAILABILITY_NOT_READY)
-  decision.facts.availability_check_required [inference] AVAILABILITY_CHECK_REQUIRED: winner=True (AVAILABILITY_CHECK_REQUIRED)
-  decision.facts.time_selection_ready [inference] TIME_SELECTION_READY: winner=False (TIME_SELECTION_NOT_READY)
-  decision.facts.user_confirmation_required [inference] USER_CONFIRMATION_REQUIRED: winner=False (INPUT_IGNORED_NOT_APPLICABLE)
-  decision.planner.status [routing] PLAN_STATUS: winner='READY' (STATUS_READY)
-  decision.planner.select_action [routing] PLAN_ACTION: winner='SEARCH_AVAILABILITY' (STEP_SELECTED)
-  decision.planner.select_stage [routing] SELECT_STAGE: winner='AVAILABILITY' (STAGE_DERIVED_FROM_ACTION)
-  decision.planner.execution_route [routing] EXECUTION_ROUTE: winner='plan_execution' (EXECUTION_ROUTE_PLAN)
-  decision.execution.eligibility [uncategorized] EXECUTE_PLAN_ACTION: winner='execute' (PLAN_ACTION_PRESENT)
-  decision.persist.reload_verify [uncategorized] RELOAD_VERIFY: winner='match' (RELOAD_MATCH)
-  decision.persist.save [uncategorized] PERSIST_SAVE: winner='save' (PERSIST_SAVE_APPLIED)
-  decision.turn.outcome [uncategorized] TURN_OUTCOME: winner={"status": "success", "stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY", "intent": "CREATE_APPOINTMENT"} (TURN_OUTCOME_EXECUTED)
-
-Rejected candidates
-  decision.fingerprint.trust / bound_datetime: BOUND_DATETIME_BYPASS — Datetime already bound on slots/session
-  decision.fingerprint.trust / fingerprint_match: FINGERPRINT_MISMATCH — Search-criteria fingerprint comparison
-  decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
-  decision.facts.availability_ready / availability_ready: AVAILABILITY_NOT_READY — Fingerprint match, bound datetime, or continuation bypass
-  decision.facts.user_confirmation_required / confirmation_pending: CONFIRMATION_REQUIRED — Confirmation gate already pending
-  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
-
-Mutations
-  plan.action: None → 'SEARCH_AVAILABILITY' (STEP_SELECTED)
-  plan.stage: None → 'AVAILABILITY' (STAGE_DERIVED_FROM_ACTION)
-  plan.status: None → 'READY' (STATUS_READY)
-
-Key rejected candidates
-  decision.fingerprint.trust / bound_datetime: BOUND_DATETIME_BYPASS — Datetime already bound on slots/session
-  decision.fingerprint.trust / fingerprint_match: FINGERPRINT_MISMATCH — Search-criteria fingerprint comparison
-  decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
-  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
-
-
-core/tests/e2e/test_tracing.py::test_decision_trace_spine_records PASSED
-core/tests/e2e/test_tracing.py::test_decision_trace_absent_when_disabled PASSED
-core/tests/e2e/test_tracing.py::test_decision_trace_causal_graph_from_session_to_outcome PASSED
-core/tests/e2e/test_tracing.py::test_forensic_trace_records_availability_and_time_resolution 
-
-=== Decision Trace Summary ===
-user_id: e2e-scripted-1f1ed57afb
-text: 'premium'
-
-Outcome
-  status: 'success'
-  stage: 'CONFIRM'
-  action: None
-  intent: 'CREATE_APPOINTMENT'
-
-Why
-  - Turn completed with an execution artifact
+  - Browse pagination handled the turn without executing plan.action
   - Confirmation gate is closed
   - Confirmation gate not active for this turn
   - Durable session flow eligible for merge
-  - No presented offers to bind against
+  - No exact user time to bind
   - Merged session and Luma slots with additive precedence
-  - Stored fingerprint missing or does not match current criteria
+  - Stored fingerprint matches current search criteria
   - Derived planner business facts for policy execution flags
 
 Why chain (reason_code)
-  CONFIRMATION_GATE_CLOSED → INPUT_IGNORED_NOT_APPLICABLE → MERGE_ELIGIBLE → BIND_NO_PRESENTED_OFFERS → SLOT_ADDITIVE_MERGE → FINGERPRINT_MISMATCH → FACTS_DERIVED → AVAILABILITY_NOT_READY → AVAILABILITY_CHECK_REQUIRED → TIME_SELECTION_NOT_READY → STATUS_READY → STEP_SELECTED → STAGE_DERIVED_FROM_ACTION → EXECUTION_ROUTE_PLAN → PAGINATION_SKIPPED → PLAN_ACTION_PRESENT → RELOAD_MATCH → PERSIST_SAVE_APPLIED → TURN_OUTCOME_EXECUTED
+  CONFIRMATION_GATE_CLOSED → INPUT_IGNORED_NOT_APPLICABLE → MERGE_ELIGIBLE → BIND_NO_USER_TIME → SLOT_ADDITIVE_MERGE → FINGERPRINT_MATCH → FACTS_DERIVED → AVAILABILITY_READY → TIME_SELECTION_NOT_READY → STATUS_READY → NO_STEP_REQUIRES_SATISFIED → STAGE_DERIVED_FROM_STATUS → EXECUTION_ROUTE_BROWSE → BROWSE_OPERATION_DETECTED → PAGINATION_HANDLED → BROWSE_NEXT → PAGINATION_SHORT_CIRCUIT
 
 Failed invariants
   none
@@ -132,54 +41,231 @@ Failed invariants
 Winning decisions
   decision.confirmation.gate_open [routing] CONFIRMATION_GATE_OPEN: winner='closed' (CONFIRMATION_GATE_CLOSED)
   decision.merge.eligibility [routing] MERGE_ELIGIBILITY: winner='merge' (MERGE_ELIGIBLE)
-  decision.merge.slot_additive [routing] SLOT_ADDITIVE_MERGE: winner={"added": ["service_id"], "updated": [], "preserved_count": 0} (SLOT_ADDITIVE_MERGE)
-  decision.fingerprint.trust [inference] FINGERPRINT_TRUST: winner='stale' (FINGERPRINT_MISMATCH)
-  decision.facts.derive_all [inference] DERIVE_BUSINESS_FACTS: winner={"availability_check_required": true, "availability_ready": false, "booking_identification_required": false, "booking_identified": false, "booking_hold_required": false, "booking_hold_ready": false, "time_selection_required": true, "time_selection_ready": false, "user_confirmation_required": false, "user_confirmation_satisfied": false, "awaiting_user_confirmation": false} (FACTS_DERIVED)
-  decision.facts.availability_ready [inference] AVAILABILITY_READY: winner=False (AVAILABILITY_NOT_READY)
-  decision.facts.availability_check_required [inference] AVAILABILITY_CHECK_REQUIRED: winner=True (AVAILABILITY_CHECK_REQUIRED)
+  decision.merge.slot_additive [routing] SLOT_ADDITIVE_MERGE: winner={"added": [], "updated": [], "preserved_count": 1} (SLOT_ADDITIVE_MERGE)
+  decision.fingerprint.trust [inference] FINGERPRINT_TRUST: winner='trusted' (FINGERPRINT_MATCH)
+  decision.facts.derive_all [inference] DERIVE_BUSINESS_FACTS: winner={"availability_check_required": false, "availability_ready": true, "booking_identification_required": false, "booking_identified": false, "booking_hold_required": false, "booking_hold_ready": false, "time_selection_required": true, "time_selection_ready": false, "user_confirmation_required": false, "user_confirmation_satisfied": false, "awaiting_user_confirmation": false} (FACTS_DERIVED)
+  decision.facts.availability_ready [inference] AVAILABILITY_READY: winner=True (AVAILABILITY_READY)
+  decision.facts.availability_check_required [inference] AVAILABILITY_CHECK_REQUIRED: winner=False (INPUT_IGNORED_NOT_APPLICABLE)
   decision.facts.time_selection_ready [inference] TIME_SELECTION_READY: winner=False (TIME_SELECTION_NOT_READY)
   decision.facts.user_confirmation_required [inference] USER_CONFIRMATION_REQUIRED: winner=False (INPUT_IGNORED_NOT_APPLICABLE)
   decision.planner.status [routing] PLAN_STATUS: winner='READY' (STATUS_READY)
-  decision.planner.select_action [routing] PLAN_ACTION: winner='SEARCH_AVAILABILITY' (STEP_SELECTED)
-  decision.planner.select_stage [routing] SELECT_STAGE: winner='AVAILABILITY' (STAGE_DERIVED_FROM_ACTION)
-  decision.planner.execution_route [routing] EXECUTION_ROUTE: winner='plan_execution' (EXECUTION_ROUTE_PLAN)
-  decision.execution.eligibility [uncategorized] EXECUTE_PLAN_ACTION: winner='execute' (PLAN_ACTION_PRESENT)
-  decision.persist.reload_verify [uncategorized] RELOAD_VERIFY: winner='match' (RELOAD_MATCH)
-  decision.persist.save [uncategorized] PERSIST_SAVE: winner='save' (PERSIST_SAVE_APPLIED)
-  decision.turn.outcome [uncategorized] TURN_OUTCOME: winner={"status": "success", "stage": "CONFIRM", "action": null, "intent": "CREATE_APPOINTMENT"} (TURN_OUTCOME_EXECUTED)
+  decision.planner.select_action [routing] PLAN_ACTION: winner=null (NO_STEP_REQUIRES_SATISFIED)
+  decision.planner.select_stage [routing] SELECT_STAGE: winner=null (STAGE_DERIVED_FROM_STATUS)
+  decision.planner.execution_route [routing] EXECUTION_ROUTE: winner='browse_pagination' (EXECUTION_ROUTE_BROWSE)
+  decision.browse.resolve_direction [routing] BROWSE_RESOLVE: winner='next' (BROWSE_OPERATION_DETECTED)
+  decision.pagination.handle_turn [presentation] PAGINATION_HANDLE: winner='handled' (PAGINATION_HANDLED)
+  decision.pagination.page_target [presentation] PAGE_TARGET: winner={"page_index": 1, "exhausted": false} (BROWSE_NEXT)
+  decision.execution.eligibility [uncategorized] EXECUTE_PLAN_ACTION: winner='skip' (PAGINATION_SHORT_CIRCUIT)
 
 Rejected candidates
-  decision.merge.bind_time / no_offers: BIND_NO_PRESENTED_OFFERS — No presented availability offers
-  decision.merge.slot_additive / preserve_durable: SLOT_PRESERVED_DURABLE — Existing session slot values preserved unless explicitly updated
+  decision.merge.bind_time / no_user_time: BIND_NO_USER_TIME — No exact user time from proposal or constraint
+  decision.merge.slot_additive / additive_luma: SLOT_ADDITIVE_MERGE — New Luma entities merged additively
   decision.fingerprint.trust / bound_datetime: BOUND_DATETIME_BYPASS — Datetime already bound on slots/session
-  decision.fingerprint.trust / fingerprint_match: FINGERPRINT_MISMATCH — Search-criteria fingerprint comparison
   decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
-  decision.facts.availability_ready / availability_ready: AVAILABILITY_NOT_READY — Fingerprint match, bound datetime, or continuation bypass
-  decision.facts.user_confirmation_required / clarification_blocks: CLARIFICATION_REQUIRED — Clarification or missing slots block confirmation requirement
   decision.facts.user_confirmation_required / confirmation_pending: CONFIRMATION_REQUIRED — Confirmation gate already pending
+  decision.planner.select_action / SEARCH_AVAILABILITY: REQUIREMENT_UNSATISFIED — Step 'SEARCH_AVAILABILITY' blocked by unsatisfied requirement 'availability_check_required' missing=['availability_check_required']
   decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
+  decision.browse.resolve_direction / text_fallback: BROWSE_TEXT_INFERRED — Text fallback with cached availability
 
 Mutations
-  slots.service_id: None → 'premium haircut' (SLOT_ADDITIVE_MERGE)
-  plan.action: None → 'SEARCH_AVAILABILITY' (STEP_SELECTED)
-  plan.stage: None → 'AVAILABILITY' (STAGE_DERIVED_FROM_ACTION)
+  plan.status: None → 'READY' (STATUS_READY)
+  availability_presentation.page_index: 0 → 1 (BROWSE_NEXT)
+
+Key rejected candidates
+  decision.merge.bind_time / no_user_time: BIND_NO_USER_TIME — No exact user time from proposal or constraint
+  decision.fingerprint.trust / bound_datetime: BOUND_DATETIME_BYPASS — Datetime already bound on slots/session
+  decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
+  decision.planner.select_action / SEARCH_AVAILABILITY: REQUIREMENT_UNSATISFIED — Step 'SEARCH_AVAILABILITY' blocked by unsatisfied requirement 'availability_check_required' missing=['availability_check_required']
+  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
+  decision.browse.resolve_direction / text_fallback: BROWSE_TEXT_INFERRED — Text fallback with cached availability
+
+.
+core/tests/orchestration/test_decision_trace_pagination_dx.py 
+
+=== Decision Trace Summary ===
+user_id: pagination-flow-user
+text: 'show more times'
+
+Outcome
+  (none)
+
+Why
+  - Browse pagination handled the turn without executing plan.action
+  - Confirmation gate is closed
+  - Confirmation gate not active for this turn
+  - Durable session flow eligible for merge
+  - No exact user time to bind
+  - Merged session and Luma slots with additive precedence
+  - Stored fingerprint matches current search criteria
+  - Derived planner business facts for policy execution flags
+
+Why chain (reason_code)
+  CONFIRMATION_GATE_CLOSED → INPUT_IGNORED_NOT_APPLICABLE → MERGE_ELIGIBLE → BIND_NO_USER_TIME → SLOT_ADDITIVE_MERGE → FINGERPRINT_MATCH → FACTS_DERIVED → AVAILABILITY_READY → TIME_SELECTION_NOT_READY → STATUS_READY → NO_STEP_REQUIRES_SATISFIED → STAGE_DERIVED_FROM_STATUS → EXECUTION_ROUTE_BROWSE → BROWSE_OPERATION_DETECTED → PAGINATION_HANDLED → BROWSE_EXHAUSTED → PAGINATION_SHORT_CIRCUIT
+
+Failed invariants
+  none
+
+Winning decisions
+  decision.confirmation.gate_open [routing] CONFIRMATION_GATE_OPEN: winner='closed' (CONFIRMATION_GATE_CLOSED)
+  decision.merge.eligibility [routing] MERGE_ELIGIBILITY: winner='merge' (MERGE_ELIGIBLE)
+  decision.merge.slot_additive [routing] SLOT_ADDITIVE_MERGE: winner={"added": [], "updated": [], "preserved_count": 1} (SLOT_ADDITIVE_MERGE)
+  decision.fingerprint.trust [inference] FINGERPRINT_TRUST: winner='trusted' (FINGERPRINT_MATCH)
+  decision.facts.derive_all [inference] DERIVE_BUSINESS_FACTS: winner={"availability_check_required": false, "availability_ready": true, "booking_identification_required": false, "booking_identified": false, "booking_hold_required": false, "booking_hold_ready": false, "time_selection_required": true, "time_selection_ready": false, "user_confirmation_required": false, "user_confirmation_satisfied": false, "awaiting_user_confirmation": false} (FACTS_DERIVED)
+  decision.facts.availability_ready [inference] AVAILABILITY_READY: winner=True (AVAILABILITY_READY)
+  decision.facts.availability_check_required [inference] AVAILABILITY_CHECK_REQUIRED: winner=False (INPUT_IGNORED_NOT_APPLICABLE)
+  decision.facts.time_selection_ready [inference] TIME_SELECTION_READY: winner=False (TIME_SELECTION_NOT_READY)
+  decision.facts.user_confirmation_required [inference] USER_CONFIRMATION_REQUIRED: winner=False (INPUT_IGNORED_NOT_APPLICABLE)
+  decision.planner.status [routing] PLAN_STATUS: winner='READY' (STATUS_READY)
+  decision.planner.select_action [routing] PLAN_ACTION: winner=null (NO_STEP_REQUIRES_SATISFIED)
+  decision.planner.select_stage [routing] SELECT_STAGE: winner=null (STAGE_DERIVED_FROM_STATUS)
+  decision.planner.execution_route [routing] EXECUTION_ROUTE: winner='browse_pagination' (EXECUTION_ROUTE_BROWSE)
+  decision.browse.resolve_direction [routing] BROWSE_RESOLVE: winner='next' (BROWSE_OPERATION_DETECTED)
+  decision.pagination.handle_turn [presentation] PAGINATION_HANDLE: winner='handled' (PAGINATION_HANDLED)
+  decision.pagination.page_target [presentation] PAGE_TARGET: winner={"page_index": 0, "exhausted": true} (BROWSE_EXHAUSTED)
+  decision.execution.eligibility [uncategorized] EXECUTE_PLAN_ACTION: winner='skip' (PAGINATION_SHORT_CIRCUIT)
+
+Rejected candidates
+  decision.merge.bind_time / no_user_time: BIND_NO_USER_TIME — No exact user time from proposal or constraint
+  decision.merge.slot_additive / additive_luma: SLOT_ADDITIVE_MERGE — New Luma entities merged additively
+  decision.fingerprint.trust / bound_datetime: BOUND_DATETIME_BYPASS — Datetime already bound on slots/session
+  decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
+  decision.facts.user_confirmation_required / confirmation_pending: CONFIRMATION_REQUIRED — Confirmation gate already pending
+  decision.planner.select_action / SEARCH_AVAILABILITY: REQUIREMENT_UNSATISFIED — Step 'SEARCH_AVAILABILITY' blocked by unsatisfied requirement 'availability_check_required' missing=['availability_check_required']
+  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
+  decision.browse.resolve_direction / text_fallback: BROWSE_TEXT_INFERRED — Text fallback with cached availability
+
+Mutations
   plan.status: None → 'READY' (STATUS_READY)
 
 Key rejected candidates
-  decision.merge.bind_time / no_offers: BIND_NO_PRESENTED_OFFERS — No presented availability offers
+  decision.merge.bind_time / no_user_time: BIND_NO_USER_TIME — No exact user time from proposal or constraint
   decision.fingerprint.trust / bound_datetime: BOUND_DATETIME_BYPASS — Datetime already bound on slots/session
+  decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
+  decision.planner.select_action / SEARCH_AVAILABILITY: REQUIREMENT_UNSATISFIED — Step 'SEARCH_AVAILABILITY' blocked by unsatisfied requirement 'availability_check_required' missing=['availability_check_required']
+  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
+  decision.browse.resolve_direction / text_fallback: BROWSE_TEXT_INFERRED — Text fallback with cached availability
+
+.
+core/tests/orchestration/test_decision_trace_pagination_dx.py 
+
+=== Decision Trace Summary ===
+user_id: pagination-flow-user
+text: '5pm'
+
+Outcome
+  (none)
+
+Why
+  - Awaiting user confirmation; execution not run
+  - Confirmation gate is closed
+  - Confirmation gate not active for this turn
+  - Durable session flow eligible for merge
+  - Bound offered time '2026-07-03T17:00:00Z'
+  - Merged session and Luma slots with additive precedence
+  - Bound booking datetime bypasses fingerprint comparison
+  - CREATE_APPOINTMENT commit-ready; confirmation_state set to pending
+
+Why chain (reason_code)
+  CONFIRMATION_GATE_CLOSED → INPUT_IGNORED_NOT_APPLICABLE → MERGE_ELIGIBLE → BIND_EXACT_TIME_MATCH → SLOT_ADDITIVE_MERGE → BOUND_DATETIME_BYPASS → CONFIRMATION_ENTER_PENDING → FACTS_DERIVED → AVAILABILITY_READY → TIME_SELECTION_READY → CONFIRMATION_REQUIRED → NO_STEP_REQUIRES_SATISFIED → STAGE_DERIVED_FROM_STATUS → EXECUTION_ROUTE_PLAN → PAGINATION_SKIPPED → AWAITING_CONFIRMATION
+
+Failed invariants
+  none
+
+Winning decisions
+  decision.confirmation.gate_open [routing] CONFIRMATION_GATE_OPEN: winner='closed' (CONFIRMATION_GATE_CLOSED)
+  decision.merge.eligibility [routing] MERGE_ELIGIBILITY: winner='merge' (MERGE_ELIGIBLE)
+  decision.merge.bind_time [routing] BIND_TIME: winner='bound' (BIND_EXACT_TIME_MATCH)
+  decision.merge.slot_additive [routing] SLOT_ADDITIVE_MERGE: winner={"added": ["date", "time"], "updated": [], "preserved_count": 1} (SLOT_ADDITIVE_MERGE)
+  decision.fingerprint.trust [inference] FINGERPRINT_TRUST: winner='bound_datetime' (BOUND_DATETIME_BYPASS)
+  decision.confirmation.enter_pending [routing] ENTER_CONFIRMATION_PENDING: winner='pending' (CONFIRMATION_ENTER_PENDING)
+  decision.facts.derive_all [inference] DERIVE_BUSINESS_FACTS: winner={"availability_check_required": false, "availability_ready": true, "booking_identification_required": false, "booking_identified": false, "booking_hold_required": false, "booking_hold_ready": false, "time_selection_required": false, "time_selection_ready": true, "user_confirmation_required": true, "user_confirmation_satisfied": false, "awaiting_user_confirmation": true} (FACTS_DERIVED)
+  decision.facts.availability_ready [inference] AVAILABILITY_READY: winner=True (AVAILABILITY_READY)
+  decision.facts.availability_check_required [inference] AVAILABILITY_CHECK_REQUIRED: winner=False (INPUT_IGNORED_NOT_APPLICABLE)
+  decision.facts.time_selection_ready [inference] TIME_SELECTION_READY: winner=True (TIME_SELECTION_READY)
+  decision.facts.user_confirmation_required [inference] USER_CONFIRMATION_REQUIRED: winner=True (CONFIRMATION_REQUIRED)
+  decision.planner.status [routing] PLAN_STATUS: winner='AWAITING_CONFIRMATION' (CONFIRMATION_REQUIRED)
+  decision.planner.confirmation [routing] CONFIRMATION: winner='await_confirmation' (CONFIRMATION_REQUIRED)
+  decision.planner.select_action [routing] PLAN_ACTION: winner=null (NO_STEP_REQUIRES_SATISFIED)
+  decision.planner.select_stage [routing] SELECT_STAGE: winner='CONFIRM' (STAGE_DERIVED_FROM_STATUS)
+  decision.planner.execution_route [routing] EXECUTION_ROUTE: winner='plan_execution' (EXECUTION_ROUTE_PLAN)
+  decision.execution.eligibility [uncategorized] EXECUTE_PLAN_ACTION: winner='skip' (AWAITING_CONFIRMATION)
+
+Rejected candidates
   decision.fingerprint.trust / fingerprint_match: FINGERPRINT_MISMATCH — Search-criteria fingerprint comparison
   decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
-  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
+  decision.facts.user_confirmation_required / clarification_blocks: CLARIFICATION_REQUIRED — Clarification or missing slots block confirmation requirement
+  decision.planner.select_action / SEARCH_AVAILABILITY: REQUIREMENT_UNSATISFIED — Step 'SEARCH_AVAILABILITY' blocked by unsatisfied requirement 'availability_check_required' missing=['availability_check_required']
+  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['user_confirmation_satisfied']
 
+Mutations
+  slots.date: None → '2026-07-03' (BIND_EXACT_TIME_MATCH)
+  slots.time: None → '17:00' (BIND_EXACT_TIME_MATCH)
+  slots.date: None → '2026-07-03' (SLOT_ADDITIVE_MERGE)
+  slots.time: None → '17:00' (SLOT_ADDITIVE_MERGE)
+  booking.confirmation_state: None → 'pending' (CONFIRMATION_ENTER_PENDING)
+  plan.stage: None → 'CONFIRM' (STAGE_DERIVED_FROM_STATUS)
+  plan.status: None → 'AWAITING_CONFIRMATION' (CONFIRMATION_REQUIRED)
 
-core/tests/e2e/test_tracing.py::test_forensic_trace_records_availability_and_time_resolution PASSED
+Key rejected candidates
+  decision.fingerprint.trust / fingerprint_match: FINGERPRINT_MISMATCH — Search-criteria fingerprint comparison
+  decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
+  decision.planner.select_action / SEARCH_AVAILABILITY: REQUIREMENT_UNSATISFIED — Step 'SEARCH_AVAILABILITY' blocked by unsatisfied requirement 'availability_check_required' missing=['availability_check_required']
+  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['user_confirmation_satisfied']
+
+.
+core/tests/orchestration/test_luma_facts_adapter.py .............        [ 24%]
+core/tests/orchestration/test_modify_confirm_apply.py ..                 [ 24%]
+core/tests/orchestration/test_non_core_intent_passthrough.py ..........  [ 27%]
+core/tests/orchestration/test_orchestrator_flow.py ......                [ 29%]
+core/tests/orchestration/test_orchestrator_invariants.py ..              [ 30%]
+core/tests/orchestration/test_rag_handler_integration.py .....           [ 31%]
+core/tests/orchestration/test_temporal_proposal_execution.py ........... [ 34%]
+...FFFFF.........................                                        [ 44%]
+core/tests/orchestration/test_time_normalization.py FFFFF                [ 46%]
+core/tests/orchestration/test_time_resolution.py .F.....F.FFFF           [ 49%]
+core/tests/session/test_availability_browse.py .......................   [ 56%]
+core/tests/session/test_awaiting_slot_e2e.py .                           [ 56%]
+core/tests/session/test_commit_consumes_confirmation.py ........         [ 59%]
+core/tests/session/test_confirmation_gate.py .........................   [ 66%]
+core/tests/session/test_invalidation.py ....                             [ 67%]
+core/tests/session/test_merge_eligibility.py ......                      [ 69%]
+core/tests/session/test_service_stickiness.py .FFFFFFFFFF                [ 72%]
+core/tests/session/test_session.py .                                     [ 73%]
+core/tests/session/test_session_manager.py ............                  [ 76%]
+core/tests/session/test_slot_retry_tracking_e2e.py F                     [ 76%]
+core/tests/rendering/test_acknowledgement_rendering_e2e.py FF            [ 77%]
+core/tests/rendering/test_adaptive_clarification_rendering_e2e.py F      [ 77%]
+core/tests/rendering/test_availability_renderer.py ..............        [ 82%]
+core/tests/rendering/test_booking_confirmation_renderer.py ......        [ 83%]
+core/tests/rendering/test_conversation_rendering_e2e.py FF               [ 84%]
+core/tests/rendering/test_rendering_verification.py FFF                  [ 85%]
+core/tests/routing/test_handler_router.py ............                   [ 88%]
+core/tests/intents/test_base_intents.py .........                        [ 91%]
+core/tests/workflows/test_workflow_invocation.py ......                  [ 93%]
+core/tests/workflows/test_workflow_manual.py ...                         [ 94%]
+core/tests/workflows/test_workflow_registry.py .......                   [ 96%]
+core/tests/execution/test_test_backend.py .......                        [ 98%]
+core/tests/execution/test_booking_execution.py ..                        [ 98%]
+core/tests/execution/test_availability_execution.py ..                   [ 99%]
+core/tests/execution/test_confirmation_execution.py ..                   [100%]
 
 =================================== FAILURES ===================================
-_______________ test_browse_pagination_full_api_path_validation ________________
-core/tests/e2e/test_browsing.py:216: in test_browse_pagination_full_api_path_validation
-    assert pagination_logs
-E   assert []
+_______________ test_time_selection_binds_only_from_current_page _______________
+core/tests/orchestration/test_availability_pagination_flow.py:520: in test_time_selection_binds_only_from_current_page
+    try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:482: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
 ----------------------------- Captured stdout call -----------------------------
 {"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {}, "raw_luma_context": null}
 [_compute_effective_collected_slots] raw_slots keys=[]
@@ -190,309 +276,651 @@ E   assert []
 {"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {}, "effective_collected_slots": {}}
 
 [BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {}, "session_slots": null, "modification_context": null}
-2026-07-08 17:08:29,591  core.orchestration.api.message                 INFO  [decision_trace:summary]
-User:
-book haircut
-
-Intent:
-CREATE_APPOINTMENT
-
-Session:
-No merge (session reset)
-
-Planner:
-NEEDS_CLARIFICATION
-
-Missing:
-date
-service_id
-time
-
-Stage:
-AVAILABILITY
-
-Action:
-None
-
-Reason:
-Missing slots ['date', 'service_id', 'time'] require clarification
-
-Outcome:
-Turn requires clarification before proceeding
-
-Timing
-
-Total:
-1401 ms
-
-User:
-book haircut
-
-Intent:
-CREATE_APPOINTMENT
-
-Session:
-No merge (session reset)
-
-Planner:
-NEEDS_CLARIFICATION
-
-Missing:
-date
-service_id
-time
-
-Stage:
-AVAILABILITY
-
-Action:
-None
-
-Reason:
-Missing slots ['date', 'service_id', 'time'] require clarification
-
-Outcome:
-Turn requires clarification before proceeding
-
-Timing
-
-Total:
-1401 ms
-
   effective_slots_for_filtering.keys()=['service_id']
   promoted_slots={'service_id': 'premium haircut'}
   effective_collected_slots (after filter)={'service_id': 'premium haircut'}
   effective_collected_slots.keys()=['service_id']
-2026-07-08 17:08:31,262  core.orchestration.api.message                 INFO  [decision_trace:summary]
-User:
-premium
-
-Intent:
-CREATE_APPOINTMENT
-
-Session:
-Merged with prior session
-
-Planner:
-READY
-
-Missing:
-date
-time
-
-Stage:
-AVAILABILITY
-
-Action:
-SEARCH_AVAILABILITY
-
-Reason:
-Executable subset satisfied; exploratory action allowed
-
-Outcome:
-Turn completed with an execution artifact
-
-Session Changes
-
-service_id
-
-null
-
-→
-
-premium haircut
-
-Timing
-
-Total:
-1649 ms
-
-User:
-premium
-
-Intent:
-CREATE_APPOINTMENT
-
-Session:
-Merged with prior session
-
-Planner:
-READY
-
-Missing:
-date
-time
-
-Stage:
-AVAILABILITY
-
-Action:
-SEARCH_AVAILABILITY
-
-Reason:
-Executable subset satisfied; exploratory action allowed
-
-Outcome:
-Turn completed with an execution artifact
-
-Session Changes
-
-service_id
-
-null
-
-→
-
-premium haircut
-
-Timing
-
-Total:
-1649 ms
-
   effective_slots_for_filtering.keys()=['service_id']
   promoted_slots={'service_id': 'premium haircut'}
   effective_collected_slots (after filter)={'service_id': 'premium haircut'}
   effective_collected_slots.keys()=['service_id']
-2026-07-08 17:08:32,926  core.orchestration.api.message                 INFO  [decision_trace:summary]
-User:
-actually July 9
-
-Intent:
-CREATE_APPOINTMENT
-
-Session:
-Merged with prior session
-
-Planner:
-READY
-
-Missing:
-time
-
-Stage:
-AVAILABILITY
-
-Action:
-SEARCH_AVAILABILITY
-
-Reason:
-Executable subset satisfied; exploratory action allowed
-
-Outcome:
-Turn completed with an execution artifact
-
-Timing
-
-Total:
-1574 ms
-
-User:
-actually July 9
-
-Intent:
-CREATE_APPOINTMENT
-
-Session:
-Merged with prior session
-
-Planner:
-READY
-
-Missing:
-time
-
-Stage:
-AVAILABILITY
-
-Action:
-SEARCH_AVAILABILITY
-
-Reason:
-Executable subset satisfied; exploratory action allowed
-
-Outcome:
-Turn completed with an execution artifact
-
-Timing
-
-Total:
-1574 ms
-
+__________ test_bind_after_pagination_page_two_rejects_page_one_slot ___________
+core/tests/orchestration/test_availability_pagination_flow.py:641: in test_bind_after_pagination_page_two_rejects_page_one_slot
+    assert try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:482: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+_______ TestTryBindOfferedTimeSelection.test_rejects_time_not_in_offers ________
+core/tests/orchestration/test_temporal_proposal_execution.py:176: in test_rejects_time_not_in_offers
+    result = try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:482: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+_ TestTryBindOfferedTimeSelection.test_binds_latest_presented_date_not_stale_date_proposal _
+core/tests/orchestration/test_temporal_proposal_execution.py:203: in test_binds_latest_presented_date_not_stale_date_proposal
+    result = try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:462: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+_ TestTryBindOfferedTimeSelection.test_new_search_replaces_historical_offers_for_binding _
+core/tests/orchestration/test_temporal_proposal_execution.py:234: in test_new_search_replaces_historical_offers_for_binding
+    result = try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:462: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+_ TestTryBindOfferedTimeSelection.test_binds_only_presented_slots_not_full_search_result _
+core/tests/orchestration/test_temporal_proposal_execution.py:269: in test_binds_only_presented_slots_not_full_search_result
+    assert try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:482: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+_ TestTryBindOfferedTimeSelection.test_legacy_fallback_caps_to_presentation_size _
+core/tests/orchestration/test_temporal_proposal_execution.py:302: in test_legacy_fallback_caps_to_presentation_size
+    assert try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:482: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+___________________________ test_noon_normalization ____________________________
+core/tests/orchestration/test_time_normalization.py:38: in test_noon_normalization
+    decision = process_luma_response(luma_response, "service", "test_user")
+core/orchestration/nlu/luma_response_processor.py:1101: in process_luma_response
+    plan = build_decision_plan(
+core/planning/orchestration/plan_builder.py:996: in build_decision_plan
+    emit_planner_decision_graph_from_plan_builder(
+core/tracing/planner.py:629: in emit_planner_decision_graph_from_plan_builder
+    emit_planner_decision_graph(
+core/tracing/planner.py:276: in emit_planner_decision_graph
+    missing_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.planning.missing_slots'
+________________________ test_noon_normalization_string ________________________
+core/tests/orchestration/test_time_normalization.py:75: in test_noon_normalization_string
+    decision = process_luma_response(luma_response, "service", "test_user")
+core/orchestration/nlu/luma_response_processor.py:1101: in process_luma_response
+    plan = build_decision_plan(
+core/planning/orchestration/plan_builder.py:996: in build_decision_plan
+    emit_planner_decision_graph_from_plan_builder(
+core/tracing/planner.py:629: in emit_planner_decision_graph_from_plan_builder
+    emit_planner_decision_graph(
+core/tracing/planner.py:276: in emit_planner_decision_graph
+    missing_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.planning.missing_slots'
+__________________________ test_morning_normalization __________________________
+core/tests/orchestration/test_time_normalization.py:109: in test_morning_normalization
+    decision = process_luma_response(luma_response, "service", "test_user")
+core/orchestration/nlu/luma_response_processor.py:1101: in process_luma_response
+    plan = build_decision_plan(
+core/planning/orchestration/plan_builder.py:996: in build_decision_plan
+    emit_planner_decision_graph_from_plan_builder(
+core/tracing/planner.py:629: in emit_planner_decision_graph_from_plan_builder
+    emit_planner_decision_graph(
+core/tracing/planner.py:276: in emit_planner_decision_graph
+    missing_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.planning.missing_slots'
+__________________________ test_time_already_in_slots __________________________
+core/tests/orchestration/test_time_normalization.py:140: in test_time_already_in_slots
+    decision = process_luma_response(luma_response, "service", "test_user")
+core/orchestration/nlu/luma_response_processor.py:1101: in process_luma_response
+    plan = build_decision_plan(
+core/planning/orchestration/plan_builder.py:996: in build_decision_plan
+    emit_planner_decision_graph_from_plan_builder(
+core/tracing/planner.py:629: in emit_planner_decision_graph_from_plan_builder
+    emit_planner_decision_graph(
+core/tracing/planner.py:276: in emit_planner_decision_graph
+    missing_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.planning.missing_slots'
+__________________ test_time_normalized_not_in_missing_slots ___________________
+core/tests/orchestration/test_time_normalization.py:177: in test_time_normalized_not_in_missing_slots
+    decision = process_luma_response(luma_response, "service", "test_user")
+core/orchestration/nlu/luma_response_processor.py:1101: in process_luma_response
+    plan = build_decision_plan(
+core/planning/orchestration/plan_builder.py:996: in build_decision_plan
+    emit_planner_decision_graph_from_plan_builder(
+core/tracing/planner.py:629: in emit_planner_decision_graph_from_plan_builder
+    emit_planner_decision_graph(
+core/tracing/planner.py:276: in emit_planner_decision_graph
+    missing_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.planning.missing_slots'
+______________________ test_no_match_returns_alternatives ______________________
+core/tests/orchestration/test_time_resolution.py:60: in test_no_match_returns_alternatives
+    result = resolve_time_after_availability(
+core/orchestration/time_resolution.py:195: in resolve_time_after_availability
+    _emit_time_resolution_trace(resolution, alternatives=alternatives)
+core/orchestration/time_resolution.py:474: in _emit_time_resolution_trace
+    emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_resolution'
+__________ test_plan_builder_forces_mismatch_clarification_not_ready ___________
+core/tests/orchestration/test_time_resolution.py:215: in test_plan_builder_forces_mismatch_clarification_not_ready
+    plan = build_decision_plan(
+core/planning/orchestration/plan_builder.py:996: in build_decision_plan
+    emit_planner_decision_graph_from_plan_builder(
+core/tracing/planner.py:629: in emit_planner_decision_graph_from_plan_builder
+    emit_planner_decision_graph(
+core/tracing/planner.py:276: in emit_planner_decision_graph
+    missing_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.planning.missing_slots'
+_____ test_apply_post_bind_time_resolution_page_two_rejects_page_one_time ______
+core/tests/orchestration/test_time_resolution.py:274: in test_apply_post_bind_time_resolution_page_two_rejects_page_one_time
+    payload = apply_post_bind_time_resolution(merged, session)
+core/orchestration/time_resolution.py:381: in apply_post_bind_time_resolution
+    payload = resolve_time_after_availability(
+core/orchestration/time_resolution.py:195: in resolve_time_after_availability
+    _emit_time_resolution_trace(resolution, alternatives=alternatives)
+core/orchestration/time_resolution.py:474: in _emit_time_resolution_trace
+    emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_resolution'
+______ test_apply_post_bind_time_resolution_page_two_binds_presented_time ______
+core/tests/orchestration/test_time_resolution.py:288: in test_apply_post_bind_time_resolution_page_two_binds_presented_time
+    payload = apply_post_bind_time_resolution(merged, session)
+core/orchestration/time_resolution.py:381: in apply_post_bind_time_resolution
+    payload = resolve_time_after_availability(
+core/orchestration/time_resolution.py:180: in resolve_time_after_availability
+    _emit_time_resolution_trace(resolution, alternatives=alternatives)
+core/orchestration/time_resolution.py:474: in _emit_time_resolution_trace
+    emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_resolution'
+__________ test_apply_post_bind_time_resolution_first_page_unchanged ___________
+core/tests/orchestration/test_time_resolution.py:324: in test_apply_post_bind_time_resolution_first_page_unchanged
+    payload = apply_post_bind_time_resolution(merged, session)
+core/orchestration/time_resolution.py:381: in apply_post_bind_time_resolution
+    payload = resolve_time_after_availability(
+core/orchestration/time_resolution.py:180: in resolve_time_after_availability
+    _emit_time_resolution_trace(resolution, alternatives=alternatives)
+core/orchestration/time_resolution.py:474: in _emit_time_resolution_trace
+    emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_resolution'
+____ test_apply_post_bind_time_resolution_legacy_session_caps_to_first_page ____
+core/tests/orchestration/test_time_resolution.py:352: in test_apply_post_bind_time_resolution_legacy_session_caps_to_first_page
+    payload = apply_post_bind_time_resolution(merged, session)
+core/orchestration/time_resolution.py:381: in apply_post_bind_time_resolution
+    payload = resolve_time_after_availability(
+core/orchestration/time_resolution.py:195: in resolve_time_after_availability
+    _emit_time_resolution_trace(resolution, alternatives=alternatives)
+core/orchestration/time_resolution.py:474: in _emit_time_resolution_trace
+    emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_resolution'
+______ TestServiceIdPreserved.test_no_service_mentioned_empty_candidates _______
+core/tests/session/test_service_stickiness.py:63: in test_no_service_mentioned_empty_candidates
+    merged = merge_luma_with_session(luma, session)
+core/session/merge.py:1655: in merge_luma_with_session
+    bind_result = try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:327: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+____ TestServiceIdDropped.test_ambiguous_service_drops_stale_session_value _____
+core/tests/session/test_service_stickiness.py:79: in test_ambiguous_service_drops_stale_session_value
+    merged = merge_luma_with_session(luma, session)
+core/session/merge.py:1655: in merge_luma_with_session
+    bind_result = try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:327: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+__ TestServiceIdDropped.test_ambiguous_service_service_id_missing_from_slots ___
+core/tests/session/test_service_stickiness.py:91: in test_ambiguous_service_service_id_missing_from_slots
+    merged = merge_luma_with_session(luma, session)
+core/session/merge.py:1655: in merge_luma_with_session
+    bind_result = try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:327: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+_ TestServiceIdDroppedTopLevel.test_top_level_candidates_drop_stale_service_id _
+core/tests/session/test_service_stickiness.py:115: in test_top_level_candidates_drop_stale_service_id
+    merged = merge_luma_with_session(luma, session)
+core/session/merge.py:1655: in merge_luma_with_session
+    bind_result = try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:327: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+_ TestServiceIdDroppedTopLevel.test_top_level_empty_candidates_preserves_session _
+core/tests/session/test_service_stickiness.py:131: in test_top_level_empty_candidates_preserves_session
+    merged = merge_luma_with_session(luma, session)
+core/session/merge.py:1655: in merge_luma_with_session
+    bind_result = try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:327: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+_ TestServiceIdDroppedTopLevel.test_raw_luma_response_null_service_id_with_candidates_drops_stale _
+core/tests/session/test_service_stickiness.py:152: in test_raw_luma_response_null_service_id_with_candidates_drops_stale
+    merged = merge_luma_with_session(luma, session)
+core/session/merge.py:1655: in merge_luma_with_session
+    bind_result = try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:327: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+_ TestServiceIdDroppedTopLevel.test_raw_luma_response_null_service_id_empty_candidates_preserves _
+core/tests/session/test_service_stickiness.py:172: in test_raw_luma_response_null_service_id_empty_candidates_preserves
+    merged = merge_luma_with_session(luma, session)
+core/session/merge.py:1655: in merge_luma_with_session
+    bind_result = try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:327: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+_ TestServiceIdDroppedFactsSlotsLeak.test_facts_slots_stale_service_id_with_candidates_drops _
+core/tests/session/test_service_stickiness.py:206: in test_facts_slots_stale_service_id_with_candidates_drops
+    merged = merge_luma_with_session(luma, session)
+core/session/merge.py:1655: in merge_luma_with_session
+    bind_result = try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:327: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+_____ TestServiceIdReplaced.test_unambiguous_new_service_replaces_session ______
+core/tests/session/test_service_stickiness.py:222: in test_unambiguous_new_service_replaces_session
+    merged = merge_luma_with_session(luma, session)
+core/session/merge.py:1655: in merge_luma_with_session
+    bind_result = try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:327: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+__________ TestServiceIdReplaced.test_same_service_repeated_is_stable __________
+core/tests/session/test_service_stickiness.py:231: in test_same_service_repeated_is_stable
+    merged = merge_luma_with_session(luma, session)
+core/session/merge.py:1655: in merge_luma_with_session
+    bind_result = try_bind_offered_time_selection(
+core/orchestration/temporal_proposal.py:327: in try_bind_offered_time_selection
+    _emit_bind_trace(
+core/orchestration/temporal_proposal.py:500: in _emit_bind_trace
+    emit_bind_time_trace(**kwargs)
+core/tracing/binding.py:61: in emit_bind_time_trace
+    time_evidence = emit_evidence(
+core/tracing/decision_trace.py:706: in emit_evidence
+    return trace.emit_evidence(
+core/tracing/decision_trace.py:367: in emit_evidence
+    self._assert_unique_id(record_id)
+core/tracing/decision_trace.py:677: in _assert_unique_id
+    raise DecisionTraceError(f"Duplicate trace record id: {record_id!r}")
+E   core.tracing.decision_trace.DecisionTraceError: Duplicate trace record id: 'evidence.time_proposal'
+_______________ test_e2e_slot_retry_tracking_increment_and_reset _______________
+core/tests/session/test_slot_retry_tracking_e2e.py:140: in test_e2e_slot_retry_tracking_increment_and_reset
+    assert (
+E   AssertionError: Expected status=NEEDS_CLARIFICATION, got READY
+E   assert 'READY' == 'NEEDS_CLARIFICATION'
+E     
+E     - NEEDS_CLARIFICATION
+E     + READY
+----------------------------- Captured stdout call -----------------------------
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
   effective_slots_for_filtering.keys()=['service_id']
-  promoted_slots={'service_id': 'premium haircut'}
-  effective_collected_slots (after filter)={'service_id': 'premium haircut'}
+  promoted_slots={'service_id': 'haircut'}
+  effective_collected_slots (after filter)={'service_id': 'haircut'}
   effective_collected_slots.keys()=['service_id']
-2026-07-08 17:08:35,529  core.orchestration.api.message                 INFO  [decision_trace:summary]
-User:
-show me additional times
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut"}, "effective_collected_slots": {"service_id": "haircut"}}
 
-Intent:
-CREATE_APPOINTMENT
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut"}, "session_slots": null, "modification_context": null}
+______________ test_acknowledgement_appears_when_slot_just_filled ______________
+core/tests/rendering/test_acknowledgement_rendering_e2e.py:138: in test_acknowledgement_appears_when_slot_just_filled
+    assert "text" in result, f"Expected text in result, got keys: {list(result.keys())}"
+E   AssertionError: Expected text in result, got keys: ['success', 'result', 'outcome', '_merged_luma_response', 'ui_actions']
+E   assert 'text' in {'_merged_luma_response': {'_conversation': {'last_intent': 'CREATE_APPOINTMENT', 'last_search_query': None, 'turns': ...ns': ['SEARCH_AVAILABILITY'], 'awaiting': None, 'blocked_actions': ['CONFIRM_APPOINTMENT'], ...}, 'success': True, ...}
+________________ test_acknowledgement_does_not_appear_on_retry _________________
+core/tests/rendering/test_acknowledgement_rendering_e2e.py:205: in test_acknowledgement_does_not_appear_on_retry
+    assert "text" in result, f"Expected text in result, got keys: {list(result.keys())}"
+E   AssertionError: Expected text in result, got keys: ['success', 'result', 'outcome', '_merged_luma_response', 'ui_actions']
+E   assert 'text' in {'_merged_luma_response': {'_conversation': {'last_intent': 'CREATE_APPOINTMENT', 'last_search_query': None, 'turns': ...ns': ['SEARCH_AVAILABILITY'], 'awaiting': None, 'blocked_actions': ['CONFIRM_APPOINTMENT'], ...}, 'success': True, ...}
+_______________ test_adaptive_clarification_variant_after_retry ________________
+core/tests/rendering/test_adaptive_clarification_rendering_e2e.py:136: in test_adaptive_clarification_variant_after_retry
+    assert (
+E   AssertionError: Expected status=NEEDS_CLARIFICATION, got READY
+E   assert 'READY' == 'NEEDS_CLARIFICATION'
+E     
+E     - NEEDS_CLARIFICATION
+E     + READY
+----------------------------- Captured stdout call -----------------------------
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut"}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'haircut'}
+  effective_collected_slots (after filter)={'service_id': 'haircut'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut"}, "effective_collected_slots": {"service_id": "haircut"}}
 
-Session:
-Merged with prior session
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut"}, "session_slots": null, "modification_context": null}
+_______________ test_conversation_rendering_scenario[scenario0] ________________
+core/tests/rendering/test_conversation_rendering_e2e.py:382: in test_conversation_rendering_scenario
+    _replay_scenario(scenario)
+core/tests/rendering/test_conversation_rendering_e2e.py:367: in _replay_scenario
+    _assert_turn_expectations(result, expect, turn_num)
+core/tests/rendering/test_conversation_rendering_e2e.py:213: in _assert_turn_expectations
+    assert actual_status == expect["status"], (
+E   AssertionError: Turn 1: Expected status NEEDS_CLARIFICATION, got READY. Result keys: ['success', 'result', 'outcome', '_merged_luma_response', 'ui_actions']
+E   assert 'READY' == 'NEEDS_CLARIFICATION'
+E     
+E     - NEEDS_CLARIFICATION
+E     + READY
+----------------------------- Captured stdout call -----------------------------
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"date": "2026-01-16", "service_id": "haircut"}, "raw_luma_context": {}}
+[_compute_effective_collected_slots] raw_slots keys=['date', 'service_id']
+  effective_slots_for_filtering.keys()=['date', 'service_id']
+  promoted_slots={'date': '2026-01-16', 'service_id': 'haircut'}
+  effective_collected_slots (after filter)={'date': '2026-01-16', 'service_id': 'haircut'}
+  effective_collected_slots.keys()=['date', 'service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"date": "2026-01-16", "service_id": "haircut"}, "effective_collected_slots": {"date": "2026-01-16", "service_id": "haircut"}}
 
-Planner:
-READY
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"date": "2026-01-16", "service_id": "haircut"}, "session_slots": null, "modification_context": null}
+_______________ test_conversation_rendering_scenario[scenario1] ________________
+core/tests/rendering/test_conversation_rendering_e2e.py:382: in test_conversation_rendering_scenario
+    _replay_scenario(scenario)
+core/tests/rendering/test_conversation_rendering_e2e.py:367: in _replay_scenario
+    _assert_turn_expectations(result, expect, turn_num)
+core/tests/rendering/test_conversation_rendering_e2e.py:213: in _assert_turn_expectations
+    assert actual_status == expect["status"], (
+E   AssertionError: Turn 1: Expected status NEEDS_CLARIFICATION, got READY. Result keys: ['success', 'result', 'outcome', '_merged_luma_response', 'ui_actions']
+E   assert 'READY' == 'NEEDS_CLARIFICATION'
+E     
+E     - NEEDS_CLARIFICATION
+E     + READY
+----------------------------- Captured stdout call -----------------------------
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut"}, "raw_luma_context": {}}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'haircut'}
+  effective_collected_slots (after filter)={'service_id': 'haircut'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut"}, "effective_collected_slots": {"service_id": "haircut"}}
 
-Missing:
-time
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut"}, "session_slots": null, "modification_context": null}
+__________________ test_rendering_missing_time_clarification ___________________
+core/tests/rendering/test_rendering_verification.py:81: in test_rendering_missing_time_clarification
+    assert "text" in result, "Expected text to be present in response for clarification"
+E   AssertionError: Expected text to be present in response for clarification
+E   assert 'text' in {'_merged_luma_response': {'_conversation': {'last_intent': 'CREATE_APPOINTMENT', 'last_search_query': None, 'turns': ...ns': ['SEARCH_AVAILABILITY'], 'awaiting': None, 'blocked_actions': ['CONFIRM_APPOINTMENT'], ...}, 'success': True, ...}
+----------------------------- Captured stdout call -----------------------------
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut", "date": "2026-01-16"}, "raw_luma_context": {}}
+[_compute_effective_collected_slots] raw_slots keys=['service_id', 'date']
+  effective_slots_for_filtering.keys()=['service_id', 'date']
+  promoted_slots={'service_id': 'haircut', 'date': '2026-01-16'}
+  effective_collected_slots (after filter)={'service_id': 'haircut', 'date': '2026-01-16'}
+  effective_collected_slots.keys()=['service_id', 'date']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut", "date": "2026-01-16"}, "effective_collected_slots": {"service_id": "haircut", "date": "2026-01-16"}}
 
-Action:
-None
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut", "date": "2026-01-16"}, "session_slots": null, "modification_context": null}
+________________ test_rendering_generic_clarification_fallback _________________
+core/tests/rendering/test_rendering_verification.py:144: in test_rendering_generic_clarification_fallback
+    assert "text" in result, "Expected text to be present in response for clarification"
+E   AssertionError: Expected text to be present in response for clarification
+E   assert 'text' in {'_merged_luma_response': {'_conversation': {'last_intent': 'CREATE_APPOINTMENT', 'last_search_query': None, 'turns': ...ns': ['SEARCH_AVAILABILITY'], 'awaiting': None, 'blocked_actions': ['CONFIRM_APPOINTMENT'], ...}, 'success': True, ...}
+----------------------------- Captured stdout call -----------------------------
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut"}, "raw_luma_context": {}}
+[_compute_effective_collected_slots] raw_slots keys=['service_id']
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'haircut'}
+  effective_collected_slots (after filter)={'service_id': 'haircut'}
+  effective_collected_slots.keys()=['service_id']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut"}, "effective_collected_slots": {"service_id": "haircut"}}
 
-Reason:
-Executable subset satisfied; exploratory action allowed
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut"}, "session_slots": null, "modification_context": null}
+_________________ test_rendering_ready_state_no_clarification __________________
+core/tests/rendering/test_rendering_verification.py:209: in test_rendering_ready_state_no_clarification
+    assert ("awaiting" in result) or (
+E   AssertionError: Expected either 'awaiting' in result or 'text' not in result for non-clarification flow, got awaiting=None, text=You're about to book a Haircut on January 16 at 2pm. Would you like me to go ahead?
+E   assert ('awaiting' in {'_merged_luma_response': {'_conversation': {'last_intent': 'CREATE_APPOINTMENT', 'last_search_query': None, 'turns': ...VAILABILITY'], 'awaiting': 'USER_CONFIRMATION', 'blocked_actions': ['CONFIRM_APPOINTMENT'], ...}, 'success': True, ...} or 'text' not in {'_merged_luma_response': {'_conversation': {'last_intent': 'CREATE_APPOINTMENT', 'last_search_query': None, 'turns': ...VAILABILITY'], 'awaiting': 'USER_CONFIRMATION', 'blocked_actions': ['CONFIRM_APPOINTMENT'], ...}, 'success': True, ...})
+----------------------------- Captured stdout call -----------------------------
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {"service_id": "haircut", "date": "2026-01-16", "time": "2pm"}, "raw_luma_context": {}}
+[_compute_effective_collected_slots] raw_slots keys=['service_id', 'date', 'time']
+  effective_slots_for_filtering.keys()=['service_id', 'date', 'time', 'has_datetime']
+  promoted_slots={'service_id': 'haircut', 'date': '2026-01-16', 'time': '2pm', 'has_datetime': True}
+  effective_collected_slots (after filter)={'service_id': 'haircut', 'date': '2026-01-16', 'time': '2pm'}
+  effective_collected_slots.keys()=['service_id', 'date', 'time']
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {"service_id": "haircut", "date": "2026-01-16", "time": "2pm", "has_datetime": true}, "effective_collected_slots": {"service_id": "haircut", "date": "2026-01-16", "time": "2pm"}}
 
-Outcome:
-Turn completed with an execution artifact
-
-Timing
-
-Total:
-2583 ms
-
-User:
-show me additional times
-
-Intent:
-CREATE_APPOINTMENT
-
-Session:
-Merged with prior session
-
-Planner:
-READY
-
-Missing:
-time
-
-Action:
-None
-
-Reason:
-Executable subset satisfied; exploratory action allowed
-
-Outcome:
-Turn completed with an execution artifact
-
-Timing
-
-Total:
-2583 ms
-
-=============================== warnings summary ===============================
-../../../../../../../../../home/mbaocha/.pyenv/versions/3.10.13/lib/python3.10/site-packages/pydantic/fields.py:799
-../../../../../../../../../home/mbaocha/.pyenv/versions/3.10.13/lib/python3.10/site-packages/pydantic/fields.py:799
-../../../../../../../../../home/mbaocha/.pyenv/versions/3.10.13/lib/python3.10/site-packages/pydantic/fields.py:799
-../../../../../../../../../home/mbaocha/.pyenv/versions/3.10.13/lib/python3.10/site-packages/pydantic/fields.py:799
-../../../../../../../../../home/mbaocha/.pyenv/versions/3.10.13/lib/python3.10/site-packages/pydantic/fields.py:799
-../../../../../../../../../home/mbaocha/.pyenv/versions/3.10.13/lib/python3.10/site-packages/pydantic/fields.py:799
-  /home/mbaocha/.pyenv/versions/3.10.13/lib/python3.10/site-packages/pydantic/fields.py:799: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'deprecated'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.5/migration/
-    warn(
-
--- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+[BEFORE_REQUIRED_SLOTS] {"trace": "BEFORE_REQUIRED_SLOTS", "intent": "CREATE_APPOINTMENT", "slots_used": {"service_id": "haircut", "date": "2026-01-16", "time": "2pm", "has_datetime": true}, "session_slots": null, "modification_context": null}
 =========================== short test summary info ============================
-FAILED core/tests/e2e/test_browsing.py::test_browse_pagination_full_api_path_validation
-============= 1 failed, 29 passed, 6 warnings in 345.79s (0:05:45) =============
+FAILED core/tests/orchestration/test_availability_pagination_flow.py::test_time_selection_binds_only_from_current_page
+FAILED core/tests/orchestration/test_availability_pagination_flow.py::test_bind_after_pagination_page_two_rejects_page_one_slot
+FAILED core/tests/orchestration/test_temporal_proposal_execution.py::TestTryBindOfferedTimeSelection::test_rejects_time_not_in_offers
+FAILED core/tests/orchestration/test_temporal_proposal_execution.py::TestTryBindOfferedTimeSelection::test_binds_latest_presented_date_not_stale_date_proposal
+FAILED core/tests/orchestration/test_temporal_proposal_execution.py::TestTryBindOfferedTimeSelection::test_new_search_replaces_historical_offers_for_binding
+FAILED core/tests/orchestration/test_temporal_proposal_execution.py::TestTryBindOfferedTimeSelection::test_binds_only_presented_slots_not_full_search_result
+FAILED core/tests/orchestration/test_temporal_proposal_execution.py::TestTryBindOfferedTimeSelection::test_legacy_fallback_caps_to_presentation_size
+FAILED core/tests/orchestration/test_time_normalization.py::test_noon_normalization
+FAILED core/tests/orchestration/test_time_normalization.py::test_noon_normalization_string
+FAILED core/tests/orchestration/test_time_normalization.py::test_morning_normalization
+FAILED core/tests/orchestration/test_time_normalization.py::test_time_already_in_slots
+FAILED core/tests/orchestration/test_time_normalization.py::test_time_normalized_not_in_missing_slots
+FAILED core/tests/orchestration/test_time_resolution.py::test_no_match_returns_alternatives
+FAILED core/tests/orchestration/test_time_resolution.py::test_plan_builder_forces_mismatch_clarification_not_ready
+FAILED core/tests/orchestration/test_time_resolution.py::test_apply_post_bind_time_resolution_page_two_rejects_page_one_time
+FAILED core/tests/orchestration/test_time_resolution.py::test_apply_post_bind_time_resolution_page_two_binds_presented_time
+FAILED core/tests/orchestration/test_time_resolution.py::test_apply_post_bind_time_resolution_first_page_unchanged
+FAILED core/tests/orchestration/test_time_resolution.py::test_apply_post_bind_time_resolution_legacy_session_caps_to_first_page
+FAILED core/tests/session/test_service_stickiness.py::TestServiceIdPreserved::test_no_service_mentioned_empty_candidates
+FAILED core/tests/session/test_service_stickiness.py::TestServiceIdDropped::test_ambiguous_service_drops_stale_session_value
+FAILED core/tests/session/test_service_stickiness.py::TestServiceIdDropped::test_ambiguous_service_service_id_missing_from_slots
+FAILED core/tests/session/test_service_stickiness.py::TestServiceIdDroppedTopLevel::test_top_level_candidates_drop_stale_service_id
+FAILED core/tests/session/test_service_stickiness.py::TestServiceIdDroppedTopLevel::test_top_level_empty_candidates_preserves_session
+FAILED core/tests/session/test_service_stickiness.py::TestServiceIdDroppedTopLevel::test_raw_luma_response_null_service_id_with_candidates_drops_stale
+FAILED core/tests/session/test_service_stickiness.py::TestServiceIdDroppedTopLevel::test_raw_luma_response_null_service_id_empty_candidates_preserves
+FAILED core/tests/session/test_service_stickiness.py::TestServiceIdDroppedFactsSlotsLeak::test_facts_slots_stale_service_id_with_candidates_drops
+FAILED core/tests/session/test_service_stickiness.py::TestServiceIdReplaced::test_unambiguous_new_service_replaces_session
+FAILED core/tests/session/test_service_stickiness.py::TestServiceIdReplaced::test_same_service_repeated_is_stable
+FAILED core/tests/session/test_slot_retry_tracking_e2e.py::test_e2e_slot_retry_tracking_increment_and_reset
+FAILED core/tests/rendering/test_acknowledgement_rendering_e2e.py::test_acknowledgement_appears_when_slot_just_filled
+FAILED core/tests/rendering/test_acknowledgement_rendering_e2e.py::test_acknowledgement_does_not_appear_on_retry
+FAILED core/tests/rendering/test_adaptive_clarification_rendering_e2e.py::test_adaptive_clarification_variant_after_retry
+FAILED core/tests/rendering/test_conversation_rendering_e2e.py::test_conversation_rendering_scenario[scenario0]
+FAILED core/tests/rendering/test_conversation_rendering_e2e.py::test_conversation_rendering_scenario[scenario1]
+FAILED core/tests/rendering/test_rendering_verification.py::test_rendering_missing_time_clarification
+FAILED core/tests/rendering/test_rendering_verification.py::test_rendering_generic_clarification_fallback
+FAILED core/tests/rendering/test_rendering_verification.py::test_rendering_ready_state_no_clarification
+================== 37 failed, 302 passed in 104.28s (0:01:44) ==================
+================================================================================
+Running tests: unit
+Path: core/tests/orchestration core/tests/session core/tests/rendering core/tests/routing core/tests/intents core/tests/workflows core/tests/execution/test_test_backend.py core/tests/execution/test_booking_execution.py core/tests/execution/test_availability_execution.py core/tests/execution/test_confirmation_execution.py
+Working directory: /mnt/c/Users/user/Documents/projects/dialogcart/dialogcart/src
+================================================================================
+
