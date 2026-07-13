@@ -34,6 +34,11 @@ def _load_scenarios() -> List[Dict[str, Any]]:
     return data.get("scenarios", [])
 
 
+_TEMPORAL_SLOT_KEYS = frozenset(
+    {"date", "time", "date_range", "datetime_range", "start_date", "end_date"}
+)
+
+
 def _build_mock_luma_response(
     text: str,
     status: str,
@@ -41,8 +46,20 @@ def _build_mock_luma_response(
     slots: Dict[str, Any],
     action: str = None,
 ) -> Dict[str, Any]:
-    """Build a mock Luma response based on expected state."""
-    service_id = slots.get("service_id", "haircut")
+    """Build a mock Luma response based on expected state.
+
+    Unconfirmed date/time use facts + proposals (canonical). Durable
+    slots.date / slots.time stay absent until bind/confirm.
+    """
+    raw = dict(slots or {})
+    date_val = raw.pop("date", None)
+    time_val = raw.pop("time", None)
+    for key in _TEMPORAL_SLOT_KEYS:
+        raw.pop(key, None)
+
+    durable_slots = raw
+    service_id = durable_slots.get("service_id", "haircut")
+    facts: Dict[str, Any] = {"service_id": service_id}
 
     response = {
         "success": True,
@@ -59,43 +76,34 @@ def _build_mock_luma_response(
                 else "NEEDS_CLARIFICATION"
             ),
         },
-        "facts": {"service_id": service_id},
-        "slots": slots.copy(),
+        "facts": facts,
+        "slots": durable_slots,
         "missing_slots": missing_slots,
         "context": {},
     }
 
-    # Add datetime_range if date and time are present
-    if "date" in slots and "time" in slots:
-        date_str = slots["date"]
-        time_str = slots["time"]
-        # Create datetime_range for complete booking
-        response["booking"]["datetime_range"] = {
-            "start": f"{date_str}T14:00:00Z",
-            "end": f"{date_str}T14:30:00Z",
-        }
+    if date_val:
+        date_str = date_val if isinstance(date_val, str) else date_val[0]
+        facts["dates"] = [date_str]
+        response["date_proposal"] = {"mode": "single_day", "start": date_str}
+
+    if time_val:
+        time_str = time_val if isinstance(time_val, str) else time_val[0]
+        facts["times"] = [time_str]
+        response["time_proposal"] = {"mode": "exact", "value": time_str}
         response["time_constraint"] = {
             "mode": "exact",
-            "start": "14:00",
-            "end": "14:00",
-        }
-        response["facts"]["times"] = [time_str]
-    elif "date" in slots:
-        # Partial datetime_range when only date is present
-        date_str = slots["date"]
-        response["booking"]["datetime_range"] = {
-            "start": f"{date_str}T00:00:00Z",
-            "end": f"{date_str}T23:59:59Z",
+            "start": time_str,
+            "end": time_str,
         }
 
     # Add confirmation state based on status or action
     # AWAITING_CONFIRMATION status indicates confirmation is pending
     if status == "AWAITING_CONFIRMATION" or action == "CONFIRM_APPOINTMENT":
         response["booking"]["confirmation_state"] = "pending"
-        if "date" in slots and "time" in slots:
-            response["booking"]["booking_state"] = "RESOLVED"
-    elif status == "READY" and "date" in slots and "time" in slots:
-        # READY with all slots means booking is resolved (no confirmation needed)
+        response["booking"]["booking_state"] = "RESOLVED"
+    elif status == "READY" and date_val and time_val:
+        # READY with date+time proposals means booking is resolved (no confirmation needed)
         response["booking"]["booking_state"] = "RESOLVED"
 
     return response
@@ -195,6 +203,10 @@ def _assert_turn_expectations(
         or result_obj.get("missing_slots", [])
         or outcome_obj.get("missing_slots", [])
     )
+    if not actual_missing:
+        facts = outcome_obj.get("facts") if isinstance(outcome_obj, dict) else None
+        if isinstance(facts, dict) and isinstance(facts.get("missing_slots"), list):
+            actual_missing = facts.get("missing_slots")
 
     # Action can be at top level, in result, or in outcome
     actual_action = (
@@ -240,6 +252,21 @@ def _assert_turn_expectations(
         assert (
             actual_action == expect["action"]
         ), f"Turn {turn_num}: Expected action {expect['action']}, got {actual_action}"
+
+    # Assert exploratory READY planning shape when clarification text is absent
+    if expect.get("status") == "READY" and not expect.get("text", {}).get(
+        "present", False
+    ):
+        allowed = (
+            result.get("allowed_actions")
+            or result_obj.get("allowed_actions")
+            or outcome_obj.get("allowed_actions")
+            or []
+        )
+        assert "SEARCH_AVAILABILITY" in allowed, (
+            f"Turn {turn_num}: Expected SEARCH_AVAILABILITY in allowed_actions for "
+            f"READY exploratory turn, got {allowed}"
+        )
 
     # Assert rendering expectations
     if "text" in expect:
@@ -313,15 +340,16 @@ def _replay_scenario(scenario: Dict[str, Any]) -> None:
         # In a real scenario, this would be handled by the NLU/Luma service
         sentence_lower = sentence.lower()
 
-        # Extract time
+        # Extract time (canonical HH:MM for facts.times / time_proposal)
         if "2pm" in sentence_lower or "14:00" in sentence_lower:
-            accumulated_slots["time"] = "2pm"
+            accumulated_slots["time"] = "14:00"
         elif (
             any(x in sentence_lower for x in ["pm", "am"])
             and "time" not in accumulated_slots
         ):
             # Generic time pattern
-            accumulated_slots["time"] = "2pm"
+            accumulated_slots["time"] = "14:00"
+
 
         # Extract date
         if "tomorrow" in sentence_lower:

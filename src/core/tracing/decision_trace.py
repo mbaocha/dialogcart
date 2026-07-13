@@ -124,6 +124,11 @@ def set_request_decision_trace_enabled(enabled: bool, *, view: Optional[str] = N
         _request_trace_view.set(view)
 
 
+def is_request_decision_trace_bound() -> bool:
+    """True when the API layer bound per-request decision-trace ownership."""
+    return _request_trace_enabled.get() is not None
+
+
 def clear_request_decision_trace_enabled() -> None:
     _request_trace_enabled.set(None)
     _request_trace_view.set(None)

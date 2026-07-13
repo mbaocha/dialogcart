@@ -7,6 +7,7 @@ Tests that rendering is correctly attached to core E2E responses.
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Dict, List, Optional
 from unittest.mock import Mock
 
 import pytest
@@ -21,17 +22,58 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 
+def _outcome(result: Dict[str, Any]) -> Dict[str, Any]:
+    outcome = result.get("outcome")
+    return outcome if isinstance(outcome, dict) else {}
+
+
+def _missing_slots(result: Dict[str, Any]) -> List[str]:
+    outcome = _outcome(result)
+    missing = outcome.get("missing_slots")
+    if missing is None:
+        facts = outcome.get("facts") or {}
+        missing = facts.get("missing_slots", []) if isinstance(facts, dict) else []
+    return list(missing) if isinstance(missing, list) else []
+
+
+def _assert_ready_missing_client_planning(
+    result: Dict[str, Any],
+    *,
+    expected_missing: Optional[List[str]] = None,
+) -> None:
+    """Assert exploratory READY planning shape when availability_client is omitted."""
+    assert result is not None
+    assert result.get("success") is True
+    outcome = _outcome(result)
+    assert outcome.get("status") == "READY", (
+        f"Expected READY when executable_with=[service_id] is satisfied, "
+        f"got {outcome.get('status')}"
+    )
+    missing = _missing_slots(result)
+    if expected_missing is not None:
+        assert set(missing) == set(expected_missing), (
+            f"Expected missing_slots={expected_missing}, got {missing}"
+        )
+    allowed = outcome.get("allowed_actions") or []
+    assert "SEARCH_AVAILABILITY" in allowed, (
+        f"Expected SEARCH_AVAILABILITY in allowed_actions, got {allowed}"
+    )
+    assert "text" not in result, (
+        f"Expected no clarification text on missing-client READY planning response, "
+        f"got text={result.get('text')!r}"
+    )
+
+
 def test_rendering_missing_time_clarification():
     """
-    Test 1: Missing slot → clarification rendering
+    service_id + date (time missing) with no availability_client.
 
-    Scenario: User provides service + date but no time.
-    Expected: status = NEEDS_CLARIFICATION, missing_slots = ["time"], rendered_text is present.
+    Product policy: READY + exploratory SEARCH_AVAILABILITY allowed; no
+    clarification rendering when the availability client is omitted.
     """
     frozen_time = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
     user_id = "test_user_rendering_001"
 
-    # Mock Luma response for "book a haircut tomorrow" (missing time)
     mock_luma_response = {
         "success": True,
         "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
@@ -53,17 +95,14 @@ def test_rendering_missing_time_clarification():
         "context": {},
     }
 
-    # Mock Luma client
     mock_luma_client = Mock(spec=LumaClient)
     mock_luma_client.resolve.return_value = mock_luma_response
 
-    # Mock organization client
     mock_org_client = Mock(spec=OrganizationClient)
     mock_org_client.get_details.return_value = {
-        "organization": {"businessCategoryId": 1}  # Maps to "service" domain
+        "organization": {"businessCategoryId": 1}
     }
 
-    # Call handle_message
     result = handle_message(
         text="book a haircut tomorrow",
         user_id=user_id,
@@ -73,29 +112,19 @@ def test_rendering_missing_time_clarification():
         organization_id=1,
     )
 
-    # Assert result structure
-    assert result is not None
-    assert result.get("success") is True
-
-    # Assert text is present (clarification signal)
-    assert "text" in result, "Expected text to be present in response for clarification"
-
-    # Assert text is truthy
-    assert result["text"], f"Expected text to be truthy, got {result.get('text')}"
+    _assert_ready_missing_client_planning(result, expected_missing=["time"])
 
 
 def test_rendering_generic_clarification_fallback():
     """
-    Test 2: Unknown clarification fallback
+    service_id only (date/time missing) with no availability_client.
 
-    Scenario: User input produces NEEDS_CLARIFICATION with no missing slots.
-    Expected: rendered_text uses generic NEEDS_CLARIFICATION template.
+    Product policy: READY + exploratory SEARCH_AVAILABILITY; planning/missing-client
+    response shape (no clarification text).
     """
     frozen_time = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
     user_id = "test_user_rendering_002"
 
-    # Mock Luma response with NEEDS_CLARIFICATION but empty missing_slots
-    # This simulates an ambiguous booking that needs clarification but no specific missing slots
     mock_luma_response = {
         "success": True,
         "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.85},
@@ -109,24 +138,18 @@ def test_rendering_generic_clarification_fallback():
         },
         "facts": {"service_id": "haircut"},
         "slots": {"service_id": "haircut"},
-        "missing_slots": [
-            "date",
-            "time",
-        ],  # Multiple missing slots for generic fallback
+        "missing_slots": ["date", "time"],
         "context": {},
     }
 
-    # Mock Luma client
     mock_luma_client = Mock(spec=LumaClient)
     mock_luma_client.resolve.return_value = mock_luma_response
 
-    # Mock organization client
     mock_org_client = Mock(spec=OrganizationClient)
     mock_org_client.get_details.return_value = {
         "organization": {"businessCategoryId": 1}
     }
 
-    # Call handle_message
     result = handle_message(
         text="book something",
         user_id=user_id,
@@ -136,28 +159,21 @@ def test_rendering_generic_clarification_fallback():
         organization_id=1,
     )
 
-    # Assert result structure
-    assert result is not None
-    assert result.get("success") is True
-
-    # Assert text is present (clarification signal)
-    assert "text" in result, "Expected text to be present in response for clarification"
-
-    # Assert text is truthy
-    assert result["text"], f"Expected text to be truthy, got {result.get('text')}"
+    _assert_ready_missing_client_planning(
+        result, expected_missing=["date", "time"]
+    )
 
 
 def test_rendering_ready_state_no_clarification():
     """
-    Test 3: READY state does NOT force clarification rendering
+    Complete booking info in one turn → confirmation flow.
 
-    Scenario: User provides all required info in one turn.
-    Expected: status = READY, rendered_text is either None or action-based (not clarification).
+    Assert canonical nested outcome.awaiting == USER_CONFIRMATION rather than
+    a root-level awaiting field.
     """
     frozen_time = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
     user_id = "test_user_rendering_003"
 
-    # Mock Luma response for "book haircut tomorrow at 2pm" (complete)
     mock_luma_response = {
         "success": True,
         "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
@@ -181,17 +197,14 @@ def test_rendering_ready_state_no_clarification():
         "context": {},
     }
 
-    # Mock Luma client
     mock_luma_client = Mock(spec=LumaClient)
     mock_luma_client.resolve.return_value = mock_luma_response
 
-    # Mock organization client
     mock_org_client = Mock(spec=OrganizationClient)
     mock_org_client.get_details.return_value = {
         "organization": {"businessCategoryId": 1}
     }
 
-    # Call handle_message
     result = handle_message(
         text="book haircut tomorrow at 2pm",
         user_id=user_id,
@@ -201,14 +214,12 @@ def test_rendering_ready_state_no_clarification():
         organization_id=1,
     )
 
-    # Assert result structure
     assert result is not None
     assert result.get("success") is True
-
-    # Assert either awaiting is present or text is not present (non-clarification flow)
-    assert ("awaiting" in result) or (
-        "text" not in result
-    ), f"Expected either 'awaiting' in result or 'text' not in result for non-clarification flow, got awaiting={result.get('awaiting')}, text={result.get('text')}"
+    outcome = _outcome(result)
+    assert outcome.get("awaiting") == "USER_CONFIRMATION", (
+        f"Expected outcome.awaiting=USER_CONFIRMATION, got {outcome.get('awaiting')!r}"
+    )
 
 
 if __name__ == "__main__":

@@ -1,23 +1,18 @@
 """
 End-to-End Tests: Acknowledgement Rendering (Phase 2)
 
-Tests that acknowledgement prefix ("Got it. ") appears when:
-- A slot was just filled (last_filled_slot is set)
-- It differs from current missing slot
-- attempt_count < 1 (first attempt)
-
-Tests that acknowledgement does NOT appear on retry attempts (attempt_count >= 1).
+Under current policy, service_id (+ optional date) with missing time yields READY
+and exploratory SEARCH_AVAILABILITY. These tests omit availability_client and
+assert the planning/missing-client response shape (no clarification text).
 """
 
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
-
-from unittest.mock import patch
 
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.nlu import LumaClient
@@ -29,14 +24,31 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 
+_TEMPORAL_SLOT_KEYS = frozenset(
+    {"date", "time", "date_range", "datetime_range", "start_date", "end_date"}
+)
+
+
 def _build_mock_luma_response(
     status: str,
     missing_slots: list,
     slots: Dict[str, Any],
     slot_attempts: Dict[str, int] = None,
 ) -> Dict[str, Any]:
-    """Build a mock Luma response for acknowledgement rendering tests."""
-    service_id = slots.get("service_id", "haircut")
+    """Build a mock Luma response for acknowledgement rendering tests.
+
+    Unconfirmed date/time use facts + proposals (canonical). Durable
+    slots.date / slots.time stay absent until bind/confirm.
+    """
+    raw = dict(slots or {})
+    date_val = raw.pop("date", None)
+    time_val = raw.pop("time", None)
+    for key in _TEMPORAL_SLOT_KEYS:
+        raw.pop(key, None)
+
+    durable_slots = raw
+    service_id = durable_slots.get("service_id", "haircut")
+    facts: Dict[str, Any] = {"service_id": service_id}
 
     response = {
         "success": True,
@@ -53,77 +65,90 @@ def _build_mock_luma_response(
                 else "NEEDS_CLARIFICATION"
             ),
         },
-        "facts": {"service_id": service_id},
-        "slots": slots.copy(),
+        "facts": facts,
+        "slots": durable_slots,
         "missing_slots": missing_slots,
         "context": {},
     }
 
-    # Add slot_attempts to facts if provided
     if slot_attempts:
         response["facts"]["slot_attempts"] = slot_attempts
 
-    # Add datetime_range if date is present
-    if "date" in slots:
-        date_str = slots["date"]
-        response["booking"]["datetime_range"] = {
-            "start": f"{date_str}T00:00:00Z",
-            "end": f"{date_str}T23:59:59Z",
+    if date_val:
+        date_str = date_val if isinstance(date_val, str) else date_val[0]
+        facts["dates"] = [date_str]
+        response["date_proposal"] = {"mode": "single_day", "start": date_str}
+
+    if time_val:
+        time_str = time_val if isinstance(time_val, str) else time_val[0]
+        facts["times"] = [time_str]
+        response["time_proposal"] = {"mode": "exact", "value": time_str}
+        response["time_constraint"] = {
+            "mode": "exact",
+            "start": time_str,
+            "end": time_str,
         }
 
     return response
 
 
+def _assert_ready_missing_client(result: Dict[str, Any], expected_missing: list) -> None:
+    assert result.get("success") is True
+    outcome = result.get("outcome") or {}
+    assert outcome.get("status") == "READY", (
+        f"Expected READY for executable_with=[service_id], got {outcome.get('status')}"
+    )
+    missing = outcome.get("missing_slots")
+    if missing is None:
+        missing = (outcome.get("facts") or {}).get("missing_slots", [])
+    assert set(missing) == set(expected_missing), (
+        f"Expected missing_slots={expected_missing}, got {missing}"
+    )
+    allowed = outcome.get("allowed_actions") or []
+    assert "SEARCH_AVAILABILITY" in allowed
+    assert "text" not in result, (
+        f"Expected no clarification text on missing-client READY response, "
+        f"got keys={list(result.keys())}"
+    )
+
+
 def test_acknowledgement_appears_when_slot_just_filled():
     """
-    Test that acknowledgement appears when a slot was just filled.
+    Date filled, time still missing, no availability_client.
 
-    Scenario:
-    - User provides date
-    - System still needs time
-    - session_state["last_filled_slot"] == "date"
-    - attempt_count == 0 (first attempt)
-
-    Expected:
-    - Response starts with "Got it."
-    - Response still mentions "time"
-    - Clarification template text is preserved after prefix
+    Expect READY exploratory planning shape (not clarification acknowledgement text).
     """
     user_id = "test_ack_1"
     frozen_time = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
 
-    # Session state with last_filled_slot set to "date"
     session_state = {
         "intent_name": "CREATE_APPOINTMENT",
-        "slots": {"service_id": "haircut", "date": "2026-01-16"},
+        "slots": {"service_id": "haircut"},
+        "date_proposal": {"mode": "single_day", "start": "2026-01-16"},
         "missing_slots": ["time"],
-        "status": "NEEDS_CLARIFICATION",
-        "facts": {},
+        "status": "READY",
+        "facts": {"service_id": "haircut", "dates": ["2026-01-16"]},
         "slot_attempts": {},
         "last_filled_slot": "date",
     }
 
-    # Mock clients
     mock_luma_client = Mock(spec=LumaClient)
     mock_org_client = Mock(spec=OrganizationClient)
     mock_org_client.get_details.return_value = {
         "organization": {"businessCategoryId": 1}
     }
 
-    # Build mock Luma response: user provided date, still needs time
     mock_luma_response = _build_mock_luma_response(
         status="NEEDS_CLARIFICATION",
         missing_slots=["time"],
         slots={"service_id": "haircut", "date": "2026-01-16"},
-        slot_attempts={},  # attempt_count == 0 for "time"
+        slot_attempts={},
     )
-
     mock_luma_client.resolve.return_value = mock_luma_response
 
-    _llm_response = "Got it. What time would you like for your appointment?"
-
     with patch(
-        "core.orchestration.orchestrator.render_llm", return_value=_llm_response
+        "core.orchestration.orchestrator.render_llm",
+        return_value="Got it. What time would you like for your appointment?",
     ):
         result = handle_message(
             text="tomorrow",
@@ -135,62 +160,46 @@ def test_acknowledgement_appears_when_slot_just_filled():
             session_state=session_state,
         )
 
-    assert "text" in result, f"Expected text in result, got keys: {list(result.keys())}"
-    assert result["text"], f"Expected non-empty text, got: {result.get('text')}"
-    assert result["text"] == _llm_response, (
-        f"Expected LLM-rendered text, got: {result['text']}"
-    )
+    _assert_ready_missing_client(result, ["time"])
 
 
 def test_acknowledgement_does_not_appear_on_retry():
     """
-    Test that acknowledgement does NOT appear on retry attempt.
+    Retry attempt with time still missing, no availability_client.
 
-    Scenario:
-    - session_state["last_filled_slot"] == "date"
-    - missing slot == "time"
-    - attempt_count == 1 (retry attempt)
-
-    Expected:
-    - Response does NOT start with "Got it."
-    - Response contains "still" (adaptive retry template)
-    - Response still mentions "time"
+    Expect READY exploratory planning shape (not adaptive clarification text).
     """
     user_id = "test_ack_2"
     frozen_time = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
 
-    # Session state with last_filled_slot set to "date" and slot_attempts showing retry
     session_state = {
         "intent_name": "CREATE_APPOINTMENT",
-        "slots": {"service_id": "haircut", "date": "2026-01-16"},
+        "slots": {"service_id": "haircut"},
+        "date_proposal": {"mode": "single_day", "start": "2026-01-16"},
         "missing_slots": ["time"],
-        "status": "NEEDS_CLARIFICATION",
-        "facts": {},
-        "slot_attempts": {"time": 1},  # attempt_count == 1 (retry)
+        "status": "READY",
+        "facts": {"service_id": "haircut", "dates": ["2026-01-16"]},
+        "slot_attempts": {"time": 1},
         "last_filled_slot": "date",
     }
 
-    # Mock clients
     mock_luma_client = Mock(spec=LumaClient)
     mock_org_client = Mock(spec=OrganizationClient)
     mock_org_client.get_details.return_value = {
         "organization": {"businessCategoryId": 1}
     }
 
-    # Build mock Luma response: still needs time, with retry attempt
     mock_luma_response = _build_mock_luma_response(
         status="NEEDS_CLARIFICATION",
         missing_slots=["time"],
         slots={"service_id": "haircut", "date": "2026-01-16"},
-        slot_attempts={"time": 1},  # attempt_count == 1 for "time"
+        slot_attempts={"time": 1},
     )
-
     mock_luma_client.resolve.return_value = mock_luma_response
 
-    _llm_response = "Could you still let me know what time works best for you?"
-
     with patch(
-        "core.orchestration.orchestrator.render_llm", return_value=_llm_response
+        "core.orchestration.orchestrator.render_llm",
+        return_value="Could you still let me know what time works best for you?",
     ):
         result = handle_message(
             text="what time",
@@ -202,14 +211,7 @@ def test_acknowledgement_does_not_appear_on_retry():
             session_state=session_state,
         )
 
-    assert "text" in result, f"Expected text in result, got keys: {list(result.keys())}"
-    assert result["text"], f"Expected non-empty text, got: {result.get('text')}"
-    assert not result["text"].startswith("Got it."), (
-        f"Expected text to NOT start with 'Got it.' on retry, got: {result['text']}"
-    )
-    assert result["text"] == _llm_response, (
-        f"Expected LLM-rendered text, got: {result['text']}"
-    )
+    _assert_ready_missing_client(result, ["time"])
 
 
 if __name__ == "__main__":

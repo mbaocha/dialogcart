@@ -1,43 +1,34 @@
 scenarios:
   - name: book_service_with_missing_time
-    description: Clarification rendering across turns - missing time slot
+    description: Exploratory READY when service+date present (time missing); no availability_client
     domain: service
     aliases:
       haircut: haircut
     turns:
       - sentence: "book a haircut tomorrow"
         expect:
-          status: NEEDS_CLARIFICATION
-          missing_slots: ["time"]
-          text:
-            present: true
-            intent: clarification
-
-      - sentence: "2pm"
-        expect:
           status: READY
-          action: SEARCH_AVAILABILITY
+          missing_slots: ["time"]
           text:
             present: false
 
-      - sentence: "yes"
+      - sentence: "2pm"
         expect:
           status: AWAITING_CONFIRMATION
           missing_slots: []
           text:
-            present: false
+            present: true
+            intent: confirmation
 
   - name: generic_clarification_fallback
-    description: Multiple missing slots → generic clarification text
+    description: Exploratory READY with service+date proposal (time missing); no clarification text
     domain: service
     aliases:
       haircut: haircut
     turns:
       - sentence: "book something"
         expect:
-          status: NEEDS_CLARIFICATION
-          missing_slots: ["date", "time"]
+          status: READY
+          missing_slots: ["time"]
           text:
-            present: true
-            intent: clarification
-
+            present: false

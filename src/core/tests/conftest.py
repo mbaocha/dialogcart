@@ -10,6 +10,7 @@ from core.tracing.decision_trace import (
     TRACE_ENV_VAR as DECISION_TRACE_ENV_VAR,
     get_last_decision_trace,
     is_decision_trace_enabled,
+    reset_decision_trace_state,
 )
 from core.tracing.formatters import format_decision_failure_context, format_decision_summary
 from core.tests.e2e.framework.trace_helpers import pop_stashed_decision_trace
@@ -22,6 +23,14 @@ from core.tracing.invariant_trace import (
 
 
 SHOW_DECISION_TRACE_ENV = "DIALOGCART_TRACE_SHOW"
+
+
+@pytest.fixture(autouse=True)
+def _reset_decision_trace_isolation():
+    """Prevent an open TurnTrace from leaking across unit tests."""
+    reset_decision_trace_state()
+    yield
+    reset_decision_trace_state()
 
 
 def pytest_configure(config):
