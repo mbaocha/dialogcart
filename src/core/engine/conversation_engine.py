@@ -57,7 +57,7 @@ class ConversationEngine:
         frozen_time: Optional[Any],
         organization_id: Optional[int],
     ) -> Any:
-        from core.orchestration.orchestrator import plan_message
+        from core.planning.planning_service import plan_message
 
         return plan_message(
             text=text,
@@ -194,12 +194,18 @@ class ConversationEngine:
         luma_client: Optional[Any] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        """Coordinate a complete conversational turn."""
+        """Coordinate a complete conversational turn.
+
+        Domain is not accepted here; planning derives it from organization_id.
+        """
         from core.execution.action_runner import ActionRunner
         from core.rendering.response_renderer import ResponseRenderer
         from core.workflows.availability.workflow import AvailabilityWorkflow
         from core.workflows.booking.workflow import BookingWorkflow
         from core.workflows.router import WorkflowRouter
+
+        # Planning derives domain from organization_id; never forward HTTP domain.
+        kwargs.pop("domain", None)
 
         action_runner = ActionRunner()
         renderer = ResponseRenderer()
@@ -360,8 +366,9 @@ class ConversationEngine:
         session_state: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        from core.orchestration.orchestrator import plan_message
+        from core.planning.planning_service import plan_message
 
+        kwargs.pop("domain", None)
         return plan_message(
             text=text,
             user_id=user_id,

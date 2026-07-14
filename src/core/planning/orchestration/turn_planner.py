@@ -1,7 +1,7 @@
 """
 Turn planner — single-turn NLU merge, planning, and outcome construction.
 
-Invoked via plan_message() in orchestrator.py (planning_only=True).
+Invoked via plan_message() in planning_service.py (planning_only=True).
 """
 
 import copy
@@ -37,7 +37,6 @@ turn_logger = logging.getLogger("core.turn_log")
 def plan_turn(
     user_id: str,
     text: str,
-    domain: str = "service",
     timezone: str = "UTC",
     phone_number: Optional[str] = None,
     email: Optional[str] = None,
@@ -51,7 +50,11 @@ def plan_turn(
     transaction_id: Optional[str] = None,
     planning_only: bool = False,
 ) -> Dict[str, Any]:
-    """Run one planning turn (NLU through plan to outcome)."""
+    """Run one planning turn (NLU through plan to outcome).
+
+    Domain is derived exclusively from organization_id (via org domain cache);
+    callers must not pass a domain argument.
+    """
     # Phase 1: import from neutral modules — breaks the circular dependency
     # with orchestrator.py (turn_planner no longer imports from orchestrator).
     from core.engine.outcome_builder import _build_planning_outcome, build_outcome_from_decision

@@ -245,7 +245,6 @@ async def post_message(request: MessageRequest, http_request: Request):
             booking_client=_booking_client,
             session_store=_session_store,
             organization_id=request.organization_id,
-            domain=request.domain,
             timezone=request.timezone,
             transaction_id=transaction_id,
         )
