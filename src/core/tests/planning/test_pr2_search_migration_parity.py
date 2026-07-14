@@ -18,7 +18,7 @@ from typing import Any, Dict, Optional
 
 import pytest
 
-from core.orchestration.availability_fingerprint import compute_availability_fingerprint
+from core.workflows.availability.fingerprint import compute_availability_fingerprint
 from core.planning.facts import build_policy_execution_flags
 from core.policy.intent_policy import (
     get_execution_steps,

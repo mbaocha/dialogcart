@@ -15,7 +15,7 @@ sys.path.insert(0, str(src_path))
 
 from extensions.capabilities.registry import clear_registry, get_adapter
 from extensions.capabilities.runner import CapabilityRunner
-from core.orchestration.api.message import MessageRequest, post_message
+from core.api.message import MessageRequest, post_message
 
 
 def test_bootstrap_registers_adapters_on_first_request():
@@ -53,7 +53,7 @@ def test_bootstrap_registers_adapters_on_first_request():
         "facts": {},
     }
 
-    with patch("core.orchestration.api.message.handle_message") as mock_handle:
+    with patch("core.api.message.handle_message") as mock_handle:
         mock_handle.return_value = {"success": True, "outcome": mock_outcome}
 
         # Call post_message (this should trigger bootstrap)
@@ -61,7 +61,7 @@ def test_bootstrap_registers_adapters_on_first_request():
         # In a real async context, this would be called with await
         try:
             # Import the bootstrap flag to reset it for testing
-            import core.orchestration.api.message as message_module
+            import core.api.message as message_module
 
             message_module._BOOTSTRAPPED = False
 
@@ -102,7 +102,7 @@ def test_bootstrap_only_runs_once():
     clear_registry()
 
     # Import message module to access bootstrap flag
-    import core.orchestration.api.message as message_module
+    import core.api.message as message_module
 
     # Reset bootstrap flag
     message_module._BOOTSTRAPPED = False

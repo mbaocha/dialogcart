@@ -10,7 +10,7 @@ Covers:
 """
 
 import pytest
-from core.orchestration.temporal_proposal import (
+from core.planning.temporal_proposal import (
     apply_confirmed_datetime,
     apply_time_constraint_to_missing_slots,
     datetime_range_from_availability_result,

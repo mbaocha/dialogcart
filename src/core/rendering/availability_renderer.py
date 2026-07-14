@@ -8,7 +8,7 @@ from typing import Any, Dict, List, Optional
 from core.rendering.llm_renderer import LlmRenderRequest
 
 try:
-    from core.orchestration.time_resolution import (
+    from core.planning.time_resolution import (
         TIME_MATCH_EXACT,
         TIME_MATCH_MISMATCH,
         TIME_MATCH_NOT_APPLICABLE,

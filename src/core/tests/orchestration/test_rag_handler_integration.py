@@ -14,10 +14,10 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from core.orchestration.clients.organization_client import OrganizationClient
-from core.orchestration.nlu import LumaClient
-from core.orchestration.orchestrator import handle_message
-from core.orchestration.session import clear_session
+from core.adapters.clients.organization_client import OrganizationClient
+from core.adapters.nlu import LumaClient
+from core.api.compat import handle_message
+from core.session.session_manager import clear_session
 
 os.environ.setdefault("CORE_EXECUTION_MODE", "test")
 

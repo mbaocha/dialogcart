@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.orchestration.availability_browse import (
+from core.workflows.availability.browse import (
     extract_availability_browse,
     infer_browse_direction_from_text,
     normalize_availability_operation,

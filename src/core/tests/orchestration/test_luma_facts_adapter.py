@@ -1,11 +1,11 @@
 """Unit tests for luma_facts_adapter and temporal proposals (Phase 2)."""
 
-from core.orchestration.luma_facts_adapter import (
+from core.planning.luma_facts_adapter import (
     facts_to_slots,
     is_flexible_combined_utterance,
     merge_promoted_luma_slots,
 )
-from core.orchestration.temporal_proposal import (
+from core.planning.temporal_proposal import (
     build_date_proposal,
     expand_slots_for_planning,
     proposal_satisfies_planning_time,

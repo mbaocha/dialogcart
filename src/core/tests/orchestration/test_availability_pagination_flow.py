@@ -13,11 +13,11 @@ from unittest.mock import Mock
 import pytest
 
 from core.session.persist import build_session_state_from_outcome
-from core.orchestration.clients.organization_client import OrganizationClient
-from core.orchestration.execution.clients.availability_client import AvailabilityClient
-from core.orchestration.nlu import LumaClient
-from core.orchestration.orchestrator import handle_message
-from core.orchestration.temporal_proposal import try_bind_offered_time_selection
+from core.adapters.clients.organization_client import OrganizationClient
+from core.execution.clients.availability_client import AvailabilityClient
+from core.adapters.nlu import LumaClient
+from core.api.compat import handle_message
+from core.planning.temporal_proposal import try_bind_offered_time_selection
 from core.rendering.availability_renderer import (
     build_availability_presentation,
     build_presented_availability_page,

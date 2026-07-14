@@ -19,10 +19,10 @@ src_path = Path(__file__).parent.parent.parent.parent
 sys.path.insert(0, str(src_path))
 
 from core.config.capabilities_loader import load_capability_policies
-from core.orchestration.clients.organization_client import OrganizationClient
-from core.orchestration.nlu import LumaClient
-from core.orchestration.orchestrator import handle_message
-from core.planning.orchestration.plan_builder import (
+from core.adapters.clients.organization_client import OrganizationClient
+from core.adapters.nlu import LumaClient
+from core.api.compat import handle_message
+from core.planning.planner.plan_builder import (
     _evaluate_condition,
     build_decision_plan,
 )

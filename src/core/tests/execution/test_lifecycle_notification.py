@@ -14,12 +14,12 @@ This test proves that:
 
 from unittest.mock import Mock
 
-from core.orchestration.clients.catalog_client import CatalogClient
-from core.orchestration.clients.customer_client import CustomerClient
-from core.orchestration.clients.organization_client import OrganizationClient
-from core.orchestration.execution.clients.booking_client import BookingClient
-from core.orchestration.nlu import LumaClient
-from core.orchestration.orchestrator import handle_message
+from core.adapters.clients.catalog_client import CatalogClient
+from core.adapters.clients.customer_client import CustomerClient
+from core.adapters.clients.organization_client import OrganizationClient
+from core.execution.clients.booking_client import BookingClient
+from core.adapters.nlu import LumaClient
+from core.api.compat import handle_message
 
 
 def test_lifecycle_notification_flow(verbose: bool = False):

@@ -15,8 +15,8 @@ contract violations and returns error structures instead.
 
 import pytest
 
-from core.orchestration.errors import ContractViolation
-from core.orchestration.nlu.luma_contracts import assert_luma_contract
+from core.adapters.errors import ContractViolation
+from core.adapters.nlu.luma_contracts import assert_luma_contract
 
 
 def test_success_requires_intent_name():

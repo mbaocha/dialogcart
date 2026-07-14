@@ -7,7 +7,7 @@ lives on the server — same path real integrations and E2E tests should use.
 
 Usage:
     # Terminal 1 — start core API
-    python -m core.orchestration.api.main
+    python -m core.api.main
 
     # Terminal 2 — chat REPL
     CORE_BASE_URL=http://localhost:8000 ORG_ID=1 python chat.py
@@ -68,8 +68,8 @@ def _get_core_base_url() -> str:
 
 def _get_domain(org_id: int) -> str:
     try:
-        from core.orchestration.cache.org_domain_cache import org_domain_cache
-        from core.orchestration.clients.organization_client import OrganizationClient
+        from core.adapters.cache.org_domain_cache import org_domain_cache
+        from core.adapters.clients.organization_client import OrganizationClient
 
         domain, _ = org_domain_cache.get_domain(
             org_id, OrganizationClient(), force_refresh=False
@@ -198,8 +198,8 @@ def _clear_session(client: httpx.Client, core_url: str, user_id: str) -> None:
 
 def _print_catalog(org_id: int, domain: str) -> None:
     try:
-        from core.orchestration.cache.catalog_cache import catalog_cache
-        from core.orchestration.clients.catalog_client import CatalogClient
+        from core.adapters.cache.catalog_cache import catalog_cache
+        from core.adapters.clients.catalog_client import CatalogClient
 
         data = catalog_cache.get_catalog(org_id, CatalogClient(), domain=domain)
         services = [
@@ -251,7 +251,7 @@ def chat_loop(
             health.raise_for_status()
         except Exception as e:
             print(f"\n[error] Core API not reachable at {core_url}: {e}")
-            print("  Start it with: python -m core.orchestration.api.main")
+            print("  Start it with: python -m core.api.main")
             return
 
         while True:
@@ -327,7 +327,7 @@ def chat_loop(
                 )
             except httpx.ConnectError as e:
                 print(f"\n[error] Cannot reach core API at {core_url}: {e}")
-                print("  Start it with: python -m core.orchestration.api.main")
+                print("  Start it with: python -m core.api.main")
                 continue
             except Exception as e:
                 print(f"\n[error] {type(e).__name__}: {e}")

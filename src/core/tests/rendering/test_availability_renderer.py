@@ -1,6 +1,6 @@
 """Tests for availability slot summarization and render request building."""
 
-from core.orchestration.temporal_proposal import try_bind_offered_time_selection
+from core.planning.temporal_proposal import try_bind_offered_time_selection
 from core.rendering.availability_renderer import (
     build_availability_presentation,
     build_availability_render_request,

@@ -65,7 +65,7 @@ def _inject_rendering_text_impl(
     session_state: Optional[Dict[str, Any]] = None,
 ) -> None:
     try:
-        from core.orchestration.time_resolution import (
+        from core.planning.time_resolution import (
             TIME_MATCH_MISMATCH,
             build_execution_result_for_time_resolution_render,
         )

@@ -6,7 +6,7 @@ import os
 import pytest
 from fastapi.testclient import TestClient
 
-from core.orchestration.api.main import app
+from core.api.main import app
 from core.tracing.invariant_trace import TRACE_ENV_VAR
 
 # Register booking conversation fixtures for all e2e test modules.
@@ -25,7 +25,6 @@ def pytest_configure(config):
     for logger_name in (
         "core",
         "core.planning",
-        "core.orchestration",
         "core.turn_log",
         "httpx",
         "httpcore",

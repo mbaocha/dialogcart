@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.orchestration.session import clear_session, get_session
+from core.session.session_manager import clear_session, get_session
 
 _FAQ_DATA = {
     "chunks": [
@@ -56,11 +56,11 @@ def test_session_messages_appended_after_handler_delegated(rag_api_user_id, api_
     }
 
     with patch(
-        "core.orchestration.api.message.handle_message", return_value=delegated_result
+        "core.api.message.handle_message", return_value=delegated_result
     ), patch(
         "extensions.handlers.adapters.rag.FaqClient"
     ) as MockFaqClient, patch(
-        "core.orchestration.api.message.render_llm", return_value="We are open Mon–Fri 9am–6pm."
+        "core.api.message.render_llm", return_value="We are open Mon–Fri 9am–6pm."
     ):
         MockFaqClient.return_value.retrieve.return_value = _FAQ_DATA
         resp = api_client.post(

@@ -26,7 +26,7 @@ except ImportError:
     # python-dotenv not installed, skip .env loading
     pass
 
-from core.orchestration.orchestrator import handle_message
+from core.api.compat import handle_message
 
 # Re-export for backward compatibility
 process_message = handle_message

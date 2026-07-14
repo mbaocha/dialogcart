@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
-from core.orchestration.session import get_session, save_session
-from core.orchestration.time_resolution import TIME_MATCH_EXACT, TIME_MATCH_MISMATCH
+from core.session.session_manager import get_session, save_session
+from core.planning.time_resolution import TIME_MATCH_EXACT, TIME_MATCH_MISMATCH
 from core.tests.e2e.framework.conversation import (
     Expect,
     FLEXI_SERVICE,

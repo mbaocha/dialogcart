@@ -18,8 +18,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from core.orchestration.nlu import LumaClient
-from core.orchestration.orchestrator import handle_message
+from core.adapters.nlu import LumaClient
+from core.api.compat import handle_message
 
 # Set execution mode to test for deterministic E2E tests
 os.environ["CORE_EXECUTION_MODE"] = "test"

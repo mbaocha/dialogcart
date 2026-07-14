@@ -6,14 +6,14 @@ from unittest.mock import Mock
 
 import pytest
 
-from core.orchestration.api import message as message_api
-from core.orchestration.clients.catalog_client import CatalogClient
-from core.orchestration.clients.organization_client import OrganizationClient
-from core.orchestration.execution.clients.availability_client import AvailabilityClient
-from core.orchestration.nlu import LumaClient
-from core.orchestration.orchestrator import handle_message as real_handle_message
-from core.orchestration.session import clear_session
-from core.orchestration.time_resolution import TIME_MATCH_EXACT
+from core.api import message as message_api
+from core.adapters.clients.catalog_client import CatalogClient
+from core.adapters.clients.organization_client import OrganizationClient
+from core.execution.clients.availability_client import AvailabilityClient
+from core.adapters.nlu import LumaClient
+from core.api.compat import handle_message as real_handle_message
+from core.session.session_manager import clear_session
+from core.planning.time_resolution import TIME_MATCH_EXACT
 from core.tests.e2e.framework.fixtures import TARGET_DATE
 from core.tests.e2e.framework.trace_helpers import (
     maybe_print_decision_trace,

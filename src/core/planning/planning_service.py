@@ -9,8 +9,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from core.orchestration.clients.organization_client import OrganizationClient
-from core.orchestration.nlu import LumaClient
+from core.adapters.clients.organization_client import OrganizationClient
+from core.adapters.nlu import LumaClient
 
 
 def plan_message(
@@ -35,7 +35,7 @@ def plan_message(
         Dict with: intent_name, stage, action, slots, missing_slots,
         time_constraint, status, and plan structure.
     """
-    from core.planning.orchestration.turn_planner import plan_turn
+    from core.planning.planner.turn_planner import plan_turn
 
     result = plan_turn(
         user_id=user_id,
@@ -97,7 +97,7 @@ def plan_message(
         "status": outcome.get("status"),
         # Include plan structure for tests that expect plan.stage and plan.action
         "plan": plan_structure,
-        # Include decision information for handle_message early returns
+        # Include decision information for ConversationEngine / early-return paths
         "_decision": result.get("_decision"),
     }
 
@@ -142,7 +142,7 @@ def plan_message(
             if _prop_val is not None:
                 planning_result[_prop_key] = _prop_val
 
-    # Carry merged_luma_response so handle_message can persist conversation memory.
+    # Carry merged_luma_response so ConversationEngine can persist conversation memory.
     planning_result["_merged_luma_response"] = result.get(
         "_merged_luma_response")
 

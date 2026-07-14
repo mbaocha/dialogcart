@@ -12,7 +12,7 @@ from core.tests.e2e.framework.fixtures import (
 )
 from core.tests.e2e.framework.runner import run_bundle
 from core.tests.e2e.scenarios.booking import SCENARIOS
-from core.orchestration.session import clear_session
+from core.session.session_manager import clear_session
 
 
 def test_conversation_dsl_expect_aliases():

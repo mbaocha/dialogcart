@@ -9,11 +9,11 @@ from unittest.mock import Mock
 import httpx
 import pytest
 
-from core.orchestration.api import message as message_api
-from core.orchestration.cache.catalog_cache import catalog_cache
-from core.orchestration.execution.clients.availability_client import AvailabilityClient
-from core.orchestration.orchestrator import handle_message as real_handle_message
-from core.orchestration.session import clear_session
+from core.api import message as message_api
+from core.adapters.cache.catalog_cache import catalog_cache
+from core.execution.clients.availability_client import AvailabilityClient
+from core.api.compat import handle_message as real_handle_message
+from core.session.session_manager import clear_session
 from core.tests.e2e.framework.conversation import (
     FLEXI_SERVICE,
     FROZEN_TIME,

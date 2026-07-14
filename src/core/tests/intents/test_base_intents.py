@@ -9,7 +9,7 @@ These tests verify that:
 
 import pytest
 
-from core.routing.intents.base_intents import (
+from core.planning.policy.base_intents import (
     CORE_BASE_INTENTS,
     is_core_intent,
     validate_core_intent,

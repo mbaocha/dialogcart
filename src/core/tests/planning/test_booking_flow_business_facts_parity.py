@@ -1,6 +1,6 @@
 """Parity tests: booking-flow steps driven by business facts in policy."""
 
-from core.orchestration.availability_fingerprint import (
+from core.workflows.availability.fingerprint import (
     build_availability_fingerprint_slots,
     compute_availability_fingerprint,
 )
@@ -215,7 +215,7 @@ class TestExecutionOnlyPlanAction:
     """plan.action is policy-selected execution only; presentation uses status/stage/awaiting."""
 
     def test_pending_confirmation_has_null_execution_action(self):
-        from core.planning.orchestration.plan_builder import build_decision_plan
+        from core.planning.planner.plan_builder import build_decision_plan
 
         slots = {
             "service_id": "svc-haircut",
@@ -248,7 +248,7 @@ class TestExecutionOnlyPlanAction:
         assert plan["action"] is None
 
     def test_confirmed_selects_commit_execution_action(self):
-        from core.planning.orchestration.plan_builder import build_decision_plan
+        from core.planning.planner.plan_builder import build_decision_plan
 
         slots = {
             "service_id": "svc-haircut",
@@ -292,8 +292,8 @@ class TestTimeMatchExactConfirmCommit:
         }
 
     def test_exact_match_pending_turn_suppresses_commit(self):
-        from core.orchestration.time_resolution import TIME_MATCH_EXACT
-        from core.planning.orchestration.plan_builder import build_decision_plan
+        from core.planning.time_resolution import TIME_MATCH_EXACT
+        from core.planning.planner.plan_builder import build_decision_plan
 
         slots = self._slots()
         session = {
@@ -326,8 +326,8 @@ class TestTimeMatchExactConfirmCommit:
         assert plan["awaiting"] == "USER_CONFIRMATION"
 
     def test_exact_match_confirmed_turn_executes_commit(self):
-        from core.orchestration.time_resolution import TIME_MATCH_EXACT
-        from core.planning.orchestration.plan_builder import build_decision_plan
+        from core.planning.time_resolution import TIME_MATCH_EXACT
+        from core.planning.planner.plan_builder import build_decision_plan
 
         slots = self._slots()
         session = {
@@ -361,8 +361,8 @@ class TestTimeMatchExactConfirmCommit:
         assert plan.get("awaiting") is None
 
     def test_exact_match_gate_accept_turn_executes_commit(self):
-        from core.orchestration.time_resolution import TIME_MATCH_EXACT
-        from core.planning.orchestration.plan_builder import build_decision_plan
+        from core.planning.time_resolution import TIME_MATCH_EXACT
+        from core.planning.planner.plan_builder import build_decision_plan
 
         slots = self._slots()
         session = {

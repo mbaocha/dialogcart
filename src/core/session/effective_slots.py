@@ -1,15 +1,15 @@
 """
-Session state merge and persistence.
+Effective slot computation for planning merges.
 
-Extracted from core.orchestration.api.session_merge for maintainability.
+Computes effective collected slots from Luma/session inputs for merge and planning.
 """
 
 import json
 import logging
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-from core.orchestration.persistence.durable_intents import (
+from core.session.durable_intents import (
     filter_slots_for_intent,
     is_durable_intent,
 )
@@ -39,7 +39,7 @@ def _compute_effective_collected_slots_internal(
         Dictionary of effective collected slots (slots that satisfy required slots)
     """
     from core.session.slot_operations import filter_slots_by_domain
-    from core.planning.orchestration.missing_slots import get_planning_required_slots_for_intent
+    from core.planning.planner.missing_slots import get_planning_required_slots_for_intent
 
     # CRITICAL: Filter slots by domain BEFORE computing effective_collected_slots
     # This prevents cross-domain slot leakage (e.g., service_id in reservation missing_slots)
@@ -132,7 +132,7 @@ def _compute_effective_collected_slots(
 
     # FACT-ONLY: Promote facts to slots BEFORE any processing
     # This ensures facts.service_id, facts.times, etc. are available for planning
-    from core.orchestration.luma_facts_adapter import (
+    from core.planning.luma_facts_adapter import (
         facts_to_slots,
         merge_promoted_luma_slots,
     )
@@ -306,7 +306,7 @@ def _compute_effective_collected_slots(
 
     # Use planner to compute missing_slots
     policy = load_planning_policy()
-    from core.orchestration.temporal_proposal import (
+    from core.planning.temporal_proposal import (
         expand_slots_for_planning,
         extract_nlu_proposals,
         merge_session_proposals,
@@ -332,14 +332,14 @@ def _compute_effective_collected_slots(
     plan = plan_intent(intent_name, planning_slots, policy)
     missing_slots = plan["missing_slots"]
 
-    from core.orchestration.temporal_proposal import apply_time_constraint_to_missing_slots
+    from core.planning.temporal_proposal import apply_time_constraint_to_missing_slots
 
     missing_slots = apply_time_constraint_to_missing_slots(
         intent_name, missing_slots, luma_response.get("time_constraint")
     )
 
     # Normalize MODIFY_BOOKING missing_slots (test contract)
-    from core.orchestration.nlu.luma_response_processor import (
+    from core.adapters.nlu.luma_response_processor import (
         _normalize_modify_booking_missing_slots,
     )
 

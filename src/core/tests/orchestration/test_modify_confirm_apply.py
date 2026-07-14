@@ -1,6 +1,6 @@
 """Confirm continuation selects APPLY_MODIFICATION without service_id fingerprint."""
 
-from core.orchestration.nlu.luma_response_processor import process_luma_response
+from core.adapters.nlu.luma_response_processor import process_luma_response
 
 _SLOTS = {
     "booking_id": "ABC12345",

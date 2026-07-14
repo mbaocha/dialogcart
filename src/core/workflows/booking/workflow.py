@@ -17,8 +17,8 @@ class BookingWorkflow:
     """Facade for all booking-domain execution operations.
 
     Phase 1: thin delegation to
-             core.orchestration.execution.dispatcher.execute
-             and core.orchestration.execution.clients.booking_client.
+             core.execution.dispatcher.execute
+             and core.execution.clients.booking_client.
     """
 
     def confirm(
@@ -31,8 +31,8 @@ class BookingWorkflow:
         Handles CONFIRM_APPOINTMENT and CONFIRM_CANCELLATION actions.
         *client* defaults to a fresh BookingClient when not supplied.
         """
-        from core.orchestration.execution.clients.booking_client import BookingClient
-        from core.orchestration.execution.dispatcher import execute
+        from core.execution.clients.booking_client import BookingClient
+        from core.execution.dispatcher import execute
 
         return execute(
             plan=plan,

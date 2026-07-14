@@ -29,10 +29,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from core.session.persist import build_session_state_from_outcome
-from core.orchestration.cache.catalog_cache import catalog_cache
-from core.orchestration.orchestrator import handle_message
-from core.orchestration.persistence.durable_intents import is_durable_intent
-from core.orchestration.session import clear_session, get_session, save_session
+from core.adapters.cache.catalog_cache import catalog_cache
+from core.api.compat import handle_message
+from core.session.durable_intents import is_durable_intent
+from core.session.session_manager import clear_session, get_session, save_session
 from core.tests.harness.clients import TestCatalogClient, TestLumaClient
 from core.tests.harness.org_setup import get_customer_details, setup_test_org_domain
 from core.tests.planning.adapter import normalize_planning_outcome
@@ -98,7 +98,6 @@ def configure_test_logging(verbose: bool = False) -> None:
     for logger_name in (
         "core",
         "core.planning",
-        "core.orchestration",
         "core.turn_log",
         "httpx",
         "httpcore",
@@ -822,7 +821,7 @@ def cleanup_test_sessions(verbose: bool = False) -> None:
         # Import here to avoid circular dependencies
         import redis
 
-        from core.orchestration.session.session_manager import (
+        from core.session.session_manager import (
             SESSION_KEY_PREFIX,
             _get_redis_url,
         )

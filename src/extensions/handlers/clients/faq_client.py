@@ -7,8 +7,8 @@ Commerce returns chunks + structured_context; Core is the only RAG renderer.
 
 from typing import Any, Dict, Optional
 
-from core.orchestration.clients.base_client import BaseClient
-from core.orchestration.errors import UpstreamError
+from core.adapters.clients.base_client import BaseClient
+from core.adapters.errors import UpstreamError
 
 
 class FaqClient(BaseClient):

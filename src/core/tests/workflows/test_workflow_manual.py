@@ -13,9 +13,9 @@ src_path = Path(__file__).parent.parent.parent.parent
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-from core.orchestration.orchestrator import _invoke_workflow_after_execute
-from core.routing.workflows import get_workflow, has_workflow, register_workflow
-from core.routing.workflows.examples.payment_prompt_workflow import (
+from core.api.legacy_helpers import _invoke_workflow_after_execute
+from core.workflows import get_workflow, has_workflow, register_workflow
+from core.workflows.examples.payment_prompt_workflow import (
     PaymentPromptWorkflow,
 )
 

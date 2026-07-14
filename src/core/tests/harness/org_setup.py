@@ -21,7 +21,7 @@ def setup_test_org_domain(domain: str) -> None:
     Args:
         domain: "service" or "reservation"
     """
-    from core.orchestration.cache.org_domain_cache import org_domain_cache
+    from core.adapters.cache.org_domain_cache import org_domain_cache
 
     business_category_id = 1 if domain == "service" else 2
     test_org_id = int(os.getenv("ORG_ID", "1"))

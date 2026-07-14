@@ -1,7 +1,7 @@
 """ActionRunner — Phase 1 architectural boundary for action execution.
 
 Dispatches a planning result to the appropriate execution handler.
-Initially wraps core.orchestration.execution.dispatcher.execute.
+Initially wraps core.execution.dispatcher.execute.
 Phase 2 will own client lifecycle and execution coordination here.
 """
 
@@ -13,7 +13,7 @@ from typing import Any, Dict, Optional
 class ActionRunner:
     """Execute the action selected by the planner.
 
-    Phase 1: thin facade over core.orchestration.execution.dispatcher.execute.
+    Phase 1: thin facade over core.execution.dispatcher.execute.
     Accepts optional pre-built clients; constructs defaults when not supplied.
     """
 
@@ -36,7 +36,7 @@ class ActionRunner:
         Keyword clients override instance-level clients (useful for per-request
         injection in tests).
         """
-        from core.orchestration.execution.dispatcher import execute
+        from core.execution.dispatcher import execute
 
         return execute(
             plan=plan,

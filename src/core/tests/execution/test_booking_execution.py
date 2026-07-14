@@ -1,7 +1,7 @@
 """
 Execution Tests: Booking Creation
 
-Tests for core.orchestration.execution.booking.execute_booking()
+Tests for core.execution.booking.execute_booking()
 
 These tests validate the EXECUTION layer only.
 Planning, session, dialog, and rendering logic are NOT involved.
@@ -24,8 +24,8 @@ src_path = Path(__file__).parent.parent.parent.parent
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-from core.orchestration.errors import UpstreamError
-from core.orchestration.execution.clients.booking_client import BookingClient
+from core.adapters.errors import UpstreamError
+from core.execution.clients.booking_client import BookingClient
 
 
 def test_create_booking_happy_path_service():

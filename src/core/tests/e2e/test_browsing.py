@@ -8,12 +8,12 @@ from typing import Any, Dict
 
 import pytest
 
-from core.orchestration.api import message as message_api
-from core.orchestration.availability_browse import resolve_availability_browse
-from core.orchestration.availability_fingerprint import compute_availability_fingerprint
-from core.orchestration.cache.catalog_cache import catalog_cache
-from core.orchestration.orchestrator import handle_message as real_handle_message
-from core.orchestration.session import clear_session
+from core.api import message as message_api
+from core.workflows.availability.browse import resolve_availability_browse
+from core.workflows.availability.fingerprint import compute_availability_fingerprint
+from core.adapters.cache.catalog_cache import catalog_cache
+from core.api.compat import handle_message as real_handle_message
+from core.session.session_manager import clear_session
 from core.tests.e2e.framework.conversation import (
     FROZEN_TIME,
     HAIRCUT_CATALOG,

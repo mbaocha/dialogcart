@@ -10,9 +10,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from core.orchestration.execution.clients.availability_client import AvailabilityClient
-from core.orchestration.session import get_session
-from core.orchestration.time_resolution import TIME_MATCH_EXACT, TIME_MATCH_MISMATCH
+from core.execution.clients.availability_client import AvailabilityClient
+from core.session.session_manager import get_session
+from core.planning.time_resolution import TIME_MATCH_EXACT, TIME_MATCH_MISMATCH
 from core.tests.e2e.framework.trace_helpers import (
     augment_assertion_message,
     maybe_print_decision_trace,

@@ -23,7 +23,6 @@ core/tests/
   orchestration/    # unit tests
   session/
   rendering/
-  routing/
   intents/
   workflows/
   test.py           # entry point

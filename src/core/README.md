@@ -189,7 +189,7 @@ This is the most complex step. Merge does, in order:
 **Purpose:** Decide what should happen next: what to execute (or not), what the conversation status is, what is the planner waiting for.
 **Inputs:** `intent_name`, `missing_slots`, `BusinessFacts`, `confirmation_state`, merged response.
 **Outputs:** `plan` — `{status, stage, action, allowed_actions, blocked_actions, awaiting, missing_slots}`.
-**Owner:** `core/planning/orchestration/plan_builder.py:build_decision_plan()`.
+**Owner:** `core/planning/planner/plan_builder.py:build_decision_plan()`.
 **See:** [§7 Planner](#7-planner).
 
 #### Execute
@@ -244,7 +244,7 @@ This is the most complex step. Merge does, in order:
 
 ### `turn_planner.py`
 
-**Path:** `core/planning/orchestration/turn_planner.py`
+**Path:** `core/planning/planner/turn_planner.py`
 
 **Purpose:** Orchestrates the planning phase — calls Luma, resolves intent, triggers merge, computes business facts, builds the plan.
 
@@ -387,7 +387,7 @@ This is the most complex step. Merge does, in order:
 
 ### `plan_builder.py`
 
-**Path:** `core/planning/orchestration/plan_builder.py`
+**Path:** `core/planning/planner/plan_builder.py`
 
 **Purpose:** Given business facts and the merged response, compute the plan for this turn.
 

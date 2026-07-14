@@ -1,7 +1,5 @@
 """
-Session state merge and persistence.
-
-Extracted from core.orchestration.api.session_merge for maintainability.
+Session merge: combine NLU turn deltas with persisted session state for planning.
 """
 
 import json
@@ -10,7 +8,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Dict, Optional
 
-from core.orchestration.persistence.durable_intents import (
+from core.session.durable_intents import (
     filter_slots_for_intent,
     is_durable_intent,
 )
@@ -88,7 +86,7 @@ def _finalize_merged_luma_response(
     luma_response: Dict[str, Any],
 ) -> Dict[str, Any]:
     """Attach transient per-turn signals before returning from merge."""
-    from core.orchestration.availability_browse import apply_availability_browse_signal
+    from core.workflows.availability.browse import apply_availability_browse_signal
 
     apply_availability_browse_signal(merged, luma_response)
     return merged
@@ -465,7 +463,7 @@ def _promote_and_bind(
 
     datetime_bound_this_turn = False
     if effective_intent == "CREATE_APPOINTMENT":
-        from core.orchestration.temporal_proposal import try_bind_offered_time_selection
+        from core.planning.temporal_proposal import try_bind_offered_time_selection
         from core.session.confirmation_gate import (
             detect_booking_revision,
             get_confirmation_state,
@@ -505,7 +503,7 @@ def _promote_and_bind(
             merged["slots"] = promoted_slots
             merged["resolved_datetime_range"] = bind_result["resolved_datetime_range"]
             datetime_bound_this_turn = True
-            from core.orchestration.time_resolution import TIME_MATCH_EXACT
+            from core.planning.time_resolution import TIME_MATCH_EXACT
 
             merged["time_match_outcome"] = TIME_MATCH_EXACT
             # Fresh bind replaces prior selection; plan_builder may re-enter pending.
@@ -515,7 +513,7 @@ def _promote_and_bind(
                 reason="rebound_selection",
             )
         elif merged.get("time_proposal"):
-            from core.orchestration.time_resolution import (
+            from core.planning.time_resolution import (
                 TIME_MATCH_EXACT,
                 apply_post_bind_time_resolution,
             )
@@ -544,7 +542,7 @@ def _promote_and_bind(
         promoted_slots, effective_intent, planning_only=ctx.planning_only
     )
 
-    from core.orchestration.temporal_proposal import (
+    from core.planning.temporal_proposal import (
         strip_unconfirmed_temporal_slots,
         temporal_slots_confirmed,
     )
@@ -719,7 +717,7 @@ def _handle_informational_turn_and_effective_intent(
 
         previous_missing_slots: list = []
         if session_state and isinstance(session_state, dict) and session_intent_name:
-            from core.orchestration.temporal_proposal import (
+            from core.planning.temporal_proposal import (
                 expand_slots_for_planning,
                 resolve_session_proposals,
             )
@@ -982,7 +980,7 @@ def _merge_slots_additive(
     # Update merged response with merged slots (non-destructive)
     merged["slots"] = merged_slots
 
-    from core.orchestration.temporal_proposal import (
+    from core.planning.temporal_proposal import (
         extract_nlu_proposals,
         merge_session_proposals,
     )
@@ -1406,7 +1404,7 @@ def _extract_raw_luma_slots(ctx: _MergeContext) -> Dict[str, Any]:
     """
     merged = ctx.merged
 
-    from core.orchestration.luma_facts_adapter import (
+    from core.planning.luma_facts_adapter import (
         facts_to_slots,
         merge_promoted_luma_slots,
     )
@@ -1621,7 +1619,7 @@ def _compute_missing_slots(
 
             # CREATE_APPOINTMENT: date/time in raw Luma slots become proposals, not durable slots.
             if missing_keys and intent == "CREATE_APPOINTMENT":
-                from core.orchestration.temporal_proposal import (
+                from core.planning.temporal_proposal import (
                     _CREATE_APPOINTMENT_TEMPORAL_SLOT_KEYS,
                     resolve_session_proposals,
                 )
@@ -1663,7 +1661,7 @@ def _compute_missing_slots(
     # Use planner to compute missing_slots
     # Slots are treated as an unordered, additive map
     policy = load_planning_policy()
-    from core.orchestration.temporal_proposal import expand_slots_for_planning
+    from core.planning.temporal_proposal import expand_slots_for_planning
 
     _facts_for_planning = merged.get("facts")
     if not isinstance(_facts_for_planning, dict):
@@ -1684,14 +1682,14 @@ def _compute_missing_slots(
     plan = plan_intent(effective_intent, planning_slots, policy)
     missing_slots = plan["missing_slots"]
 
-    from core.orchestration.temporal_proposal import apply_time_constraint_to_missing_slots
+    from core.planning.temporal_proposal import apply_time_constraint_to_missing_slots
 
     missing_slots = apply_time_constraint_to_missing_slots(
         effective_intent, missing_slots, luma_response.get("time_constraint")
     )
 
     # MISSING_SLOTS_DECISION: Log missing slots computation decision
-    from core.planning.orchestration.missing_slots import (
+    from core.planning.planner.missing_slots import (
         get_planning_required_slots_for_intent as get_required_slots_for_intent,
     )
 
@@ -1745,7 +1743,7 @@ def _compute_missing_slots(
 
     # Normalize MODIFY_BOOKING missing_slots (test contract)
     # Import here to avoid circular dependency
-    from core.orchestration.nlu.luma_response_processor import (
+    from core.adapters.nlu.luma_response_processor import (
         _normalize_modify_booking_missing_slots,
     )
 
@@ -1817,7 +1815,7 @@ def _enforce_intent_authority(ctx: _MergeContext) -> None:
 
     # STEP 1.5: Extract slots from Luma to check if continuation is valid
     # Extract slots early to determine if UNKNOWN intent should be overridden
-    from core.orchestration.luma_facts_adapter import (
+    from core.planning.luma_facts_adapter import (
         facts_to_slots,
         merge_promoted_luma_slots,
     )
@@ -2089,7 +2087,3 @@ def merge_luma_with_session(
     _finalize_effective_slots_and_trace(ctx, effective_intent, durable_slots_for_persist)
 
     return _finalize_merged_luma_response(merged, luma_response)
-
-
-# Backward compatibility alias
-merge_session_with_luma_response = merge_luma_with_session

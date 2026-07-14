@@ -29,10 +29,10 @@ def recompute_missing_slots_from_slots(
 ) -> List[str]:
     """Recompute missing_slots from persisted slots via planner."""
     from core.planning.policy.action_policy import load_planning_policy, plan_intent
-    from core.orchestration.nlu.luma_response_processor import (
+    from core.adapters.nlu.luma_response_processor import (
         _normalize_modify_booking_missing_slots,
     )
-    from core.orchestration.temporal_proposal import (
+    from core.planning.temporal_proposal import (
         apply_time_constraint_to_missing_slots,
         expand_slots_for_planning,
         resolve_session_proposals,

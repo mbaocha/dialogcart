@@ -23,7 +23,7 @@ See `capabilities/README.md` and `capabilities/contract.md`.
 Single-turn handlers with `handle()`. Return user-facing text; core does not resume
 a booking step afterward.
 
-Config: `core/config/intent_handlers.yaml`
+Config: `core/planning/policy/intent_handlers.yaml`
 
 ## Bootstrap
 

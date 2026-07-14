@@ -115,7 +115,7 @@ class StageRunner:
 
     def finish(self, result: Dict[str, Any], **spine_kwargs: Any) -> Dict[str, Any]:
         """Attach traces (when appropriate) and wrap with the execution spine."""
-        from core.orchestration.orchestrator import _return_with_execution_spine
+        from core.tracing.execution_return import _return_with_execution_spine
 
         if not self._omit_invariant_attach and isinstance(result, dict):
             attach_trace_to_result(result)

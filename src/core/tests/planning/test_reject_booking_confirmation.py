@@ -2,8 +2,8 @@
 
 from unittest.mock import Mock
 
-from core.orchestration.nlu import LumaClient
-from core.orchestration.orchestrator import handle_message
+from core.adapters.nlu import LumaClient
+from core.api.compat import handle_message
 from core.session.persist import build_session_state_from_outcome
 from core.rendering.booking_confirmation_renderer import (
     render_booking_confirmation_rejected,
@@ -341,7 +341,7 @@ def test_correction_time_revision_when_session_needs_clarification():
 
 def test_service_revision_invalidates_bound_slot_and_searches():
     """Changing service while pending must not re-confirm the old time."""
-    from core.orchestration.execution.clients.availability_client import (
+    from core.execution.clients.availability_client import (
         AvailabilityClient,
     )
 
@@ -407,7 +407,7 @@ def test_service_revision_invalidates_bound_slot_and_searches():
 
 def test_date_revision_invalidates_bound_slot_and_searches():
     """Changing date while pending must search the new day, not re-confirm old slot."""
-    from core.orchestration.execution.clients.availability_client import (
+    from core.execution.clients.availability_client import (
         AvailabilityClient,
     )
 

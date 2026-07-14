@@ -22,7 +22,7 @@ src_path = Path(__file__).parent.parent.parent.parent
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-from core.planning.orchestration.intent_resolution import resolve_effective_intent
+from core.planning.planner.intent_resolution import resolve_effective_intent
 
 
 def test_confirm_continuation_with_awaiting_confirmation_status():
@@ -326,7 +326,7 @@ def test_confirm_not_overridden_by_durable_recovery():
 
         # Mock is_core_intent to return False for CONFIRM_ACTION (non-core)
         # and True for CREATE_APPOINTMENT (core)
-        with patch("core.routing.intents.base_intents.is_core_intent") as mock_is_core:
+        with patch("core.planning.policy.base_intents.is_core_intent") as mock_is_core:
 
             def is_core_side_effect(intent_name):
                 return intent_name == "CREATE_APPOINTMENT"

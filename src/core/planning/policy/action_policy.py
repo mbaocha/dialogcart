@@ -5,10 +5,7 @@ Pure, deterministic, stateless planning function for intent execution.
 No dialog logic, no execution - only planning.
 """
 
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
-
-import yaml
 
 
 def _get_required_slots_from_unified_policy(intent_name: str) -> List[str]:

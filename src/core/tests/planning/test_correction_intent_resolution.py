@@ -16,7 +16,7 @@ src_path = Path(__file__).parent.parent.parent.parent
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-from core.planning.orchestration.intent_resolution import resolve_effective_intent
+from core.planning.planner.intent_resolution import resolve_effective_intent
 
 
 def test_correction_preserves_create_appointment_session():
@@ -124,7 +124,7 @@ def test_modify_without_booking_id_switches_from_create_session():
             "MODIFY_BOOKING",
         )
         with patch(
-            "core.orchestration.session.session_manager.clear_session"
+            "core.session.session_manager.clear_session"
         ) as mock_clear:
             effective_intent, session_reset = resolve_effective_intent(
                 luma_response, session_state, "test_user"
@@ -155,7 +155,7 @@ def test_modify_with_booking_id_switches_from_create_session():
             "MODIFY_BOOKING",
         )
         with patch(
-            "core.orchestration.session.session_manager.clear_session"
+            "core.session.session_manager.clear_session"
         ) as mock_clear:
             effective_intent, session_reset = resolve_effective_intent(
                 luma_response, session_state, "test_user"

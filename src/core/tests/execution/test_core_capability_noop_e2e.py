@@ -24,10 +24,10 @@ from unittest.mock import Mock
 from extensions.capabilities.adapters.noop import NoopAdapter
 from extensions.capabilities.registry import clear_registry, register_adapter
 from extensions.capabilities.runner import CapabilityRunner
-from core.orchestration.clients.organization_client import OrganizationClient
-from core.orchestration.nlu import LumaClient
-from core.orchestration.orchestrator import handle_message
-from core.orchestration.session import clear_session, get_session, save_session
+from core.adapters.clients.organization_client import OrganizationClient
+from core.adapters.nlu import LumaClient
+from core.api.compat import handle_message
+from core.session.session_manager import clear_session, get_session, save_session
 
 # Set execution mode to test
 os.environ["CORE_EXECUTION_MODE"] = "test"

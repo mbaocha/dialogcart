@@ -22,7 +22,8 @@ This file exists to minimize repository exploration. Read this first. Read only 
 | `core/policy/` | Intent policy loader (`intent_policy.yaml` consumer) |
 | `core/session/` | Session schema, merge eligibility, invalidation, confirmation gate, persistence |
 | `core/rendering/` | LLM-rendered reply text (availability, booking confirmation) |
-| `core/routing/` | Intent router, action router, handler router, workflow registry |
+| `core/planning/policy/` | Handler router, base intents, intent→action mapping |
+| `core/workflows/` | Domain workflows + extensibility registry |
 | `core/tracing/` | Decision trace, invariant trace, spine, formatters |
 | `core/config/` | `intent_policy.yaml`, `capabilities.yaml`, `dialog_policy.yaml` |
 | `extensions/` | Capability adapters (payment, noop) |
@@ -35,7 +36,7 @@ This file exists to minimize repository exploration. Read this first. Read only 
 | `app.py:lambda_handler()` | AWS Lambda entry; routes to `route_event()` |
 | `core/orchestration/orchestrator.py:handle_message()` | Canonical per-turn entry for orchestration + execution |
 | `core/orchestration/orchestrator.py:plan_message()` | Planning-only wrapper (calls `plan_turn`) |
-| `core/planning/orchestration/turn_planner.py:plan_turn()` | NLU → session merge → plan, called by plan_message |
+| `core/planning/planner/turn_planner.py:plan_turn()` | NLU → session merge → plan, called by plan_message |
 | `nlu/pipeline.py:NLUPipeline.run()` | Production NLU pipeline entry |
 | `nlu/api.py` | Production NLU HTTP service (`/resolve`, default port 9002) |
 | `run.py` | Starts `nlu.api` with fixed `LUMA_TEST_NOW` for deterministic testing |
@@ -46,8 +47,8 @@ This file exists to minimize repository exploration. Read this first. Read only 
 
 These are the modules most likely to need changes in any given feature:
 
-- `core/planning/orchestration/turn_planner.py` — turn flow, session merge gating, intent recovery
-- `core/planning/orchestration/plan_builder.py` — action/stage selection logic
+- `core/planning/planner/turn_planner.py` — turn flow, session merge gating, intent recovery
+- `core/planning/planner/plan_builder.py` — action/stage selection logic
 - `core/planning/facts/business_fact_registry.py` — business fact derivation
 - `core/policy/intent_policy.yaml` — intent durable flags, execution steps, required slots
 - `core/orchestration/availability_fingerprint.py` — fingerprint computation
@@ -96,7 +97,7 @@ For each task type, start with exactly these files. Read no others unless a spec
 
 ### Booking / Confirmation (CONFIRM_APPOINTMENT)
 1. `core/session/confirmation_gate.py` — gate classification
-2. `core/planning/orchestration/plan_builder.py` — how AWAITING_CONFIRMATION is reached
+2. `core/planning/planner/plan_builder.py` — how AWAITING_CONFIRMATION is reached
 3. `core/orchestration/execution/clients/booking_client.py` — execution
 4. `core/rendering/booking_confirmation_renderer.py` — confirmation text
 5. Test: `core/tests/session/test_confirmation_gate.py`, `core/tests/execution/test_confirmation_execution.py`
@@ -111,7 +112,7 @@ For each task type, start with exactly these files. Read no others unless a spec
 
 ### Business Facts
 1. `core/planning/facts/business_fact_registry.py` — `derive_business_facts()`
-2. `core/planning/orchestration/plan_builder.py` — where facts are consumed
+2. `core/planning/planner/plan_builder.py` — where facts are consumed
 3. Test: `core/tests/planning/test_business_fact_registry.py`
 
 ### Fingerprint
@@ -141,7 +142,7 @@ For each task type, start with exactly these files. Read no others unless a spec
 ### NLU / Intent Resolution
 1. `nlu/pipeline.py` — production NLU pipeline
 2. `nlu/stages/` — stage1 intent + stage2 slot extractors
-3. `core/planning/orchestration/intent_resolution.py` — `resolve_effective_intent()`
+3. `core/planning/planner/intent_resolution.py` — `resolve_effective_intent()`
 4. `core/orchestration/nlu/luma_response_processor.py` — response interpretation
 5. `core/session/confirmation_gate.py` — confirmation turn classification
 
@@ -216,7 +217,7 @@ Before searching, check if the file is listed in section 2 (Fast Navigation) for
 ### Prefer Known Entry Points
 
 For any orchestration change: start at `core/orchestration/orchestrator.py:handle_message()`.
-For any planning change: start at `core/planning/orchestration/turn_planner.py:plan_turn()`.
+For any planning change: start at `core/planning/planner/turn_planner.py:plan_turn()`.
 For any NLU change: start at `nlu/pipeline.py:NLUPipeline.run()`.
 For any policy change: start at `core/config/intent_policy.yaml`.
 

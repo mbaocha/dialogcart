@@ -31,12 +31,12 @@ from extensions.capabilities.clients.payment import (
 )
 from extensions.capabilities.registry import clear_registry, register_adapter
 from extensions.capabilities.runner import CapabilityRunner
-from core.orchestration.api.capability_boundary import apply_capability_to_result
+from core.api.capability_boundary import apply_capability_to_result
 from core.session.persist import build_session_state_from_outcome
-from core.orchestration.clients.organization_client import OrganizationClient
-from core.orchestration.nlu import LumaClient
-from core.orchestration.orchestrator import handle_message
-from core.orchestration.session import clear_session, get_session, save_session
+from core.adapters.clients.organization_client import OrganizationClient
+from core.adapters.nlu import LumaClient
+from core.api.compat import handle_message
+from core.session.session_manager import clear_session, get_session, save_session
 
 # Set execution mode to test
 os.environ["CORE_EXECUTION_MODE"] = "test"

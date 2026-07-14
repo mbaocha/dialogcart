@@ -17,11 +17,11 @@ src_path = Path(__file__).parent.parent.parent.parent
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-from core.orchestration.cache.catalog_cache import catalog_cache
-from core.orchestration.cache.org_domain_cache import org_domain_cache
-from core.orchestration.clients.catalog_client import CatalogClient
-from core.orchestration.clients.organization_client import OrganizationClient
-from core.orchestration.orchestrator import handle_message
+from core.adapters.cache.catalog_cache import catalog_cache
+from core.adapters.cache.org_domain_cache import org_domain_cache
+from core.adapters.clients.catalog_client import CatalogClient
+from core.adapters.clients.organization_client import OrganizationClient
+from core.api.compat import handle_message
 
 
 def check_services():

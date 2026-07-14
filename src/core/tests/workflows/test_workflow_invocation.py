@@ -6,8 +6,8 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from core.orchestration.orchestrator import _invoke_workflow_after_execute
-from core.routing.workflows import register_workflow
+from core.api.legacy_helpers import _invoke_workflow_after_execute
+from core.workflows import register_workflow
 
 
 class TestWorkflowInvocation:
@@ -137,7 +137,7 @@ class TestWorkflowExample:
 
     def test_payment_prompt_workflow_injects_prompt(self):
         """Verify example workflow injects payment prompt."""
-        from core.routing.workflows.examples.payment_prompt_workflow import (
+        from core.workflows.examples.payment_prompt_workflow import (
             PaymentPromptWorkflow,
         )
 

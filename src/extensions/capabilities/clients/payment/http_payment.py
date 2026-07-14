@@ -13,7 +13,7 @@ This client:
 
 from typing import Any, Dict, Optional
 
-from core.orchestration.clients.base_client import BaseClient
+from core.adapters.clients.base_client import BaseClient
 
 from .payment import PaymentClient
 

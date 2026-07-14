@@ -5,7 +5,7 @@ from core.planning.facts.business_fact_registry import (
     PlanningFactContext,
     derive_business_facts,
 )
-from core.planning.orchestration.plan_builder import _maybe_enter_booking_confirmation_pending
+from core.planning.planner.plan_builder import _maybe_enter_booking_confirmation_pending
 from core.session.appointment_extensions import _maybe_persist_booking_confirmation_pending
 from core.session.confirmation_gate import (
     consume_create_appointment_confirmation,

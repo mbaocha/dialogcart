@@ -1,6 +1,6 @@
 """Unit tests for availability fingerprint normalization."""
 
-from core.orchestration.availability_fingerprint import (
+from core.workflows.availability.fingerprint import (
     build_availability_fingerprint_slots,
     compute_availability_fingerprint,
     slots_match_availability_fingerprint,

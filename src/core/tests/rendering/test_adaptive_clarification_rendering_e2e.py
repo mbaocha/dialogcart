@@ -10,7 +10,6 @@ import os
 import sys
 from pathlib import Path
 from typing import Any, Dict
-from unittest.mock import patch
 
 os.environ["CORE_EXECUTION_MODE"] = "test"
 
@@ -38,8 +37,8 @@ except Exception:
     pass
 
 from core.session.persist import build_session_state_from_outcome
-from core.orchestration.orchestrator import handle_message
-from core.orchestration.session import clear_session, get_session, save_session
+from core.api.compat import handle_message
+from core.session.session_manager import clear_session, get_session, save_session
 
 from core.tests.harness.clients import ScriptedLumaClient, TestCatalogClient, TestLumaClient
 from core.tests.harness.org_setup import get_customer_details, setup_test_org_domain
@@ -133,17 +132,13 @@ def test_adaptive_clarification_variant_after_retry():
 
     session_store = SessionStoreWrapper(user_id)
 
-    with patch(
-        "core.orchestration.orchestrator.render_llm",
-        return_value="What date would you like for your haircut?",
-    ):
-        result1 = handle_message(
-            text="book haircut",
-            user_id=user_id,
-            luma_client=luma_client,
-            organization_client=None,
-            session_store=session_store,
-        )
+    result1 = handle_message(
+        text="book haircut",
+        user_id=user_id,
+        luma_client=luma_client,
+        organization_client=None,
+        session_store=session_store,
+    )
 
     _assert_ready_missing_client(result1, ["date", "time"])
 
@@ -159,16 +154,12 @@ def test_adaptive_clarification_variant_after_retry():
     if new_session1:
         save_session(user_id, new_session1)
 
-    with patch(
-        "core.orchestration.orchestrator.render_llm",
-        return_value="Could you still tell me which date works?",
-    ):
-        result2 = handle_message(
-            text="still thinking",
-            user_id=user_id,
-            luma_client=luma_client,
-            organization_client=None,
-            session_store=session_store,
-        )
+    result2 = handle_message(
+        text="still thinking",
+        user_id=user_id,
+        luma_client=luma_client,
+        organization_client=None,
+        session_store=session_store,
+    )
 
     _assert_ready_missing_client(result2, ["date", "time"])

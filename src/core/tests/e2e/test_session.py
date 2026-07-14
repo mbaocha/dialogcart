@@ -4,7 +4,7 @@ from unittest.mock import patch
 
 import pytest
 
-from core.orchestration.session import clear_session, get_session, save_session
+from core.session.session_manager import clear_session, get_session, save_session
 
 
 @pytest.fixture
@@ -95,7 +95,7 @@ def test_ready_outcome_persists_service_id_slots(user_id, api_client):
     save_session(user_id, _turn1_session())
 
     with patch(
-        "core.orchestration.api.message.handle_message",
+        "core.api.message.handle_message",
         return_value=_ready_after_premium_outcome(),
     ):
         resp = api_client.post(
@@ -119,7 +119,7 @@ def test_executed_success_outcome_persists_service_id_slots(user_id, api_client)
     save_session(user_id, _turn1_session())
 
     with patch(
-        "core.orchestration.api.message.handle_message",
+        "core.api.message.handle_message",
         return_value=_executed_success_after_premium_outcome(),
     ):
         resp = api_client.post(
@@ -217,7 +217,7 @@ def test_awaiting_confirmation_outcome_persists_bound_datetime_and_pending(user_
     save_session(user_id, _session_after_availability_search())
 
     with patch(
-        "core.orchestration.api.message.handle_message",
+        "core.api.message.handle_message",
         return_value=_awaiting_confirmation_after_time_bind_outcome(),
     ):
         resp = api_client.post(

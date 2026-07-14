@@ -3,7 +3,7 @@
 import logging
 from typing import Any, Dict, Optional, Tuple
 
-from core.orchestration.persistence.durable_intents import is_durable_intent
+from core.session.durable_intents import is_durable_intent
 
 logger = logging.getLogger(__name__)
 

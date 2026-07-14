@@ -109,7 +109,7 @@ def check_merge(
         merged_keys = set(merged_slots.keys()) if isinstance(merged_slots, dict) else set()
         missing_keys = raw_keys - merged_keys
         if missing_keys and intent_name == "CREATE_APPOINTMENT":
-            from core.orchestration.temporal_proposal import (
+            from core.planning.temporal_proposal import (
                 _CREATE_APPOINTMENT_TEMPORAL_SLOT_KEYS,
                 resolve_session_proposals,
             )
@@ -400,7 +400,7 @@ def check_persistence(
     if not isinstance(slots, dict):
         slots = {}
 
-    from core.planning.orchestration.missing_slots import (
+    from core.planning.planner.missing_slots import (
         get_planning_required_slots_for_intent as get_required_slots_for_intent,
     )
 
@@ -469,7 +469,7 @@ def check_persistence(
         final_intent = intent_name
         if previous_intent and previous_intent not in ("", "UNKNOWN"):
             try:
-                from core.orchestration.persistence.durable_intents import (
+                from core.session.durable_intents import (
                     is_durable_intent,
                 )
 

@@ -17,9 +17,9 @@ class AvailabilityWorkflow:
     """Facade for all availability-domain operations.
 
     Phase 1: thin delegation to the existing implementations in
-             core.orchestration.availability_pagination,
-             core.orchestration.availability_fingerprint,
-             and core.orchestration.execution.clients.availability_client.
+             core.workflows.availability.pagination,
+             core.workflows.availability.fingerprint,
+             and core.execution.clients.availability_client.
 
     Availability is a CORE workflow, not an extension.
     """
@@ -41,7 +41,7 @@ class AvailabilityWorkflow:
         Returns a full turn result when the turn is a browse operation,
         or None when normal planning is required.
         """
-        from core.orchestration.availability_pagination import (
+        from core.workflows.availability.pagination import (
             try_handle_availability_browse_turn,
         )
 
@@ -58,7 +58,7 @@ class AvailabilityWorkflow:
 
     def compute_fingerprint(self, slots: Dict[str, Any]) -> str:
         """Compute the canonical availability fingerprint for *slots*."""
-        from core.orchestration.availability_fingerprint import (
+        from core.workflows.availability.fingerprint import (
             compute_availability_fingerprint,
         )
 
@@ -70,7 +70,7 @@ class AvailabilityWorkflow:
         fingerprint: str,
     ) -> bool:
         """Return True when *slots* produce the same fingerprint as stored."""
-        from core.orchestration.availability_fingerprint import (
+        from core.workflows.availability.fingerprint import (
             slots_match_availability_fingerprint,
         )
 
@@ -89,10 +89,10 @@ class AvailabilityWorkflow:
 
         *client* defaults to a fresh AvailabilityClient when not supplied.
         """
-        from core.orchestration.execution.clients.availability_client import (
+        from core.execution.clients.availability_client import (
             AvailabilityClient,
         )
-        from core.orchestration.execution.dispatcher import execute
+        from core.execution.dispatcher import execute
 
         return execute(
             plan=plan,
@@ -123,16 +123,16 @@ class AvailabilityWorkflow:
         Returns ``(updated_slots, updated_session_state)`` because both may be
         rebound during time-match resolution.
         """
-        from core.orchestration.session_ops import _persist_to_session
-        from core.orchestration.availability_fingerprint import (
+        from core.session.session_ops import _persist_to_session
+        from core.workflows.availability.fingerprint import (
             build_availability_fingerprint_slots,
             compute_availability_fingerprint,
         )
-        from core.orchestration.temporal_proposal import (
+        from core.planning.temporal_proposal import (
             enrich_last_execution_result,
             resolve_execution_proposals,
         )
-        from core.orchestration.time_resolution import (
+        from core.planning.time_resolution import (
             TIME_MATCH_EXACT,
             TIME_MATCH_MISMATCH,
             apply_time_match_exact_to_plan,

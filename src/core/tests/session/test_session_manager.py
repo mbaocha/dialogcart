@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 
 import pytest
 
-from core.orchestration.session.session_manager import (
+from core.session.session_manager import (
     SESSION_KEY_PREFIX,
     SESSION_TTL_SECONDS,
     clear_session,
@@ -37,7 +37,7 @@ class TestSaveLoad:
         mock_redis.get.return_value = json.dumps(session_state).encode("utf-8")
 
         with patch(
-            "core.orchestration.session.session_manager._get_redis_client",
+            "core.session.session_manager._get_redis_client",
             return_value=mock_redis,
         ):
             save_session(user_id, session_state)
@@ -65,7 +65,7 @@ class TestSaveLoad:
         mock_redis.get.return_value = None
 
         with patch(
-            "core.orchestration.session.session_manager._get_redis_client",
+            "core.session.session_manager._get_redis_client",
             return_value=mock_redis,
         ):
             result = get_session(user_id)
@@ -89,7 +89,7 @@ class TestSaveLoad:
         mock_redis = Mock()
 
         with patch(
-            "core.orchestration.session.session_manager._get_redis_client",
+            "core.session.session_manager._get_redis_client",
             return_value=mock_redis,
         ):
             save_session(user_id, session_state)
@@ -114,7 +114,7 @@ class TestSaveLoad:
         mock_redis = Mock()
 
         with patch(
-            "core.orchestration.session.session_manager._get_redis_client",
+            "core.session.session_manager._get_redis_client",
             return_value=mock_redis,
         ):
             # Save multiple times
@@ -139,7 +139,7 @@ class TestTTLExpiry:
         mock_redis.get.return_value = None  # Redis returns None for expired keys
 
         with patch(
-            "core.orchestration.session.session_manager._get_redis_client",
+            "core.session.session_manager._get_redis_client",
             return_value=mock_redis,
         ):
             result = get_session(user_id)
@@ -163,7 +163,7 @@ class TestTTLExpiry:
         mock_redis = Mock()
 
         with patch(
-            "core.orchestration.session.session_manager._get_redis_client",
+            "core.session.session_manager._get_redis_client",
             return_value=mock_redis,
         ):
             save_session(user_id, session_state)
@@ -185,7 +185,7 @@ class TestClear:
         mock_redis.delete.return_value = 1
 
         with patch(
-            "core.orchestration.session.session_manager._get_redis_client",
+            "core.session.session_manager._get_redis_client",
             return_value=mock_redis,
         ):
             clear_session(user_id)
@@ -209,7 +209,7 @@ class TestClear:
         mock_redis.get.return_value = None  # After clear, get returns None
 
         with patch(
-            "core.orchestration.session.session_manager._get_redis_client",
+            "core.session.session_manager._get_redis_client",
             return_value=mock_redis,
         ):
             save_session(user_id, session_state)
@@ -229,7 +229,7 @@ class TestRedisUnavailable:
         user_id = "test_user"
 
         with patch(
-            "core.orchestration.session.session_manager._get_redis_client",
+            "core.session.session_manager._get_redis_client",
             return_value=None,
         ):
             result = get_session(user_id)
@@ -248,7 +248,7 @@ class TestRedisUnavailable:
         }
 
         with patch(
-            "core.orchestration.session.session_manager._get_redis_client",
+            "core.session.session_manager._get_redis_client",
             return_value=None,
         ):
             # Should not raise
@@ -259,7 +259,7 @@ class TestRedisUnavailable:
         user_id = "test_user"
 
         with patch(
-            "core.orchestration.session.session_manager._get_redis_client",
+            "core.session.session_manager._get_redis_client",
             return_value=None,
         ):
             # Should not raise
@@ -291,7 +291,7 @@ class TestSerialization:
         mock_redis.get.return_value = json.dumps(session_state).encode("utf-8")
 
         with patch(
-            "core.orchestration.session.session_manager._get_redis_client",
+            "core.session.session_manager._get_redis_client",
             return_value=mock_redis,
         ):
             save_session(user_id, session_state)

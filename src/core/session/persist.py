@@ -1,7 +1,5 @@
 """
-Session state merge and persistence.
-
-Extracted from core.orchestration.api.session_merge for maintainability.
+Build durable session state from a turn outcome for persistence.
 """
 
 import json
@@ -9,7 +7,7 @@ import logging
 import os
 from typing import Any, Dict, Optional
 
-from core.orchestration.persistence.durable_intents import (
+from core.session.durable_intents import (
     filter_slots_for_intent,
     is_durable_intent,
 )
@@ -137,7 +135,7 @@ def build_session_state_from_outcome(
     and is the ONLY source of truth. NO later code must overwrite it with raw/filtered missing slots.
 
     Args:
-        outcome: Outcome dictionary from handle_message
+        outcome: Outcome dictionary from ConversationEngine / API turn handling
         outcome_status: Outcome status ("READY" | "NEEDS_CLARIFICATION" | "AWAITING_CONFIRMATION")
         merged_luma_response: Optional merged Luma response (for extracting intent)
         previous_session_state: Optional previous session state (unused, for compatibility)
@@ -148,7 +146,7 @@ def build_session_state_from_outcome(
     """
     # If merged_luma_response is None (empty/error Luma response), preserve previous session state
     # This handles cases where Luma API errors or empty responses occur
-    # The orchestrator should have already handled this case, but we need to ensure session is preserved
+    # Planning recovery / the API layer may already have handled this; still preserve session here
     if merged_luma_response is None and previous_session_state:
         # Preserve session state from previous turn - don't clear on empty/error responses
         # Return the previous session state as-is (or build new state from outcome if it has intent)
@@ -268,7 +266,7 @@ def build_session_state_from_outcome(
         outcome, previous_session_state, outcome_status
     )
 
-    from core.orchestration.temporal_proposal import (
+    from core.planning.temporal_proposal import (
         has_bound_booking_datetime,
         strip_unconfirmed_temporal_slots,
     )
@@ -553,7 +551,7 @@ def build_session_state_from_outcome(
             f"NOT persisting intent or slots, but persisting {len(serializable_facts)} facts"
         )
 
-    from core.orchestration.temporal_proposal import resolve_session_proposals
+    from core.planning.temporal_proposal import resolve_session_proposals
 
     _persisted_proposals = resolve_session_proposals(
         merged_luma_response=merged_luma_response,
@@ -671,7 +669,7 @@ def build_session_state_from_outcome(
         # Compute effective_collected_slots from persisted slots
         effective_collected_slots = {}
         if final_intent:
-            from core.planning.orchestration.missing_slots import (
+            from core.planning.planner.missing_slots import (
                 get_planning_required_slots_for_intent as get_required_slots_for_intent,
             )
 
@@ -688,7 +686,7 @@ def build_session_state_from_outcome(
         # Get required_slots for intent
         required_slots_list = []
         if final_intent:
-            from core.planning.orchestration.missing_slots import (
+            from core.planning.planner.missing_slots import (
                 get_planning_required_slots_for_intent as get_required_slots_for_intent,
             )
 

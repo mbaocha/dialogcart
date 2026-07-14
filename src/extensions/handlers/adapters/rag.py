@@ -3,7 +3,7 @@
 import logging
 from typing import Any, Dict, Optional
 
-from core.orchestration.errors import UpstreamError
+from core.adapters.errors import UpstreamError
 from extensions.handlers.base import HandlerResponse, IntentHandler
 from extensions.handlers.clients.faq_client import FaqClient
 from extensions.handlers.query_resolution import resolve_faq_query

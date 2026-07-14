@@ -1,6 +1,6 @@
 """Parity tests: SEARCH_AVAILABILITY driven by availability_check_required business fact."""
 
-from core.orchestration.availability_fingerprint import (
+from core.workflows.availability.fingerprint import (
     build_availability_fingerprint_slots,
     compute_availability_fingerprint,
 )

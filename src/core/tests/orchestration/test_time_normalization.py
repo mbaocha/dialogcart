@@ -11,7 +11,7 @@ time is always extracted to slots.
 
 import pytest
 
-from core.orchestration.nlu.luma_response_processor import process_luma_response
+from core.adapters.nlu.luma_response_processor import process_luma_response
 
 
 def test_noon_normalization():

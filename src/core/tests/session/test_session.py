@@ -20,9 +20,9 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
 from core.session.persist import build_session_state_from_outcome
-from core.orchestration.cache.catalog_cache import catalog_cache
-from core.orchestration.orchestrator import handle_message
-from core.orchestration.session import clear_session, get_session, save_session
+from core.adapters.cache.catalog_cache import catalog_cache
+from core.api.compat import handle_message
+from core.session.session_manager import clear_session, get_session, save_session
 from core.tests.harness.clients import TestCatalogClient, TestLumaClient
 from core.tests.harness.org_setup import get_customer_details, setup_test_org_domain
 from core.tests.planning.planning_scenarios import planning_scenarios
@@ -697,7 +697,7 @@ def cleanup_test_sessions(verbose: bool = False) -> None:
         # Import here to avoid circular dependencies
         import redis
 
-        from core.orchestration.session.session_manager import (
+        from core.session.session_manager import (
             SESSION_KEY_PREFIX,
             _get_redis_url,
         )

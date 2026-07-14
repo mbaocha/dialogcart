@@ -4,9 +4,9 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, Optional
 from unittest.mock import Mock
 
-from core.orchestration.clients.organization_client import OrganizationClient
-from core.orchestration.execution.clients.availability_client import AvailabilityClient
-from core.orchestration.execution.clients.booking_client import BookingClient
+from core.adapters.clients.organization_client import OrganizationClient
+from core.execution.clients.availability_client import AvailabilityClient
+from core.execution.clients.booking_client import BookingClient
 from core.tests.mocks import (
     mock_cancel_booking,
     mock_confirm_booking,

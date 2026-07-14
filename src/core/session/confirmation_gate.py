@@ -273,7 +273,7 @@ def detect_booking_revision(
     date_changed = False
     new_date = None
     if isinstance(luma_response, dict):
-        from core.orchestration.temporal_proposal import extract_nlu_proposals
+        from core.planning.temporal_proposal import extract_nlu_proposals
 
         proposals = extract_nlu_proposals(luma_response)
         date_proposal = proposals.get("date_proposal")
@@ -298,10 +298,10 @@ def detect_booking_revision(
 
     time_changed = False
     if isinstance(luma_response, dict):
-        from core.orchestration.availability_fingerprint import (
+        from core.workflows.availability.fingerprint import (
             _normalize_time_for_fingerprint,
         )
-        from core.orchestration.temporal_proposal import exact_time_proposal_from_luma
+        from core.planning.temporal_proposal import exact_time_proposal_from_luma
 
         time_proposal = exact_time_proposal_from_luma(luma_response)
         if time_proposal and time_proposal.get("value"):
@@ -394,7 +394,7 @@ def is_confirmation_gate_open(session_state: Optional[Dict[str, Any]]) -> bool:
     if get_confirmation_state(session_state) == "pending":
         return True
 
-    from core.orchestration.temporal_proposal import has_bound_booking_datetime
+    from core.planning.temporal_proposal import has_bound_booking_datetime
 
     return has_bound_booking_datetime(
         session_state.get("slots"), session_state
@@ -406,7 +406,7 @@ def has_revision_facts(luma_response: Optional[Dict[str, Any]]) -> bool:
     if not isinstance(luma_response, dict):
         return False
 
-    from core.orchestration.temporal_proposal import (
+    from core.planning.temporal_proposal import (
         exact_time_proposal_from_luma,
         extract_nlu_proposals,
     )

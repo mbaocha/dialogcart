@@ -6,11 +6,11 @@ import copy
 
 import pytest
 
-from core.orchestration.availability_fingerprint import (
+from core.workflows.availability.fingerprint import (
     build_availability_fingerprint_slots,
     compute_availability_fingerprint,
 )
-from core.planning.orchestration.plan_builder import build_decision_plan
+from core.planning.planner.plan_builder import build_decision_plan
 from core.tracing.decision_trace import (
     TRACE_ENV_VAR,
     TurnTrace,

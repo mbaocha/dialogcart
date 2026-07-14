@@ -198,7 +198,7 @@ class ExecutionCoordinator:
             slots["organization_id"] = _get_org_id_from_env()
 
         if action == "SEARCH_AVAILABILITY":
-            from core.orchestration.temporal_proposal import (
+            from core.planning.temporal_proposal import (
                 resolve_execution_proposals,
                 slots_for_availability_search,
             )
@@ -213,7 +213,7 @@ class ExecutionCoordinator:
         plan["slots"] = slots
 
         try:
-            from core.orchestration.catalog_resolver import (
+            from core.execution.catalog_resolver import (
                 load_sku_to_catalog_id_for_org,
             )
 
@@ -338,7 +338,7 @@ class ExecutionCoordinator:
             build_outcome_from_decision,
             build_planning_response_from_plan,
         )
-        from core.orchestration.time_resolution import (
+        from core.planning.time_resolution import (
             sync_execution_plan_from_time_resolution,
         )
 

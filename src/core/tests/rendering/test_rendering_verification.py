@@ -12,9 +12,9 @@ from unittest.mock import Mock
 
 import pytest
 
-from core.orchestration.clients.organization_client import OrganizationClient
-from core.orchestration.nlu import LumaClient
-from core.orchestration.orchestrator import handle_message
+from core.adapters.clients.organization_client import OrganizationClient
+from core.adapters.nlu import LumaClient
+from core.api.compat import handle_message
 
 # Add src to path BEFORE importing core modules
 src_path = Path(__file__).parent.parent.parent.parent

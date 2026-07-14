@@ -3,8 +3,8 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from core.orchestration.orchestrator import handle_message
-from core.orchestration.persistence.durable_intents import is_durable_intent
+from core.api.compat import handle_message
+from core.session.durable_intents import is_durable_intent
 from core.tests.harness.clients import TestCatalogClient, TestLumaClient
 from core.tests.harness.mock_clients import (
     create_mock_availability_client,
@@ -284,7 +284,7 @@ def run_multi_turn_scenario(
     aliases = scenario.get("aliases", {"haircut": "haircut"})
 
     setup_test_org_domain(domain)
-    from core.orchestration.cache.catalog_cache import catalog_cache
+    from core.adapters.cache.catalog_cache import catalog_cache
     import os
 
     test_org_id = int(os.getenv("ORG_ID", "1"))

@@ -1,8 +1,7 @@
-"""SessionProjector — Phase 1 architectural boundary for session projection.
+"""SessionProjector — projects an execution/planning outcome onto session state.
 
-Turns an execution outcome into a persisted session state.
-Initially wraps core.session.persist.build_session_state_from_outcome.
-Phase 2 will consolidate projection logic here.
+Thin boundary used by the HTTP API layer over
+``core.session.persist.build_session_state_from_outcome``.
 """
 
 from __future__ import annotations
@@ -11,11 +10,7 @@ from typing import Any, Dict, Optional
 
 
 class SessionProjector:
-    """Project an execution outcome onto a new session state.
-
-    Phase 1: thin facade over
-             core.session.persist.build_session_state_from_outcome.
-    """
+    """Project an outcome onto a new session state for persistence."""
 
     def project(
         self,

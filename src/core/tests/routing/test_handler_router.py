@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.routing.handler_router import resolve_handler
+from core.planning.policy.handler_router import resolve_handler
 
 
 RAG_INTENTS = ["DISCOVERY", "DETAILS", "QUOTE", "RECOMMENDATION", "GENERAL_INQUIRY"]

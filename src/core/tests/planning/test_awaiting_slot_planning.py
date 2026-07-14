@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 
 import pytest
 
-from core.planning.orchestration.missing_slots import compute_missing_slots
+from core.planning.planner.missing_slots import compute_missing_slots
 
 
 def _prioritize_awaiting_slot(
@@ -238,7 +238,7 @@ def test_awaiting_slot_with_none_session_state():
 
 def test_build_decision_plan_exposes_prioritized_missing_slots():
     """build_decision_plan must return awaiting_slot-prioritized missing_slots on the plan."""
-    from core.planning.orchestration.plan_builder import build_decision_plan
+    from core.planning.planner.plan_builder import build_decision_plan
 
     session_state = {
         "awaiting_slot": "service_id",

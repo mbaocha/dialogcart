@@ -5,12 +5,13 @@ Verifies that non-core intents are passed through as non-orchestrated signals
 rather than being rejected as errors.
 """
 
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
-from core.orchestration.orchestrator import _handle_non_core_intent, handle_message
-from core.routing.intents.base_intents import CORE_BASE_INTENTS
+from core.api.compat import handle_message
+from core.api.legacy_helpers import _handle_non_core_intent
+from core.planning.policy.base_intents import CORE_BASE_INTENTS
 
 
 class TestNonCoreIntentPassthrough:
@@ -41,11 +42,7 @@ class TestNonCoreIntentPassthrough:
         assert "slots" in result["outcome"]["facts"]
         assert result["outcome"]["facts"]["slots"]["amount"] == "100"
 
-    @patch("core.orchestration.orchestrator.LumaClient")
-    @patch("core.orchestration.orchestrator.OrganizationClient")
-    def test_non_core_intent_passed_through_in_handle_message(
-        self, mock_org_client, mock_luma_client
-    ):
+    def test_non_core_intent_passed_through_in_handle_message(self):
         """Verify handle_message passes through non-core intents."""
         # Setup mock Luma response with non-core intent
         mock_luma_instance = Mock()
@@ -57,14 +54,11 @@ class TestNonCoreIntentPassthrough:
             "needs_clarification": False,
             "status": "ready",
         }
-        mock_luma_client.return_value = mock_luma_instance
 
-        # Mock organization client
         mock_org_instance = Mock()
         mock_org_instance.get_details.return_value = {
             "organization": {"id": 1, "domain": "service"}
         }
-        mock_org_client.return_value = mock_org_instance
 
         result = handle_message(
             user_id="test_user",
@@ -88,7 +82,7 @@ class TestNonCoreIntentPassthrough:
         # This is a sanity check - core intents should not be passed through
         for intent in CORE_BASE_INTENTS:
             # Just verify the intent is recognized as core
-            from core.routing.intents.base_intents import is_core_intent
+            from core.planning.policy.base_intents import is_core_intent
 
             assert is_core_intent(intent) is True
 
@@ -218,10 +212,10 @@ class TestNonCoreIntentInvariants:
 
     def test_core_intents_not_affected(self):
         """Verify core intents are not affected by non-core intent handling."""
-        from core.routing.intents.base_intents import CORE_BASE_INTENTS
+        from core.planning.policy.base_intents import CORE_BASE_INTENTS
 
         # All core intents should still be recognized as core
         for intent in CORE_BASE_INTENTS:
-            from core.routing.intents.base_intents import is_core_intent
+            from core.planning.policy.base_intents import is_core_intent
 
             assert is_core_intent(intent) is True

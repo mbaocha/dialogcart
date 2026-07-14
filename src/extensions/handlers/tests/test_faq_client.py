@@ -8,7 +8,7 @@ import pytest
 os.environ.setdefault("CORE_EXECUTION_MODE", "test")
 
 from extensions.handlers.clients.faq_client import FaqClient
-from core.orchestration.errors import UpstreamError
+from core.adapters.errors import UpstreamError
 
 
 def _wrapped_response(data: dict) -> dict:

@@ -18,10 +18,10 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 from core.session.persist import build_session_state_from_outcome
-from core.orchestration.clients.organization_client import OrganizationClient
-from core.orchestration.execution.clients.availability_client import AvailabilityClient
-from core.orchestration.nlu import LumaClient
-from core.orchestration.orchestrator import handle_message
+from core.adapters.clients.organization_client import OrganizationClient
+from core.execution.clients.availability_client import AvailabilityClient
+from core.adapters.nlu import LumaClient
+from core.api.compat import handle_message
 
 
 class _StatefulSessionStore:

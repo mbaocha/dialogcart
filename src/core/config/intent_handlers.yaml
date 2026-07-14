@@ -1,3 +1,0 @@
-handlers:
-  rag:
-    intents: [DISCOVERY, DETAILS, QUOTE, RECOMMENDATION, GENERAL_INQUIRY]

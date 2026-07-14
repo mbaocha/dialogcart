@@ -88,7 +88,7 @@ def resolve_availability_fingerprint(
 
     if not fingerprint and user_id:
         try:
-            from core.orchestration.session import get_session
+            from core.session.session_manager import get_session
 
             latest_session = get_session(user_id)
             if latest_session and isinstance(latest_session, dict):
@@ -271,7 +271,7 @@ def apply_create_appointment_extensions(
             outcome=outcome,
         )
     elif (exec_result := _extract_availability_execution_result(outcome)):
-        from core.orchestration.temporal_proposal import enrich_last_execution_result
+        from core.planning.temporal_proposal import enrich_last_execution_result
         from core.rendering.availability_renderer import (
             build_availability_presentation,
             build_presented_availability,
@@ -480,7 +480,7 @@ def _maybe_persist_booking_confirmation_pending(
     if not all(slots.get(key) for key in ("service_id", "date", "time")):
         return
 
-    from core.orchestration.temporal_proposal import has_bound_booking_datetime
+    from core.planning.temporal_proposal import has_bound_booking_datetime
 
     if not has_bound_booking_datetime(slots, session_state):
         return

@@ -7,8 +7,8 @@ from unittest.mock import patch
 import httpx
 import pytest
 
-from core.orchestration.execution.clients.availability_client import AvailabilityClient
-from core.orchestration.execution.dispatcher import (
+from core.execution.clients.availability_client import AvailabilityClient
+from core.execution.dispatcher import (
     _finalize_availability_search,
     _normalize_availability_response,
 )

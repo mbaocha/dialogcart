@@ -1,7 +1,7 @@
 """
 Execution Tests: Availability Search
 
-Tests for core.orchestration.execution.availability.search_availability()
+Tests for core.execution.availability.search_availability()
 
 These tests validate the EXECUTION layer only.
 Planning, session, dialog, and rendering logic are NOT involved.
@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import MagicMock, Mock, patch
 
-from core.orchestration.execution.clients.availability_client import AvailabilityClient
+from core.execution.clients.availability_client import AvailabilityClient
 
 # Add src to path
 src_path = Path(__file__).parent.parent.parent.parent

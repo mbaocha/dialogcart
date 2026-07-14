@@ -10,13 +10,13 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
-from core.orchestration.clients.organization_client import OrganizationClient
-from core.orchestration.nlu import LumaClient
-from core.orchestration.orchestrator import handle_message
+from core.adapters.clients.organization_client import OrganizationClient
+from core.adapters.nlu import LumaClient
+from core.api.compat import handle_message
 
 # Add src to path BEFORE importing core modules
 src_path = Path(__file__).parent.parent.parent.parent
@@ -146,19 +146,15 @@ def test_acknowledgement_appears_when_slot_just_filled():
     )
     mock_luma_client.resolve.return_value = mock_luma_response
 
-    with patch(
-        "core.orchestration.orchestrator.render_llm",
-        return_value="Got it. What time would you like for your appointment?",
-    ):
-        result = handle_message(
-            text="tomorrow",
-            user_id=user_id,
-            luma_client=mock_luma_client,
-            organization_client=mock_org_client,
-            frozen_time=frozen_time,
-            organization_id=1,
-            session_state=session_state,
-        )
+    result = handle_message(
+        text="tomorrow",
+        user_id=user_id,
+        luma_client=mock_luma_client,
+        organization_client=mock_org_client,
+        frozen_time=frozen_time,
+        organization_id=1,
+        session_state=session_state,
+    )
 
     _assert_ready_missing_client(result, ["time"])
 
@@ -197,19 +193,15 @@ def test_acknowledgement_does_not_appear_on_retry():
     )
     mock_luma_client.resolve.return_value = mock_luma_response
 
-    with patch(
-        "core.orchestration.orchestrator.render_llm",
-        return_value="Could you still let me know what time works best for you?",
-    ):
-        result = handle_message(
-            text="what time",
-            user_id=user_id,
-            luma_client=mock_luma_client,
-            organization_client=mock_org_client,
-            frozen_time=frozen_time,
-            organization_id=1,
-            session_state=session_state,
-        )
+    result = handle_message(
+        text="what time",
+        user_id=user_id,
+        luma_client=mock_luma_client,
+        organization_client=mock_org_client,
+        frozen_time=frozen_time,
+        organization_id=1,
+        session_state=session_state,
+    )
 
     _assert_ready_missing_client(result, ["time"])
 

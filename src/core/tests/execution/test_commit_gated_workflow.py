@@ -12,7 +12,7 @@ from unittest.mock import Mock, call
 
 import pytest
 
-from core.orchestration.orchestrator import handle_message
+from core.api.compat import handle_message
 
 # Optional import: whatsapp_renderer may not exist in all environments
 try:
@@ -23,11 +23,11 @@ except ImportError:
     # whatsapp_renderer not available - skip rendering validation
     HAS_WHATSAPP_RENDERER = False
     render_outcome_to_whatsapp = None
-from core.orchestration.clients.catalog_client import CatalogClient
-from core.orchestration.clients.customer_client import CustomerClient
-from core.orchestration.clients.organization_client import OrganizationClient
-from core.orchestration.execution.clients.booking_client import BookingClient
-from core.orchestration.nlu import LumaClient
+from core.adapters.clients.catalog_client import CatalogClient
+from core.adapters.clients.customer_client import CustomerClient
+from core.adapters.clients.organization_client import OrganizationClient
+from core.execution.clients.booking_client import BookingClient
+from core.adapters.nlu import LumaClient
 
 
 def test_commit_gated_workflow_pending_then_confirmed():

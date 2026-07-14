@@ -1,6 +1,6 @@
 """Tests for SKU → catalog item id resolution at execution boundary."""
 
-from core.orchestration.catalog_resolver import (
+from core.execution.catalog_resolver import (
     build_sku_to_catalog_id,
     resolve_catalog_item_id,
 )

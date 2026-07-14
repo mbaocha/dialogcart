@@ -3,8 +3,8 @@
 import copy
 from typing import Any, Callable, Dict, Optional
 
-from core.orchestration.clients.catalog_client import CatalogClient
-from core.orchestration.nlu import LumaClient
+from core.adapters.clients.catalog_client import CatalogClient
+from core.adapters.nlu import LumaClient
 
 
 class ScriptedLumaClient(LumaClient):  # noqa: N801

@@ -2,7 +2,7 @@
 
 import pytest
 
-from core.orchestration.availability_pagination import try_handle_availability_browse_turn
+from core.workflows.availability.pagination import try_handle_availability_browse_turn
 from core.rendering.availability_renderer import (
     build_availability_presentation,
     build_presented_availability_page,

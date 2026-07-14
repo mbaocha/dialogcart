@@ -289,7 +289,7 @@ def evaluate_availability_evidence_ready(
     sufficient — require a successful availability cache and fingerprint match,
     or a resolved_datetime_range from presented-offer binding.
     """
-    from core.orchestration.availability_fingerprint import (
+    from core.workflows.availability.fingerprint import (
         build_availability_fingerprint_slots,
         slots_match_availability_fingerprint,
     )
@@ -320,7 +320,7 @@ def evaluate_availability_evidence_ready(
     # MODIFY / reservation flows may carry booking_id without service_id; bound
     # datetime still indicates a prior search+selection for non-appointment creates.
     if intent_name != "CREATE_APPOINTMENT":
-        from core.orchestration.temporal_proposal import has_bound_booking_datetime
+        from core.planning.temporal_proposal import has_bound_booking_datetime
 
         if has_bound_booking_datetime(slots, session_state, luma_response):
             return True
@@ -454,7 +454,7 @@ def _derive_time_selection_ready(
     session_state: Optional[Dict[str, Any]],
     luma_response: Dict[str, Any],
 ) -> bool:
-    from core.orchestration.temporal_proposal import has_bound_booking_datetime
+    from core.planning.temporal_proposal import has_bound_booking_datetime
 
     return has_bound_booking_datetime(slots, session_state, luma_response)
 

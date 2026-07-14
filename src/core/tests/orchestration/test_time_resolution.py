@@ -1,6 +1,6 @@
 """Tests for deterministic time resolution after availability search."""
 
-from core.orchestration.time_resolution import (
+from core.planning.time_resolution import (
     TIME_MATCH_EXACT,
     TIME_MATCH_MISMATCH,
     TIME_MATCH_NOT_APPLICABLE,
@@ -9,7 +9,7 @@ from core.orchestration.time_resolution import (
     apply_time_match_mismatch_to_plan,
     resolve_time_after_availability,
 )
-from core.planning.orchestration.plan_builder import build_decision_plan
+from core.planning.planner.plan_builder import build_decision_plan
 from core.rendering.availability_renderer import (
     build_availability_presentation,
     build_availability_render_request,

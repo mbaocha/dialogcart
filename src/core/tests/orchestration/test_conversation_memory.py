@@ -4,7 +4,7 @@ Tests for conversation_memory — build_conversation_context and update_conversa
 
 import pytest
 
-from core.orchestration.nlu.conversation_memory import (
+from core.adapters.nlu.conversation_memory import (
     build_conversation_context,
     update_conversation,
 )
