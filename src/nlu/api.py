@@ -1,5 +1,5 @@
 """
-NLU API — Flask stub serving the same /resolve contract as luma, on port 9002.
+NLU API — Flask service serving the `/resolve` contract on port 9002.
 
 Request body (POST /resolve):
     {
@@ -105,6 +105,13 @@ def health():
     return jsonify({"status": "ok"})
 
 
-if __name__ == "__main__":
+def main():
+    """Run the Flask development server (canonical NLU service)."""
     port = int(os.getenv("PORT", "9002"))
+    logger.info("NLU API starting on http://localhost:%s", port)
     app.run(host="0.0.0.0", port=port)
+
+
+if __name__ == "__main__":
+    main()
+

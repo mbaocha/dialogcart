@@ -150,8 +150,8 @@ Build and return response
 **Purpose:** Extract structured understanding of the current utterance.
 **Inputs:** `text`, `domain`, optional conversation context built by Core.
 **Outputs:** `luma_response` — intent, facts, time/date proposals, time_constraint, slots, service_candidates.
-**Owner:** `luma_client` (HTTP call to Luma service).
-**Important invariant:** Luma is stateless. Core owns all session context. Luma may receive context to help interpret the current utterance but must not fabricate booking slots absent from the utterance.
+**Owner:** `luma_client` (HTTP call to production NLU at `src/nlu`; default `LUMA_BASE_URL=http://localhost:9002`).
+**Important invariant:** NLU is stateless. Core owns all session context. NLU may receive context to help interpret the current utterance but must not fabricate booking slots absent from the utterance.
 
 #### Merge with session
 

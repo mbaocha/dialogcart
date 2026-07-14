@@ -76,7 +76,7 @@ SCRIPTED_FIXTURE_PARAMS: Dict[str, Dict[str, Any]] = {
 
 def luma_reachable() -> bool:
     base = __import__("os").getenv(
-        "LUMA_BASE_URL", "http://localhost:9001").rstrip("/")
+        "LUMA_BASE_URL", "http://localhost:9002").rstrip("/")
     try:
         with httpx.Client(timeout=3.0) as client:
             for path in ("/health", "/resolve"):
@@ -104,7 +104,7 @@ def luma_reachable() -> bool:
 
 requires_luma = pytest.mark.skipif(
     not luma_reachable(),
-    reason="Luma NLU service is not reachable (set LUMA_BASE_URL or start Luma)",
+    reason="NLU service is not reachable (set LUMA_BASE_URL or start src/nlu)",
 )
 
 

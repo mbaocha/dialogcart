@@ -32,6 +32,27 @@ from nlu.clarification.reasons import ClarificationReason
 logger = logging.getLogger(__name__)
 
 
+def _record_planner_stage(*, plan: Dict[str, Any]) -> None:
+    from core.tracing.stage_runner import StageRunner
+
+    StageRunner().planner(plan=plan)
+
+
+def _record_fingerprint_stage(
+    *,
+    stored_fingerprint: Any,
+    current_fingerprint: Any,
+    availability_resolved: Any,
+) -> None:
+    from core.tracing.stage_runner import StageRunner
+
+    StageRunner().fingerprint(
+        stored_fingerprint=stored_fingerprint,
+        current_fingerprint=current_fingerprint,
+        availability_resolved=availability_resolved,
+    )
+
+
 def _convert_time_24h_to_12h(time_24h: str) -> str:
     """
     Convert time from 24-hour format (HH:MM) to 12-hour format (h:mmam/pm).
@@ -1107,33 +1128,11 @@ def process_luma_response(
         organization_id=organization_id,
     )
 
-    from core.tracing.invariant_trace import trace_stage
-    from core.tracing.stage_checks import check_fingerprint, check_planner
-
-    trace_stage(
-        "planner",
-        lambda: check_planner(plan=plan),
-        allowed_mutations=["plan.status", "plan.stage", "plan.action"],
-        forbidden_mutations=["plan.text", "plan.ui_actions", "plan.ui_hint"],
-        state_snapshot={
-            "status": plan.get("status"),
-            "stage": plan.get("stage"),
-            "action": plan.get("action"),
-            "missing_slots": plan.get("missing_slots"),
-        },
-    )
-    trace_stage(
-        "fingerprint",
-        lambda: check_fingerprint(
-            stored_fingerprint=stored_fingerprint,
-            current_fingerprint=current_fingerprint,
-            availability_ready=availability_resolved,
-        ),
-        state_snapshot={
-            "stored_fingerprint": stored_fingerprint,
-            "current_fingerprint": current_fingerprint,
-            "availability_resolved": availability_resolved,
-        },
+    _record_planner_stage(plan=plan)
+    _record_fingerprint_stage(
+        stored_fingerprint=stored_fingerprint,
+        current_fingerprint=current_fingerprint,
+        availability_resolved=availability_resolved,
     )
 
     if isinstance(luma_response_for_plan.get("booking"), dict):

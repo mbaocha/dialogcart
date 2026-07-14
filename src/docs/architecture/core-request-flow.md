@@ -472,7 +472,7 @@ Then `save_session(user_id, new_session_state)` writes to the session store.
     ├──► [plan_message()] ──► [plan_turn()]
     │         │
     │         ├── tenant context + catalog resolution
-    │         ├── Luma NLU call → intent=CREATE_APPOINTMENT, slots={service_id, date, time}
+    │         ├── NLU call (`LumaClient` → `src/nlu`) → intent=CREATE_APPOINTMENT, slots={service_id, date, time}
     │         ├── contract validation
     │         ├── intent resolution (effective=CREATE_APPOINTMENT)
     │         ├── missing_slots=[] (all 3 slots collected)
@@ -537,7 +537,7 @@ The planning layer converts an incoming message and current session state into a
 
 ### Luma input
 
-`plan_turn()` builds `tenant_context` from the catalog and calls the Luma NLU service with:
+`plan_turn()` builds `tenant_context` from the catalog and calls the NLU service (`src/nlu` via `LumaClient` / `LUMA_BASE_URL`) with:
 - `text` — the user message
 - `context` — conversation history + alias map (service name → ID mapping) + prior intent
 

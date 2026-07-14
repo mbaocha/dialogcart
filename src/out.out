@@ -2118,7 +2118,7 @@ core/tests/execution/test_booking_execution.py ..                        [ 98%]
 core/tests/execution/test_availability_execution.py ..                   [ 99%]
 core/tests/execution/test_confirmation_execution.py ..                   [100%]
 
-======================== 343 passed in 94.19s (0:01:34) ========================
+======================== 343 passed in 91.37s (0:01:31) ========================
 ================================================================================
 Running tests: unit
 Path: core/tests/orchestration core/tests/session core/tests/rendering core/tests/routing core/tests/intents core/tests/workflows core/tests/execution/test_test_backend.py core/tests/execution/test_booking_execution.py core/tests/execution/test_availability_execution.py core/tests/execution/test_confirmation_execution.py

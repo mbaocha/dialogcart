@@ -31,6 +31,7 @@ from core.tracing.decision_trace import (
     measure_stage,
     get_request_trace_view,
 )
+from core.tracing.stage_runner import StageRunner
 from core.tracing.invariant_trace import (
     STAGE_ORDER,
     STAGE_OWNERS,
@@ -85,6 +86,8 @@ __all__ = [
     "invariant_failure_context",
     "is_trace_enabled",
     "trace_stage",
+    # Stage runner
+    "StageRunner",
     # Decision trace
     "DECISION_TRACE_ENV_VAR",
     "DECISION_TRACE_HEADER",

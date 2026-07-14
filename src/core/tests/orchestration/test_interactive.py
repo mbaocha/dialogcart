@@ -28,7 +28,7 @@ def check_services():
     """Check if required services are running."""
     import httpx
 
-    luma_url = os.getenv("LUMA_BASE_URL", "http://localhost:9001")
+    luma_url = os.getenv("LUMA_BASE_URL", "http://localhost:9002")
     internal_api_url = os.getenv("INTERNAL_API_BASE_URL", "http://localhost:3000")
 
     print("\n" + "=" * 60)
@@ -394,7 +394,7 @@ def interactive_test():
                         print("\n💡 TROUBLESHOOTING:")
                         print("   Luma service returned an error.")
                         print("   Make sure Luma service is running:")
-                        print("   - Default URL: http://localhost:9001")
+                        print("   - Default URL: http://localhost:9002")
                         print("   - Set LUMA_BASE_URL env var if different")
 
             except Exception as e:
@@ -478,7 +478,7 @@ def quick_test(
                 print("\n💡 TROUBLESHOOTING:")
                 print("   Luma service returned an error.")
                 print("   Make sure Luma service is running:")
-                print("   - Default URL: http://localhost:9001")
+                print("   - Default URL: http://localhost:9002")
                 print("   - Set LUMA_BASE_URL env var if different")
 
         return result

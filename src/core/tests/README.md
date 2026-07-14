@@ -8,7 +8,7 @@ core/tests/
   mocks/            # mock API payloads
   scenarios/
     execution/      # mock-booking YAML
-    smoke/          # real-Luma YAML (RUN_REAL_LUMA_E2E)
+    smoke/          # real-NLU YAML (RUN_REAL_LUMA_E2E; needs LUMA_BASE_URL → src/nlu)
   planning/         # PR gate — plan contract (65 tests)
   execution/        # mock booking + commit flows
   smoke/            # unified YAML smoke runner
@@ -32,16 +32,16 @@ core/tests/
 ## Commands
 
 ```bash
-# Planning (requires Luma for 29 scenario tests)
+# Planning (requires NLU on LUMA_BASE_URL, default localhost:9002, for live scenario tests)
 python core/tests/test.py --category planning
 
-# Mock-booking execution (requires Luma)
+# Mock-booking execution (requires NLU for live client tests)
 python core/tests/test.py --category execution
 
-# Full YAML smoke (requires Luma + flag)
+# Full YAML smoke (requires NLU + flag)
 RUN_REAL_LUMA_E2E=true python core/tests/test.py --category smoke
 
-# Fast unit tests (no Luma)
+# Fast unit tests (no live NLU)
 python core/tests/test.py --category unit
 python core/tests/test.py --category e2e
 

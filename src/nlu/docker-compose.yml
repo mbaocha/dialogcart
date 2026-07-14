@@ -1,0 +1,26 @@
+services:
+  nlu-api:
+    build:
+      context: ..
+      dockerfile: nlu/Dockerfile
+    ports:
+      - "9002:9002"
+    environment:
+      PORT: "9002"
+      LOG_LEVEL: "INFO"
+      # LUMA_TEST_NOW: "2026-01-13T10:00:00Z"  # Optional: pin reference date
+      # ANTHROPIC_API_KEY: ""  # Required for SLM extraction
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        tag: "nlu-api"
+
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s

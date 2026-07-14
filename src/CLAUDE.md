@@ -15,8 +15,8 @@ This file exists to minimize repository exploration. Read this first. Read only 
 
 | Package | Owns |
 |---|---|
-| `luma/` | NLU pipeline: extraction → intent → structure → grouping → semantic → decision → calendar |
-| `nlu/` | Newer NLU architecture with stage1/stage2 dispatcher; mirrors luma/ |
+| `nlu/` | Production NLU: stage1/stage2 SLM extraction, normalisation, calendar binding (HTTP `/resolve` on port 9002) |
+| `luma/` | Legacy rule-based NLU (retained for reference; not the production implementation) |
 | `core/orchestration/` | Turn orchestration, session merge, availability fingerprint, execution dispatch |
 | `core/planning/` | Turn planner, business facts, plan builder, intent resolution, missing slots |
 | `core/policy/` | Intent policy loader (`intent_policy.yaml` consumer) |
@@ -36,10 +36,11 @@ This file exists to minimize repository exploration. Read this first. Read only 
 | `core/orchestration/orchestrator.py:handle_message()` | Canonical per-turn entry for orchestration + execution |
 | `core/orchestration/orchestrator.py:plan_message()` | Planning-only wrapper (calls `plan_turn`) |
 | `core/planning/orchestration/turn_planner.py:plan_turn()` | NLU → session merge → plan, called by plan_message |
-| `luma/pipeline.py:LumaPipeline.run()` | Luma NLU pipeline entry |
-| `luma/api.py` | Luma service API |
-| `nlu/pipeline.py` | NLU pipeline entry (newer arch) |
-| `luma/cli/interactive.py` | Interactive CLI for manual testing |
+| `nlu/pipeline.py:NLUPipeline.run()` | Production NLU pipeline entry |
+| `nlu/api.py` | Production NLU HTTP service (`/resolve`, default port 9002) |
+| `run.py` | Starts `nlu.api` with fixed `LUMA_TEST_NOW` for deterministic testing |
+| `luma/pipeline.py:LumaPipeline.run()` | Legacy NLU pipeline (not production) |
+| `luma/api.py` | Legacy NLU service API (not production) |
 
 ### Frequently Modified Modules
 
@@ -56,7 +57,8 @@ These are the modules most likely to need changes in any given feature:
 - `core/session/invalidation.py` — session invalidation triggers
 - `core/rendering/availability_renderer.py` — availability reply text
 - `core/orchestration/availability_pagination.py` — browse/next/previous handling
-- `luma/grouping/reservation_intent_resolver.py` — intent classification rules
+- `nlu/pipeline.py` — NLU pipeline and post-processing
+- `nlu/stages/` — stage1 intent + stage2 slot extractors
 
 ### Test Locations
 
@@ -69,12 +71,9 @@ These are the modules most likely to need changes in any given feature:
 | Execution | `core/tests/execution/` |
 | Decision Trace | `core/tests/tracing/` |
 | E2E (full turn) | `core/tests/e2e/` |
-| Smoke (real Luma) | `core/tests/smoke/` |
-| Luma NLU | `luma/tests/` |
+| Smoke (real NLU via `LUMA_BASE_URL`) | `core/tests/smoke/` |
 | NLU pipeline | `nlu/tests/` |
-| Intent resolver | `luma/grouping/test_reservation_intent_resolver.py` |
-| Calendar | `luma/calendar/test_calendar_binder.py` |
-| Extraction | `luma/extraction/test*.py` |
+| Legacy Luma NLU | `luma/tests/` (not in default pytest paths) |
 
 ---
 
@@ -140,10 +139,11 @@ For each task type, start with exactly these files. Read no others unless a spec
 3. `core/orchestration/orchestrator.py` lines ~840–870 — how steps are matched and executed
 
 ### NLU / Intent Resolution
-1. `luma/grouping/reservation_intent_resolver.py` — intent classification
-2. `core/planning/orchestration/intent_resolution.py` — `resolve_effective_intent()`
-3. `core/orchestration/nlu/luma_response_processor.py` — response interpretation
-4. `core/session/confirmation_gate.py` — confirmation turn classification
+1. `nlu/pipeline.py` — production NLU pipeline
+2. `nlu/stages/` — stage1 intent + stage2 slot extractors
+3. `core/planning/orchestration/intent_resolution.py` — `resolve_effective_intent()`
+4. `core/orchestration/nlu/luma_response_processor.py` — response interpretation
+5. `core/session/confirmation_gate.py` — confirmation turn classification
 
 ---
 
@@ -199,13 +199,11 @@ Run the smallest test first. Expand only if it fails.
 | Decision trace | `pytest core/tests/tracing/test_decision_trace.py -q` | `pytest core/tests/tracing/ -q` |
 | Orchestrator flow | `pytest core/tests/orchestration/test_orchestrator_flow.py -q` | `pytest core/tests/orchestration/ -q` |
 | Full turn (E2E) | `pytest core/tests/e2e/test_booking.py -q` | `pytest core/tests/e2e/ -q` |
-| NLU / Luma pipeline | `pytest luma/tests/test_luma.py -q` | `pytest luma/ -q` |
-| NLU extraction | `pytest luma/extraction/test.py -q` | `pytest luma/extraction/ -q` |
-| Intent resolver | `pytest luma/grouping/test_reservation_intent_resolver.py -q` | `pytest luma/ -q` |
-| Smoke (real Luma) | `pytest core/tests/smoke/ -q` | N/A — integration only |
+| NLU pipeline | `pytest nlu/tests/ -q` | `pytest nlu/ -q` |
+| Smoke (real NLU) | `pytest core/tests/smoke/ -q` | N/A — integration only; needs `LUMA_BASE_URL` → nlu |
 | Session invalidation | `pytest core/tests/session/test_invalidation.py -q` | `pytest core/tests/session/ -q` |
 
-Do not run `pytest .` or `pytest core/` without a specific reason. It hits smoke tests and real Luma.
+Do not run `pytest .` or `pytest core/` without a specific reason. It hits smoke tests and a live NLU service.
 
 ---
 
@@ -219,7 +217,7 @@ Before searching, check if the file is listed in section 2 (Fast Navigation) for
 
 For any orchestration change: start at `core/orchestration/orchestrator.py:handle_message()`.
 For any planning change: start at `core/planning/orchestration/turn_planner.py:plan_turn()`.
-For any NLU change: start at `luma/pipeline.py:LumaPipeline.run()`.
+For any NLU change: start at `nlu/pipeline.py:NLUPipeline.run()`.
 For any policy change: start at `core/config/intent_policy.yaml`.
 
 ### Follow Imports Selectively
@@ -228,7 +226,7 @@ Follow an import only if the symbol you need is not visible from the file you're
 
 ### Do Not Search Across Unrelated Packages
 
-Changes to `core/session/` do not require reading `luma/`. Changes to `luma/extraction/` do not require reading `core/orchestration/`. The packages are loosely coupled; the NLU result is a plain dict handed to core at a single boundary.
+Changes to `core/session/` do not require reading `nlu/`. Changes to `nlu/stages/` do not require reading `core/orchestration/`. The packages are loosely coupled; the NLU result is a plain dict handed to core at a single boundary.
 
 ### Avoid Broad Pattern Matching
 
@@ -246,12 +244,12 @@ Do not inspect these unless the task explicitly targets them.
 | `**/*.pyc` | Compiled bytecode |
 | `*.zip`, `src.zip`, `src (2).zip`, `src (3).zip` | Archived snapshots |
 | `out.out`, `../out.out`, `../out2.out` | Logged output files |
+| `luma/` | Legacy NLU package; not production. Read only when comparing migration history. |
 | `luma/perf/` | Performance profiling scripts, not business logic |
 | `*.egg-info/` | Package metadata |
 | `.pytest_cache/` | Pytest internal cache |
 | `core/tests/scenarios/` | YAML scenario fixtures — read only when debugging specific scenario failures |
 | `core/tests/harness/` | Test harness infrastructure — read only when the harness itself is broken |
-| `nlu/` | Newer NLU architecture; active production uses `luma/`. Read `nlu/` only for NLU-specific tasks |
 | `extensions/capabilities/` | Payment/capability adapters — read only for payment flow tasks |
 
 ---

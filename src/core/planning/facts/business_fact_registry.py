@@ -165,38 +165,32 @@ def derive_business_facts(context: PlanningFactContext) -> BusinessFacts:
         intent_name,
         facts,
     )
-    from core.tracing.invariant_trace import trace_stage
-    from core.tracing.stage_checks import check_business_facts
+    from core.tracing.stage_runner import StageRunner
 
-    try:
-        from core.tracing.decision_trace import measure_stage
-    except ImportError:
-        from contextlib import contextmanager
+    def _snapshot(f: BusinessFacts) -> Dict[str, Any]:
+        return {
+            "intent": intent_name,
+            "availability_ready": f.availability_ready,
+            "availability_check_required": f.availability_check_required,
+            "user_confirmation_required": f.user_confirmation_required,
+            "user_confirmation_satisfied": f.user_confirmation_satisfied,
+            "awaiting_user_confirmation": f.awaiting_user_confirmation,
+        }
 
-        @contextmanager
-        def measure_stage(_stage: str):  # type: ignore[misc]
-            yield
-
-    with measure_stage("business_facts"):
-        trace_stage(
-            "business_facts",
-            lambda: check_business_facts(facts=facts, intent_name=intent_name),
-            state_snapshot={
-                "intent": intent_name,
-                "availability_ready": facts.availability_ready,
-                "availability_check_required": facts.availability_check_required,
-                "user_confirmation_required": facts.user_confirmation_required,
-                "user_confirmation_satisfied": facts.user_confirmation_satisfied,
-                "awaiting_user_confirmation": facts.awaiting_user_confirmation,
-            },
-        )
+    def _emit(f: BusinessFacts) -> None:
         try:
             from core.tracing.facts import emit_business_facts_trace
 
-            emit_business_facts_trace(context, facts)
+            emit_business_facts_trace(context, f)
         except ImportError:
             pass
-    return facts
+
+    return StageRunner().business_facts(
+        lambda: facts,
+        intent_name=intent_name,
+        facts_snapshot=_snapshot,
+        emit=_emit,
+    )
 
 
 def build_policy_execution_flags(

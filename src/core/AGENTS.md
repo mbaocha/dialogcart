@@ -8,6 +8,23 @@ Extends the root [Architectural Constitution](../../AGENTS.md). Core-specific ow
 
 Orchestration between NLU, Capabilities, and the user. Applies only within Core; cross-system boundaries are in the root constitution.
 
+The production owner of each conversational turn within Core is **ConversationEngine** (`process_turn`). HTTP and compat shims prepare context and persist results; they do not own the turn pipeline.
+
+---
+
+## Turn orchestration
+
+- Durable orchestration stages for a turn are **Planning → Execution → Rendering**.
+- The engine sequences those stages. It must not re-implement planning, booking dispatch, or domain post-processing owned elsewhere.
+- **Planning** produces the plan (intent, status, stage, action, slots, missing slots, and related planning artifacts).
+- **Execution** decides whether a policy-selected step runs and, when it does, performs coordination through to pre-render business outcomes.
+- **Rendering** turns plan and execution artifacts into the user-facing response.
+- Planning failure, handler delegation, browse/pagination, and clarification-without-tool-run are **control-flow branches**, not peer orchestration stages.
+- Browse/pagination remains presentation routing after planning; it must not become a fourth durable stage.
+- Non-execute and clarification response shapes belong with outcome builders—not ad hoc in the turn owner.
+- Grow turn-lifecycle behaviour in the engine and its execution-coordination boundary—not in orchestration compat shims.
+- Observability (Decision Trace, invariant stage checks) is **orthogonal** to business logic. Tracing must not dictate business return types or orchestration APIs; emitters wrap seams owned by the subsystem that makes the decision.
+
 ---
 
 ## Session
@@ -62,11 +79,11 @@ Orchestration between NLU, Capabilities, and the user. Applies only within Core;
 - Search parameters: service, date, duration, resource, location.
 - Presentation state must not modify booking slots, proposals, fingerprints, or other durable state.
 - Pagination is presentation state only.
-- Luma emits `AVAILABILITY` with `operation: browse_next | browse_previous | null`.
+- NLU emits `AVAILABILITY` with `operation: browse_next | browse_previous | null`.
 - Core consumes structured `operation` only—not raw user text for browse direction.
-- Luma classifies intent and operation; Core owns the execution decision.
+- NLU classifies intent and operation; Core owns the execution decision.
 - Core may reuse cache, paginate, or execute `SEARCH_AVAILABILITY`.
-- Luma never instructs Core to search.
+- NLU never instructs Core to search.
 
 Reference: [`AVAILABILITY_INTERACTION_CONTRACT.md`](orchestration/contracts/AVAILABILITY_INTERACTION_CONTRACT.md)
 
@@ -92,7 +109,7 @@ Reference: [`AVAILABILITY_INTERACTION_CONTRACT.md`](orchestration/contracts/AVAI
 - Presentation uses `status`, `stage`, `awaiting`, `missing_slots`, and execution artifacts.
 - Awaiting confirmation (no commit): `status=AWAITING_CONFIRMATION`, `stage=CONFIRM`, `awaiting=USER_CONFIRMATION`, `action=null`.
 - After user confirmation, policy may select a commit step (e.g. `CONFIRM_APPOINTMENT`).
-- Eligibility: business facts. Sequencing: policy + generic selector. Fact computation: runtime fact registry. Conversation phase/UI: presentation fields. Slot completeness, safety, dispatch: planner infrastructure—not sequencing.
+- Eligibility inputs: business facts. Sequencing: policy + generic selector. Fact computation: runtime fact registry. Conversation phase/UI: presentation fields. Slot completeness and safety checks belong to planning infrastructure—not sequencing. Whether and how `plan.action` runs belongs to **execution coordination**—not the planner.
 
 ---
 
@@ -104,9 +121,11 @@ Reference: [`AVAILABILITY_INTERACTION_CONTRACT.md`](orchestration/contracts/AVAI
 
 ## Booking execution
 
-- Core dispatches the execution step selected by policy.
-- Execution clients perform the operation and return outcomes; they do not decide the next user action.
-- Core merges results into session and plans the following turn.
+- Policy selects the execution step (`plan.action`); it may be `null` when nothing should run.
+- Execution coordination owns eligibility, preparation, client binding, dispatch, and workflow post-hooks needed before rendering.
+- Execution clients perform the operation and return business outcomes; they do not decide the next user action.
+- Rendering produces the user-facing response from plan and execution artifacts.
+- HTTP and session infrastructure own persistence of durable state for the following turn—not the turn orchestrator.
 
 ---
 

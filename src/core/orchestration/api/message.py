@@ -179,9 +179,8 @@ async def post_message(request: MessageRequest, http_request: Request):
             TurnInvariantTrace,
             finalize_turn_trace,
             is_trace_enabled,
-            trace_stage,
         )
-        from core.tracing.stage_checks import check_reload_session, check_save_session
+        from core.tracing.stage_runner import StageRunner
 
         query_trace = http_request.query_params.get(DECISION_TRACE_QUERY_PARAM)
         trace_enabled, trace_view = resolve_trace_view(
@@ -425,28 +424,16 @@ async def post_message(request: MessageRequest, http_request: Request):
                         session_saved = True
                         saved_session_state = new_session_state
                         if is_trace_enabled():
-                            trace_stage(
-                                "save_session",
-                                lambda: check_save_session(
-                                    saved=True, user_id=request.user_id
-                                ),
-                                state_snapshot={
-                                    "intent": new_session_state.get("intent_name")
-                                    or new_session_state.get("intent"),
-                                    "status": new_session_state.get("status"),
-                                },
+                            _stages = StageRunner()
+                            _stages.save_session(
+                                new_session_state=new_session_state,
+                                user_id=request.user_id,
                             )
                             reloaded_state = get_session(request.user_id)
-                            trace_stage(
-                                "reload_session",
-                                lambda: check_reload_session(
-                                    saved_state=new_session_state,
-                                    reloaded_state=reloaded_state,
-                                    user_id=request.user_id,
-                                ),
-                                state_snapshot={
-                                    "reloaded": reloaded_state is not None,
-                                },
+                            _stages.reload_session(
+                                saved_state=new_session_state,
+                                reloaded_state=reloaded_state,
+                                user_id=request.user_id,
                             )
                         if decision_trace_enabled:
                             reloaded_state = get_session(request.user_id)

@@ -145,3 +145,55 @@ def build_planning_response_from_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     response["_merged_luma_response"] = plan.get("_merged_luma_response")
     response.setdefault("ui_actions", [])
     return response
+
+
+def build_planning_only_response(plan: Dict[str, Any]) -> Dict[str, Any]:
+    """Build the response when policy selects no runnable execution step.
+
+    Differs from ``build_planning_response_from_plan`` by omitting plan ``text``
+    and ``_merged_luma_response`` (legacy planning-only return shape).
+    """
+    decision = plan.get("_decision")
+    if decision:
+        outcome_dict = build_outcome_from_decision(decision)
+    else:
+        logger.warning(
+            "Decision not available in plan, using fallback construction"
+        )
+        plan_slots = plan.get("slots", {})
+        plan_missing_slots = plan.get("missing_slots", [])
+        plan_obj = plan.get("plan", {})
+        if not isinstance(plan_obj, dict):
+            plan_obj = {}
+        facts = {
+            "slots": plan_slots if isinstance(plan_slots, dict) else {},
+            "missing_slots": (
+                plan_missing_slots if isinstance(plan_missing_slots, list) else []
+            ),
+        }
+        outcome_dict = {
+            "status": plan.get("status")
+            or plan_obj.get("status", "NEEDS_CLARIFICATION"),
+            "awaiting": plan.get("awaiting"),
+            "allowed_actions": plan.get("allowed_actions", []),
+            "blocked_actions": plan.get("blocked_actions", []),
+            "facts": facts,
+            "intent_name": plan.get("intent_name") or plan.get("intent", ""),
+            "plan": {
+                "status": plan_obj.get("status")
+                or plan.get("status", "NEEDS_CLARIFICATION"),
+                "stage": plan_obj.get("stage") or plan.get("stage"),
+                "action": plan_obj.get("action") or plan.get("action"),
+            },
+            "slots": plan_slots,
+            "missing_slots": plan_missing_slots,
+        }
+    if plan.get("active_capability"):
+        outcome_dict["active_capability"] = plan.get("active_capability")
+    result: Dict[str, Any] = {
+        "success": True,
+        "result": outcome_dict,
+        "outcome": outcome_dict,
+    }
+    result.setdefault("ui_actions", [])
+    return result

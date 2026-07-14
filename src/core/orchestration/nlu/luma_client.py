@@ -1,8 +1,9 @@
 """
 Luma NLU Interface
 
-HTTP client for calling Luma /resolve endpoint.
-Luma is a semantic understanding service, not an execution client.
+HTTP client for calling the NLU `/resolve` endpoint.
+The env var and class name remain `LUMA_*` / `LumaClient` for compatibility.
+The production implementation is `src/nlu` (default `http://localhost:9002`).
 """
 
 import os
@@ -14,14 +15,15 @@ from core.orchestration.errors import UpstreamError
 
 
 class LumaClient:
-    """HTTP client for Luma NLU service."""
+    """HTTP client for the NLU service (`src/nlu`)."""
 
     def __init__(self, base_url: Optional[str] = None, timeout: float = 30.0):
         """
-        Initialize Luma NLU client.
+        Initialize NLU HTTP client.
 
         Args:
-            base_url: Luma service base URL. Defaults to LUMA_BASE_URL env var.
+            base_url: NLU service base URL. Defaults to LUMA_BASE_URL env var,
+                then http://localhost:9002.
             timeout: Request timeout in seconds
         """
         if base_url:
@@ -31,7 +33,7 @@ class LumaClient:
             if env_value:
                 self.base_url = env_value
             else:
-                self.base_url = "http://localhost:9001"
+                self.base_url = "http://localhost:9002"
 
         self.base_url = self.base_url.rstrip("/")
         self.timeout = timeout

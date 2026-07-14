@@ -234,7 +234,7 @@ def chat_loop(
     org_id = _get_org_id()
     domain = _get_domain(org_id)
     core_url = _get_core_base_url()
-    luma_url = os.getenv("LUMA_BASE_URL", "http://localhost:9001")
+    luma_url = os.getenv("LUMA_BASE_URL", "http://localhost:9002")
     internal_url = os.getenv("INTERNAL_API_BASE_URL", "http://localhost:3000")
 
     print("\nDialogCart Chat (HTTP → core API)")
