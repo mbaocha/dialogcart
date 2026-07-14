@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, Dict
 from unittest.mock import MagicMock, Mock, patch
 
-from core.orchestration.execution.availability import search_availability
 from core.orchestration.execution.clients.availability_client import AvailabilityClient
 
 # Add src to path

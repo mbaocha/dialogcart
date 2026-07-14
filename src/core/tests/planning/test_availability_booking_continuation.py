@@ -21,7 +21,7 @@ from core.orchestration.execution.clients.availability_client import Availabilit
 from core.orchestration.execution.clients.booking_client import BookingClient
 from core.orchestration.nlu import LumaClient
 from core.orchestration.orchestrator import handle_message
-from core.orchestration.api.session_merge import build_session_state_from_outcome
+from core.session.persist import build_session_state_from_outcome
 from core.planning.orchestration.intent_resolution import resolve_effective_intent
 from core.session.appointment_extensions import resolve_availability_fingerprint
 

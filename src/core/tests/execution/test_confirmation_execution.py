@@ -26,7 +26,6 @@ if str(src_path) not in sys.path:
 
 from core.orchestration.errors import UpstreamError
 from core.orchestration.execution.clients.booking_client import BookingClient
-from core.orchestration.execution.confirmation import confirm_booking
 
 
 def test_confirm_booking_happy_path():

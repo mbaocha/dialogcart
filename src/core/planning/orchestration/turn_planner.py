@@ -1302,10 +1302,8 @@ def plan_turn(
     # Use ONLY effective_response (never the raw luma_response)
     # ARCHITECTURAL FIX: Always compute effective_collected_slots, even when there's no session
     # This ensures slots are persisted correctly on the first turn
-    from core.orchestration.api.session_merge import (
-        _compute_effective_collected_slots,
-        merge_luma_with_session,
-    )
+    from core.session.effective_slots import _compute_effective_collected_slots
+    from core.session.merge import merge_luma_with_session
 
     # Initialize prior_slots for logging (used later)
     prior_slots = []

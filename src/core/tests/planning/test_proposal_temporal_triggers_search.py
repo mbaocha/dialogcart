@@ -17,7 +17,7 @@ src_path = Path(__file__).parent.parent.parent.parent
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-from core.orchestration.api.session_merge import build_session_state_from_outcome
+from core.session.persist import build_session_state_from_outcome
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.execution.clients.availability_client import AvailabilityClient
 from core.orchestration.nlu import LumaClient

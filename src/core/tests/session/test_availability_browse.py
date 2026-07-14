@@ -8,7 +8,7 @@ from core.orchestration.availability_browse import (
     normalize_availability_operation,
     resolve_availability_browse,
 )
-from core.orchestration.api.session_merge import build_session_state_from_outcome
+from core.session.persist import build_session_state_from_outcome
 from core.rendering.availability_renderer import (
     build_availability_presentation,
     build_presented_availability_page,

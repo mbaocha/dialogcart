@@ -74,7 +74,7 @@ def _render_pagination_text(
     direction: Optional[str] = None,
     no_more: bool = False,
 ) -> Optional[str]:
-    from core.orchestration.orchestrator import _structured_context_from_decision
+    from core.rendering.response_renderer import _structured_context_from_decision
 
     conversation_history = (session_state or {}).get("messages", [])
     structured_context: Dict[str, Any] = {}
@@ -115,10 +115,8 @@ def try_handle_availability_browse_turn(
     Returns a full handle_message response when handled, otherwise None.
     Never calls SEARCH_AVAILABILITY or mutates booking slots/proposals.
     """
-    from core.orchestration.orchestrator import (
-        _persist_to_session,
-        build_outcome_from_decision,
-    )
+    from core.orchestration.session_ops import _persist_to_session
+    from core.engine.outcome_builder import build_outcome_from_decision
 
     merged = plan.get("_merged_luma_response") if isinstance(plan, dict) else None
     intent_obj = merged.get("intent") if isinstance(merged, dict) else None

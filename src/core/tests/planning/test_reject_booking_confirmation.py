@@ -4,7 +4,7 @@ from unittest.mock import Mock
 
 from core.orchestration.nlu import LumaClient
 from core.orchestration.orchestrator import handle_message
-from core.orchestration.api.session_merge import build_session_state_from_outcome
+from core.session.persist import build_session_state_from_outcome
 from core.rendering.booking_confirmation_renderer import (
     render_booking_confirmation_rejected,
 )

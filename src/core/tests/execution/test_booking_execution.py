@@ -25,7 +25,6 @@ if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
 from core.orchestration.errors import UpstreamError
-from core.orchestration.execution.booking import execute_booking
 from core.orchestration.execution.clients.booking_client import BookingClient
 
 

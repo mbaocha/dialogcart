@@ -1,6 +1,6 @@
 """Confirmation is consumed after successful CREATE_APPOINTMENT commit."""
 
-from core.orchestration.api.session_merge import build_session_state_from_outcome
+from core.session.persist import build_session_state_from_outcome
 from core.planning.facts.business_fact_registry import (
     PlanningFactContext,
     derive_business_facts,

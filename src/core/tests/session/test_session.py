@@ -19,7 +19,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from core.orchestration.api.session_merge import build_session_state_from_outcome
+from core.session.persist import build_session_state_from_outcome
 from core.orchestration.cache.catalog_cache import catalog_cache
 from core.orchestration.orchestrator import handle_message
 from core.orchestration.session import clear_session, get_session, save_session

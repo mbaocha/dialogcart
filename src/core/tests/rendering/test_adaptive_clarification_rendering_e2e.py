@@ -37,7 +37,7 @@ except ImportError:
 except Exception:
     pass
 
-from core.orchestration.api.session_merge import build_session_state_from_outcome
+from core.session.persist import build_session_state_from_outcome
 from core.orchestration.orchestrator import handle_message
 from core.orchestration.session import clear_session, get_session, save_session
 

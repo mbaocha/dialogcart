@@ -1,10 +1,23 @@
 """
-Orchestration Layer - Message API Endpoint
+Message API — HTTP boundary for the orchestration layer.
 
-FastAPI endpoint for processing user messages.
+Receives HTTP requests and delegates turn orchestration to ConversationEngine.
 
-This is the public API entry point for the orchestration layer.
-It receives HTTP requests and delegates to the orchestrator.
+Production flow:
+    POST /message
+        ↓  session loaded (_raw_session), unfiltered session passed to engine
+    ConversationEngine.process_turn()
+        ↓  plan → browse short-circuit → eligibility → execution → rendering
+        → result dict
+    post_message()
+        ↓  capability boundary → handler boundary → persistence → response
+
+Session contract:
+    - HTTP loads the raw session from the store.
+    - ConversationEngine receives the raw (unfiltered) session as session_state.
+    - TurnPlanner owns interpreting session contents (merge eligibility, confirmation gate).
+    - HTTP applies a status filter only for the capability boundary call
+      (apply_capability_to_result); that filtered value is never forwarded to the engine.
 """
 
 import json
@@ -20,12 +33,11 @@ from pydantic import BaseModel
 # Import app module which loads .env files
 import core.app  # noqa: F401
 from core.orchestration.api.capability_boundary import apply_capability_to_result
-from core.orchestration.api.session_merge import build_session_state_from_outcome  # noqa: F401 (re-exported for compat)
 from core.session.session_projector import SessionProjector as _SessionProjector
 from core.orchestration.errors import ContractViolation, UpstreamError
 from core.orchestration.execution.clients.availability_client import AvailabilityClient
 from core.orchestration.execution.clients.booking_client import BookingClient
-from core.orchestration.orchestrator import handle_message
+from core.engine.conversation_engine import ConversationEngine
 from core.orchestration.session import clear_session, get_session, save_session
 from core.rendering.llm_renderer import LlmRenderRequest, render_llm
 
@@ -33,8 +45,10 @@ from core.rendering.llm_renderer import LlmRenderRequest, render_llm
 _availability_client = AvailabilityClient()
 _booking_client = BookingClient()
 
-# Phase 2: SessionProjector owns session projection
 _session_projector = _SessionProjector()
+
+# Production orchestration engine — single instance, reused across requests.
+_engine = ConversationEngine()
 
 
 class _SessionStore:
@@ -76,9 +90,6 @@ _BOOTSTRAPPED = False
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# Bootstrap flag to ensure adapters are registered exactly once
-_BOOTSTRAPPED = False
-
 
 class MessageRequest(BaseModel):
     """Request model for /message endpoint."""
@@ -111,17 +122,18 @@ async def post_message(request: MessageRequest, http_request: Request):
     Process a user message through the orchestration pipeline.
 
     Session handling:
-    - Loads session at request start (if status == "NEEDS_CLARIFICATION")
-    - Merges session state with Luma response (handled in handle_message)
-    - Saves session if outcome.status == "NEEDS_CLARIFICATION", "AWAITING_CONFIRMATION",
-      or "AWAITING_CAPABILITY"
-    - Preserves session if outcome.status == "READY"
+    - Loads raw session at request start; passes it unfiltered to ConversationEngine.
+    - Session merge and interpretation are owned by TurnPlanner inside the engine.
+    - Saves session for outcome statuses: NEEDS_CLARIFICATION, AWAITING_CONFIRMATION,
+      AWAITING_CAPABILITY, READY, EXECUTED.
+    - Capability boundary receives a status-filtered view of the session
+      (only NEEDS_CLARIFICATION and AWAITING_CAPABILITY pass through).
 
     Capability handling:
-    - If core emits AWAITING_CAPABILITY, routes to capability runner
-    - Runner manages adapter lifecycle and returns facts when complete
-    - Facts are merged into outcome.facts and saved to session
-    - On next turn, core reads facts from session and proceeds
+    - If core emits AWAITING_CAPABILITY, routes to capability runner.
+    - Runner manages adapter lifecycle and returns facts when complete.
+    - Facts are merged into outcome.facts and saved to session.
+    - On next turn, core reads facts from session and proceeds.
 
     Args:
         request: Message request with user_id, text, domain, timezone
@@ -223,18 +235,20 @@ async def post_message(request: MessageRequest, http_request: Request):
         # They are computed fresh from intent contract + collected slots
         # No snapshot needed for missing_slots
 
-        # Call handle_message with session state (merge happens inside)
-        result = handle_message(
+        # Production path: ConversationEngine is the direct orchestration entrypoint.
+        # session_state=_raw_session passes the unfiltered session — this matches the
+        # value handle_message() previously loaded from _session_store and forwarded.
+        result = _engine.process_turn(
             user_id=request.user_id,
             text=request.text,
-            domain=request.domain,
-            timezone=request.timezone,
-            organization_id=request.organization_id,
-            session_state=session_state,
-            transaction_id=transaction_id,
+            session_state=_raw_session,
             availability_client=_availability_client,
             booking_client=_booking_client,
             session_store=_session_store,
+            organization_id=request.organization_id,
+            domain=request.domain,
+            timezone=request.timezone,
+            transaction_id=transaction_id,
         )
 
         # Capability boundary (single owner: API layer, not turn_planner)
@@ -384,7 +398,6 @@ async def post_message(request: MessageRequest, http_request: Request):
                     "EXECUTED",
                     "success",
                 ):
-                    # Phase 2: SessionProjector owns session projection
                     new_session_state = _session_projector.project(
                         persistence_outcome,
                         outcome_status,

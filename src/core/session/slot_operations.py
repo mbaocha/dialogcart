@@ -1,43 +1,6 @@
-"""
-Slot Contract - Planning Integration
-
-DEPRECATED: This module is being phased out in favor of the new planning modules.
-All slot requirements MUST come from intent_planning.yaml via the planner.
-
-GUARD: This module should NOT compute missing slots directly.
-Use core.planning.policy.action_policy.plan_intent() instead.
-
-PLANNING BOUNDARY:
-- Planning = intent_planning.yaml + planner code (core.planning.policy.action_policy)
-- Dialog = dialog_policy.yaml (consumes planner output, does NOT compute missing slots) - available via core.planning
-- Execution = intent_execution.yaml (dumb routing only, does NOT reference slots)
-
-This module provides backward-compatible wrappers that delegate to the new modules.
-"""
+"""Domain-specific slot manipulation for session merge and effective-slot computation."""
 
 from typing import Any, Dict
-
-# Re-export from new location for backward compatibility
-from core.planning.orchestration.missing_slots import (
-    compute_missing_slots,
-    get_planning_required_slots_for_intent,
-)
-
-
-# Keep old function for backward compatibility
-def get_required_slots_for_intent(intent_name: str):
-    """
-    DEPRECATED: Get required slots from planner instead.
-
-    This function is kept for backward compatibility but delegates to the planner.
-    New code should use core.planning.policy.action_policy.plan_intent() directly.
-    """
-    from core.planning.policy.action_policy import load_planning_policy
-
-    policy = load_planning_policy()
-    intent_policy = policy.get(intent_name, {})
-    required_slots = intent_policy.get("required_slots", [])
-    return required_slots if isinstance(required_slots, list) else []
 
 
 def filter_slots_by_domain(
@@ -310,13 +273,3 @@ def promote_slots_for_intent(
                 promoted[key] = raw_slots[key]
 
     return promoted
-
-
-__all__ = [
-    "compute_missing_slots",
-    "get_planning_required_slots_for_intent",
-    "get_required_slots_for_intent",
-    "filter_slots_by_domain",
-    "filter_collected_slots_for_intent",
-    "promote_slots_for_intent",
-]

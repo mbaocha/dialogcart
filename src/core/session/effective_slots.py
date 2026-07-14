@@ -38,10 +38,8 @@ def _compute_effective_collected_slots_internal(
     Returns:
         Dictionary of effective collected slots (slots that satisfy required slots)
     """
-    from core.orchestration.api.slot_contract import (
-        filter_slots_by_domain,
-        get_required_slots_for_intent,
-    )
+    from core.session.slot_operations import filter_slots_by_domain
+    from core.planning.orchestration.missing_slots import get_planning_required_slots_for_intent
 
     # CRITICAL: Filter slots by domain BEFORE computing effective_collected_slots
     # This prevents cross-domain slot leakage (e.g., service_id in reservation missing_slots)
@@ -54,7 +52,7 @@ def _compute_effective_collected_slots_internal(
     # No special routing needed - users can provide missing slots in any order
     effective_slots_for_filtering = domain_filtered_slots
 
-    required_slots_set = set(get_required_slots_for_intent(effective_intent))
+    required_slots_set = set(get_planning_required_slots_for_intent(effective_intent))
 
     if debug_persistence_enabled():
         print(
@@ -215,7 +213,7 @@ def _compute_effective_collected_slots(
         context = {}
 
     # Promote slots
-    from core.orchestration.api.slot_contract import promote_slots_for_intent
+    from core.session.slot_operations import promote_slots_for_intent
 
     promoted_slots = promote_slots_for_intent(raw_slots, intent_name, context)
 

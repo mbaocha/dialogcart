@@ -32,7 +32,7 @@ from extensions.capabilities.clients.payment import (
 from extensions.capabilities.registry import clear_registry, register_adapter
 from extensions.capabilities.runner import CapabilityRunner
 from core.orchestration.api.capability_boundary import apply_capability_to_result
-from core.orchestration.api.session_merge import build_session_state_from_outcome
+from core.session.persist import build_session_state_from_outcome
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.nlu import LumaClient
 from core.orchestration.orchestrator import handle_message

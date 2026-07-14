@@ -3,7 +3,7 @@ platform linux -- Python 3.10.13, pytest-9.0.2, pluggy-1.6.0
 rootdir: /mnt/c/Users/user/Documents/projects/dialogcart/dialogcart/src
 configfile: pytest.ini
 plugins: anyio-4.12.0
-collected 339 items
+collected 343 items
 
 core/tests/orchestration/contracts/test_luma_contracts.py ......         [  1%]
 core/tests/orchestration/test_availability_fingerprint.py .....          [  3%]
@@ -936,7 +936,7 @@ Key rejected candidates
   decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['user_confirmation_satisfied']
 
 .
-core/tests/orchestration/test_luma_facts_adapter.py .............        [ 24%]
+core/tests/orchestration/test_luma_facts_adapter.py .............        [ 23%]
 core/tests/orchestration/test_modify_confirm_apply.py ..                 [ 24%]
 core/tests/orchestration/test_non_core_intent_passthrough.py .
 
@@ -1278,7 +1278,7 @@ Key rejected candidates
   decision.planner.select_action / FINALIZE_RESERVATION: REQUIREMENT_UNSATISFIED — Step 'FINALIZE_RESERVATION' blocked by unsatisfied requirement 'booking_hold_ready' missing=['booking_code', 'booking_id']
 
 .
-core/tests/orchestration/test_orchestrator_invariants.py .               [ 30%]
+core/tests/orchestration/test_orchestrator_invariants.py .               [ 29%]
 core/tests/orchestration/test_rag_handler_integration.py 
 
 === Decision Trace Summary ===
@@ -1465,9 +1465,9 @@ Key rejected candidates
 .
 core/tests/orchestration/test_temporal_proposal_execution.py ........... [ 34%]
 .................................                                        [ 44%]
-core/tests/orchestration/test_time_normalization.py .....                [ 46%]
+core/tests/orchestration/test_time_normalization.py .....                [ 45%]
 core/tests/orchestration/test_time_resolution.py .............           [ 49%]
-core/tests/session/test_availability_browse.py .......................   [ 56%]
+core/tests/session/test_availability_browse.py .......................   [ 55%]
 core/tests/session/test_awaiting_slot_e2e.py 
 
 === Decision Trace Summary ===
@@ -1533,11 +1533,12 @@ Key rejected candidates
   decision.planner.select_action / FINALIZE_RESERVATION: REQUIREMENT_UNSATISFIED — Step 'FINALIZE_RESERVATION' blocked by unsatisfied requirement 'booking_hold_ready' missing=['booking_code', 'booking_id']
 
 .
-core/tests/session/test_commit_consumes_confirmation.py ........         [ 59%]
-core/tests/session/test_confirmation_gate.py .........................   [ 66%]
+core/tests/session/test_commit_consumes_confirmation.py ........         [ 58%]
+core/tests/session/test_confirmation_gate.py .........................   [ 65%]
 core/tests/session/test_invalidation.py ....                             [ 67%]
-core/tests/session/test_merge_eligibility.py ......                      [ 69%]
-core/tests/session/test_service_stickiness.py ...........                [ 72%]
+core/tests/session/test_merge_eligibility.py ......                      [ 68%]
+core/tests/session/test_merge_entity_time_regression.py ....             [ 69%]
+core/tests/session/test_service_stickiness.py ...........                [ 73%]
 core/tests/session/test_session.py .                                     [ 73%]
 core/tests/session/test_session_manager.py ............                  [ 76%]
 core/tests/session/test_slot_retry_tracking_e2e.py 
@@ -2117,7 +2118,7 @@ core/tests/execution/test_booking_execution.py ..                        [ 98%]
 core/tests/execution/test_availability_execution.py ..                   [ 99%]
 core/tests/execution/test_confirmation_execution.py ..                   [100%]
 
-======================= 339 passed in 106.33s (0:01:46) ========================
+======================== 343 passed in 94.19s (0:01:34) ========================
 ================================================================================
 Running tests: unit
 Path: core/tests/orchestration core/tests/session core/tests/rendering core/tests/routing core/tests/intents core/tests/workflows core/tests/execution/test_test_backend.py core/tests/execution/test_booking_execution.py core/tests/execution/test_availability_execution.py core/tests/execution/test_confirmation_execution.py

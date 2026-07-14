@@ -12,7 +12,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from core.orchestration.api.session_merge import build_session_state_from_outcome
+from core.session.persist import build_session_state_from_outcome
 from core.orchestration.clients.organization_client import OrganizationClient
 from core.orchestration.execution.clients.availability_client import AvailabilityClient
 from core.orchestration.nlu import LumaClient
