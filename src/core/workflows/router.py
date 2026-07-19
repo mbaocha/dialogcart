@@ -1,24 +1,20 @@
-"""WorkflowRouter — routes an execution action to the owning domain workflow.
+"""WorkflowRouter — domain selection for execution post-processing.
 
-Phase 2: maps execution client names (from intent policy) and action names
-to the appropriate workflow boundary. Initially contains simple delegation
-with no business logic.
-
-Phase 3 will replace client-name routing with action-first routing and
-allow the router to fully own the execution dispatch.
+Maps the policy ``client`` field from ``intent_policy.yaml`` to a domain
+route name (``availability`` / ``booking``). Does not construct workflows
+or initiate tool dispatch.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 
 class WorkflowRouter:
-    """Select and return the workflow that owns a given execution action.
+    """Select the domain that owns post-processing for an execution client.
 
     Routing key: the ``client`` field set in ``intent_policy.yaml`` for
-    each execution step. This mirrors the existing orchestrator dispatch
-    so behaviour is identical.
+    each execution step. Engine constructs workflow instances separately.
     """
 
     _CLIENT_TO_ROUTE: Dict[str, str] = {
@@ -30,20 +26,8 @@ class WorkflowRouter:
         """Return the route name for *client_name*, or None if unknown.
 
         Returns:
-            ``"availability"`` — route to AvailabilityWorkflow
-            ``"booking"``      — route to BookingWorkflow
+            ``"availability"`` — AvailabilityWorkflow post-processing
+            ``"booking"``      — BookingWorkflow post-processing
             ``None``           — unrecognised client; caller should fall back
         """
         return self._CLIENT_TO_ROUTE.get(client_name or "")
-
-    def get_availability_workflow(self) -> Any:
-        """Return the AvailabilityWorkflow instance for this router."""
-        from core.workflows.availability.workflow import AvailabilityWorkflow
-
-        return AvailabilityWorkflow()
-
-    def get_booking_workflow(self) -> Any:
-        """Return the BookingWorkflow instance for this router."""
-        from core.workflows.booking.workflow import BookingWorkflow
-
-        return BookingWorkflow()

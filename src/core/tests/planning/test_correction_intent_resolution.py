@@ -40,7 +40,7 @@ def test_correction_preserves_create_appointment_session():
     with patch("core.policy.intent_policy.get_intent_durable") as mock_durable:
         mock_durable.return_value = True
         effective_intent, session_reset = resolve_effective_intent(
-            luma_response, session_state, "test_user"
+            luma_response, session_state, "test_user", 1
         )
 
     assert effective_intent == "CREATE_APPOINTMENT"
@@ -65,7 +65,7 @@ def test_correction_preserves_modify_booking_session_needs_clarification():
     with patch("core.policy.intent_policy.get_intent_durable") as mock_durable:
         mock_durable.return_value = True
         effective_intent, session_reset = resolve_effective_intent(
-            luma_response, session_state, "test_user"
+            luma_response, session_state, "test_user", 1
         )
 
     assert effective_intent == "MODIFY_BOOKING"
@@ -93,7 +93,7 @@ def test_correction_ready_modify_unresolved_by_intent_resolution():
     with patch("core.policy.intent_policy.get_intent_durable") as mock_durable:
         mock_durable.return_value = True
         effective_intent, session_reset = resolve_effective_intent(
-            luma_response, session_state, "test_user"
+            luma_response, session_state, "test_user", 1
         )
 
     assert effective_intent == "CORRECTION"
@@ -127,12 +127,12 @@ def test_modify_without_booking_id_switches_from_create_session():
             "core.session.session_manager.clear_session"
         ) as mock_clear:
             effective_intent, session_reset = resolve_effective_intent(
-                luma_response, session_state, "test_user"
+                luma_response, session_state, "test_user", 1
             )
 
     assert effective_intent == "MODIFY_BOOKING"
     assert session_reset is True
-    mock_clear.assert_called_once_with("test_user")
+    mock_clear.assert_called_once_with(1, "test_user")
 
 
 def test_modify_with_booking_id_switches_from_create_session():
@@ -158,12 +158,12 @@ def test_modify_with_booking_id_switches_from_create_session():
             "core.session.session_manager.clear_session"
         ) as mock_clear:
             effective_intent, session_reset = resolve_effective_intent(
-                luma_response, session_state, "test_user"
+                luma_response, session_state, "test_user", 1
             )
 
     assert effective_intent == "MODIFY_BOOKING"
     assert session_reset is True
-    mock_clear.assert_called_once_with("test_user")
+    mock_clear.assert_called_once_with(1, "test_user")
 
 
 def test_correction_without_session_stays_correction():
@@ -176,7 +176,7 @@ def test_correction_without_session_stays_correction():
     }
 
     effective_intent, session_reset = resolve_effective_intent(
-        luma_response, None, "test_user"
+        luma_response, None, "test_user", 1
     )
 
     assert effective_intent == "CORRECTION"

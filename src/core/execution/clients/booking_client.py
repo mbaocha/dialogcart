@@ -111,7 +111,9 @@ class BookingClient(BaseClient):
         logger.debug("Creating booking with payload: %s", payload)
         return self._request("POST", path, json=payload)
 
-    def get_booking(self, booking_code: str) -> Dict[str, Any]:
+    def get_booking(
+        self, booking_code: str, organization_id: int
+    ) -> Dict[str, Any]:
         """
         Get booking by booking code.
 
@@ -125,7 +127,31 @@ class BookingClient(BaseClient):
             UpstreamError: On network failures or HTTP errors
         """
         path = f"/api/internal/bookings/{booking_code}"
-        return self._request("GET", path)
+        response = self._request(
+            "GET", path, params={"organization_id": organization_id}
+        )
+        self._validate_booking_organization(response, organization_id)
+        return response
+
+    @staticmethod
+    def _validate_booking_organization(
+        response: Dict[str, Any], organization_id: int
+    ) -> None:
+        """Reject booking data that explicitly belongs to another tenant."""
+        booking = response.get("booking", response)
+        if not isinstance(booking, dict):
+            return
+        response_org_id = booking.get("organization_id")
+        if response_org_id is None:
+            response_org_id = booking.get("organizationId")
+        organization = booking.get("organization")
+        if response_org_id is None and isinstance(organization, dict):
+            response_org_id = organization.get("id")
+        if response_org_id is not None and int(response_org_id) != organization_id:
+            raise ValueError(
+                "Booking organization_id conflicts with request tenant: "
+                f"expected {organization_id}, got {response_org_id}"
+            )
 
     def cancel_booking(
         self,
@@ -210,6 +236,7 @@ class BookingClient(BaseClient):
             params["customer_id"] = customer_id
         if extra_params:
             params.update(extra_params)
+        params["organization_id"] = organization_id
         path = f"/api/internal/organizations/{organization_id}/bookings/search"
         return self._request("GET", path, params=params)
 
@@ -239,6 +266,7 @@ class BookingClient(BaseClient):
 
     def create_payment_intent(
         self,
+        organization_id: int,
         booking_id: int,
         amount: Any,
         currency: str = "usd",
@@ -246,6 +274,7 @@ class BookingClient(BaseClient):
         extra_payment_fields: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         payload = {
+            "organization_id": organization_id,
             "booking_id": booking_id,
             "payment": {
                 "amount": amount,

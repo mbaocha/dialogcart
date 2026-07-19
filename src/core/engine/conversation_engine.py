@@ -1,8 +1,25 @@
 """ConversationEngine — production orchestration owner.
 
-Coordinates planning → (browse branch) → execution → rendering.
-Observability is owned by ``StageRunner``. Booking execution details live in
-``ExecutionCoordinator``; outcome shaping lives in ``outcome_builder``.
+Called from ``core.api.message`` (HTTP) and ``core.api.compat`` (tests/legacy).
+Owns the turn pipeline after the API loads session; does not persist session or
+run capability/handler boundaries (those live in ``core.api``).
+
+Turn flow (``process_turn``):
+    planning via ``plan_message()`` → ``plan_turn()``
+        ↓  planning failure → error result
+        ↓  HANDLER_DELEGATED → early result (API runs handler boundary)
+        ↓  availability browse/pagination → early result (no SEARCH_AVAILABILITY)
+        ↓  ``ExecutionCoordinator.resolve()`` — eligibility gate (may skip execution)
+        ↓  ``ExecutionCoordinator.run()`` — tool dispatch + workflow post-process
+        ↓  ``ResponseRenderer`` — user-facing text on executed paths
+        → result { success, outcome, plan?, text, _decision?, _merged_luma_response? }
+
+Ownership:
+    - Planning: ``core.planning`` (this module only sequences it).
+    - Execution eligibility, client binding, dispatch: ``ExecutionCoordinator``.
+    - Outcome dict shaping: ``outcome_builder``.
+    - Observability: ``StageRunner`` (stage timing, invariant trace hooks).
+    - Session persistence: ``core.api`` + ``core.session`` after ``process_turn`` returns.
 """
 
 from __future__ import annotations
@@ -53,9 +70,9 @@ class ConversationEngine:
         user_id: str,
         session_state: Optional[Dict[str, Any]],
         luma_client: Optional[Any],
+        catalog_client: Optional[Any],
         organization_client: Optional[Any],
-        frozen_time: Optional[Any],
-        organization_id: Optional[int],
+        organization_id: int,
     ) -> Any:
         from core.planning.planning_service import plan_message
 
@@ -64,8 +81,8 @@ class ConversationEngine:
             user_id=user_id,
             session_state=session_state,
             luma_client=luma_client,
+            catalog_client=catalog_client,
             organization_client=organization_client,
-            frozen_time=frozen_time,
             organization_id=organization_id,
         )
 
@@ -74,6 +91,7 @@ class ConversationEngine:
         plan: Dict[str, Any],
         session_state: Optional[Dict[str, Any]],
         session_store: Optional[Any],
+        organization_id: int,
         user_id: str,
         availability_workflow: Any,
     ) -> Optional[Dict[str, Any]]:
@@ -82,6 +100,7 @@ class ConversationEngine:
             plan=plan,
             session_state=session_state,
             session_store=session_store,
+            organization_id=organization_id,
             user_id=user_id,
         )
 
@@ -91,8 +110,7 @@ class ConversationEngine:
         *,
         session_store: Optional[Any],
         user_id: str,
-        organization_id: Optional[int],
-        action_runner: Any,
+        organization_id: int,
         workflow_router: Any,
         booking_workflow: Any,
         availability_workflow: Any,
@@ -104,7 +122,6 @@ class ConversationEngine:
             session_store=session_store,
             user_id=user_id,
             organization_id=organization_id,
-            action_runner=action_runner,
             workflow_router=workflow_router,
             booking_workflow=booking_workflow,
             availability_workflow=availability_workflow,
@@ -122,10 +139,9 @@ class ConversationEngine:
     ) -> Dict[str, Any]:
         decision = plan.get("_decision")
         if decision:
-            renderer.render_availability(
+            renderer.render_execution(
                 result, decision, execution_result, session_state
             )
-            renderer.render_outcome(result, decision, execution_result)
         return result
 
     def _finish_gate(
@@ -185,20 +201,22 @@ class ConversationEngine:
         self,
         text: str,
         user_id: str,
+        organization_id: int,
         session_state: Optional[Dict[str, Any]] = None,
         availability_client: Optional[Any] = None,
         organization_client: Optional[Any] = None,
         session_store: Optional[Any] = None,
         frozen_time: Optional[Any] = None,
-        organization_id: Optional[int] = None,
         luma_client: Optional[Any] = None,
+        catalog_client: Optional[Any] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
         """Coordinate a complete conversational turn.
 
         Domain is not accepted here; planning derives it from organization_id.
+        ``frozen_time`` is accepted for API compatibility but is not forwarded
+        to planning (unused by ``plan_turn``).
         """
-        from core.execution.action_runner import ActionRunner
         from core.rendering.response_renderer import ResponseRenderer
         from core.workflows.availability.workflow import AvailabilityWorkflow
         from core.workflows.booking.workflow import BookingWorkflow
@@ -206,8 +224,12 @@ class ConversationEngine:
 
         # Planning derives domain from organization_id; never forward HTTP domain.
         kwargs.pop("domain", None)
+        # Drop unused clock override so it cannot leak into planning kwargs.
+        _ = frozen_time
+        # Prefer explicit arg; accept legacy kwargs for callers that only pass **kwargs.
+        if catalog_client is None:
+            catalog_client = kwargs.pop("catalog_client", None)
 
-        action_runner = ActionRunner()
         renderer = ResponseRenderer()
         availability_workflow = AvailabilityWorkflow()
         booking_workflow = BookingWorkflow()
@@ -230,8 +252,8 @@ class ConversationEngine:
                 user_id=user_id,
                 session_state=session_state,
                 luma_client=luma_client,
+                catalog_client=catalog_client,
                 organization_client=organization_client,
-                frozen_time=frozen_time,
                 organization_id=organization_id,
             )
 
@@ -270,6 +292,7 @@ class ConversationEngine:
                     "success": True,
                     "outcome": hd_outcome,
                     "result": hd_outcome,
+                    "_working_session": session_state,
                 }
                 return stages.finish(
                     hd_response,
@@ -282,6 +305,7 @@ class ConversationEngine:
                     plan=plan,
                     session_state=session_state,
                     session_store=session_store,
+                    organization_id=organization_id,
                     user_id=user_id,
                     availability_workflow=availability_workflow,
                 ),
@@ -316,7 +340,6 @@ class ConversationEngine:
                     session_store=session_store,
                     user_id=user_id,
                     organization_id=organization_id,
-                    action_runner=action_runner,
                     workflow_router=workflow_router,
                     booking_workflow=booking_workflow,
                     availability_workflow=availability_workflow,
@@ -351,27 +374,3 @@ class ConversationEngine:
                     can_execute=True,
                 )
 
-    def handle_turn(
-        self,
-        text: str,
-        user_id: str,
-        **kwargs: Any,
-    ) -> Dict[str, Any]:
-        return self.process_turn(text=text, user_id=user_id, **kwargs)
-
-    def plan_turn(
-        self,
-        text: str,
-        user_id: str,
-        session_state: Optional[Dict[str, Any]] = None,
-        **kwargs: Any,
-    ) -> Dict[str, Any]:
-        from core.planning.planning_service import plan_message
-
-        kwargs.pop("domain", None)
-        return plan_message(
-            text=text,
-            user_id=user_id,
-            session_state=session_state,
-            **kwargs,
-        )

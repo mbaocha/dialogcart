@@ -212,7 +212,7 @@ class TestBookingIdentificationFacts:
 class TestConfirmationFacts:
     def test_confirmation_pending_requires_user_confirmation(self):
         session = {
-            "booking": {"confirmation_state": "pending"},
+            "confirmation_state": "pending",
         }
         facts = derive_business_facts(
             _ctx(
@@ -230,7 +230,7 @@ class TestConfirmationFacts:
 
     def test_confirmation_confirmed_satisfies_user_confirmation(self):
         session = {
-            "booking": {"confirmation_state": "confirmed"},
+            "confirmation_state": "confirmed",
         }
         facts = derive_business_facts(
             _ctx(
@@ -249,7 +249,7 @@ class TestConfirmationFacts:
     def test_gate_accept_continuation_satisfies_user_confirmation(self):
         """ACCEPT turn may satisfy confirmation before persisted state catches up."""
         session = {
-            "booking": {"confirmation_state": "pending"},
+            "confirmation_state": "pending",
         }
         facts = derive_business_facts(
             _ctx(
@@ -260,7 +260,7 @@ class TestConfirmationFacts:
                     "time": "14:00",
                 },
                 session_state=session,
-                luma_response={"_confirm_booking_continuation": True},
+                confirm_booking_continuation=True,
                 confirmation_state="pending",
             )
         )
@@ -392,7 +392,7 @@ class TestModifyAvailabilityCheckFacts:
             "date": "2026-07-10",
             "time": "14:00",
         }
-        session = {"booking": {"confirmation_state": "confirmed"}}
+        session = {"confirmation_state": "confirmed"}
         facts = derive_business_facts(
             _ctx(
                 intent_name="MODIFY_BOOKING",

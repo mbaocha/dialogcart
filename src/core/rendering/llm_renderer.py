@@ -8,6 +8,7 @@ Extensions own the instruction; core owns the execution.
 Business context is extracted from facts["structured_context"] when present.
 """
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -91,6 +92,13 @@ def _build_user_message(request: LlmRenderRequest) -> str:
             avail_lines.append(f"(+ {more_count} more times not shown)")
         if avail_lines:
             parts.append("Availability:\n" + "\n".join(avail_lines))
+
+    execution = request.facts.get("execution")
+    if isinstance(execution, dict):
+        parts.append(
+            "Execution evidence:\n"
+            + json.dumps(execution, default=str, ensure_ascii=False, indent=2)
+        )
 
     return "\n\n".join(parts)
 

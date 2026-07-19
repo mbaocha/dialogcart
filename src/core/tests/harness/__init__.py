@@ -11,6 +11,7 @@ from core.tests.harness.mock_clients import (
     create_mock_organization_client,
 )
 from core.tests.harness.org_setup import get_customer_details, setup_test_org_domain
+from core.tests.harness.recording_luma_client import RecordingLumaClient
 from core.tests.harness.scenario_loader import load_yaml_scenarios, scenario_param_id
 from core.tests.harness.scenario_runner import (
     assert_turn_expectations,
@@ -22,6 +23,7 @@ from core.tests.harness.session_store import MockSessionStore
 __all__ = [
     "TestCatalogClient",
     "TestLumaClient",
+    "RecordingLumaClient",
     "MockSessionStore",
     "create_mock_availability_client",
     "create_mock_booking_client",

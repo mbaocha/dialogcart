@@ -173,8 +173,14 @@ class CapabilityRunner:
         if not user_id:
             logger.error("user_id missing from context")
             return RunnerResult(passthrough=True)
+        organization_id = context.get("organization_id")
+        if not isinstance(organization_id, int) or organization_id <= 0:
+            logger.error("organization_id missing or invalid in capability context")
+            return RunnerResult(passthrough=True)
 
-        is_first_activation = self._is_first_activation(user_id, capability)
+        is_first_activation = self._is_first_activation(
+            organization_id, user_id, capability
+        )
 
         # Step 5: Route to adapter
         try:
@@ -203,7 +209,7 @@ class CapabilityRunner:
             except Exception as abort_error:
                 logger.error(f"Adapter abort error: {abort_error}", exc_info=True)
             # Clear adapter state
-            self._clear_adapter_state(user_id, capability)
+            self._clear_adapter_state(organization_id, user_id, capability)
             # Passthrough to core (core will handle error state)
             return RunnerResult(passthrough=True)
 
@@ -248,7 +254,7 @@ class CapabilityRunner:
                 )
 
             # Clear adapter-local state
-            self._clear_adapter_state(user_id, capability)
+            self._clear_adapter_state(organization_id, user_id, capability)
 
             # TEMPORARY LOG: Inspect RunnerResult before returning
             # This helps diagnose why facts might be None
@@ -283,7 +289,9 @@ class CapabilityRunner:
 
             # Persist adapter-local state (if adapter maintains state)
             # Note: Adapter state is separate from core session
-            self._persist_adapter_state(user_id, capability, response)
+            self._persist_adapter_state(
+                organization_id, user_id, capability, response
+            )
 
             # TEMPORARY LOG: Inspect RunnerResult for non-completion path
             logger.error(
@@ -334,6 +342,12 @@ class CapabilityRunner:
         if not user_id:
             logger.warning("Cannot abort capability: user_id missing from context")
             return
+        organization_id = context.get("organization_id")
+        if not isinstance(organization_id, int) or organization_id <= 0:
+            logger.warning(
+                "Cannot abort capability: organization_id missing or invalid"
+            )
+            return
 
         try:
             adapter = get_adapter(capability)
@@ -341,7 +355,7 @@ class CapabilityRunner:
             logger.warning(
                 f"Adapter not registered for capability: {capability}, skipping abort"
             )
-            self._clear_adapter_state(user_id, capability)
+            self._clear_adapter_state(organization_id, user_id, capability)
             return
 
         try:
@@ -353,9 +367,11 @@ class CapabilityRunner:
             logger.error(f"Error during adapter abort: {e}", exc_info=True)
         finally:
             # Always clear adapter state, even if abort fails
-            self._clear_adapter_state(user_id, capability)
+            self._clear_adapter_state(organization_id, user_id, capability)
 
-    def _is_first_activation(self, user_id: str, capability: str) -> bool:
+    def _is_first_activation(
+        self, organization_id: int, user_id: str, capability: str
+    ) -> bool:
         """
         Check if this is the first activation of the capability for this user.
 
@@ -366,11 +382,15 @@ class CapabilityRunner:
         Returns:
             True if first activation, False otherwise
         """
-        state = self._state_store.get(user_id, capability)
+        state = self._state_store.get(organization_id, user_id, capability)
         return state is None
 
     def _persist_adapter_state(
-        self, user_id: str, capability: str, response: AdapterResponse
+        self,
+        organization_id: int,
+        user_id: str,
+        capability: str,
+        response: AdapterResponse,
     ) -> None:
         """
         Persist adapter-local state.
@@ -386,10 +406,14 @@ class CapabilityRunner:
             response: Adapter response (may contain state hints)
         """
         # Store activation flag (indicates capability is active)
-        self._state_store.set(user_id, capability, {"active": True})
+        self._state_store.set(
+            organization_id, user_id, capability, {"active": True}
+        )
         logger.debug(f"Persisted adapter state for {capability} for user {user_id}")
 
-    def _clear_adapter_state(self, user_id: str, capability: str) -> None:
+    def _clear_adapter_state(
+        self, organization_id: int, user_id: str, capability: str
+    ) -> None:
         """
         Clear adapter-local state.
 
@@ -402,7 +426,7 @@ class CapabilityRunner:
             user_id: User identifier
             capability: Capability name
         """
-        self._state_store.delete(user_id, capability)
+        self._state_store.delete(organization_id, user_id, capability)
         logger.debug(f"Cleared adapter state for {capability} for user {user_id}")
 
 
@@ -411,28 +435,37 @@ class InMemoryStateStore:
     In-memory state store for adapter-local state.
 
     This is a simple implementation for single-process deployments.
-    For distributed deployments, use Redis or database-backed store.
+    For distributed deployments, migrate this tenant-scoped state to Redis or
+    a database-backed store with capability-lifecycle TTL expiry.
 
     State structure:
     {
-        (user_id, capability): state_dict
+        (organization_id, user_id, capability): state_dict
     }
     """
 
     def __init__(self):
         self._store: Dict[tuple, Dict[str, Any]] = {}
 
-    def get(self, user_id: str, capability: str) -> Optional[Dict[str, Any]]:
-        """Get adapter state for user and capability."""
-        key = (user_id, capability)
+    def get(
+        self, organization_id: int, user_id: str, capability: str
+    ) -> Optional[Dict[str, Any]]:
+        """Get adapter state for organization, user, and capability."""
+        key = (organization_id, user_id, capability)
         return self._store.get(key)
 
-    def set(self, user_id: str, capability: str, state: Dict[str, Any]) -> None:
-        """Set adapter state for user and capability."""
-        key = (user_id, capability)
+    def set(
+        self,
+        organization_id: int,
+        user_id: str,
+        capability: str,
+        state: Dict[str, Any],
+    ) -> None:
+        """Set adapter state for organization, user, and capability."""
+        key = (organization_id, user_id, capability)
         self._store[key] = state
 
-    def delete(self, user_id: str, capability: str) -> None:
-        """Delete adapter state for user and capability."""
-        key = (user_id, capability)
+    def delete(self, organization_id: int, user_id: str, capability: str) -> None:
+        """Delete adapter state for organization, user, and capability."""
+        key = (organization_id, user_id, capability)
         self._store.pop(key, None)

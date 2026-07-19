@@ -1,5 +1,5 @@
-# execution package — action execution boundary
+# execution package — canonical execution result
 
-from core.execution.action_runner import ActionRunner
+from core.execution.result import ExecutionResult, normalize_execution_result
 
-__all__ = ["ActionRunner"]
+__all__ = ["ExecutionResult", "normalize_execution_result"]

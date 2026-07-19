@@ -1,18 +1,23 @@
 """Unit tests for confirmation gate classification and clear-pending (PR1–PR2)."""
 
-from core.session.confirmation_gate import (
+from core.planning.booking_revision import (
     BookingRevision,
-    ConfirmationGateTurn,
-    apply_booking_revision,
-    classify_confirmation_gate_turn,
-    clear_pending_confirmation,
     detect_booking_revision,
-    get_confirmation_state,
     has_actionable_booking_facts,
     has_revision_facts,
+)
+from core.session.confirmation_gate import (
+    ConfirmationGateTurn,
+    classify_confirmation_gate_turn,
+    get_confirmation_state,
     is_confirmation_gate_open,
     normalize_confirmation_state,
     set_confirmation_state,
+)
+from core.session.invalidation import (
+    InvalidationTrigger,
+    apply_invalidation,
+    clear_booking_state,
 )
 
 
@@ -21,7 +26,6 @@ def _pending_session(**overrides):
         "intent_name": "CREATE_APPOINTMENT",
         "status": "AWAITING_CONFIRMATION",
         "confirmation_state": "pending",
-        "booking": {"confirmation_state": "pending"},
         "slots": {
             "service_id": "premium haircut",
             "date": "2026-07-06",
@@ -40,13 +44,13 @@ def test_gate_open_when_pending():
     assert is_confirmation_gate_open(_pending_session()) is True
 
 
-def test_gate_open_when_bound_datetime_even_if_status_needs_clarification():
+def test_gate_closed_without_pending_authorization_even_if_datetime_bound():
     session = _pending_session(
         status="NEEDS_CLARIFICATION",
         confirmation_state=None,
         booking={},
     )
-    assert is_confirmation_gate_open(session) is True
+    assert is_confirmation_gate_open(session) is False
 
 
 def test_gate_closed_without_booking_session():
@@ -60,7 +64,7 @@ def test_accept_on_confirm_action():
         {"intent": {"name": "CONFIRM_ACTION"}, "facts": {}},
         _pending_session(),
     )
-    assert action == ConfirmationGateTurn.ACCEPT
+    assert action == ConfirmationGateTurn.YES
 
 
 def test_reject_on_reject_action_without_revision_facts():
@@ -68,10 +72,10 @@ def test_reject_on_reject_action_without_revision_facts():
         {"intent": {"name": "REJECT_ACTION"}, "facts": {}},
         _pending_session(),
     )
-    assert action == ConfirmationGateTurn.REJECT
+    assert action == ConfirmationGateTurn.NO
 
 
-def test_revise_wins_over_reject_when_time_present():
+def test_reject_action_is_no_even_when_time_present():
     action = classify_confirmation_gate_turn(
         {
             "intent": {"name": "REJECT_ACTION"},
@@ -84,10 +88,10 @@ def test_revise_wins_over_reject_when_time_present():
         },
         _pending_session(),
     )
-    assert action == ConfirmationGateTurn.REVISE
+    assert action == ConfirmationGateTurn.NO
 
 
-def test_revise_on_correction_with_time():
+def test_correction_with_time_is_another_request():
     action = classify_confirmation_gate_turn(
         {
             "intent": {"name": "CORRECTION"},
@@ -100,10 +104,10 @@ def test_revise_on_correction_with_time():
         },
         _pending_session(),
     )
-    assert action == ConfirmationGateTurn.REVISE
+    assert action == ConfirmationGateTurn.ANOTHER_REQUEST
 
 
-def test_revise_on_create_appointment_with_time_only():
+def test_create_appointment_with_time_only_is_another_request():
     action = classify_confirmation_gate_turn(
         {
             "intent": {"name": "CREATE_APPOINTMENT"},
@@ -111,24 +115,24 @@ def test_revise_on_create_appointment_with_time_only():
         },
         _pending_session(),
     )
-    assert action == ConfirmationGateTurn.REVISE
+    assert action == ConfirmationGateTurn.ANOTHER_REQUEST
 
 
-def test_none_when_gate_closed():
+def test_no_classification_when_gate_closed():
     action = classify_confirmation_gate_turn(
         {"intent": {"name": "REJECT_ACTION"}, "facts": {}},
         {"intent_name": "CREATE_APPOINTMENT",
             "status": "NEEDS_CLARIFICATION", "slots": {}},
     )
-    assert action == ConfirmationGateTurn.NONE
+    assert action is None
 
 
-def test_none_for_unrelated_intent_while_pending():
+def test_unrelated_intent_while_pending_is_another_request():
     action = classify_confirmation_gate_turn(
         {"intent": {"name": "FAQ"}, "facts": {}},
         _pending_session(),
     )
-    assert action == ConfirmationGateTurn.NONE
+    assert action == ConfirmationGateTurn.ANOTHER_REQUEST
 
 
 def test_same_service_id_echo_is_not_revision_alone():
@@ -146,10 +150,10 @@ def test_same_service_id_echo_is_not_revision_alone():
         },
         _pending_session(),
     )
-    assert action == ConfirmationGateTurn.NONE
+    assert action == ConfirmationGateTurn.ANOTHER_REQUEST
 
 
-def test_service_change_is_revise():
+def test_service_change_is_another_request():
     action = classify_confirmation_gate_turn(
         {
             "intent": {"name": "CORRECTION"},
@@ -157,7 +161,7 @@ def test_service_change_is_revise():
         },
         _pending_session(),
     )
-    assert action == ConfirmationGateTurn.REVISE
+    assert action == ConfirmationGateTurn.ANOTHER_REQUEST
 
 
 def test_actionable_facts_include_exact_time_proposal():
@@ -184,30 +188,42 @@ def test_actionable_facts_false_for_empty_side_intent():
     )
 
 
-def test_set_confirmation_state_mirrors_booking_and_top_level():
+def test_set_confirmation_state_writes_top_level_only():
     session = {"slots": {}}
     set_confirmation_state(session, "pending")
-    assert session["booking"]["confirmation_state"] == "pending"
     assert session["confirmation_state"] == "pending"
+    assert "booking" not in session
     assert get_confirmation_state(session) == "pending"
 
 
-def test_normalize_prefers_booking_over_top_level():
+def test_normalize_prefers_top_level_and_removes_nested_value():
     session = {
         "confirmation_state": "confirmed",
         "booking": {"confirmation_state": "pending"},
     }
     normalize_confirmation_state(session)
-    assert get_confirmation_state(session) == "pending"
-    assert session["confirmation_state"] == "pending"
-    assert session["booking"]["confirmation_state"] == "pending"
+    assert get_confirmation_state(session) == "confirmed"
+    assert session["confirmation_state"] == "confirmed"
+    assert "confirmation_state" not in session["booking"]
 
 
-def test_normalize_promotes_top_level_into_booking():
-    session = {"confirmation_state": "pending", "booking": {}}
+def test_normalize_migrates_nested_value_to_top_level():
+    session = {"booking": {"confirmation_state": "pending"}}
     normalize_confirmation_state(session)
-    assert session["booking"]["confirmation_state"] == "pending"
+    assert session["confirmation_state"] == "pending"
+    assert "confirmation_state" not in session["booking"]
     assert get_confirmation_state(session) == "pending"
+
+
+def test_explicit_top_level_clear_wins_over_legacy_nested_value():
+    session = {
+        "confirmation_state": None,
+        "booking": {"confirmation_state": "pending"},
+    }
+    normalize_confirmation_state(session)
+    assert "confirmation_state" not in session
+    assert "confirmation_state" not in session["booking"]
+    assert get_confirmation_state(session) is None
 
 
 def test_detect_time_only_revision():
@@ -221,10 +237,10 @@ def test_detect_time_only_revision():
     assert revision.time is True
     assert revision.service is False
     assert revision.date is False
-    summary = revision.to_summary()
-    assert summary == {
-        "changes": [{"field": "time", "from": "09:00", "to": "11:00"}]
-    }
+    assert len(revision.changes) == 1
+    assert revision.changes[0].field == "time"
+    assert revision.changes[0].from_value == "09:00"
+    assert revision.changes[0].to_value == "11:00"
 
 
 def test_detect_date_revision():
@@ -234,7 +250,8 @@ def test_detect_date_revision():
     )
     assert revision.date is True
     assert revision.time is False
-    assert revision.to_summary()["changes"][0]["to"] == "2026-07-11"
+    assert revision.changes[0].field == "date"
+    assert revision.changes[0].to_value == "2026-07-11"
 
 
 def test_detect_service_revision():
@@ -243,7 +260,8 @@ def test_detect_service_revision():
         _pending_session(),
     )
     assert revision.service is True
-    assert revision.to_summary()["changes"][0]["from"] == "premium haircut"
+    assert revision.changes[0].field == "service"
+    assert revision.changes[0].from_value == "premium haircut"
 
 
 def test_apply_time_revision_keeps_presented_availability():
@@ -252,7 +270,12 @@ def test_apply_time_revision_keeps_presented_availability():
         availability_fingerprint="fp",
         last_execution_result={"slots": []},
     )
-    apply_booking_revision(session, BookingRevision(time=True), reason="test")
+    apply_invalidation(
+        session,
+        InvalidationTrigger.BOOKING_REVISION,
+        revision=BookingRevision(time=True),
+        reason="test",
+    )
     assert "time" not in session["slots"]
     assert session["slots"].get("date") == "2026-07-06"
     assert session["slots"].get("service_id") == "premium haircut"
@@ -266,7 +289,12 @@ def test_apply_date_revision_clears_availability_artifacts():
         availability_fingerprint="fp",
         last_execution_result={"slots": []},
     )
-    apply_booking_revision(session, BookingRevision(date=True), reason="test")
+    apply_invalidation(
+        session,
+        InvalidationTrigger.BOOKING_REVISION,
+        revision=BookingRevision(date=True),
+        reason="test",
+    )
     assert "date" not in session["slots"]
     assert "time" not in session["slots"]
     assert session["slots"].get("service_id") == "premium haircut"
@@ -280,8 +308,12 @@ def test_apply_service_revision_clears_service_and_availability():
         presented_availability={"search_date": "2026-07-06", "slots": []},
         availability_fingerprint="fp",
     )
-    apply_booking_revision(
-        session, BookingRevision(service=True), reason="test")
+    apply_invalidation(
+        session,
+        InvalidationTrigger.BOOKING_REVISION,
+        revision=BookingRevision(service=True),
+        reason="test",
+    )
     assert "service_id" not in session["slots"]
     assert "date" not in session["slots"]
     assert "time" not in session["slots"]
@@ -298,9 +330,10 @@ def test_clear_pending_with_time():
             },
         }
     )
-    clear_pending_confirmation(session, clear_time=True, reason="test")
-    assert "confirmation_state" not in session
-    assert session.get("booking") == {}
+    clear_booking_state(session, clear_time=True, reason="test")
+    assert get_confirmation_state(session) is None
+    booking = session.get("booking")
+    assert booking is None or booking.get("booking_id") is None
     assert session["slots"].get("date") == "2026-07-06"
     assert "time" not in session["slots"]
     assert "resolved_datetime_range" not in session
@@ -310,8 +343,9 @@ def test_clear_pending_with_time():
 
 def test_clear_pending_confirmation_only_keeps_time():
     session = _pending_session()
-    clear_pending_confirmation(session, clear_time=False, reason="rebind")
-    assert "confirmation_state" not in session
-    assert session.get("booking") == {}
+    clear_booking_state(session, clear_time=False, reason="rebind")
+    assert get_confirmation_state(session) is None
+    booking = session.get("booking")
+    assert booking is None or booking.get("booking_id") is None
     assert session["slots"].get("time") == "09:00"
     assert session.get("resolved_datetime_range")

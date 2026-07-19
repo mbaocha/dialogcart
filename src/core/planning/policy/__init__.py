@@ -1,10 +1,9 @@
 """
 Planning Policy Module
 
-Contains policy modules for planning decisions:
+Static policy helpers used by the planning pipeline and algorithms:
 - action_policy: Action planning (executable_actions determination)
-- stage_policy: Stage-based dialog policy (NEEDS_CLARIFICATION, AWAITING_CONFIRMATION)
 - handler_router: Intent → handler mapping (intent_handlers.yaml)
 - base_intents: Core-owned intent membership
-- intent_router: Legacy intent → action name mapping
+- intent_router: Intent → action name mapping (adapter / NLU processor)
 """

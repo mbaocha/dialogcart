@@ -1,18 +1,89 @@
-"""Confirmation is consumed after successful CREATE_APPOINTMENT commit."""
+"""Confirmation lifecycle: Stage 7 policy, commit consumption, and gate closure."""
 
-from core.session.persist import build_session_state_from_outcome
 from core.planning.facts.business_fact_registry import (
     PlanningFactContext,
     derive_business_facts,
 )
-from core.planning.planner.plan_builder import _maybe_enter_booking_confirmation_pending
-from core.session.appointment_extensions import _maybe_persist_booking_confirmation_pending
+from core.planning.booking_revision import has_committed_create_appointment
+from core.planning.pipeline.requests import AttachedRequest
+from core.planning.pipeline.stage06_confirmation import resolve_confirmation
+from core.planning.pipeline.types import (
+    AvailabilityDecision,
+    SlotTurnState,
+    WorkingTurn,
+)
+from core.workflows.booking.workflow import BookingWorkflow
 from core.session.confirmation_gate import (
+    ConfirmationGateTurn,
     consume_create_appointment_confirmation,
     get_confirmation_state,
-    has_committed_create_appointment,
     is_confirmation_gate_open,
 )
+
+
+def _commit_ready_payload(**slot_overrides):
+    slots = {
+        "service_id": "premium",
+        "date": "2026-07-10",
+        "time": "10:00",
+        **slot_overrides,
+    }
+    return {
+        "slots": slots,
+        "_effective_collected_slots": dict(slots),
+        "resolved_datetime_range": {
+            "start": "2026-07-10T10:00:00Z",
+            "end": "2026-07-10T10:30:00Z",
+        },
+    }
+
+
+def _resolve_confirmation(**overrides):
+    payload = overrides.pop("payload", _commit_ready_payload())
+    turn_operation = overrides.pop("turn_operation", "NONE")
+    confirm_booking_continuation = overrides.pop("confirm_booking_continuation", False)
+    gate_action = overrides.pop("intent_decision_gate_action", None)
+    working_turn = overrides.pop(
+        "working_turn",
+        WorkingTurn(
+            payload=payload,
+            effective_collected_slots=dict(payload["_effective_collected_slots"]),
+        ),
+    )
+    slot_state = overrides.pop(
+        "slot_state",
+        SlotTurnState(
+            intent_name="CREATE_APPOINTMENT",
+            missing_slots=[],
+            effective_collected_slots=dict(payload["_effective_collected_slots"]),
+            base_status="READY",
+            needs_clarification=False,
+        ),
+    )
+    availability = overrides.pop(
+        "availability",
+        AvailabilityDecision(availability_ready=True),
+    )
+    attached_request = AttachedRequest(
+        planning_intent="CREATE_APPOINTMENT",
+        turn_operation=turn_operation,
+        session_reset_occurred=False,
+        confirm_booking_continuation=confirm_booking_continuation,
+        gate_action=gate_action,
+    )
+    defaults = {
+        "attached_request": attached_request,
+        "session_state": None,
+        "gate_booking_intent": "CREATE_APPOINTMENT",
+        "user_id": "test",
+    }
+    defaults.update(overrides)
+    return resolve_confirmation(
+        slot_state=slot_state,
+        working_turn=working_turn,
+        availability=availability,
+        **defaults,
+    )
 
 
 def test_has_committed_create_appointment():
@@ -21,113 +92,163 @@ def test_has_committed_create_appointment():
     assert has_committed_create_appointment({}) is False
 
 
-def test_persist_clears_confirmation_when_booking_id_present():
-    session_state = {
+def test_booking_workflow_consumes_confirmation_after_successful_commit():
+    session_state = {"confirmation_state": "pending"}
+    merged = {"confirmation_state": "confirmed"}
+    plan = {
+        "action": "CONFIRM_APPOINTMENT",
+        "slots": {},
+        "_merged_luma_response": merged,
+    }
+
+    slots = BookingWorkflow().process_result(
+        execution_result={
+            "status": "succeeded",
+            "refs": {"booking_id": "bk-99"},
+            "subject": {},
+        },
+        plan=plan,
+        slots={},
+        action="CONFIRM_APPOINTMENT",
+        session_state=session_state,
+    )
+
+    assert slots["booking_id"] == "bk-99"
+    assert get_confirmation_state(session_state) is None
+    assert get_confirmation_state(merged) is None
+
+
+def test_stage_confirmation_enters_pending_when_commit_ready():
+    payload = _commit_ready_payload()
+    decision = _resolve_confirmation(payload=payload)
+
+    assert decision.confirmation_state == "pending"
+    assert decision.awaiting_user_confirmation is True
+    assert get_confirmation_state(payload) == "pending"
+
+
+def test_stage_confirmation_skips_pending_when_booking_id_exists():
+    payload = _commit_ready_payload(booking_id="bk-1")
+    decision = _resolve_confirmation(payload=payload)
+
+    assert decision.confirmation_state is None
+    assert decision.awaiting_user_confirmation is False
+    assert get_confirmation_state(payload) is None
+
+
+def test_stage_confirmation_clears_on_no():
+    session = {
         "intent_name": "CREATE_APPOINTMENT",
         "confirmation_state": "pending",
-        "booking": {"confirmation_state": "pending"},
         "slots": {
             "service_id": "premium",
             "date": "2026-07-10",
             "time": "10:00",
-            "booking_id": "bk-99",
         },
         "resolved_datetime_range": {
             "start": "2026-07-10T10:00:00Z",
             "end": "2026-07-10T10:30:00Z",
         },
+        "presented_availability": {"search_date": "2026-07-10", "slots": []},
     }
-    merged = {
-        "booking": {"confirmation_state": "confirmed"},
-        "confirmation_state": "confirmed",
-    }
-    _maybe_persist_booking_confirmation_pending(session_state, merged, {})
-    assert get_confirmation_state(session_state) is None
-    assert get_confirmation_state(merged) is None
-
-
-def test_persist_clears_confirmation_from_successful_confirm_outcome():
-    session_state = {
-        "intent_name": "CREATE_APPOINTMENT",
-        "slots": {
-            "service_id": "premium",
-            "date": "2026-07-10",
-            "time": "10:00",
-        },
-    }
-    merged = {"booking": {"confirmation_state": "confirmed"}}
-    outcome = {
-        "status": "EXECUTED",
-        "booking_id": "bk-new",
-        "plan": {
-            "action": "CONFIRM_APPOINTMENT",
-            "slots": {
-                "service_id": "premium",
-                "date": "2026-07-10",
-                "time": "10:00",
-                "booking_id": "bk-new",
-            },
-        },
-    }
-    _maybe_persist_booking_confirmation_pending(session_state, merged, outcome)
-    assert session_state["slots"]["booking_id"] == "bk-new"
-    assert get_confirmation_state(session_state) is None
-    assert get_confirmation_state(merged) is None
-
-
-def test_persist_does_not_reenter_pending_when_booking_id_exists():
-    session_state = {
-        "intent_name": "CREATE_APPOINTMENT",
-        "slots": {
-            "service_id": "premium",
-            "date": "2026-07-10",
-            "time": "10:00",
-            "booking_id": "bk-1",
-        },
-        "resolved_datetime_range": {
-            "start": "2026-07-10T10:00:00Z",
-            "end": "2026-07-10T10:30:00Z",
-        },
-    }
-    _maybe_persist_booking_confirmation_pending(session_state, {}, {})
-    assert get_confirmation_state(session_state) is None
-
-
-def test_plan_builder_skips_pending_when_booking_id_exists():
-    luma_response = {
-        "slots": {
-            "service_id": "premium",
-            "date": "2026-07-10",
-            "time": "10:00",
-            "booking_id": "bk-1",
-        },
-        "_effective_collected_slots": {
-            "service_id": "premium",
-            "date": "2026-07-10",
-            "time": "10:00",
-            "booking_id": "bk-1",
-        },
-        "resolved_datetime_range": {
-            "start": "2026-07-10T10:00:00Z",
-            "end": "2026-07-10T10:30:00Z",
-        },
-    }
-    result = _maybe_enter_booking_confirmation_pending(
-        "CREATE_APPOINTMENT",
-        luma_response,
-        missing_slots=[],
-        needs_clarification=False,
-        availability_resolved=True,
-        confirmation_state=None,
+    payload = {"slots": {}, "_effective_collected_slots": {}}
+    working_turn = WorkingTurn(
+        payload=payload,
     )
-    assert result is None
-    assert get_confirmation_state(luma_response) is None
+    decision = resolve_confirmation(
+        attached_request=AttachedRequest(
+            planning_intent="CREATE_APPOINTMENT",
+            turn_operation="NONE",
+            session_reset_occurred=False,
+            gate_action=ConfirmationGateTurn.NO,
+        ),
+        slot_state=SlotTurnState(
+            intent_name="CREATE_APPOINTMENT",
+            missing_slots=[],
+            effective_collected_slots={},
+            base_status="AWAITING_CONFIRMATION",
+        ),
+        working_turn=working_turn,
+        availability=AvailabilityDecision(availability_ready=True),
+        session_state=session,
+        gate_booking_intent="CREATE_APPOINTMENT",
+        user_id="test",
+    )
+
+    assert decision.confirmation_state is None
+    assert decision.reject_evidence is not None
+    assert decision.reject_evidence.rejected is True
+    assert get_confirmation_state(working_turn.payload) is None
+
+
+def test_stage_confirmation_clears_on_another_request():
+    """AVAILABILITY + ANOTHER_REQUEST supersedes pending confirmation and invalidates trust."""
+    payload = _commit_ready_payload()
+    session = {
+        "intent_name": "CREATE_APPOINTMENT",
+        "confirmation_state": "pending",
+        "slots": {
+            "service_id": "premium",
+            "date": "2026-07-10",
+            "time": "10:00",
+        },
+        "resolved_datetime_range": {
+            "start": "2026-07-10T10:00:00Z",
+            "end": "2026-07-10T10:30:00Z",
+        },
+        "presented_availability": {"search_date": "2026-07-10", "slots": []},
+        "availability_fingerprint": "fp-test",
+    }
+    decision = _resolve_confirmation(
+        payload=payload,
+        session_state=session,
+        intent_decision_gate_action=ConfirmationGateTurn.ANOTHER_REQUEST,
+        turn_operation="AVAILABILITY",
+    )
+
+    effective_slots = payload.get("_effective_collected_slots") or payload.get("slots") or {}
+
+    assert decision.confirmation_state is None
+    assert get_confirmation_state(payload) is None
+    assert decision.awaiting_user_confirmation is False
+    assert decision.user_confirmation_satisfied is False
+    # Supersede path invalidates availability trust; it does not reshow cache.
+    assert decision.availability_reshow is False
+    assert decision.availability_invalidation is not None
+    assert decision.availability_invalidation.invalidated is True
+    assert (
+        decision.availability_invalidation.reason_code
+        == "AVAILABILITY_SUPERSEDES_PENDING_CONFIRMATION"
+    )
+    assert decision.bound_datetime_clear is not None
+    assert decision.bound_datetime_clear.cleared is True
+    assert decision.slots_adjusted is True
+    assert payload.get("resolved_datetime_range") is None
+    assert effective_slots.get("time") in (None, "")
+    assert effective_slots.get("service_id") == "premium"
+    assert effective_slots.get("date") == "2026-07-10"
+
+    # Stage 08 omits superseded session binding when deriving facts
+    # (BoundDatetimeClearEvidence). Do not resurrect session.resolved_datetime_range.
+    facts = derive_business_facts(
+        PlanningFactContext(
+            intent_name="CREATE_APPOINTMENT",
+            organization_id=1,
+            slots=effective_slots,
+            session_state=None,
+            luma_response=payload,
+            confirmation_state=decision.confirmation_state,
+        )
+    )
+    assert facts.user_confirmation_required is False
+    assert facts.time_selection_ready is False
 
 
 def test_business_facts_skip_confirmation_when_booking_id_exists():
     facts = derive_business_facts(
         PlanningFactContext(
             intent_name="CREATE_APPOINTMENT",
+            organization_id=1,
             slots={
                 "service_id": "premium",
                 "date": "2026-07-10",
@@ -151,7 +272,6 @@ def test_gate_closed_after_commit():
         "intent_name": "CREATE_APPOINTMENT",
         "status": "AWAITING_CONFIRMATION",
         "confirmation_state": "pending",
-        "booking": {"confirmation_state": "pending"},
         "slots": {
             "service_id": "premium",
             "date": "2026-07-10",
@@ -165,68 +285,3 @@ def test_gate_closed_after_commit():
     }
     consume_create_appointment_confirmation(session)
     assert is_confirmation_gate_open(session) is False
-
-
-def test_executed_confirm_appointment_rebuilds_session_and_consumes_confirmation():
-    """EXECUTED outcomes must flow through the normal persistence pipeline."""
-    previous_session = {
-        "intent_name": "CREATE_APPOINTMENT",
-        "status": "AWAITING_CONFIRMATION",
-        "confirmation_state": "pending",
-        "booking": {"confirmation_state": "pending"},
-        "slots": {
-            "service_id": "premium haircut",
-            "date": "2026-07-10",
-            "time": "10:00",
-            "organization_id": 1,
-        },
-        "resolved_datetime_range": {
-            "start": "2026-07-10T10:00:00Z",
-            "end": "2026-07-10T10:30:00Z",
-        },
-        "availability_fingerprint": "fp-abc",
-        "presented_availability": {"search_date": "2026-07-10", "slots": []},
-    }
-    merged_luma = {
-        "intent": {"name": "CREATE_APPOINTMENT"},
-        "booking": {"confirmation_state": "confirmed"},
-        "slots": previous_session["slots"],
-        "_effective_collected_slots": previous_session["slots"],
-        "resolved_datetime_range": previous_session["resolved_datetime_range"],
-    }
-    execution_outcome = {
-        "status": "EXECUTED",
-        "booking_id": "MOCK-BOOKING-001",
-        "facts": {
-            "intent_name": "CREATE_APPOINTMENT",
-            "slots": {
-                **previous_session["slots"],
-                "booking_id": "MOCK-BOOKING-001",
-            },
-        },
-        "plan": {
-            "status": "READY",
-            "stage": "CONFIRM",
-            "action": "CONFIRM_APPOINTMENT",
-            "slots": {
-                **previous_session["slots"],
-                "booking_id": "MOCK-BOOKING-001",
-            },
-        },
-    }
-
-    session_state = build_session_state_from_outcome(
-        execution_outcome,
-        "EXECUTED",
-        merged_luma,
-        previous_session,
-        user_id="e2e-user",
-    )
-
-    assert session_state is not None
-    assert session_state["intent_name"] == "CREATE_APPOINTMENT"
-    assert session_state["slots"]["booking_id"] == "MOCK-BOOKING-001"
-    assert get_confirmation_state(session_state) is None
-    assert session_state["slots"]["service_id"] == "premium haircut"
-    assert session_state.get("resolved_datetime_range")
-    assert session_state.get("availability_fingerprint") == "fp-abc"

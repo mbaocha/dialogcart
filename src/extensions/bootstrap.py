@@ -6,16 +6,15 @@ Call once at application startup.
 """
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 
-def register_default_extensions(*, organization_id: Optional[int] = None) -> None:
+def register_default_extensions() -> None:
     """Register default capability adapters and intent handlers."""
     from extensions.capabilities.bootstrap import register_default_adapters
     from extensions.handlers.bootstrap import register_default_handlers
 
-    register_default_adapters(organization_id=organization_id)
+    register_default_adapters()
     register_default_handlers()
     logger.info("Registered default extensions (capabilities + handlers)")

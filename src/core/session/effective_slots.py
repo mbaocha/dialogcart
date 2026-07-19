@@ -19,7 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 def _compute_effective_collected_slots_internal(
-    promoted_slots: Dict[str, Any], effective_intent: str, planning_only: bool = False
+    promoted_slots: Dict[str, Any],
+    effective_intent: str,
+    *,
+    apply_domain_filter: bool = True,
 ) -> Dict[str, Any]:
     """
     Compute effective collected slots from promoted slots.
@@ -43,9 +46,10 @@ def _compute_effective_collected_slots_internal(
 
     # CRITICAL: Filter slots by domain BEFORE computing effective_collected_slots
     # This prevents cross-domain slot leakage (e.g., service_id in reservation missing_slots)
-    # PLANNING-ONLY: Skip domain filtering when planning_only=True
     domain_filtered_slots = filter_slots_by_domain(
-        promoted_slots, effective_intent, planning_only=planning_only
+        promoted_slots,
+        effective_intent,
+        apply_domain_filter=apply_domain_filter,
     )
 
     # Slots are treated as an unordered, additive map
@@ -87,7 +91,9 @@ def _compute_effective_collected_slots_internal(
 
 
 def _compute_effective_collected_slots(
-    luma_response: Dict[str, Any], planning_only: bool = False
+    luma_response: Dict[str, Any],
+    *,
+    apply_domain_filter: bool = True,
 ) -> Dict[str, Any]:
     """
     Compute effective collected slots for a Luma response when there's no session.
@@ -225,7 +231,7 @@ def _compute_effective_collected_slots(
     # Compute effective collected slots (for backward compatibility, not used for missing_slots)
     # No session on first turn - planner handles missing_slots computation
     effective_collected_slots = _compute_effective_collected_slots_internal(
-        promoted_slots, intent_name, planning_only=planning_only
+        promoted_slots, intent_name, apply_domain_filter=apply_domain_filter
     )
 
     # TRACE 2: After modification context detection (both paths)
@@ -243,127 +249,21 @@ def _compute_effective_collected_slots(
             )
         )
 
-    # CRITICAL: Also compute missing_slots for first turns (no session)
-    # ARCHITECTURAL INVARIANT: missing_slots = REQUIRED_SLOTS(intent) - durable_slots.keys()
-    # missing_slots must be computed from durable slots (after promotion writes into slots)
-    # A slot is satisfied ONLY if it exists in durable_slots under its exact slot name
-    # Use planner for missing_slots computation
-    from core.planning.policy.action_policy import load_planning_policy, plan_intent
-
-    # BEFORE_REQUIRED_SLOTS: Log right before required-slot computation (first turn)
-    before_required_slots_log = {
-        "trace": "BEFORE_REQUIRED_SLOTS",
-        "intent": intent_name,
-        "slots_used": promoted_slots,
-        "session_slots": None,  # No session on first turn
-        "modification_context": modification_context,
-    }
-    logger.info(
-        "BEFORE_REQUIRED_SLOTS: %s",
-        json.dumps(before_required_slots_log, ensure_ascii=False, default=str),
-    )
-    if debug_persistence_enabled():
-        print(
-            f"\n[BEFORE_REQUIRED_SLOTS] {json.dumps(before_required_slots_log, ensure_ascii=False, default=str)}"
-        )
-
-    # HARD INVARIANT CHECK (test/debug only):
-    # This must run at the exact entry point of required-slot computation
-    # Note: raw_slots was captured before promotion (line 1679), so use it as raw_luma_slots
-    # Note: os is already imported at module level (line 12)
-    if os.getenv("PYTEST_CURRENT_TEST") or os.getenv("DEBUG_SLOT_DROP") == "1":
-        # Capture variables: raw_luma_slots, merged_slots, session_slots, intent
-        # raw_slots is the original Luma slots before promotion (captured at line 1679)
-        raw_luma_slots = raw_slots.copy() if isinstance(raw_slots, dict) else {}
-
-        merged_slots = promoted_slots
-        if not isinstance(merged_slots, dict):
-            merged_slots = {}
-
-        session_slots = {}  # No session on first turn
-
-        intent = intent_name
-
-        # INVARIANT CHECK: If raw_luma_slots is not empty AND merged_slots is empty OR missing any key from raw_luma_slots
-        if raw_luma_slots:
-            merged_slots_keys = set(merged_slots.keys())
-            raw_luma_slots_keys = set(raw_luma_slots.keys())
-            missing_keys = raw_luma_slots_keys - merged_slots_keys
-
-            if not merged_slots or missing_keys:
-                error_msg = (
-                    f"INVARIANT VIOLATION: Luma slots dropped before required-slot computation\n"
-                    f"  raw_luma_slots: {raw_luma_slots}\n"
-                    f"  merged_slots: {merged_slots}\n"
-                    f"  session_slots: {session_slots}\n"
-                    f"  intent: {intent}\n"
-                    f"  missing_keys: {list(missing_keys) if missing_keys else 'merged_slots is empty'}"
-                )
-                logger.error(f"[HARD_INVARIANT] {error_msg}")
-                print(f"\n[HARD_INVARIANT] {error_msg}")
-                # Do NOT swallow this error - let the test crash
-                raise Exception(error_msg)
-
-    # Use planner to compute missing_slots
-    policy = load_planning_policy()
+    # Proposal preparation for first turns. Canonical missing_slots owned by finalize_turn_state.
     from core.planning.temporal_proposal import (
-        expand_slots_for_planning,
         extract_nlu_proposals,
         merge_session_proposals,
     )
 
     _nlu_props = extract_nlu_proposals(luma_response)
-    _merged_props = merge_session_proposals(None, _nlu_props["date_proposal"], _nlu_props["time_proposal"])
+    _merged_props = merge_session_proposals(
+        None, _nlu_props["date_proposal"], _nlu_props["time_proposal"]
+    )
     luma_response["date_proposal"] = _merged_props["date_proposal"]
     luma_response["time_proposal"] = _merged_props["time_proposal"]
 
-    _facts_for_planning = luma_response.get("facts")
-    if not isinstance(_facts_for_planning, dict):
-        _facts_for_planning = None
-    planning_slots = expand_slots_for_planning(
-        promoted_slots,
-        date_proposal=luma_response.get("date_proposal"),
-        time_proposal=luma_response.get("time_proposal"),
-        date_constraint=luma_response.get("date_constraint"),
-        nlu_facts=_facts_for_planning,
-        time_constraint=luma_response.get("time_constraint"),
-        intent_name=intent_name,
-    )
-    plan = plan_intent(intent_name, planning_slots, policy)
-    missing_slots = plan["missing_slots"]
-
-    from core.planning.temporal_proposal import apply_time_constraint_to_missing_slots
-
-    missing_slots = apply_time_constraint_to_missing_slots(
-        intent_name, missing_slots, luma_response.get("time_constraint")
-    )
-
-    # Normalize MODIFY_BOOKING missing_slots (test contract)
-    from core.adapters.nlu.luma_response_processor import (
-        _normalize_modify_booking_missing_slots,
-    )
-
-    missing_slots = _normalize_modify_booking_missing_slots(
-        missing_slots, luma_response
-    )
-
-    # INVARIANT CHECK: missing_slots must be a list
-    assert isinstance(
-        missing_slots, list
-    ), f"missing_slots must be a list, got {type(missing_slots)}: {missing_slots}"
-
-    # INVARIANT CHECK: missing_slots must never be None after computation
-    assert missing_slots is not None, "missing_slots must not be None after computation"
-
-    # Store in response
+    # Store effective collected slots only — do not derive missing_slots here
     luma_response["_effective_collected_slots"] = effective_collected_slots
-    luma_response["missing_slots"] = missing_slots
-
-    # LOG: computed missing_slots for first turn
-    # Note: logger is already defined at module level (line 14), no need to redefine
-    logger.info(
-        f"[MISSING_SLOTS] Computed missing_slots for first turn: intent={intent_name}, missing_slots={missing_slots}"
-    )
     return luma_response
 
 

@@ -784,6 +784,16 @@ class NLUPipeline:
 
         service_term = slm.get("service_term")
         facts = slm.get("facts", {})
+        if not isinstance(facts, dict):
+            facts = {}
+
+        # AVAILABILITY Stage 2 extracts service into facts.service_id and leaves
+        # service_term null. Honor that current-turn evidence before reusing a
+        # locked session resolved_service_id (date-only follow-ups keep null).
+        if not service_term:
+            extracted = facts.get("service_id")
+            if isinstance(extracted, str) and extracted.strip():
+                service_term = extracted.strip()
 
         ctx = conversation_context if isinstance(conversation_context, dict) else {}
         awaiting_service_id = "service_id" in ctx.get("missing_slots", [])

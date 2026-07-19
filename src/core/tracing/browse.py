@@ -135,16 +135,18 @@ def emit_pagination_handle_trace(
         return None
 
     session_state = session_state if isinstance(session_state, dict) else {}
-    last_result = session_state.get("last_execution_result")
+    from core.workflows.availability.presentation import availability_cache_from_session
+
+    cache = availability_cache_from_session(session_state)
     presentation = session_state.get("availability_presentation") or {}
 
     cache_id = emit_evidence(
         "SESSION_CACHE",
         subsystem="session",
         facts={
-            "last_execution_type": last_result.get("type") if isinstance(last_result, dict) else None,
-            "last_execution_status": last_result.get("status") if isinstance(last_result, dict) else None,
-            "cached_slot_count": len(last_result.get("slots") or []) if isinstance(last_result, dict) else 0,
+            "last_execution_type": cache.get("type") if isinstance(cache, dict) else None,
+            "last_execution_status": cache.get("status") if isinstance(cache, dict) else None,
+            "cached_slot_count": len(cache.get("slots") or []) if isinstance(cache, dict) else 0,
             "page_index": presentation.get("page_index"),
         },
         node_id=PAGINATION_EVIDENCE_CACHE_ID,

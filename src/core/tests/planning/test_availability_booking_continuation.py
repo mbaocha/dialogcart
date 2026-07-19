@@ -21,9 +21,8 @@ from core.execution.clients.availability_client import AvailabilityClient
 from core.execution.clients.booking_client import BookingClient
 from core.adapters.nlu import LumaClient
 from core.api.compat import handle_message
-from core.session.persist import build_session_state_from_outcome
+from core.session.turn_persistence import project_and_persist_turn_result
 from core.planning.planner.intent_resolution import resolve_effective_intent
-from core.session.appointment_extensions import resolve_availability_fingerprint
 
 
 def test_availability_preserves_create_appointment_session():
@@ -46,7 +45,7 @@ def test_availability_preserves_create_appointment_session():
     with patch("core.policy.intent_policy.get_intent_durable") as mock_durable:
         mock_durable.return_value = True
         effective_intent, session_reset = resolve_effective_intent(
-            luma_response, session_state, "test_user"
+            luma_response, session_state, "test_user", 1
         )
 
     assert effective_intent == "CREATE_APPOINTMENT"
@@ -70,7 +69,7 @@ def test_check_availability_preserves_create_appointment_session():
     with patch("core.policy.intent_policy.get_intent_durable") as mock_durable:
         mock_durable.return_value = True
         effective_intent, session_reset = resolve_effective_intent(
-            luma_response, session_state, "test_user"
+            luma_response, session_state, "test_user", 1
         )
 
     assert effective_intent == "CREATE_APPOINTMENT"
@@ -87,7 +86,7 @@ def test_availability_without_session_stays_availability():
     }
 
     effective_intent, session_reset = resolve_effective_intent(
-        luma_response, None, "test_user"
+        luma_response, None, "test_user", 1
     )
 
     assert effective_intent == "AVAILABILITY"
@@ -109,7 +108,7 @@ def test_availability_during_faq_still_switches_intent():
     }
 
     effective_intent, session_reset = resolve_effective_intent(
-        luma_response, session_state, "test_user"
+        luma_response, session_state, "test_user", 1
     )
 
     assert effective_intent == "AVAILABILITY"
@@ -185,10 +184,10 @@ def test_e2e_availability_date_refinement_after_service_resolved():
 
     class MockSessionStore:
         def __init__(self, state):
-            self._state = state
+            self._sessions = {(1, user_id): state}
 
-        def get_session(self, _user_id):
-            return self._state
+        def get_session(self, organization_id, user_id):
+            return self._sessions[(organization_id, user_id)]
 
     result_turn2 = handle_message(
         text="do you have availability for 3rd july 2026",
@@ -223,50 +222,32 @@ def test_e2e_availability_date_refinement_after_service_resolved():
     assert call_kwargs["service_id"] == 18
 
 
-def test_resolve_availability_fingerprint_prefers_execution_over_stale_session():
-    """Plan without fingerprint must not block top-level availability fingerprint."""
-    outcome = {
-        "type": "availability",
-        "status": "success",
-        "availability_fingerprint": "new-fingerprint",
-        "plan": {"status": "READY", "stage": "AVAILABILITY", "action": "SEARCH_AVAILABILITY"},
-    }
-    previous = {"availability_fingerprint": "stale-fingerprint"}
-
-    assert resolve_availability_fingerprint(outcome, previous, None, "user") == "new-fingerprint"
-
-
 class _StatefulSessionStore:
     def __init__(self, state=None):
-        self._state = state or {}
+        self._sessions = {}
+        if state:
+            self._sessions[(1, "u1")] = state
 
-    def get_session(self, _user_id):
-        return self._state
+    def get_session(self, organization_id, user_id):
+        return self._sessions.get((organization_id, user_id), {})
 
-    def save_session(self, _user_id, state):
-        self._state = state
+    def save_session(self, organization_id, user_id, state):
+        self._sessions[(organization_id, user_id)] = state
 
 
 def _persist_session_from_result(result, previous_session, user_id, session_store=None):
-    outcome = dict(result.get("outcome") or result.get("result") or {})
-    plan = result.get("plan") or {}
-    if not outcome.get("intent_name") and not outcome.get("intent"):
-        plan_intent = plan.get("intent_name") or plan.get("intent")
-        if plan_intent:
-            outcome["intent_name"] = plan_intent
-    outcome_status = outcome.get("status") or "success"
-    merged = result.get("_merged_luma_response")
-    new_session = build_session_state_from_outcome(
-        outcome,
-        outcome_status,
-        merged,
-        previous_session,
-        user_id,
-        session_store,
+    projected = result.get("_projected_session_state")
+    if isinstance(projected, dict):
+        return projected
+    return project_and_persist_turn_result(
+        result=result,
+        organization_id=1,
+        user_id=user_id,
+        previous_session_state=previous_session,
+        working_session_state=result.get("_working_session") or previous_session,
+        session_store=session_store,
+        save=session_store is not None,
     )
-    if new_session and session_store is not None:
-        session_store.save_session(user_id, new_session)
-    return new_session
 
 
 def test_e2e_july6_search_fingerprint_and_time_selection_confirm():
@@ -405,7 +386,7 @@ def test_e2e_july6_search_fingerprint_and_time_selection_confirm():
     assert plan3.get("action") == "SEARCH_AVAILABILITY"
 
     exec_result3 = result3.get("result", {})
-    stored_fp = session_store.get_session(user_id).get("availability_fingerprint")
+    stored_fp = session_store.get_session(1, user_id).get("availability_fingerprint")
     current_fp = exec_result3.get("availability_fingerprint")
     assert stored_fp == current_fp
 

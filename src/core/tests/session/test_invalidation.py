@@ -1,13 +1,13 @@
 """Unit tests for centralized invalidation registry (PR1)."""
 
-from core.session.confirmation_gate import BookingRevision, get_confirmation_state
+from core.planning.booking_revision import BookingRevision
+from core.session.confirmation_gate import get_confirmation_state
 from core.session.invalidation import InvalidationTrigger, apply_invalidation
 
 
 def _pending_session():
     return {
         "confirmation_state": "pending",
-        "booking": {"confirmation_state": "pending"},
         "slots": {
             "service_id": "haircut",
             "date": "2026-07-06",

@@ -55,6 +55,7 @@ def test_confirm_continuation_with_awaiting_confirmation_status():
             luma_response=luma_response,
             session_state=session_state,
             user_id="test_user_123",
+            organization_id=1,
         )
 
     # Assert: CONFIRM_* was treated as continuation (effective_intent = session intent)
@@ -101,6 +102,7 @@ def test_confirm_not_continuation_with_needs_clarification_status():
             luma_response=luma_response,
             session_state=session_state,
             user_id="test_user_123",
+            organization_id=1,
         )
 
     # Assert: CONFIRM_* was NOT treated as continuation (effective_intent = CONFIRM_ACTION)
@@ -126,7 +128,6 @@ def test_confirm_continuation_with_session_pending_confirmation_state():
         "intent_name": "CREATE_APPOINTMENT",
         "status": "NEEDS_CLARIFICATION",
         "confirmation_state": "pending",
-        "booking": {"confirmation_state": "pending"},
         "slots": {
             "service_id": "svc_123",
             "date": "2024-01-15",
@@ -137,7 +138,7 @@ def test_confirm_continuation_with_session_pending_confirmation_state():
     with patch("core.policy.intent_policy.get_intent_durable") as mock_durable:
         mock_durable.return_value = True
         effective_intent, session_reset = resolve_effective_intent(
-            luma_response, session_state, "test_user"
+            luma_response, session_state, "test_user", 1
         )
 
     assert effective_intent == "CREATE_APPOINTMENT"
@@ -174,6 +175,7 @@ def test_confirm_not_continuation_with_ready_status():
             luma_response=luma_response,
             session_state=session_state,
             user_id="test_user_123",
+            organization_id=1,
         )
 
     # Assert: CONFIRM_* was NOT treated as continuation (effective_intent = CONFIRM_ACTION)
@@ -203,6 +205,7 @@ def test_confirm_no_session():
         luma_response=luma_response,
         session_state=session_state,
         user_id="test_user_123",
+        organization_id=1,
     )
 
     # Assert: CONFIRM_ACTION is used as effective intent (no continuation logic)
@@ -244,6 +247,7 @@ def test_confirm_continuation_with_null_status():
             luma_response=luma_response,
             session_state=session_state,
             user_id="test_user_123",
+            organization_id=1,
         )
 
     # Assert: CONFIRM_* was NOT treated as continuation (status is None, not AWAITING_CONFIRMATION)
@@ -280,6 +284,7 @@ def test_confirm_continuation_with_missing_status_key():
             luma_response=luma_response,
             session_state=session_state,
             user_id="test_user_123",
+            organization_id=1,
         )
 
     # Assert: CONFIRM_* was NOT treated as continuation (status key missing)
@@ -337,6 +342,7 @@ def test_confirm_not_overridden_by_durable_recovery():
                 luma_response=luma_response,
                 session_state=session_state,
                 user_id="test_user_123",
+                organization_id=1,
             )
 
     # CRITICAL ASSERTION: CONFIRM_ACTION should NOT be overridden by durable recovery

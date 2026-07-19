@@ -4,68 +4,29 @@ from unittest.mock import Mock
 
 from core.adapters.nlu import LumaClient
 from core.api.compat import handle_message
-from core.session.persist import build_session_state_from_outcome
 from core.rendering.booking_confirmation_renderer import (
     render_booking_confirmation_rejected,
 )
-from core.session.appointment_extensions import (
-    _maybe_persist_booking_confirmation_pending,
-)
+from core.session.session_projector import SessionProjectorV2
 
 
 class _StatefulSessionStore:
     def __init__(self, initial=None):
         self._sessions = {}
         if initial:
-            self._sessions.update(initial)
+            self._sessions.update({(1, user_id): state for user_id, state in initial.items()})
 
-    def get_session(self, user_id):
-        return self._sessions.get(user_id)
+    def get_session(self, organization_id, user_id):
+        return self._sessions.get((organization_id, user_id))
 
-    def save_session(self, user_id, session_state):
-        self._sessions[user_id] = session_state
+    def save_session(self, organization_id, user_id, session_state):
+        self._sessions[(organization_id, user_id)] = session_state
 
 
 def test_render_booking_confirmation_rejected_is_open_ended():
     text = render_booking_confirmation_rejected()
     assert "won't book" in text.lower()
     assert "change" in text.lower()
-
-
-def test_persist_reject_clears_pending_and_time():
-    session_state = {
-        "intent_name": "CREATE_APPOINTMENT",
-        "confirmation_state": "pending",
-        "booking": {"confirmation_state": "pending"},
-        "slots": {
-            "service_id": "premium haircut",
-            "date": "2026-07-06",
-            "time": "11:15",
-        },
-        "resolved_datetime_range": {
-            "start": "2026-07-06T11:15:00Z",
-            "end": "2026-07-06T11:45:00Z",
-        },
-        "facts": {
-            "slots": {"time": "11:15"},
-            "resolved_datetime_range": {
-                "start": "2026-07-06T11:15:00Z",
-                "end": "2026-07-06T11:45:00Z",
-            },
-        },
-    }
-    _maybe_persist_booking_confirmation_pending(
-        session_state,
-        {"_booking_confirmation_rejected": True},
-        {},
-    )
-    assert "confirmation_state" not in session_state
-    assert session_state.get("booking") == {}
-    assert session_state["slots"].get("date") == "2026-07-06"
-    assert "time" not in session_state["slots"]
-    assert "resolved_datetime_range" not in session_state
-    assert "time" not in session_state["facts"]["slots"]
-    assert "resolved_datetime_range" not in session_state["facts"]
 
 
 def _reject_session(*, status: str, pending: bool):
@@ -104,7 +65,6 @@ def _reject_session(*, status: str, pending: bool):
     }
     if pending:
         session["confirmation_state"] = "pending"
-        session["booking"] = {"confirmation_state": "pending"}
     return session
 
 
@@ -140,18 +100,20 @@ def _run_reject_and_persist(user_id: str, session: dict):
     assert "time" not in (outcome.get("slots") or {})
 
     # Persist the way the HTTP layer does.
-    new_session = build_session_state_from_outcome(
-        outcome,
-        outcome.get("status"),
-        result.get("_merged_luma_response"),
-        session_store.get_session(user_id),
-        user_id,
-        session_store,
+    previous_session = session_store.get_session(1, user_id)
+    new_session = SessionProjectorV2().project(
+        outcome=outcome,
+        outcome_status=outcome.get("status"),
+        organization_id=1,
+        merged_luma_response=result.get("_merged_luma_response"),
+        previous_session_state=previous_session,
+        user_id=user_id,
+        working_session_state=result.get("_working_session") or previous_session,
     )
     assert new_session is not None
-    session_store.save_session(user_id, new_session)
+    session_store.save_session(1, user_id, new_session)
 
-    session = session_store.get_session(user_id)
+    session = session_store.get_session(1, user_id)
     assert session.get("confirmation_state") is None
     assert session.get("booking") == {}
     assert session.get("slots", {}).get("service_id") == "flexi haircut + pruning"

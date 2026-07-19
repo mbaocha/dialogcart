@@ -17,6 +17,7 @@ import pytest
 from core.adapters.clients.organization_client import OrganizationClient
 from core.adapters.nlu import LumaClient
 from core.api.compat import handle_message
+from core.tests.harness.clients import stub_catalog_client
 
 # Add src to path BEFORE importing core modules
 src_path = Path(__file__).parent.parent.parent.parent
@@ -151,6 +152,7 @@ def test_acknowledgement_appears_when_slot_just_filled():
         user_id=user_id,
         luma_client=mock_luma_client,
         organization_client=mock_org_client,
+        catalog_client=stub_catalog_client(),
         frozen_time=frozen_time,
         organization_id=1,
         session_state=session_state,
@@ -198,6 +200,7 @@ def test_acknowledgement_does_not_appear_on_retry():
         user_id=user_id,
         luma_client=mock_luma_client,
         organization_client=mock_org_client,
+        catalog_client=stub_catalog_client(),
         frozen_time=frozen_time,
         organization_id=1,
         session_state=session_state,

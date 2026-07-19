@@ -7,14 +7,33 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.api.main import app
+from core.tests.harness.recording_luma_client import RECACHE_ENV
 from core.tracing.invariant_trace import TRACE_ENV_VAR
 
 # Register booking conversation fixtures for all e2e test modules.
 pytest_plugins = ["core.tests.e2e.framework.fixtures"]
 
 
+def pytest_addoption(parser):
+    parser.addoption(
+        "--recache-luma",
+        action="store_true",
+        default=False,
+        help=(
+            "Force live Luma /resolve and overwrite E2E recordings "
+            f"(sets {RECACHE_ENV}=1)"
+        ),
+    )
+
+
 def pytest_configure(config):
     """Show orchestration trace logs (logger.error) during E2E runs."""
+    config.addinivalue_line(
+        "markers",
+        "live_luma: integration test that requires a reachable Live Luma /resolve service",
+    )
+    if config.getoption("--recache-luma"):
+        os.environ[RECACHE_ENV] = "1"
     if config.getoption("--trace-invariants", default=False):
         os.environ[TRACE_ENV_VAR] = "1"
     if os.getenv(TRACE_ENV_VAR, "").strip().lower() in {"1", "true", "yes", "on"}:

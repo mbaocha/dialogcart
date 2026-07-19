@@ -126,7 +126,7 @@ def test_runner_passthrough_on_completion():
     ), "Payment should be active after initiation"
 
     # Mark payment as paid (simulate webhook)
-    mark_payment_as_paid("booking_789")
+    mark_payment_as_paid(1, "booking_789")
 
     try:
         # Act - reconciliation (adapter should complete)

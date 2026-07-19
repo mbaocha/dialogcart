@@ -1,6 +1,6 @@
 """Confirm continuation selects APPLY_MODIFICATION without service_id fingerprint."""
 
-from core.adapters.nlu.luma_response_processor import process_luma_response
+from core.tests.harness.planning_compat import process_luma_response
 
 _SLOTS = {
     "booking_id": "ABC12345",
@@ -26,7 +26,7 @@ def test_confirm_continuation_uses_resolved_datetime_range_without_fingerprint()
         "intent": {"name": "MODIFY_BOOKING"},
         "_effective_intent": "MODIFY_BOOKING",
         "_confirm_booking_continuation": True,
-        "booking": {"confirmation_state": "confirmed"},
+        "confirmation_state": "confirmed",
         "slots": dict(_SLOTS),
         "_effective_collected_slots": dict(_SLOTS),
         "missing_slots": [],
@@ -34,7 +34,11 @@ def test_confirm_continuation_uses_resolved_datetime_range_without_fingerprint()
     }
 
     decision = process_luma_response(
-        luma_response, "service", "test_user", session_state=session_state
+        luma_response,
+        "service",
+        "test_user",
+        organization_id=1,
+        session_state=session_state,
     )
 
     assert decision["plan"]["action"] == "APPLY_MODIFICATION"
@@ -59,7 +63,7 @@ def test_confirm_continuation_modify_ready_without_range_or_fingerprint():
         "intent": {"name": "MODIFY_BOOKING"},
         "_effective_intent": "MODIFY_BOOKING",
         "_confirm_booking_continuation": True,
-        "booking": {"confirmation_state": "confirmed"},
+        "confirmation_state": "confirmed",
         "slots": dict(session_state["slots"]),
         "_effective_collected_slots": dict(session_state["slots"]),
         "missing_slots": [],
@@ -67,7 +71,11 @@ def test_confirm_continuation_modify_ready_without_range_or_fingerprint():
     }
 
     decision = process_luma_response(
-        luma_response, "service", "test_user", session_state=session_state
+        luma_response,
+        "service",
+        "test_user",
+        organization_id=1,
+        session_state=session_state,
     )
 
     assert decision["plan"]["action"] == "APPLY_MODIFICATION"

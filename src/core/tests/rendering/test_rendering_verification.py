@@ -15,6 +15,7 @@ import pytest
 from core.adapters.clients.organization_client import OrganizationClient
 from core.adapters.nlu import LumaClient
 from core.api.compat import handle_message
+from core.tests.harness.clients import stub_catalog_client
 
 # Add src to path BEFORE importing core modules
 src_path = Path(__file__).parent.parent.parent.parent
@@ -108,6 +109,7 @@ def test_rendering_missing_time_clarification():
         user_id=user_id,
         luma_client=mock_luma_client,
         organization_client=mock_org_client,
+        catalog_client=stub_catalog_client(),
         frozen_time=frozen_time,
         organization_id=1,
     )
@@ -155,6 +157,7 @@ def test_rendering_generic_clarification_fallback():
         user_id=user_id,
         luma_client=mock_luma_client,
         organization_client=mock_org_client,
+        catalog_client=stub_catalog_client(),
         frozen_time=frozen_time,
         organization_id=1,
     )
@@ -210,6 +213,7 @@ def test_rendering_ready_state_no_clarification():
         user_id=user_id,
         luma_client=mock_luma_client,
         organization_client=mock_org_client,
+        catalog_client=stub_catalog_client(),
         frozen_time=frozen_time,
         organization_id=1,
     )

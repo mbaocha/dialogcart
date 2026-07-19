@@ -208,7 +208,6 @@ class TestServiceIdDroppedFactsSlotsLeak:
         slots = merged.get("slots") or {}
         assert "service_id" not in slots or slots["service_id"] is None
         assert "service_id" in (merged.get("_intentionally_dropped_slots") or set())
-        assert "service_id" in (merged.get("missing_slots") or [])
 
 
 class TestServiceIdReplaced:

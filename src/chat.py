@@ -10,7 +10,7 @@ Usage:
     python -m core.api.main
 
     # Terminal 2 — chat REPL
-    CORE_BASE_URL=http://localhost:8000 ORG_ID=1 python chat.py
+    CORE_BASE_URL=http://localhost:8000 ORG_ID=1 CUSTOMER_ID=2 python chat.py
     CORE_BASE_URL=http://localhost:8000 ORG_ID=1 python chat.py --user-id alice --debug
     CORE_BASE_URL=http://localhost:8000 ORG_ID=1 python chat.py --user-id alice --trace
     CORE_BASE_URL=http://localhost:8000 ORG_ID=1 python chat.py --user-id alice --trace reasoning
@@ -60,6 +60,16 @@ def _get_org_id() -> int:
         return max(1, int(os.getenv("ORG_ID", "1")))
     except Exception:
         return 1
+
+
+def _get_customer_id() -> int | None:
+    value = os.getenv("CUSTOMER_ID") or os.getenv("TEST_CUSTOMER_ID")
+    if not value:
+        return None
+    try:
+        return max(1, int(value))
+    except (TypeError, ValueError):
+        return None
 
 
 def _get_core_base_url() -> str:
@@ -149,21 +159,26 @@ def _post_message(
     domain: str,
     timezone: str,
     org_id: int,
+    customer_id: int | None = None,
     trace: bool = False,
     trace_view: str = "summary",
 ) -> dict:
     params = {}
     if trace:
         params["trace"] = trace_view
+    payload = {
+        "user_id": user_id,
+        "text": text,
+        "domain": domain,
+        "timezone": timezone,
+        "organization_id": org_id,
+    }
+    if customer_id is not None:
+        payload["customer_id"] = customer_id
+
     response = client.post(
         f"{core_url}/api/message",
-        json={
-            "user_id": user_id,
-            "text": text,
-            "domain": domain,
-            "timezone": timezone,
-            "organization_id": org_id,
-        },
+        json=payload,
         params=params,
         headers={"X-Debug-Decision-Trace": "true"} if trace else {},
     )
@@ -184,15 +199,23 @@ def _post_message(
     }
 
 
-def _get_session(client: httpx.Client, core_url: str, user_id: str) -> dict | None:
-    response = client.get(f"{core_url}/api/session/{user_id}")
+def _get_session(
+    client: httpx.Client, core_url: str, organization_id: int, user_id: str
+) -> dict | None:
+    response = client.get(
+        f"{core_url}/api/organizations/{organization_id}/sessions/{user_id}"
+    )
     response.raise_for_status()
     payload = response.json()
     return payload.get("session")
 
 
-def _clear_session(client: httpx.Client, core_url: str, user_id: str) -> None:
-    response = client.delete(f"{core_url}/api/session/{user_id}")
+def _clear_session(
+    client: httpx.Client, core_url: str, organization_id: int, user_id: str
+) -> None:
+    response = client.delete(
+        f"{core_url}/api/organizations/{organization_id}/sessions/{user_id}"
+    )
     response.raise_for_status()
 
 
@@ -232,13 +255,17 @@ def chat_loop(
     trace_view: str = "summary",
 ):
     org_id = _get_org_id()
+    customer_id = _get_customer_id()
     domain = _get_domain(org_id)
     core_url = _get_core_base_url()
     luma_url = os.getenv("LUMA_BASE_URL", "http://localhost:9002")
     internal_url = os.getenv("INTERNAL_API_BASE_URL", "http://localhost:3000")
 
     print("\nDialogCart Chat (HTTP → core API)")
-    print(f"  core={core_url}  org={org_id}  domain={domain}  user={user_id}")
+    print(
+        f"  core={core_url}  org={org_id}  domain={domain}  "
+        f"user={user_id}  customer={customer_id or 'unset'}"
+    )
     print(f"  luma={luma_url}  internal={internal_url}")
     print("  Commands: quit  reset  debug  trace  status  catalog")
     if trace:
@@ -272,7 +299,7 @@ def chat_loop(
 
             if cmd == "reset":
                 try:
-                    _clear_session(client, core_url, user_id)
+                    _clear_session(client, core_url, org_id, user_id)
                     print("[session cleared]")
                 except Exception as e:
                     print(f"[reset error] {e}")
@@ -290,7 +317,7 @@ def chat_loop(
 
             if cmd == "status":
                 try:
-                    sess = _get_session(client, core_url, user_id)
+                    sess = _get_session(client, core_url, org_id, user_id)
                     if sess:
                         print(
                             json.dumps(
@@ -322,6 +349,7 @@ def chat_loop(
                     domain=domain,
                     timezone=timezone,
                     org_id=org_id,
+                    customer_id=customer_id,
                     trace=trace,
                     trace_view=trace_view,
                 )

@@ -17,6 +17,9 @@ import yaml
 from core.adapters.clients.organization_client import OrganizationClient
 from core.adapters.nlu import LumaClient
 from core.api.compat import handle_message
+from core.session.session_manager import clear_session
+from core.tests.harness.clients import stub_catalog_client
+from core.tests.harness.session_store import MockSessionStore
 
 # Add src to path BEFORE importing core modules
 src_path = Path(__file__).parent.parent.parent.parent
@@ -100,7 +103,7 @@ def _build_mock_luma_response(
     # Add confirmation state based on status or action
     # AWAITING_CONFIRMATION status indicates confirmation is pending
     if status == "AWAITING_CONFIRMATION" or action == "CONFIRM_APPOINTMENT":
-        response["booking"]["confirmation_state"] = "pending"
+        response["confirmation_state"] = "pending"
         response["booking"]["booking_state"] = "RESOLVED"
     elif status == "READY" and date_val and time_val:
         # READY with date+time proposals means booking is resolved (no confirmation needed)
@@ -313,10 +316,13 @@ def _replay_scenario(scenario: Dict[str, Any]) -> None:
     scenario_name = scenario["name"]
     user_id = f"test_conversation_{scenario_name}"
     frozen_time = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
+    organization_id = 1
+
+    clear_session(organization_id, user_id)
+    session_store = MockSessionStore()
 
     # Track state across turns
     accumulated_slots = {}
-    session_state = None
 
     # Mock clients
     mock_luma_client = Mock(spec=LumaClient)
@@ -387,16 +393,14 @@ def _replay_scenario(scenario: Dict[str, Any]) -> None:
             user_id=user_id,
             luma_client=mock_luma_client,
             organization_client=mock_org_client,
+            catalog_client=stub_catalog_client(),
             frozen_time=frozen_time,
-            organization_id=1,
+            organization_id=organization_id,
+            session_store=session_store,
         )
 
         # Assert expectations
         _assert_turn_expectations(result, expect, turn_num)
-
-        # Update session state for next turn (simplified - in real flow this would come from session_store)
-        # For multi-turn tests, we'd need to properly track session state
-        # This is a simplified version that works for the test structure
 
 
 @pytest.mark.parametrize("scenario", _load_scenarios())

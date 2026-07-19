@@ -7,11 +7,24 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, TypedDict
 
 from core.planning.luma_facts_adapter import is_flexible_combined_utterance
 
 logger = logging.getLogger(__name__)
+
+
+class ExecutionProposalResolutionContext(TypedDict):
+    """Typed planning evidence consumed by execution proposal resolution."""
+
+    current_turn_time_proposal: Optional[Dict[str, Any]]
+    current_turn_time_constraint: Optional[Dict[str, Any]]
+    current_turn_has_explicit_time: bool
+    session_time_proposal_reuse_allowed: bool
+    confirmation_continuation: bool
+    availability_invalidated: bool
+    bound_datetime_cleared: bool
+
 
 # Durable slot keys that must not persist for CREATE_APPOINTMENT until availability confirms.
 _CREATE_APPOINTMENT_TEMPORAL_SLOT_KEYS = frozenset(
@@ -25,7 +38,17 @@ def has_bound_booking_datetime(
     merged: Optional[Dict[str, Any]] = None,
 ) -> bool:
     """True when a confirmed booking datetime is bound (not merely proposed or searched)."""
-    for source in (merged, session_state):
+    ignore_session = bool(
+        isinstance(merged, dict)
+        and (
+            merged.get("_revision_invalidated_availability")
+            or merged.get("_bound_datetime_cleared")
+        )
+    )
+    sources = (merged,)
+    if not ignore_session:
+        sources = (merged, session_state)
+    for source in sources:
         if not isinstance(source, dict):
             continue
         resolved = source.get("resolved_datetime_range")
@@ -37,7 +60,7 @@ def has_bound_booking_datetime(
             if isinstance(facts_resolved, dict) and facts_resolved.get("start"):
                 return True
     slot_sources = [slots]
-    if isinstance(session_state, dict):
+    if not ignore_session and isinstance(session_state, dict):
         slot_sources.append(session_state.get("slots"))
     for slot_map in slot_sources:
         if not isinstance(slot_map, dict):
@@ -130,8 +153,9 @@ def enrich_last_execution_result(
 ) -> Dict[str, Any]:
     """Build a replaceable last_execution_result payload for one availability search.
 
-    Keeps the full latest search slots for diagnostics. Binding uses
-    ``presented_availability`` (what was shown), not this full list.
+    Keeps the full latest search slots as the trusted AvailabilityCache. Ambiguous
+    selection uses ``presented_availability``; explicit complete selection may use
+    this full list via the availability selection resolver.
     """
     slots_list = list(exec_result.get("slots") or [])
     payload: Dict[str, Any] = {
@@ -180,12 +204,17 @@ def enrich_last_execution_result(
 def get_presented_availability_offers(
     session_state: Optional[Dict[str, Any]],
 ) -> list:
-    """Return slots the user was shown (selectable set for time binding)."""
+    """Return slots in the current discovery/disambiguation window."""
+    from core.workflows.availability.presentation import (
+        ensure_presented_availability,
+        presented_availability_from_session,
+    )
+
     if not isinstance(session_state, dict):
         logger.debug("[TIME_SELECTION_OFFERS] no session_state")
         return []
 
-    presented = session_state.get("presented_availability")
+    presented = presented_availability_from_session(session_state)
     if isinstance(presented, dict):
         offers = presented.get("slots", [])
         if isinstance(offers, list) and offers:
@@ -198,68 +227,20 @@ def get_presented_availability_offers(
             )
             return offers
 
-    # Legacy sessions: approximate presentation from latest search (same cap as UI).
-    last_result = session_state.get("last_execution_result")
-    if not isinstance(last_result, dict):
-        logger.debug(
-            "[TIME_SELECTION_OFFERS] no presented_availability or last_execution_result")
+    # Legacy sessions: approximate presentation from trusted cache (same cap as UI).
+    presented_payload = ensure_presented_availability(session_state=session_state)
+    if not isinstance(presented_payload, dict):
+        logger.debug("[TIME_SELECTION_OFFERS] no presented_availability or cache")
         return []
-    if last_result.get("type") != "availability" or last_result.get("status") != "success":
-        logger.debug(
-            "[TIME_SELECTION_OFFERS] last_execution_result not usable type=%s status=%s",
-            last_result.get("type"),
-            last_result.get("status"),
-        )
-        return []
-    offers = last_result.get("slots", [])
-    if not isinstance(offers, list) or not offers:
-        logger.debug(
-            "[TIME_SELECTION_OFFERS] empty slots in last_execution_result "
-            "search_date=%s",
-            last_result.get("search_date"),
-        )
-        return []
-
-    presentation_date = _resolve_presentation_search_date(last_result, offers)
-    candidate = offers
-    if presentation_date:
-        candidate = _filter_offers_to_search_date(offers, presentation_date)
-        if offers and not candidate:
-            # Never bind against an emptied filter; fall back to offer-derived day.
-            fallback_date = _derive_presentation_date_from_offers(offers)
-            if fallback_date:
-                candidate = _filter_offers_to_search_date(
-                    offers, fallback_date)
-            else:
-                candidate = offers
-            logger.warning(
-                "[TIME_SELECTION_OFFERS] search_date filter emptied offers; "
-                "fallback_date=%s offers=%s",
-                fallback_date,
-                _offer_start_summaries(candidate),
-            )
-
-    from core.rendering.availability_renderer import build_presented_availability
-
-    presented_payload = build_presented_availability(
-        candidate, search_date=presentation_date
-    )
     presented_offers = presented_payload.get("slots") or []
     logger.debug(
-        "[TIME_SELECTION_OFFERS] source=legacy_last_execution_result "
+        "[TIME_SELECTION_OFFERS] source=cache_derived_presentation "
         "presentation_date=%s presented=%s offer_starts=%s",
         presented_payload.get("search_date"),
         len(presented_offers),
         _offer_start_summaries(presented_offers),
     )
     return presented_offers if isinstance(presented_offers, list) else []
-
-
-def get_cached_availability_offers(
-    session_state: Optional[Dict[str, Any]],
-) -> list:
-    """Return selectable offers for time binding (presented availability)."""
-    return get_presented_availability_offers(session_state)
 
 
 def _parse_offer_start_parts(start_raw: Any) -> Optional[tuple[str, str]]:
@@ -276,6 +257,71 @@ def _parse_offer_start_parts(start_raw: Any) -> Optional[tuple[str, str]]:
     return parsed.date().isoformat(), f"{parsed.hour:02d}:{parsed.minute:02d}"
 
 
+def create_bound_datetime_from_offer(
+    *,
+    slots: Dict[str, Any],
+    offer: Dict[str, Any],
+    offer_date: str,
+    user_time_norm: str,
+    execution_result: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """Canonical creator for a successful presented-offer time bind.
+
+    Returns normalized durable slots plus ``resolved_datetime_range``, or None when
+    the offer cannot be converted into a bound datetime.
+    """
+    start_raw = offer.get("starts_at") or offer.get("start")
+    end_raw = offer.get("ends_at") or offer.get("end")
+    bound_slots = dict(slots or {})
+    bound_slots["date"] = offer_date
+    bound_slots["time"] = user_time_norm
+    if start_raw and end_raw:
+        resolved_datetime_range = {"start": str(start_raw), "end": str(end_raw)}
+    else:
+        resolved_datetime_range = build_datetime_range_from_slots(
+            bound_slots, execution_result
+        )
+    if not resolved_datetime_range:
+        return None
+    return {
+        "slots": bound_slots,
+        "resolved_datetime_range": resolved_datetime_range,
+    }
+
+
+def build_selection_user_facts(
+    turn_payload: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Build SelectionResolver user_facts from current-turn provenance flags.
+
+    Carried session date/time alone must not set ``*_from_current_turn``.
+    """
+    facts: Dict[str, Any] = {}
+    if not isinstance(turn_payload, dict):
+        return facts
+
+    if turn_payload.get("_current_turn_has_date") and turn_payload.get("_current_turn_date"):
+        facts["date"] = turn_payload.get("_current_turn_date")
+        facts["date_from_current_turn"] = True
+
+    if turn_payload.get("_current_turn_has_time") and turn_payload.get("_current_turn_time"):
+        facts["time"] = turn_payload.get("_current_turn_time")
+        facts["time_from_current_turn"] = True
+    elif turn_payload.get("_current_turn_has_time"):
+        tp = turn_payload.get("time_proposal")
+        if isinstance(tp, dict) and tp.get("mode") == "exact" and tp.get("value"):
+            facts["time"] = tp.get("value")
+            facts["time_from_current_turn"] = True
+
+    for key in ("service_id", "location", "staff", "resource", "resource_id"):
+        turn_key = f"_current_turn_{key}"
+        if turn_payload.get(turn_key) is not None:
+            facts[key] = turn_payload.get(turn_key)
+            facts[f"{key}_from_current_turn"] = True
+
+    return facts
+
+
 def try_bind_offered_time_selection(
     slots: Dict[str, Any],
     session_state: Optional[Dict[str, Any]],
@@ -283,33 +329,58 @@ def try_bind_offered_time_selection(
     date_proposal: Optional[Dict[str, Any]] = None,
     time_proposal: Optional[Dict[str, Any]] = None,
     time_constraint: Optional[Dict[str, Any]] = None,
+    user_facts: Optional[Dict[str, Any]] = None,
+    turn_payload: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Bind durable slots when the user picks a time from presented availability."""
-    presented = (
-        session_state.get("presented_availability")
-        if isinstance(session_state, dict)
-        else None
-    )
-    last_result = (
-        session_state.get("last_execution_result")
-        if isinstance(session_state, dict)
-        else None
+    """Bind durable slots when the user picks a time from availability.
+
+    Selection is routed through Discovery Selector via
+    ``resolve_via_discovery`` (AvailabilitySelectionPolicy).
+    Ambiguous choices resolve against presented availability; explicit complete
+    choices may resolve against the trusted cache when uniquely matched.
+    """
+    from core.workflows.availability.discovery.bridge import resolve_via_discovery
+    from core.workflows.availability.presentation import (
+        availability_cache_from_session,
+        presented_availability_from_session,
     )
 
-    user_time_raw = None
-    if isinstance(time_proposal, dict) and time_proposal.get("mode") == "exact":
+    slots_before = dict(slots or {})
+    resolved_facts = dict(user_facts or {})
+    if not resolved_facts and turn_payload is not None:
+        resolved_facts = build_selection_user_facts(turn_payload)
+
+    if not resolved_facts.get("time_from_current_turn"):
+        if isinstance(time_proposal, dict) and time_proposal.get("mode") == "exact":
+            if time_proposal.get("value"):
+                resolved_facts.setdefault("time", time_proposal.get("value"))
+                if turn_payload is None or turn_payload.get("_current_turn_has_time"):
+                    resolved_facts["time_from_current_turn"] = True
+        elif isinstance(time_constraint, dict):
+            if time_constraint.get("mode") == "exact" and time_constraint.get("start"):
+                resolved_facts.setdefault("time", time_constraint.get("start"))
+                if turn_payload is None or turn_payload.get("_current_turn_has_time"):
+                    resolved_facts["time_from_current_turn"] = True
+
+    user_time_raw = resolved_facts.get("time")
+    if (
+        not user_time_raw
+        and isinstance(time_proposal, dict)
+        and time_proposal.get("mode") == "exact"
+    ):
         user_time_raw = time_proposal.get("value")
     if not user_time_raw and isinstance(time_constraint, dict):
         if time_constraint.get("mode") == "exact" and time_constraint.get("start"):
             user_time_raw = time_constraint.get("start")
 
+    presented = presented_availability_from_session(session_state)
+    cache = availability_cache_from_session(session_state)
     offers = get_presented_availability_offers(session_state)
-    slots_before = dict(slots or {})
     logger.debug(
         "[TIME_SELECTION_BIND] attempt user_time_raw=%r time_proposal=%s "
         "time_constraint=%s date_proposal=%s slots.date=%s "
         "presented_search_date=%s presented_slots=%s "
-        "last_execution_result.search_date=%s",
+        "cache_search_date=%s user_facts=%s",
         user_time_raw,
         time_proposal,
         time_constraint,
@@ -317,180 +388,102 @@ def try_bind_offered_time_selection(
         (slots or {}).get("date") if isinstance(slots, dict) else None,
         presented.get("search_date") if isinstance(presented, dict) else None,
         _offer_start_summaries(offers),
-        last_result.get("search_date") if isinstance(
-            last_result, dict) else None,
+        cache.get("search_date") if isinstance(cache, dict) else None,
+        {
+            k: resolved_facts.get(k)
+            for k in (
+                "date",
+                "time",
+                "date_from_current_turn",
+                "time_from_current_turn",
+            )
+        },
     )
 
-    if not offers:
-        logger.debug(
-            "[TIME_SELECTION_BIND] no presented offers to search; bind skipped")
-        _emit_bind_trace(
-            slots_before=slots_before,
-            bind_result=None,
-            skip_reason="no_offers",
-            time_proposal=time_proposal,
-            time_constraint=time_constraint,
-            offers=offers,
-            user_time_raw=user_time_raw,
-        )
-        return None
-
-    if not user_time_raw:
-        logger.debug(
-            "[TIME_SELECTION_BIND] no exact user time from time_proposal/time_constraint"
-        )
-        _emit_bind_trace(
-            slots_before=slots_before,
-            bind_result=None,
-            skip_reason="no_user_time",
-            time_proposal=time_proposal,
-            time_constraint=time_constraint,
-            offers=offers,
-            user_time_raw=user_time_raw,
-        )
-        return None
-
-    from core.workflows.availability.fingerprint import _normalize_time_for_fingerprint
-
-    user_time_norm = _normalize_time_for_fingerprint(user_time_raw)
-    if not user_time_norm:
-        logger.debug(
-            "[TIME_SELECTION_BIND] user time failed normalization user_time_raw=%r",
-            user_time_raw,
-        )
-        _emit_bind_trace(
-            slots_before=slots_before,
-            bind_result=None,
-            skip_reason="normalize_failed",
-            time_proposal=time_proposal,
-            time_constraint=time_constraint,
-            offers=offers,
-            user_time_raw=user_time_raw,
-            user_time_norm=user_time_norm,
-        )
-        return None
-
-    # Bind only against the availability list that was just presented to the user.
-    # Do not use stale date_proposal or durable slots.date — those may reflect an
-    # earlier search (e.g. July 6) while the user is picking from July 3 offers.
-    expected_date = None
-    if isinstance(presented, dict):
-        expected_date = _normalize_search_date(presented.get("search_date"))
-    if not expected_date:
-        expected_date = _derive_presentation_date_from_offers(offers)
-
-    logger.debug(
-        "[TIME_SELECTION_BIND] searching user_time_norm=%s expected_date=%s "
-        "offers=%s offer_starts=%s",
-        user_time_norm,
-        expected_date,
-        len(offers),
-        _offer_start_summaries(offers),
+    resolution = resolve_via_discovery(
+        slots=slots,
+        presented_availability=presented,
+        availability_cache=cache,
+        user_facts=resolved_facts,
+        date_proposal=date_proposal,
+        time_proposal=time_proposal,
+        time_constraint=time_constraint,
+        session_state=session_state,
     )
-
-    for offer in offers:
-        if not isinstance(offer, dict):
-            logger.debug(
-                "[TIME_SELECTION_BIND] reject reason=not_dict offer=%r", offer)
-            continue
-        start_raw = offer.get("starts_at") or offer.get("start")
-        end_raw = offer.get("ends_at") or offer.get("end")
-        parsed = _parse_offer_start_parts(start_raw)
-        if not parsed:
-            logger.debug(
-                "[TIME_SELECTION_BIND] reject reason=parse_failed start_raw=%r",
-                start_raw,
-            )
-            continue
-        offer_date, offer_time = parsed
-        if offer_time != user_time_norm:
-            logger.debug(
-                "[TIME_SELECTION_BIND] reject reason=time_mismatch "
-                "offer_date=%s offer_time=%s user_time_norm=%s start_raw=%s",
-                offer_date,
-                offer_time,
-                user_time_norm,
-                start_raw,
-            )
-            continue
-        if expected_date and offer_date != expected_date:
-            logger.debug(
-                "[TIME_SELECTION_BIND] reject reason=date_mismatch "
-                "offer_date=%s expected_date=%s offer_time=%s start_raw=%s",
-                offer_date,
-                expected_date,
-                offer_time,
-                start_raw,
-            )
-            continue
-
-        bound_slots = dict(slots or {})
-        bound_slots["date"] = offer_date
-        bound_slots["time"] = user_time_norm
-        resolved_datetime_range = None
-        if start_raw and end_raw:
-            resolved_datetime_range = {
-                "start": str(start_raw), "end": str(end_raw)}
-        else:
-            resolved_datetime_range = build_datetime_range_from_slots(
-                bound_slots, session_state.get("last_execution_result")
-                if isinstance(session_state, dict)
-                else None
-            )
-        if not resolved_datetime_range:
-            logger.debug(
-                "[TIME_SELECTION_BIND] reject reason=no_datetime_range "
-                "offer_date=%s offer_time=%s start_raw=%r end_raw=%r",
-                offer_date,
-                offer_time,
-                start_raw,
-                end_raw,
-            )
-            return None
-        logger.debug(
-            "[TIME_SELECTION_BIND] bound date=%s time=%s from offered availability "
-            "start=%s end=%s",
-            offer_date,
-            user_time_norm,
-            start_raw,
-            end_raw,
-        )
-        result = {
-            "slots": bound_slots,
-            "resolved_datetime_range": resolved_datetime_range,
+    if isinstance(turn_payload, dict):
+        turn_payload["_selection_resolution"] = {
+            "status": resolution.get("status"),
+            "source": resolution.get("source"),
+            "reason_code": resolution.get("reason_code"),
         }
+
+    bind_result = resolution.get("bind_result")
+    reason_code = resolution.get("reason_code") or "not_found"
+    matched = resolution.get("status") == "matched" and isinstance(bind_result, dict)
+
+    if matched:
+        bound_slots = bind_result.get("slots") if isinstance(bind_result, dict) else {}
+        resolved = (
+            bind_result.get("resolved_datetime_range")
+            if isinstance(bind_result, dict)
+            else None
+        )
+        logger.debug(
+            "[TIME_SELECTION_BIND] bound date=%s time=%s source=%s start=%s",
+            (bound_slots or {}).get("date"),
+            (bound_slots or {}).get("time"),
+            resolution.get("source"),
+            (resolved or {}).get("start") if isinstance(resolved, dict) else None,
+        )
         _emit_bind_trace(
             slots_before=slots_before,
-            bind_result=result,
+            bind_result=bind_result,
             time_proposal=time_proposal,
             time_constraint=time_constraint,
             offers=offers,
             user_time_raw=user_time_raw,
-            user_time_norm=user_time_norm,
-            expected_date=expected_date,
-            matched_offer_start=str(start_raw),
+            user_time_norm=(bound_slots or {}).get("time"),
+            expected_date=(bound_slots or {}).get("date"),
+            matched_offer_start=(
+                (resolved or {}).get("start") if isinstance(resolved, dict) else None
+            ),
         )
-        return result
+        return bind_result
+
+    skip_reason = {
+        "no_offers": "no_offers",
+        "no_user_time": "no_user_time",
+        "normalize_failed": "normalize_failed",
+        "no_presented_match": "time_mismatch",
+        "multiple_presented_matches": "time_mismatch",
+        "explicit_offer_not_in_cache": "time_mismatch",
+        "multiple_cache_matches": "time_mismatch",
+        "explicit_selection_incomplete": "no_user_time",
+        "search_criteria_changed": "time_mismatch",
+        "time_mismatch": "time_mismatch",
+        "presentation_ambiguous": "time_mismatch",
+        "explicit_cache_miss": "time_mismatch",
+        "explicit_cache_ambiguous": "time_mismatch",
+        "parse_failed": "time_mismatch",
+        "no_datetime_range": "time_mismatch",
+    }.get(str(reason_code), "time_mismatch")
     logger.debug(
-        "[TIME_SELECTION_BIND] no match user_time_raw=%r user_time_norm=%s "
-        "expected_date=%s offers=%s",
-        user_time_raw,
-        user_time_norm,
-        expected_date,
-        _offer_start_summaries(offers),
+        "[TIME_SELECTION_BIND] no match reason=%s status=%s source=%s",
+        reason_code,
+        resolution.get("status"),
+        resolution.get("source"),
     )
     _emit_bind_trace(
         slots_before=slots_before,
         bind_result=None,
-        skip_reason="time_mismatch",
+        skip_reason=skip_reason,
         time_proposal=time_proposal,
         time_constraint=time_constraint,
         offers=offers,
         user_time_raw=user_time_raw,
-        user_time_norm=user_time_norm,
-        expected_date=expected_date,
     )
     return None
+
 
 
 def _emit_bind_trace(**kwargs: Any) -> None:
@@ -614,6 +607,23 @@ def extract_nlu_proposals(
     facts = luma_response.get("facts", {})
     if not isinstance(facts, dict):
         facts = {}
+    slots = luma_response.get("slots")
+    if not isinstance(slots, dict):
+        slots = {}
+
+    # Prefer explicit current-turn date evidence (mirrors time_proposal handling).
+    explicit_date_proposal = luma_response.get("date_proposal")
+    if isinstance(explicit_date_proposal, dict) and explicit_date_proposal.get("start"):
+        date_proposal = explicit_date_proposal
+    else:
+        date_proposal = build_date_proposal(
+            facts, luma_response.get("date_constraint")
+        )
+        if not date_proposal and slots.get("date"):
+            date_proposal = {
+                "mode": "single_day",
+                "start": slots["date"],
+            }
 
     explicit_time_proposal = luma_response.get("time_proposal")
     if isinstance(explicit_time_proposal, dict):
@@ -622,15 +632,11 @@ def extract_nlu_proposals(
         time_proposal = build_time_proposal(
             facts, luma_response.get("time_constraint")
         )
-        if not time_proposal:
-            slots = luma_response.get("slots")
-            if isinstance(slots, dict) and slots.get("time"):
-                time_proposal = {"mode": "exact", "value": slots["time"]}
+        if not time_proposal and slots.get("time"):
+            time_proposal = {"mode": "exact", "value": slots["time"]}
 
     return {
-        "date_proposal": build_date_proposal(
-            facts, luma_response.get("date_constraint")
-        ),
+        "date_proposal": date_proposal,
         "time_proposal": time_proposal,
     }
 
@@ -833,31 +839,148 @@ def apply_time_constraint_to_missing_slots(
     return missing_slots
 
 
+def _session_v2_proposal(
+    session_state: Dict[str, Any],
+    *,
+    kind: str,
+) -> Optional[Dict[str, Any]]:
+    """Read a persisted proposal from Session V2 ``planning.proposals``."""
+    planning = session_state.get("planning")
+    if not isinstance(planning, dict):
+        return None
+    proposals = planning.get("proposals")
+    if not isinstance(proposals, dict):
+        return None
+    proposal = proposals.get(kind)
+    return proposal if isinstance(proposal, dict) else None
+
+
+def _session_date_proposal(session_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Resolve carried date_proposal from legacy mirrors or V2 nested storage."""
+    proposal = session_state.get("date_proposal")
+    if proposal is not None:
+        return proposal
+    facts = session_state.get("facts")
+    if isinstance(facts, dict) and facts.get("date_proposal") is not None:
+        return facts.get("date_proposal")
+    return _session_v2_proposal(session_state, kind="date")
+
+
+def _session_time_proposal(session_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Resolve carried time_proposal from legacy mirrors or V2 nested storage."""
+    proposal = session_state.get("time_proposal")
+    if proposal is not None:
+        return proposal
+    facts = session_state.get("facts")
+    if isinstance(facts, dict) and facts.get("time_proposal") is not None:
+        return facts.get("time_proposal")
+    return _session_v2_proposal(session_state, kind="time")
+
+
+def _has_established_availability_search(session_state: Dict[str, Any]) -> bool:
+    """True when session already holds artifacts from a prior availability search."""
+    if session_state.get("availability_fingerprint"):
+        return True
+    last = session_state.get("last_execution_result")
+    if isinstance(last, dict) and last:
+        return True
+    presented = session_state.get("presented_availability")
+    if isinstance(presented, dict) and (
+        presented.get("slots") or presented.get("times")
+    ):
+        return True
+    availability = session_state.get("availability")
+    if not isinstance(availability, dict):
+        return False
+    if availability.get("fingerprint"):
+        return True
+    cache = availability.get("cache")
+    if isinstance(cache, dict) and cache.get("search_result"):
+        return True
+    presentation = availability.get("presentation")
+    if isinstance(presentation, dict) and presentation.get("presented"):
+        return True
+    return False
+
+
 def resolve_execution_proposals(
     plan: Optional[Dict[str, Any]] = None,
     session_state: Optional[Dict[str, Any]] = None,
+    *,
+    context: Optional[ExecutionProposalResolutionContext] = None,
 ) -> Dict[str, Optional[Dict[str, Any]]]:
     """Resolve date/time proposals for execution (availability search / confirmation).
 
-    Priority:
-      1. plan.date_proposal / time_proposal  (set by plan_message from merged response)
-      2. session_state.date_proposal / time_proposal  (prior turn, persisted)
-      3. session_state.facts.date_proposal / time_proposal  (legacy fallback)
+    Time precedence with typed context:
+      1. Current-turn explicit time proposal.
+      2. Current-turn resolved time constraint.
+      3. Session time proposal, only when reuse remains valid.
+      4. No time proposal.
+
+    Session date proposals are read from top-level mirrors, facts, and V2
+    ``planning.proposals.date``.
+
+    When planning marked ``_revision_invalidated_availability`` *and* the session
+    already has an established availability search, the session ``date_proposal``
+    belongs to the prior search criteria and must not rebind the new search.
+    Session time proposals remain gated by ``revision_invalidated`` alone.
+
+    Initial service clarification (no prior search) still reuses the carried
+    ``date_proposal`` so SEARCH keeps the user-stated date.
     """
     plan = plan or {}
     session_state = session_state or {}
-    session_facts = session_state.get("facts") or {}
+    plan_facts = plan.get("facts") if isinstance(plan.get("facts"), dict) else {}
+    merged = plan.get("_merged_luma_response")
+    if not isinstance(merged, dict):
+        merged = {}
+    if context is None:
+        plan_context = plan.get("execution_proposal_context")
+        if isinstance(plan_context, dict):
+            context = plan_context
+    revision_invalidated = bool(
+        plan.get("_revision_invalidated_availability")
+        or merged.get("_revision_invalidated_availability")
+    )
+    established_availability = _has_established_availability_search(session_state)
+    # Mid-flow service/date revision after a prior SEARCH must not reuse the old
+    # date. Clarification that only fills service (no prior SEARCH) must keep it.
+    suppress_session_date = revision_invalidated and established_availability
 
     date_proposal = (
         plan.get("date_proposal")
-        or session_state.get("date_proposal")
-        or (session_facts.get("date_proposal") if isinstance(session_facts, dict) else None)
+        or plan_facts.get("date_proposal")
+        or merged.get("date_proposal")
     )
-    time_proposal = (
-        plan.get("time_proposal")
-        or session_state.get("time_proposal")
-        or (session_facts.get("time_proposal") if isinstance(session_facts, dict) else None)
-    )
+    if context is not None:
+        current_turn_time = context.get("current_turn_time_proposal")
+        current_turn_constraint = context.get("current_turn_time_constraint")
+        time_proposal = (
+            dict(current_turn_time)
+            if isinstance(current_turn_time, dict)
+            else build_time_proposal(
+                {},
+                (
+                    dict(current_turn_constraint)
+                    if isinstance(current_turn_constraint, dict)
+                    else None
+                ),
+            )
+        )
+        reuse_session_time = bool(
+            context.get("session_time_proposal_reuse_allowed", True)
+        )
+    else:
+        time_proposal = (
+            plan.get("time_proposal")
+            or plan_facts.get("time_proposal")
+            or merged.get("time_proposal")
+        )
+        reuse_session_time = True
+    if not suppress_session_date:
+        date_proposal = date_proposal or _session_date_proposal(session_state)
+    if not revision_invalidated and reuse_session_time and not time_proposal:
+        time_proposal = _session_time_proposal(session_state)
     return {"date_proposal": date_proposal, "time_proposal": time_proposal}
 
 
@@ -934,10 +1057,13 @@ def build_datetime_range_from_slots(
 def datetime_range_from_availability_result(
     execution_result: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, str]]:
-    """Build resolved_datetime_range from normalized availability execution slots."""
+    """Build a datetime range from a canonical availability execution result."""
     if not isinstance(execution_result, dict):
         return None
-    slots_list = execution_result.get("slots", [])
+    availability = execution_result.get("availability")
+    if not isinstance(availability, dict):
+        return None
+    slots_list = availability.get("slots", [])
     if not isinstance(slots_list, list) or not slots_list:
         return None
     first = slots_list[0]

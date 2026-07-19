@@ -11,23 +11,92 @@ import logging
 from enum import Enum
 from typing import Any, Callable, Dict, Optional, Set, Tuple
 
-from core.session.confirmation_gate import (
-    BookingRevision,
-    clear_pending_confirmation,
-)
+from core.planning.booking_revision import BookingRevision
+from core.session.confirmation_gate import set_confirmation_state
 
 logger = logging.getLogger(__name__)
 
 _AVAILABILITY_STATE_KEYS = frozenset(
-    {"presented_availability", "availability_fingerprint", "last_execution_result"}
+    {
+        "presented_availability",
+        "availability_fingerprint",
+        "last_execution_result",
+        "availability_presentation",
+    }
 )
+
+
+def clear_booking_state(
+    state: Optional[Dict[str, Any]],
+    *,
+    clear_time: bool = True,
+    clear_date: bool = False,
+    clear_availability: bool = False,
+    clear_service: bool = False,
+    reason: str = "",
+) -> Dict[str, Any]:
+    """Apply planner-selected booking invalidation to a processing state."""
+    if not isinstance(state, dict):
+        return {}
+
+    set_confirmation_state(state, None)
+
+    if clear_time or clear_date or clear_service:
+        slots = dict(state.get("slots") or {})
+        if clear_time:
+            slots.pop("time", None)
+            slots.pop("has_datetime", None)
+            slots.pop("datetime_range", None)
+        if clear_date:
+            slots.pop("date", None)
+            slots.pop("date_range", None)
+        if clear_service:
+            slots.pop("service_id", None)
+            slots.pop("_canonical_service_id", None)
+        state["slots"] = slots
+        state.pop("resolved_datetime_range", None)
+
+        facts = state.get("facts")
+        if isinstance(facts, dict):
+            facts = dict(facts)
+            facts.pop("resolved_datetime_range", None)
+            fact_slots = facts.get("slots")
+            if isinstance(fact_slots, dict):
+                fact_slots = dict(fact_slots)
+                if clear_time:
+                    fact_slots.pop("time", None)
+                    fact_slots.pop("has_datetime", None)
+                    fact_slots.pop("datetime_range", None)
+                if clear_date:
+                    fact_slots.pop("date", None)
+                    fact_slots.pop("date_range", None)
+                if clear_service:
+                    fact_slots.pop("service_id", None)
+                    fact_slots.pop("_canonical_service_id", None)
+                facts["slots"] = fact_slots
+            state["facts"] = facts
+
+    if clear_availability:
+        for key in _AVAILABILITY_STATE_KEYS:
+            state.pop(key, None)
+
+    if reason:
+        logger.debug(
+            "[BOOKING_INVALIDATION] reason=%s clear_time=%s clear_date=%s "
+            "clear_availability=%s clear_service=%s",
+            reason,
+            clear_time,
+            clear_date,
+            clear_availability,
+            clear_service,
+        )
+    return state
 
 
 class InvalidationTrigger(str, Enum):
     """Explicit invalidation events (one trigger per call site)."""
 
     REJECT_CONFIRMATION = "reject_confirmation"
-    REVISE_FALLBACK = "revise_fallback"
     TIME_REBOUND = "time_rebound"
     UNBOUND_PROPOSAL_WHILE_PENDING = "unbound_proposal_while_pending"
     BOOKING_REVISION = "booking_revision"
@@ -44,12 +113,6 @@ INVALIDATION_RULES: Dict[InvalidationTrigger, Dict[str, Any]] = {
         "clear_slots": frozenset({"time"}),
         "clear_state": frozenset(),
         "default_reason": "reject",
-    },
-    InvalidationTrigger.REVISE_FALLBACK: {
-        "clear_confirmation": True,
-        "clear_slots": frozenset({"time"}),
-        "clear_state": frozenset(),
-        "default_reason": "revise_fallback",
     },
     InvalidationTrigger.TIME_REBOUND: {
         "clear_confirmation": True,
@@ -160,7 +223,7 @@ def _confirmation_flags_from_sets(
     clear_slots: Set[str],
     clear_state: Set[str],
 ) -> Dict[str, bool]:
-    """Translate declarative slot/state sets into clear_pending_confirmation flags."""
+    """Translate declarative slot/state sets into booking invalidation flags."""
     return {
         "clear_time": "time" in clear_slots,
         "clear_date": "date" in clear_slots or "date_range" in clear_slots,
@@ -177,7 +240,7 @@ def _apply_confirmation_rule(
     reason: str,
 ) -> Dict[str, Any]:
     flags = _confirmation_flags_from_sets(clear_slots, clear_state)
-    return clear_pending_confirmation(state, reason=reason, **flags)
+    return clear_booking_state(state, reason=reason, **flags)
 
 
 def _invalidate_ambiguous_service(

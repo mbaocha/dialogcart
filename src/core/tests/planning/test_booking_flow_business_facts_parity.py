@@ -133,7 +133,7 @@ class TestConfirmAppointmentBusinessFacts:
         }
         session = {
             **_availability_cache_session(slots, intent_name="CREATE_APPOINTMENT"),
-            "booking": {"confirmation_state": "pending"},
+            "confirmation_state": "pending",
         }
         step, flags = _select(
             "CREATE_APPOINTMENT",
@@ -154,7 +154,7 @@ class TestConfirmAppointmentBusinessFacts:
         }
         session = {
             **_availability_cache_session(slots, intent_name="CREATE_APPOINTMENT"),
-            "booking": {"confirmation_state": "confirmed"},
+            "confirmation_state": "confirmed",
         }
         step, flags = _select(
             "CREATE_APPOINTMENT",
@@ -197,7 +197,7 @@ class TestApplyModificationBusinessFacts:
         }
         session = {
             **_availability_cache_session(slots, intent_name="MODIFY_BOOKING"),
-            "booking": {"confirmation_state": "confirmed"},
+            "confirmation_state": "confirmed",
         }
         step, flags = _select(
             "MODIFY_BOOKING",
@@ -215,7 +215,7 @@ class TestExecutionOnlyPlanAction:
     """plan.action is policy-selected execution only; presentation uses status/stage/awaiting."""
 
     def test_pending_confirmation_has_null_execution_action(self):
-        from core.planning.planner.plan_builder import build_decision_plan
+        from core.tests.harness.planning_compat import build_decision_plan
 
         slots = {
             "service_id": "svc-haircut",
@@ -225,7 +225,7 @@ class TestExecutionOnlyPlanAction:
         }
         session = {
             **_availability_cache_session(slots, intent_name="CREATE_APPOINTMENT"),
-            "booking": {"confirmation_state": "pending"},
+            "confirmation_state": "pending",
         }
         luma_response = {
             "intent": {"name": "CREATE_APPOINTMENT"},
@@ -233,7 +233,7 @@ class TestExecutionOnlyPlanAction:
             "_effective_collected_slots": slots,
             "missing_slots": [],
             "needs_clarification": False,
-            "booking": {"confirmation_state": "pending"},
+            "confirmation_state": "pending",
         }
         plan = build_decision_plan(
             intent_name="CREATE_APPOINTMENT",
@@ -248,7 +248,7 @@ class TestExecutionOnlyPlanAction:
         assert plan["action"] is None
 
     def test_confirmed_selects_commit_execution_action(self):
-        from core.planning.planner.plan_builder import build_decision_plan
+        from core.tests.harness.planning_compat import build_decision_plan
 
         slots = {
             "service_id": "svc-haircut",
@@ -258,7 +258,7 @@ class TestExecutionOnlyPlanAction:
         }
         session = {
             **_availability_cache_session(slots, intent_name="CREATE_APPOINTMENT"),
-            "booking": {"confirmation_state": "confirmed"},
+            "confirmation_state": "confirmed",
         }
         luma_response = {
             "intent": {"name": "CREATE_APPOINTMENT"},
@@ -266,7 +266,7 @@ class TestExecutionOnlyPlanAction:
             "_effective_collected_slots": slots,
             "missing_slots": [],
             "needs_clarification": False,
-            "booking": {"confirmation_state": "confirmed"},
+            "confirmation_state": "confirmed",
         }
         plan = build_decision_plan(
             intent_name="CREATE_APPOINTMENT",
@@ -293,12 +293,12 @@ class TestTimeMatchExactConfirmCommit:
 
     def test_exact_match_pending_turn_suppresses_commit(self):
         from core.planning.time_resolution import TIME_MATCH_EXACT
-        from core.planning.planner.plan_builder import build_decision_plan
+        from core.tests.harness.planning_compat import build_decision_plan
 
         slots = self._slots()
         session = {
             **_availability_cache_session(slots, intent_name="CREATE_APPOINTMENT"),
-            "booking": {"confirmation_state": "pending"},
+            "confirmation_state": "pending",
             "resolved_datetime_range": {
                 "start": "2026-07-10T12:00:00Z",
                 "end": "2026-07-10T12:30:00Z",
@@ -310,7 +310,7 @@ class TestTimeMatchExactConfirmCommit:
             "_effective_collected_slots": slots,
             "missing_slots": [],
             "needs_clarification": False,
-            "booking": {"confirmation_state": "pending"},
+            "confirmation_state": "pending",
             "time_match_outcome": TIME_MATCH_EXACT,
             "time_resolution": {"outcome": TIME_MATCH_EXACT, "requested_time": "12:00"},
         }
@@ -327,12 +327,12 @@ class TestTimeMatchExactConfirmCommit:
 
     def test_exact_match_confirmed_turn_executes_commit(self):
         from core.planning.time_resolution import TIME_MATCH_EXACT
-        from core.planning.planner.plan_builder import build_decision_plan
+        from core.tests.harness.planning_compat import build_decision_plan
 
         slots = self._slots()
         session = {
             **_availability_cache_session(slots, intent_name="CREATE_APPOINTMENT"),
-            "booking": {"confirmation_state": "confirmed"},
+            "confirmation_state": "confirmed",
             "resolved_datetime_range": {
                 "start": "2026-07-10T12:00:00Z",
                 "end": "2026-07-10T12:30:00Z",
@@ -344,7 +344,7 @@ class TestTimeMatchExactConfirmCommit:
             "_effective_collected_slots": slots,
             "missing_slots": [],
             "needs_clarification": False,
-            "booking": {"confirmation_state": "confirmed"},
+            "confirmation_state": "confirmed",
             "time_match_outcome": TIME_MATCH_EXACT,
             "time_resolution": {"outcome": TIME_MATCH_EXACT, "requested_time": "12:00"},
         }
@@ -362,12 +362,12 @@ class TestTimeMatchExactConfirmCommit:
 
     def test_exact_match_gate_accept_turn_executes_commit(self):
         from core.planning.time_resolution import TIME_MATCH_EXACT
-        from core.planning.planner.plan_builder import build_decision_plan
+        from core.tests.harness.planning_compat import build_decision_plan
 
         slots = self._slots()
         session = {
             **_availability_cache_session(slots, intent_name="CREATE_APPOINTMENT"),
-            "booking": {"confirmation_state": "pending"},
+            "confirmation_state": "pending",
             "resolved_datetime_range": {
                 "start": "2026-07-10T12:00:00Z",
                 "end": "2026-07-10T12:30:00Z",
@@ -379,7 +379,7 @@ class TestTimeMatchExactConfirmCommit:
             "_effective_collected_slots": slots,
             "missing_slots": [],
             "needs_clarification": False,
-            "booking": {"confirmation_state": "pending"},
+            "confirmation_state": "pending",
             "time_match_outcome": TIME_MATCH_EXACT,
             "time_resolution": {"outcome": TIME_MATCH_EXACT, "requested_time": "12:00"},
             "_confirm_booking_continuation": True,

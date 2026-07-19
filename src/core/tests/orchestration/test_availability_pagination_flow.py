@@ -12,13 +12,14 @@ from unittest.mock import Mock
 
 import pytest
 
-from core.session.persist import build_session_state_from_outcome
+from core.session.turn_persistence import project_and_persist_turn_result
+from core.adapters.clients.catalog_client import CatalogClient
 from core.adapters.clients.organization_client import OrganizationClient
 from core.execution.clients.availability_client import AvailabilityClient
 from core.adapters.nlu import LumaClient
 from core.api.compat import handle_message
 from core.planning.temporal_proposal import try_bind_offered_time_selection
-from core.rendering.availability_renderer import (
+from core.workflows.availability.presentation import (
     build_availability_presentation,
     build_presented_availability_page,
 )
@@ -30,13 +31,17 @@ SERVICE = "premium haircut"
 
 class _StatefulSessionStore:
     def __init__(self, state: Optional[Dict[str, Any]] = None):
-        self._state = state or {}
+        self._sessions = {}
+        if state:
+            self._sessions[(1, "u1")] = state
 
-    def get_session(self, _user_id: str) -> Dict[str, Any]:
-        return self._state
+    def get_session(self, organization_id: int, user_id: str) -> Dict[str, Any]:
+        return self._sessions.get((organization_id, user_id), {})
 
-    def save_session(self, _user_id: str, state: Dict[str, Any]) -> None:
-        self._state = state
+    def save_session(
+        self, organization_id: int, user_id: str, state: Dict[str, Any]
+    ) -> None:
+        self._sessions[(organization_id, user_id)] = state
 
 
 def _paginated_availability_client(
@@ -69,27 +74,17 @@ def _persist_session_from_result(
     user_id: str,
     session_store: _StatefulSessionStore,
 ) -> Dict[str, Any]:
-    outcome = dict(result.get("outcome") or result.get("result") or {})
-    plan = result.get("plan") or {}
-    if not outcome.get("intent_name") and not outcome.get("intent"):
-        plan_intent = plan.get("intent_name") or plan.get("intent")
-        if plan_intent:
-            outcome["intent_name"] = plan_intent
-    browse_pagination = result.get("availability_pagination")
-    if isinstance(browse_pagination, dict) and not outcome.get("availability_pagination"):
-        outcome["availability_pagination"] = browse_pagination
-    outcome_status = outcome.get("status") or "success"
-    merged = result.get("_merged_luma_response")
-    new_session = build_session_state_from_outcome(
-        outcome,
-        outcome_status,
-        merged,
-        previous_session,
-        user_id,
-        session_store,
+    projected = result.get("_projected_session_state")
+    if isinstance(projected, dict):
+        return projected
+    new_session = project_and_persist_turn_result(
+        result=result,
+        organization_id=1,
+        user_id=user_id,
+        previous_session_state=previous_session,
+        working_session_state=result.get("_working_session") or previous_session,
+        session_store=session_store,
     )
-    if new_session:
-        session_store.save_session(user_id, new_session)
     return new_session or {}
 
 
@@ -97,6 +92,16 @@ def _mock_org_client() -> Mock:
     mock_org = Mock(spec=OrganizationClient)
     mock_org.get_details.return_value = {"organization": {"businessCategoryId": 1}}
     return mock_org
+
+
+def _mock_catalog_client() -> Mock:
+    mock_catalog = Mock(spec=CatalogClient)
+    mock_catalog.get_services.return_value = {
+        "catalog_last_updated_at": "2026-01-01T00:00:00Z",
+        "services": [{"id": 18, "name": SERVICE, "is_active": True}],
+    }
+    mock_catalog.get_reservation.return_value = {"room_types": [], "extras": []}
+    return mock_catalog
 
 
 def _luma_response(**overrides: Any) -> Dict[str, Any]:
@@ -120,6 +125,7 @@ def _run_turn(
     session_store: _StatefulSessionStore,
     availability_client: Mock,
     org_client: Mock,
+    catalog_client: Optional[Mock] = None,
 ) -> Dict[str, Any]:
     mock_luma = Mock(spec=LumaClient)
     mock_luma.resolve.return_value = luma_response
@@ -129,6 +135,7 @@ def _run_turn(
         luma_client=mock_luma,
         availability_client=availability_client,
         organization_client=org_client,
+        catalog_client=catalog_client or _mock_catalog_client(),
         session_store=session_store,
         frozen_time=FROZEN_TIME,
         organization_id=1,
@@ -239,7 +246,7 @@ def _browse(
         f"expected browse turn to paginate, got plan action="
         f"{(result.get('plan') or {}).get('action')!r}"
     )
-    return session_store.get_session(user_id)
+    return session_store.get_session(1, user_id)
 
 
 @pytest.fixture
@@ -298,7 +305,7 @@ def test_show_more_with_create_appointment_intent_no_operation(pagination_harnes
     assert pagination is not None
     assert pagination.get("page_index") == 1
 
-    session = session_store.get_session(user_id)
+    session = session_store.get_session(1, user_id)
     second_page = _presented_starts(session)
     assert second_page != first_page
     assert _page_index(session) == 1
@@ -335,7 +342,7 @@ def test_browse_persists_page_index_through_message_session_build(pagination_har
     first_page_starts = set(_presented_starts(session))
     searches_after_setup = availability_client.get_service_availability.call_count
 
-    previous_before_browse = dict(session_store.get_session(user_id))
+    previous_before_browse = dict(session_store.get_session(1, user_id))
     result = _run_turn(
         text="show me additional times",
         user_id=user_id,
@@ -405,7 +412,7 @@ def test_no_more_pages_explicit_response_not_repeat():
     )
     assert pagination is not None
     assert pagination.get("exhausted") is True
-    session_after = session_store.get_session(user_id)
+    session_after = session_store.get_session(1, user_id)
     assert _presented_starts(session_after) == last_page
     assert _page_index(session_after) == 1
 

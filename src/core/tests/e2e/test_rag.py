@@ -34,9 +34,9 @@ _FAQ_DATA = {
 @pytest.fixture
 def rag_api_user_id():
     uid = "test-rag-sess"
-    clear_session(uid)
+    clear_session(1, uid)
     yield uid
-    clear_session(uid)
+    clear_session(1, uid)
 
 
 def test_session_messages_appended_after_handler_delegated(rag_api_user_id, api_client):
@@ -56,7 +56,7 @@ def test_session_messages_appended_after_handler_delegated(rag_api_user_id, api_
     }
 
     with patch(
-        "core.api.message.handle_message", return_value=delegated_result
+        "core.api.message._engine.process_turn", return_value=delegated_result
     ), patch(
         "extensions.handlers.adapters.rag.FaqClient"
     ) as MockFaqClient, patch(
@@ -73,7 +73,7 @@ def test_session_messages_appended_after_handler_delegated(rag_api_user_id, api_
         )
 
     assert resp.status_code == 200
-    session = get_session(rag_api_user_id)
+    session = get_session(1, rag_api_user_id)
     assert session is not None, "Session must be saved after HANDLER_DELEGATED turn"
     messages = session.get("messages") or []
     assert any(m.get("role") == "user" for m in messages)

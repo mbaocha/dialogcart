@@ -47,37 +47,31 @@ class PlanningFactContext:
 
     intent_name: str
     slots: Dict[str, Any]
+    organization_id: int
     session_state: Optional[Dict[str, Any]] = None
     luma_response: Optional[Dict[str, Any]] = None
     missing_slots: Optional[List[str]] = None
     needs_clarification: bool = False
     confirmation_state: Optional[str] = None
-    organization_id: Optional[int] = None
+    confirm_booking_continuation: bool = False
+    """Attach-phase ACCEPT from AttachedRequest (not a payload projection)."""
 
 
 def derive_user_confirmation_satisfied(
     confirmation_state: Optional[str],
     luma_response: Optional[Dict[str, Any]] = None,
+    *,
+    confirm_booking_continuation: bool = False,
 ) -> bool:
     """True when the user has accepted an outstanding booking confirmation.
 
     Encapsulates persisted ``confirmation_state`` and the turn-level gate ACCEPT
-    signal (``_confirm_booking_continuation``) so planners reason about business
-    semantics only.
+    signal from ``AttachedRequest.confirm_booking_continuation``.
     """
+    _ = luma_response
     if confirmation_state == "confirmed":
         return True
-    if isinstance(luma_response, dict) and _user_accepted_booking_confirmation(
-        luma_response
-    ):
-        return True
-    return False
-
-
-def _user_accepted_booking_confirmation(luma_response: Dict[str, Any]) -> bool:
-    """Turn-level ACCEPT at the booking confirmation gate (pre-persist)."""
-    return bool(luma_response.get("_confirm_booking_continuation"))
-
+    return bool(confirm_booking_continuation)
 
 def derive_business_facts(context: PlanningFactContext) -> BusinessFacts:
     """Derive all planner business facts for the given planning context."""
@@ -91,7 +85,9 @@ def derive_business_facts(context: PlanningFactContext) -> BusinessFacts:
     if confirmation_state is None:
         confirmation_state = _resolve_confirmation_state(session_state, luma_response)
     user_confirmation_satisfied = derive_user_confirmation_satisfied(
-        confirmation_state, luma_response
+        confirmation_state,
+        luma_response,
+        confirm_booking_continuation=context.confirm_booking_continuation,
     )
 
     availability_ready = _derive_availability_ready(
@@ -100,6 +96,7 @@ def derive_business_facts(context: PlanningFactContext) -> BusinessFacts:
         session_state=session_state,
         luma_response=luma_response,
         organization_id=context.organization_id,
+        confirm_booking_continuation=context.confirm_booking_continuation,
     )
     availability_check_required = _derive_availability_check_required(
         intent_name=intent_name,
@@ -197,6 +194,7 @@ def build_policy_execution_flags(
     *,
     intent_name: str,
     slots: Dict[str, Any],
+    organization_id: int,
     session_state: Optional[Dict[str, Any]] = None,
     luma_response: Optional[Dict[str, Any]] = None,
     missing_slots: Optional[List[str]] = None,
@@ -204,7 +202,7 @@ def build_policy_execution_flags(
     availability_resolved: bool = False,
     confirmation_state: Optional[str] = None,
     booking_hold_created: Optional[bool] = None,
-    organization_id: Optional[int] = None,
+    confirm_booking_continuation: bool = False,
 ) -> Dict[str, Any]:
     """Build selector flags including derived business facts for one planning cycle."""
     facts = derive_business_facts(
@@ -217,6 +215,7 @@ def build_policy_execution_flags(
             needs_clarification=needs_clarification,
             confirmation_state=confirmation_state,
             organization_id=organization_id,
+            confirm_booking_continuation=confirm_booking_continuation,
         )
     )
     if booking_hold_created is None:
@@ -243,17 +242,9 @@ def _successful_availability_execution(
     session_state: Optional[Dict[str, Any]],
 ) -> bool:
     """True when session holds a successful availability search result."""
-    if not isinstance(session_state, dict):
-        return False
-    last = session_state.get("last_execution_result")
-    if not isinstance(last, dict):
-        return False
-    if last.get("type") != "availability":
-        return False
-    if last.get("status") != "success":
-        return False
-    slots = last.get("slots")
-    return isinstance(slots, list) and len(slots) > 0
+    from core.workflows.availability.presentation import has_trusted_availability_cache
+
+    return has_trusted_availability_cache(session_state)
 
 
 def _has_resolved_datetime_selection(
@@ -261,7 +252,18 @@ def _has_resolved_datetime_selection(
     luma_response: Dict[str, Any],
 ) -> bool:
     """True when the user confirmed a concrete slot (post-search binding)."""
-    for source in (luma_response, session_state):
+    # Criteria revision or explicit bound-time clear on the working turn:
+    # do not resurrect the prior session binding for this turn's facts.
+    sources = (luma_response,)
+    if not (
+        isinstance(luma_response, dict)
+        and (
+            luma_response.get("_revision_invalidated_availability")
+            or luma_response.get("_bound_datetime_cleared")
+        )
+    ):
+        sources = (luma_response, session_state)
+    for source in sources:
         if not isinstance(source, dict):
             continue
         resolved = source.get("resolved_datetime_range")
@@ -281,7 +283,8 @@ def evaluate_availability_evidence_ready(
     slots: Dict[str, Any],
     session_state: Optional[Dict[str, Any]],
     luma_response: Dict[str, Any],
-    organization_id: Optional[int] = None,
+    organization_id: int,
+    confirm_booking_continuation: bool = False,
 ) -> bool:
     """True when availability was searched for current criteria or a slot was confirmed.
 
@@ -294,11 +297,16 @@ def evaluate_availability_evidence_ready(
         slots_match_availability_fingerprint,
     )
 
+    revision_invalidated = bool(
+        isinstance(luma_response, dict)
+        and luma_response.get("_revision_invalidated_availability")
+    )
+
     if _has_resolved_datetime_selection(session_state, luma_response):
         return True
 
     stored_fingerprint = None
-    if isinstance(session_state, dict):
+    if not revision_invalidated and isinstance(session_state, dict):
         stored_fingerprint = session_state.get("availability_fingerprint")
 
     facts_obj = luma_response.get("facts")
@@ -307,14 +315,18 @@ def evaluate_availability_evidence_ready(
         intent_name=intent_name,
         organization_id=organization_id,
         luma_response=luma_response,
-        session_state=session_state,
+        session_state=None if revision_invalidated else session_state,
         nlu_facts=facts_obj if isinstance(facts_obj, dict) else None,
     )
 
     fingerprint_matched = slots_match_availability_fingerprint(
         fingerprint_slots, stored_fingerprint, intent_name=intent_name
     )
-    if fingerprint_matched and _successful_availability_execution(session_state):
+    if (
+        fingerprint_matched
+        and not revision_invalidated
+        and _successful_availability_execution(session_state)
+    ):
         return True
 
     # MODIFY / reservation flows may carry booking_id without service_id; bound
@@ -322,13 +334,17 @@ def evaluate_availability_evidence_ready(
     if intent_name != "CREATE_APPOINTMENT":
         from core.planning.temporal_proposal import has_bound_booking_datetime
 
-        if has_bound_booking_datetime(slots, session_state, luma_response):
+        bind_session = None if revision_invalidated else session_state
+        if has_bound_booking_datetime(slots, bind_session, luma_response):
             return True
 
     if derive_user_confirmation_satisfied(
         _resolve_confirmation_state(session_state, luma_response),
         luma_response,
+        confirm_booking_continuation=confirm_booking_continuation,
     ):
+        if revision_invalidated:
+            return False
         stored_range = (
             session_state.get("resolved_datetime_range")
             if isinstance(session_state, dict)
@@ -354,7 +370,8 @@ def _derive_availability_ready(
     slots: Dict[str, Any],
     session_state: Optional[Dict[str, Any]],
     luma_response: Dict[str, Any],
-    organization_id: Optional[int] = None,
+    organization_id: int,
+    confirm_booking_continuation: bool = False,
 ) -> bool:
     """True when availability outcome is trustworthy for current booking parameters."""
     return evaluate_availability_evidence_ready(
@@ -363,6 +380,7 @@ def _derive_availability_ready(
         session_state=session_state,
         luma_response=luma_response,
         organization_id=organization_id,
+        confirm_booking_continuation=confirm_booking_continuation,
     )
 
 

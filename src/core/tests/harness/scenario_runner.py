@@ -146,12 +146,13 @@ def _persist_session_for_next_turn(
     result: Dict[str, Any],
     normalized: Dict[str, Any],
     session_store: MockSessionStore,
+    organization_id: int,
     user_id: str,
     current_intent: Optional[str],
     booking_intent: Optional[str] = None,
 ) -> None:
     """Mirror session fields required for multi-turn execution flows."""
-    previous_session = session_store.get_session(user_id)
+    previous_session = session_store.get_session(organization_id, user_id)
     if (
         normalized.get("status") == "HANDLER_DELEGATED"
         and previous_session
@@ -159,20 +160,29 @@ def _persist_session_for_next_turn(
         and is_durable_intent(booking_intent)
     ):
         # Informational detour: durable booking session must survive unchanged
-        session_store.save_session(user_id, previous_session)
+        session_store.save_session(organization_id, user_id, previous_session)
         return
 
     plan_obj = normalized.get("plan", {})
-    execution_result = result.get("result", {})
+    execution_plan = result.get("plan")
+    execution_plan = execution_plan if isinstance(execution_plan, dict) else {}
+    outcome = result.get("outcome") if isinstance(result.get("outcome"), dict) else {}
+    execution_result = (
+        outcome
+        if outcome.get("schema_version") == 1
+        else result.get("result", {})
+    )
     slots = dict(normalized.get("slots", {}))
     plan_slots = plan_obj.get("slots", {})
     if isinstance(plan_slots, dict):
         slots.update(plan_slots)
     if isinstance(execution_result, dict):
-        exec_booking_id = execution_result.get("booking_id")
+        refs = execution_result.get("refs")
+        refs = refs if isinstance(refs, dict) else execution_result
+        exec_booking_id = refs.get("booking_id")
         if exec_booking_id:
             slots["booking_id"] = exec_booking_id
-        exec_booking_code = execution_result.get("booking_code")
+        exec_booking_code = refs.get("booking_code")
         if exec_booking_code:
             slots["booking_code"] = exec_booking_code
 
@@ -182,7 +192,6 @@ def _persist_session_for_next_turn(
         "missing_slots": normalized.get("missing_slots", []),
         "status": normalized.get("status"),
     }
-    outcome = result.get("outcome") if isinstance(result.get("outcome"), dict) else {}
     facts = outcome.get("facts") if isinstance(outcome.get("facts"), dict) else {}
     merged = result.get("_merged_luma_response")
     if isinstance(merged, dict):
@@ -206,33 +215,23 @@ def _persist_session_for_next_turn(
     if "action" in plan_obj:
         session_state["action"] = plan_obj.get("action")
 
-    outcome_booking = outcome.get("booking") if isinstance(outcome, dict) else None
-    if isinstance(outcome_booking, dict) and outcome_booking.get("confirmation_state"):
-        session_state["confirmation_state"] = outcome_booking["confirmation_state"]
-        session_state["booking"] = {
-            "confirmation_state": outcome_booking["confirmation_state"]
-        }
+    incoming_confirmation = outcome.get("confirmation_state")
+    if incoming_confirmation:
+        session_state["confirmation_state"] = incoming_confirmation
     elif normalized.get("status") == "AWAITING_CONFIRMATION":
         session_state["confirmation_state"] = "pending"
-        session_state["booking"] = {"confirmation_state": "pending"}
 
     if isinstance(execution_result, dict):
-        if execution_result.get("availability_fingerprint"):
-            session_state["availability_fingerprint"] = execution_result[
-                "availability_fingerprint"
-            ]
-        elif plan_obj.get("availability_fingerprint"):
-            session_state["availability_fingerprint"] = plan_obj[
-                "availability_fingerprint"
-            ]
-        if execution_result.get("resolved_datetime_range"):
-            session_state["resolved_datetime_range"] = execution_result[
-                "resolved_datetime_range"
-            ]
-        elif plan_obj.get("resolved_datetime_range"):
-            session_state["resolved_datetime_range"] = plan_obj[
-                "resolved_datetime_range"
-            ]
+        availability_fingerprint = execution_plan.get(
+            "availability_fingerprint"
+        ) or plan_obj.get("availability_fingerprint")
+        if availability_fingerprint:
+            session_state["availability_fingerprint"] = availability_fingerprint
+        resolved_datetime_range = execution_plan.get(
+            "resolved_datetime_range"
+        ) or plan_obj.get("resolved_datetime_range")
+        if resolved_datetime_range:
+            session_state["resolved_datetime_range"] = resolved_datetime_range
 
     if previous_session:
         if (
@@ -254,7 +253,7 @@ def _persist_session_for_next_turn(
         if "messages" not in session_state and previous_session.get("messages"):
             session_state["messages"] = previous_session["messages"]
 
-    session_store.save_session(user_id, session_state)
+    session_store.save_session(organization_id, user_id, session_state)
 
 
 def run_multi_turn_scenario(
@@ -382,12 +381,13 @@ def run_multi_turn_scenario(
                 result,
                 normalized,
                 session_store,
+                test_org_id,
                 user_id,
                 current_intent,
                 booking_intent=booking_intent,
             )
             if expectations.get("preserve_booking_session") and booking_intent:
-                preserved = session_store.get_session(user_id)
+                preserved = session_store.get_session(test_org_id, user_id)
                 assert preserved is not None, (
                     f"[{scenario_name}] Turn {turn_idx}: Expected booking session "
                     f"to be preserved after detour, got None"

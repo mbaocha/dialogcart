@@ -4,66 +4,62 @@ Message API — HTTP boundary for the orchestration layer.
 Receives HTTP requests and delegates turn orchestration to ConversationEngine.
 
 Production flow:
-    POST /message
-        ↓  session loaded (_raw_session), unfiltered session passed to engine
-    ConversationEngine.process_turn()
+    POST /api/message
+        ↓  trace setup (optional)
+        ↓  load session → _raw_session (unfiltered)
+        ↓  filter session_state only for capability context
+    ConversationEngine.process_turn(_raw_session)
         ↓  plan → browse short-circuit → eligibility → execution → rendering
-        → result dict
+        → result { success, outcome, plan?, text, ... }
     post_message()
-        ↓  capability boundary → handler boundary → persistence → response
+        ↓  capability boundary (only if outcome.status == AWAITING_CAPABILITY)
+            → early return if still pending (no persist)
+            → else merge facts and continue
+        ↓  handler boundary (only if HANDLER_DELEGATED)
+        ↓  SessionProjector + save_session (selected statuses)
+        → MessageResponse
 
 Session contract:
-    - HTTP loads the raw session from the store.
-    - ConversationEngine receives the raw (unfiltered) session as session_state.
+    - HTTP loads the raw session from the store as _raw_session.
+    - ConversationEngine receives _raw_session (unfiltered) as session_state.
     - TurnPlanner owns interpreting session contents (merge eligibility, confirmation gate).
-    - HTTP applies a status filter only for the capability boundary call
-      (apply_capability_to_result); that filtered value is never forwarded to the engine.
+    - HTTP filters session_state to NEEDS_CLARIFICATION or AWAITING_CAPABILITY only
+      for apply_capability_to_result context; that filtered value is never forwarded
+      to the engine. _raw_session is still used for engine input, handler delegation,
+      and persistence.
+    - Persistence runs for outcome statuses: NEEDS_CLARIFICATION,
+      AWAITING_CONFIRMATION, AWAITING_CAPABILITY, READY, EXECUTED, success.
 """
 
 import json
+import copy
 import logging
 import os
 import uuid
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Ensure environment variables are loaded at startup
 # Import app module which loads .env files
 import core.app  # noqa: F401
 from core.api.capability_boundary import apply_capability_to_result
-from core.session.session_projector import SessionProjector as _SessionProjector
 from core.adapters.errors import ContractViolation, UpstreamError
 from core.execution.clients.availability_client import AvailabilityClient
 from core.execution.clients.booking_client import BookingClient
 from core.engine.conversation_engine import ConversationEngine
-from core.session.session_manager import clear_session, get_session, save_session
+from core.session.session_manager import clear_session, get_session
+from core.session.session_schema_v2 import prepare_session_for_load
+from core.session.turn_persistence import project_and_persist_turn_result, resolve_projection_status
 from core.rendering.llm_renderer import LlmRenderRequest, render_llm
 
 # Module-level execution clients — core owns these; callers pass text only.
 _availability_client = AvailabilityClient()
 _booking_client = BookingClient()
 
-_session_projector = _SessionProjector()
-
 # Production orchestration engine — single instance, reused across requests.
 _engine = ConversationEngine()
-
-
-class _SessionStore:
-    """Thin adapter so orchestrator can persist execution artifacts between turns."""
-
-    @staticmethod
-    def get_session(user_id: str):
-        return get_session(user_id)
-
-    @staticmethod
-    def save_session(user_id: str, session_state: dict) -> None:
-        save_session(user_id, session_state)
-
-
-_session_store = _SessionStore()
 
 # Extension runners (optional) — single integration point between core and extensions.
 # Core never imports adapters/handlers or branches on their names.
@@ -98,7 +94,8 @@ class MessageRequest(BaseModel):
     text: str
     domain: Optional[str] = "service"
     timezone: Optional[str] = "UTC"
-    organization_id: Optional[int] = None
+    organization_id: int = Field(..., gt=0)
+    customer_id: Optional[int] = Field(default=None, gt=0)
     transaction_id: Optional[str] = None  # Optional per-request tracing ID
 
 
@@ -141,11 +138,11 @@ async def post_message(request: MessageRequest, http_request: Request):
     Returns:
         Message response with success status and outcome or error
     """
-    # Bootstrap extensions (once per process, org-scoped gate adapters)
+    # Bootstrap tenant-neutral extensions once per process.
     global _BOOTSTRAPPED
     if not _BOOTSTRAPPED and _extensions_available and register_default_extensions:
         try:
-            register_default_extensions(organization_id=request.organization_id)
+            register_default_extensions()
             _BOOTSTRAPPED = True
         except Exception as e:
             logger.warning(
@@ -206,9 +203,16 @@ async def post_message(request: MessageRequest, http_request: Request):
             )
 
         # Load session at request start
-        session_state = get_session(request.user_id)
+        loaded_session = get_session(request.organization_id, request.user_id)
+        previous_session = copy.deepcopy(loaded_session) if loaded_session else None
+        working_session = (
+            loaded_session
+            if loaded_session is not None
+            else prepare_session_for_load(None)
+        )
+        session_state = working_session
         # Keep the unfiltered session so HANDLER_DELEGATED can preserve booking state
-        _raw_session = session_state
+        _raw_session = working_session
 
         if not decision_trace_enabled:
             logger.info(
@@ -235,16 +239,15 @@ async def post_message(request: MessageRequest, http_request: Request):
         # No snapshot needed for missing_slots
 
         # Production path: ConversationEngine is the direct orchestration entrypoint.
-        # session_state=_raw_session passes the unfiltered session — this matches the
-        # value handle_message() previously loaded from _session_store and forwarded.
+        # Pass the unfiltered request-scoped working session through the turn.
         result = _engine.process_turn(
             user_id=request.user_id,
             text=request.text,
             session_state=_raw_session,
             availability_client=_availability_client,
             booking_client=_booking_client,
-            session_store=_session_store,
             organization_id=request.organization_id,
+            customer_id=request.customer_id,
             timezone=request.timezone,
             transaction_id=transaction_id,
         )
@@ -335,13 +338,10 @@ async def post_message(request: MessageRequest, http_request: Request):
             outcome["text"] = rendered_text
             result["outcome"] = outcome
 
-            # Update conversation memory and persist, preserving any active booking session.
-            from core.adapters.nlu.conversation_memory import (
-                append_messages_turn,
-                update_conversation,
-            )
+            # Update conversation memory in the request-scoped working session.
+            from core.adapters.nlu.conversation_memory import update_conversation
 
-            _conv_base = _raw_session or {}
+            _conv_base = result.get("_working_session") or _raw_session or {}
             _updated_session = update_conversation(
                 _conv_base,
                 user_text=request.text,
@@ -349,17 +349,9 @@ async def post_message(request: MessageRequest, http_request: Request):
                 search_query=outcome.get("search_query"),
                 assistant_text=rendered_text,
             )
-            _updated_session = append_messages_turn(
-                _updated_session, request.text, rendered_text
-            )
-            save_session(request.user_id, _updated_session)
-            logger.info(
-                "[session] handler_delegated_save",
-                extra={
-                    "user_id": request.user_id,
-                    "handler": handler_name,
-                    "intent": outcome.get("intent_name"),
-                },
+            result["_working_session"] = _updated_session
+            result["_handler_conversation_update"] = _updated_session.get(
+                "conversation"
             )
 
         # Handle session persistence after response
@@ -369,24 +361,10 @@ async def post_message(request: MessageRequest, http_request: Request):
             with measure_stage("persistence"):
                 outcome_status = outcome.get("status")
                 merged_luma_response = result.get("_merged_luma_response")
-                previous_session = _raw_session or session_state
-                persistence_outcome = dict(outcome)
-                if not persistence_outcome.get("intent_name") and not persistence_outcome.get(
-                    "intent"
-                ):
-                    plan_for_intent = result.get("plan", {})
-                    if isinstance(plan_for_intent, dict):
-                        plan_intent = plan_for_intent.get("intent_name") or plan_for_intent.get(
-                            "intent"
-                        )
-                        if plan_intent:
-                            persistence_outcome["intent_name"] = plan_intent
-
-                browse_pagination = result.get("availability_pagination")
-                if isinstance(browse_pagination, dict) and not persistence_outcome.get(
-                    "availability_pagination"
-                ):
-                    persistence_outcome["availability_pagination"] = browse_pagination
+                current_working_session = (
+                    result.get("_working_session") or working_session
+                )
+                projection_status = resolve_projection_status(outcome, result=result)
 
                 if outcome_status in (
                     "NEEDS_CLARIFICATION",
@@ -395,31 +373,48 @@ async def post_message(request: MessageRequest, http_request: Request):
                     "READY",
                     "EXECUTED",
                     "success",
+                    "succeeded",
+                    "HANDLER_DELEGATED",
                 ):
-                    new_session_state = _session_projector.project(
-                        persistence_outcome,
-                        outcome_status,
-                        merged_luma_response,
-                        previous_session,
-                        request.user_id,
-                        session_store=_session_store,
+                    assistant_text = result.get("text") or outcome.get("text")
+                    conversation_messages = [
+                        {"role": "user", "text": request.text}
+                    ]
+                    if assistant_text:
+                        conversation_messages.append(
+                            {"role": "assistant", "text": assistant_text}
+                        )
+
+                    capability_result = None
+                    outcome_facts = outcome.get("facts")
+                    if isinstance(outcome_facts, dict):
+                        payment_satisfied = outcome_facts.get(
+                            "payment_satisfied"
+                        )
+                        active_capability = outcome.get("active_capability")
+                        if payment_satisfied is not None or active_capability:
+                            capability_result = {
+                                "payment_satisfied": payment_satisfied,
+                                "active": active_capability,
+                            }
+
+                    new_session_state = project_and_persist_turn_result(
+                        result=result,
+                        outcome=outcome,
+                        outcome_status=projection_status,
+                        organization_id=request.organization_id,
+                        previous_session_state=previous_session,
+                        user_id=request.user_id,
+                        working_session_state=current_working_session,
+                        capability_result=capability_result,
+                        handler_conversation_update=result.get(
+                            "_handler_conversation_update"
+                        ),
+                        conversation_messages=conversation_messages,
+                        fallback_session_state=current_working_session or {},
                     )
-                    if new_session_state is None and outcome_status in ("READY", "success"):
-                        # Preserve chat history when no durable session payload was produced.
-                        # EXECUTED durable intents must rebuild via build_session_state_from_outcome.
-                        new_session_state = previous_session or {}
 
                     if new_session_state is not None:
-                        from core.adapters.nlu.conversation_memory import (
-                            append_messages_turn,
-                        )
-
-                        new_session_state = append_messages_turn(
-                            new_session_state,
-                            request.text,
-                            result.get("text") or outcome.get("text"),
-                        )
-                        save_session(request.user_id, new_session_state)
                         session_saved = True
                         saved_session_state = new_session_state
                         if is_trace_enabled():
@@ -427,18 +422,6 @@ async def post_message(request: MessageRequest, http_request: Request):
                             _stages.save_session(
                                 new_session_state=new_session_state,
                                 user_id=request.user_id,
-                            )
-                            reloaded_state = get_session(request.user_id)
-                            _stages.reload_session(
-                                saved_state=new_session_state,
-                                reloaded_state=reloaded_state,
-                                user_id=request.user_id,
-                            )
-                        if decision_trace_enabled:
-                            reloaded_state = get_session(request.user_id)
-                            emit_reload_verify(
-                                saved_state=new_session_state,
-                                reloaded_state=reloaded_state,
                             )
                         log_event = (
                             "session_preserved_on_ready"
@@ -480,11 +463,25 @@ async def post_message(request: MessageRequest, http_request: Request):
                         saved=session_saved,
                         new_session_state=saved_session_state,
                     )
+                    if session_saved and saved_session_state is not None:
+                        reloaded_state = get_session(
+                            request.organization_id, request.user_id
+                        )
+                        emit_reload_verify(
+                            saved_state=saved_session_state,
+                            reloaded_state=reloaded_state,
+                        )
+                    else:
+                        emit_reload_verify(
+                            saved_state=None,
+                            reloaded_state=None,
+                        )
         elif decision_trace_enabled:
             emit_persist_save_for_outcome(
                 outcome_status=None,
                 saved=False,
             )
+            emit_reload_verify(saved_state=None, reloaded_state=None)
 
         # Convert to response model
         outcome_for_response = result.get("outcome")
@@ -565,14 +562,18 @@ async def post_message(request: MessageRequest, http_request: Request):
             pass
 
 
-@router.get("/session/{user_id}")
-async def get_user_session(user_id: str):
+@router.get("/organizations/{organization_id}/sessions/{user_id}")
+async def get_user_session(organization_id: int, user_id: str):
     """Return persisted session for a user (debug / chat REPL status command)."""
-    return {"session": get_session(user_id)}
+    if organization_id <= 0:
+        raise HTTPException(status_code=422, detail="organization_id must be positive")
+    return {"session": get_session(organization_id, user_id)}
 
 
-@router.delete("/session/{user_id}")
-async def delete_user_session(user_id: str):
+@router.delete("/organizations/{organization_id}/sessions/{user_id}")
+async def delete_user_session(organization_id: int, user_id: str):
     """Clear persisted session for a user (chat REPL reset command)."""
-    clear_session(user_id)
+    if organization_id <= 0:
+        raise HTTPException(status_code=422, detail="organization_id must be positive")
+    clear_session(organization_id, user_id)
     return {"success": True}

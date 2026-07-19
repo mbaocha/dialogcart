@@ -14,11 +14,10 @@ scenarios:
 
       - sentence: "2pm"
         expect:
-          status: AWAITING_CONFIRMATION
+          status: READY
           missing_slots: []
           text:
-            present: true
-            intent: confirmation
+            present: false
 
   - name: generic_clarification_fallback
     description: Exploratory READY with service+date proposal (time missing); no clarification text

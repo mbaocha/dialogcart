@@ -7,10 +7,14 @@ class MockSessionStore:
     """Simple session store that stores session state in memory."""
 
     def __init__(self):
-        self.sessions: Dict[str, Dict[str, Any]] = {}
+        self.sessions: Dict[tuple[int, str], Dict[str, Any]] = {}
 
-    def get_session(self, user_id: str) -> Optional[Dict[str, Any]]:
-        return self.sessions.get(user_id)
+    def get_session(
+        self, organization_id: int, user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        return self.sessions.get((organization_id, user_id))
 
-    def save_session(self, user_id: str, session_state: Dict[str, Any]) -> None:
-        self.sessions[user_id] = session_state
+    def save_session(
+        self, organization_id: int, user_id: str, session_state: Dict[str, Any]
+    ) -> None:
+        self.sessions[(organization_id, user_id)] = session_state

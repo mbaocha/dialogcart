@@ -37,10 +37,13 @@ class AvailabilityClient(BaseClient):
         trace_kwargs: Dict[str, Any],
     ) -> Dict[str, Any]:
         """HTTP request with availability.request / HTTP metadata capture."""
+        org_param = params.get("organization_id")
+        if org_param is None:
+            raise ValueError("organization_id is required for availability request tracing")
         begin_availability_request(
             endpoint=path,
             method=method,
-            organization_id=int(params.get("organization_id") or 0),
+            organization_id=int(org_param),
             params=params,
             **trace_kwargs,
         )

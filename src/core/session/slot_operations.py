@@ -1,81 +1,94 @@
 """Domain-specific slot manipulation for session merge and effective-slot computation."""
 
-from typing import Any, Dict
+from typing import Any, Dict, FrozenSet, Set
+
+# Shared durable slots valid in both service and reservation domains.
+SHARED_DOMAIN_SLOTS: FrozenSet[str] = frozenset(
+    {"service_id", "date_range", "booking_id", "booking_code"}
+)
+
+# Service-domain durable slots (CREATE_APPOINTMENT, MODIFY_BOOKING).
+SERVICE_DOMAIN_SLOTS: FrozenSet[str] = frozenset(
+    {"date", "time", "has_datetime"} | SHARED_DOMAIN_SLOTS
+)
+
+# Reservation-domain durable slots (CREATE_RESERVATION, MODIFY_RESERVATION).
+RESERVATION_DOMAIN_SLOTS: FrozenSet[str] = frozenset(
+    {"start_date", "end_date"} | SHARED_DOMAIN_SLOTS
+)
+
+# MODIFY_BOOKING may carry reservation-shaped delta slots from NLU promotion.
+MODIFY_BOOKING_DELTA_SLOTS: FrozenSet[str] = frozenset(
+    {"start_date", "end_date", "duration"}
+)
+
+# Internal planning/execution keys — not cross-domain booking facts; always preserved.
+INTERNAL_SLOT_PASSTHROUGH: FrozenSet[str] = frozenset({"_canonical_service_id"})
+
+SERVICE_DOMAIN_INTENTS: FrozenSet[str] = frozenset(
+    {"CREATE_APPOINTMENT", "MODIFY_BOOKING"}
+)
+RESERVATION_DOMAIN_INTENTS: FrozenSet[str] = frozenset(
+    {"CREATE_RESERVATION", "MODIFY_RESERVATION"}
+)
+
+
+def _domain_valid_slots(intent_name: str) -> Set[str] | None:
+    """Return allowed durable slot names for intent domain, or None if intent is unknown."""
+    if intent_name in SERVICE_DOMAIN_INTENTS:
+        valid = set(SERVICE_DOMAIN_SLOTS)
+        if intent_name == "MODIFY_BOOKING":
+            valid |= MODIFY_BOOKING_DELTA_SLOTS
+        return valid
+    if intent_name in RESERVATION_DOMAIN_INTENTS:
+        return set(RESERVATION_DOMAIN_SLOTS)
+    return None
 
 
 def filter_slots_by_domain(
-    slots: Dict[str, Any], intent_name: str, planning_only: bool = False
+    slots: Dict[str, Any],
+    intent_name: str,
+    *,
+    apply_domain_filter: bool = True,
 ) -> Dict[str, Any]:
     """
     Filter slots to only include those valid for the intent's domain.
 
     ARCHITECTURAL INVARIANT: Domain slot isolation
-    - Service domain (CREATE_APPOINTMENT, MODIFY_BOOKING): date, time, service_id
-    - Reservation domain (CREATE_RESERVATION, MODIFY_RESERVATION): start_date, end_date, service_id
-    - service_id is valid in both domains
+    - Service domain (CREATE_APPOINTMENT, MODIFY_BOOKING): date, time, service_id, …
+    - Reservation domain (CREATE_RESERVATION, MODIFY_RESERVATION): start_date, end_date, service_id, …
+    - service_id, date_range, booking_id are shared across domains
     - date/time from service must NOT leak into reservation
     - start_date/end_date from reservation must NOT leak into service
     - Generic 'date' must NOT satisfy start_date/end_date for CREATE_RESERVATION
 
     This must be called BEFORE computing effective_collected_slots to prevent
-    cross-domain slot leakage.
-
-    PLANNING-ONLY MODE: When planning_only=True, skip domain filtering.
-    Planning must proceed with all slots, even if they're "wrong" for the domain.
-    Validation happens in execution layer, not planning.
+    cross-domain slot leakage. Callers decide explicitly via apply_domain_filter;
+    this is independent of planning-only outcome shaping.
 
     Args:
         slots: Slots dictionary to filter
         intent_name: Intent name to determine domain
-        planning_only: If True, skip domain filtering and return all slots
+        apply_domain_filter: When False, return a copy of all slots unchanged
 
     Returns:
-        Filtered slots dictionary (only slots valid for intent domain, or all slots if planning_only=True)
+        Filtered slots dictionary (domain-valid slots plus internal passthrough keys)
     """
     import logging
 
     logger = logging.getLogger(__name__)
 
-    # PLANNING-ONLY: Skip domain filtering - planning must proceed with all slots
-    if planning_only:
+    if not apply_domain_filter:
         logger.debug(
-            f"[DOMAIN_FILTER] PLANNING-ONLY: Skipping domain filter, returning all slots"
+            "[DOMAIN_FILTER] apply_domain_filter=False: returning all slots unchanged"
         )
         return slots.copy() if slots else {}
 
     if not intent_name or not slots:
         return slots.copy() if slots else {}
 
-    # Define domain-specific valid slots
-    service_domain_intents = {"CREATE_APPOINTMENT", "MODIFY_BOOKING"}
-    reservation_domain_intents = {"CREATE_RESERVATION", "MODIFY_RESERVATION"}
-
-    # Determine domain
-    if intent_name in service_domain_intents:
-        # Service domain: date, time, service_id, has_datetime, date_range, booking_id
-        valid_slots = {
-            "date",
-            "time",
-            "service_id",
-            "has_datetime",
-            "date_range",
-            "booking_id",
-        }
-
-        # MODIFY_BOOKING delta slots: preserve all slots valid for EITHER domain OR declared delta slots
-        if intent_name == "MODIFY_BOOKING":
-            delta_slots = {"start_date", "end_date", "duration"}
-            valid_slots = valid_slots | delta_slots
-    elif intent_name in reservation_domain_intents:
-        # Reservation domain: start_date, end_date, service_id, date_range (NOT date, time)
-        valid_slots = {
-            "start_date",
-            "end_date",
-            "service_id",
-            "date_range",
-            "booking_id",
-        }
-    else:
+    valid_slots = _domain_valid_slots(intent_name)
+    if valid_slots is None:
         # Unknown intent - keep all slots (let other filters handle it)
         return slots.copy()
 
@@ -84,7 +97,11 @@ def filter_slots_by_domain(
     dropped = []
 
     for slot_name, slot_value in slots.items():
-        if slot_name in valid_slots:
+        if (
+            slot_name in valid_slots
+            or slot_name in INTERNAL_SLOT_PASSTHROUGH
+            or slot_name.startswith("_")
+        ):
             filtered[slot_name] = slot_value
         else:
             dropped.append(slot_name)

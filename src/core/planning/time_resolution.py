@@ -15,10 +15,10 @@ from core.planning.temporal_proposal import (
     _filter_offers_to_search_date,
     _normalize_search_date,
     _parse_offer_start_parts,
-    build_datetime_range_from_slots,
+    create_bound_datetime_from_offer,
     get_presented_availability_offers,
 )
-from core.rendering.availability_renderer import dedupe_availability_slots
+from core.workflows.availability.presentation import dedupe_availability_slots
 
 logger = logging.getLogger(__name__)
 
@@ -79,33 +79,6 @@ def _collect_offer_starts(
     return filtered
 
 
-def _build_bind_result(
-    *,
-    slots: Dict[str, Any],
-    offer: Dict[str, Any],
-    offer_date: str,
-    user_time_norm: str,
-) -> Dict[str, Any]:
-    start_raw = offer.get("starts_at") or offer.get("start")
-    end_raw = offer.get("ends_at") or offer.get("end")
-    bound_slots = dict(slots or {})
-    bound_slots["date"] = offer_date
-    bound_slots["time"] = user_time_norm
-    resolved_datetime_range = None
-    if start_raw and end_raw:
-        resolved_datetime_range = {
-            "start": str(start_raw), "end": str(end_raw)}
-    else:
-        resolved_datetime_range = build_datetime_range_from_slots(
-            bound_slots, None)
-    if not resolved_datetime_range:
-        return {}
-    return {
-        "slots": bound_slots,
-        "resolved_datetime_range": resolved_datetime_range,
-    }
-
-
 def resolve_time_after_availability(
     *,
     offers: List[Dict[str, Any]],
@@ -157,7 +130,7 @@ def resolve_time_after_availability(
             continue
         if expected_date and offer_date != expected_date:
             continue
-        bind_result = _build_bind_result(
+        bind_result = create_bound_datetime_from_offer(
             slots=slots or {},
             offer=offer,
             offer_date=offer_date,
@@ -263,83 +236,6 @@ def _patch_plan_container(
                 facts["time_resolution"] = time_resolution
 
 
-def apply_time_match_exact_to_plan(
-    plan: Dict[str, Any],
-    *,
-    bind_result: Dict[str, Any],
-    time_resolution: Optional[Dict[str, Any]] = None,
-) -> None:
-    """Apply exact-match binding and move plan toward confirmation."""
-    bound_slots = bind_result.get("slots")
-    resolved_range = bind_result.get("resolved_datetime_range")
-    if not isinstance(bound_slots, dict) or not isinstance(resolved_range, dict):
-        return
-
-    _patch_plan_container(
-        plan,
-        status="AWAITING_CONFIRMATION",
-        stage="CONFIRM",
-        action=None,
-        awaiting="USER_CONFIRMATION",
-        time_match_outcome=TIME_MATCH_EXACT,
-        time_resolution=time_resolution,
-        bound_slots=bound_slots,
-        resolved_range=resolved_range,
-    )
-
-    merged = plan.get("_merged_luma_response")
-    if isinstance(merged, dict):
-        merged_slots = merged.get("slots")
-        if not isinstance(merged_slots, dict):
-            merged_slots = {}
-        merged_slots.update(bound_slots)
-        merged["slots"] = merged_slots
-        merged["resolved_datetime_range"] = dict(resolved_range)
-        merged["time_match_outcome"] = TIME_MATCH_EXACT
-        if time_resolution is not None:
-            merged["time_resolution"] = dict(time_resolution)
-        try:
-            from core.session.confirmation_gate import set_confirmation_state
-
-            set_confirmation_state(merged, "pending")
-        except ImportError:
-            pass
-
-
-def apply_time_match_mismatch_to_plan(
-    plan: Dict[str, Any],
-    *,
-    time_resolution: Dict[str, Any],
-    time_proposal: Optional[Dict[str, Any]] = None,
-) -> None:
-    """Retain requested time and require a conversational response (no execution)."""
-    _patch_plan_container(
-        plan,
-        status="NEEDS_CLARIFICATION",
-        stage="AVAILABILITY",
-        action=None,
-        awaiting="TIME_SELECTION",
-        time_match_outcome=TIME_MATCH_MISMATCH,
-        time_resolution=time_resolution,
-    )
-    if isinstance(time_proposal, dict):
-        plan["time_proposal"] = time_proposal
-
-    merged = plan.get("_merged_luma_response")
-    if isinstance(merged, dict):
-        merged["time_match_outcome"] = TIME_MATCH_MISMATCH
-        merged["time_resolution"] = dict(time_resolution)
-        if isinstance(time_proposal, dict):
-            merged["time_proposal"] = time_proposal
-
-    decision = plan.get("_decision")
-    if isinstance(decision, dict) and isinstance(time_proposal, dict):
-        decision["time_proposal"] = time_proposal
-        facts = decision.get("facts")
-        if isinstance(facts, dict):
-            facts["time_proposal"] = time_proposal
-
-
 def apply_post_bind_time_resolution(
     merged: Dict[str, Any],
     session_state: Optional[Dict[str, Any]],
@@ -350,10 +246,13 @@ def apply_post_bind_time_resolution(
         return None
     if not isinstance(session_state, dict):
         return None
-    last_result = session_state.get("last_execution_result")
-    if not isinstance(last_result, dict):
-        return None
-    if last_result.get("type") != "availability" or last_result.get("status") != "success":
+    from core.workflows.availability.presentation import (
+        availability_cache_from_session,
+        presented_availability_from_session,
+    )
+
+    cache = availability_cache_from_session(session_state)
+    if cache is None:
         return None
 
     offers = get_presented_availability_offers(session_state)
@@ -361,11 +260,11 @@ def apply_post_bind_time_resolution(
         return None
 
     search_date = None
-    presented = session_state.get("presented_availability")
+    presented = presented_availability_from_session(session_state)
     if isinstance(presented, dict) and presented.get("search_date"):
         search_date = _normalize_search_date(presented.get("search_date"))
     if not search_date:
-        search_date = _normalize_search_date(last_result.get("search_date"))
+        search_date = _normalize_search_date(cache.get("search_date"))
 
     slots = merged.get("slots") if isinstance(
         merged.get("slots"), dict) else {}
@@ -389,12 +288,6 @@ def apply_post_bind_time_resolution(
         merged["slots"] = bind_result["slots"]
         merged["resolved_datetime_range"] = bind_result["resolved_datetime_range"]
         merged["time_match_outcome"] = TIME_MATCH_EXACT
-        try:
-            from core.session.confirmation_gate import set_confirmation_state
-
-            set_confirmation_state(merged, "pending")
-        except ImportError:
-            pass
         return payload
 
     if outcome == TIME_MATCH_MISMATCH:
@@ -404,51 +297,54 @@ def apply_post_bind_time_resolution(
     return None
 
 
-def sync_execution_plan_from_time_resolution(
-    plan: Dict[str, Any],
-    execution_result: Dict[str, Any],
-) -> None:
-    """Ensure execution_result.plan reflects post-resolution planner state."""
-    if not plan.get("time_match_outcome"):
-        return
-    if not isinstance(execution_result, dict):
-        return
-    plan_snapshot = execution_result.get("plan")
-    if not isinstance(plan_snapshot, dict):
-        plan_snapshot = {}
-        execution_result["plan"] = plan_snapshot
-    for key in ("status", "stage", "action", "awaiting", "time_match_outcome"):
-        if key in plan:
-            plan_snapshot[key] = plan.get(key)
-    execution_result["time_match_outcome"] = plan.get("time_match_outcome")
-    if plan.get("time_resolution"):
-        execution_result["time_resolution"] = plan.get("time_resolution")
-
-
 def build_execution_result_for_time_resolution_render(
     session_state: Optional[Dict[str, Any]],
     *,
     time_resolution: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Build a synthetic availability execution payload for mismatch rendering."""
+    """Build a canonical synthetic availability artifact for mismatch rendering."""
     if not isinstance(session_state, dict):
         return None
-    last_result = session_state.get("last_execution_result")
-    if not isinstance(last_result, dict):
+    from core.workflows.availability.presentation import availability_cache_from_session
+
+    cache = availability_cache_from_session(session_state)
+    if cache is None:
         return None
-    if last_result.get("type") != "availability":
-        return None
-    resolution = time_resolution or last_result.get("time_resolution")
+    resolution = time_resolution or (
+        cache.get("time_resolution")
+        if isinstance(cache.get("time_resolution"), dict)
+        else None
+    )
     if not isinstance(resolution, dict):
         return None
     if resolution.get("outcome") != TIME_MATCH_MISMATCH:
         return None
-    return {
-        "type": "availability",
-        "status": last_result.get("status", "success"),
-        "slots": list(last_result.get("slots") or []),
-        "time_resolution": resolution,
-    }
+
+    session_slots = session_state.get("slots")
+    session_slots = dict(session_slots) if isinstance(session_slots, dict) else {}
+    organization_id = session_slots.get("organization_id") or session_state.get(
+        "organization_id"
+    )
+    if organization_id is None:
+        return None
+    session_slots["organization_id"] = organization_id
+
+    from core.execution.result import normalize_execution_result
+
+    return normalize_execution_result(
+        {
+            "action": "SEARCH_AVAILABILITY",
+            "intent_name": session_state.get("intent_name")
+            or session_state.get("intent"),
+            "slots": session_slots,
+        },
+        {
+            "type": "availability",
+            "status": cache.get("status", "success"),
+            "slots": list(cache.get("slots") or []),
+            "time_resolution": resolution,
+        },
+    )
 
 
 def _emit_time_resolution_trace(

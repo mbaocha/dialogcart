@@ -20,6 +20,7 @@ import pytest
 from core.adapters.clients.organization_client import OrganizationClient
 from core.adapters.nlu import LumaClient
 from core.api.compat import handle_message
+from core.tests.harness.clients import stub_catalog_client
 from core.session.session_manager import clear_session
 
 # Set execution mode to test
@@ -41,7 +42,7 @@ def test_rendered_ui_appears_at_api_boundary_clarification():
     text = "book something"
 
     # Cleanup
-    clear_session(user_id)
+    clear_session(1, user_id)
 
     try:
         # Mock Luma client (response with missing slots - triggers clarification)
@@ -71,6 +72,7 @@ def test_rendered_ui_appears_at_api_boundary_clarification():
             user_id=user_id,
             luma_client=mock_luma_client,
             organization_client=mock_org_client,
+            catalog_client=stub_catalog_client(domain="reservation"),
             organization_id=1,
         )
 
@@ -94,7 +96,7 @@ def test_rendered_ui_appears_at_api_boundary_clarification():
 
     finally:
         # Cleanup
-        clear_session(user_id)
+        clear_session(1, user_id)
 
 
 def test_invariant_fails_if_rendered_ui_missing():

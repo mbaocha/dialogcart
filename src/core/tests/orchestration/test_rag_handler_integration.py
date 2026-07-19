@@ -18,8 +18,14 @@ from core.adapters.clients.organization_client import OrganizationClient
 from core.adapters.nlu import LumaClient
 from core.api.compat import handle_message
 from core.session.session_manager import clear_session
+from core.tests.harness.clients import stub_catalog_client
 
 os.environ.setdefault("CORE_EXECUTION_MODE", "test")
+
+
+def _catalog():
+    return stub_catalog_client()
+
 
 _FAQ_DATA = {
     "chunks": [
@@ -81,7 +87,7 @@ class TestRagHandlerIntegration:
         register_default_handlers()
         for uid in ("test-rag-t1", "test-rag-t1b", "test-rag-t2", "test-rag-t3",
                     "test-rag-noid"):
-            clear_session(uid)
+            clear_session(1, uid)
 
     # ------------------------------------------------------------------
     # Turn 1 — HANDLER_DELEGATED outcome from orchestrator
@@ -94,6 +100,7 @@ class TestRagHandlerIntegration:
             user_id="test-rag-t1",
             luma_client=_rag_luma_mock(),
             organization_client=_org_mock(),
+            catalog_client=_catalog(),
             organization_id=1,
         )
         outcome = result.get("outcome", {})
@@ -109,6 +116,7 @@ class TestRagHandlerIntegration:
             user_id="test-rag-t1b",
             luma_client=_rag_luma_mock(search_query="haircut"),
             organization_client=_org_mock(),
+            catalog_client=_catalog(),
             organization_id=1,
         )
         outcome = result.get("outcome", {})
@@ -165,6 +173,7 @@ class TestRagHandlerIntegration:
             user_id="test-rag-t2",
             luma_client=luma,
             organization_client=_org_mock(),
+            catalog_client=_catalog(),
             organization_id=1,
             session_state=session_with_conv,
         )
@@ -188,6 +197,7 @@ class TestRagHandlerIntegration:
                 user_id="test-rag-noid",
                 luma_client=_rag_luma_mock(),
                 organization_client=_org_mock(),
+                catalog_client=_catalog(),
                 organization_id=None,
             )
             MockFaqClient.return_value.retrieve.assert_not_called()
@@ -219,6 +229,7 @@ class TestRagHandlerIntegration:
             user_id="test-rag-t3",
             luma_client=mock_luma,
             organization_client=_org_mock(),
+            catalog_client=_catalog(),
             organization_id=1,
         )
 

@@ -36,7 +36,6 @@ except ImportError:
 except Exception:
     pass
 
-from core.session.persist import build_session_state_from_outcome
 from core.api.compat import handle_message
 from core.session.session_manager import clear_session, get_session, save_session
 
@@ -100,7 +99,7 @@ def test_adaptive_clarification_variant_after_retry():
     user_id = "test_adaptive_clarification_001"
     domain = "service"
 
-    clear_session(user_id)
+    clear_session(1, user_id)
     setup_test_org_domain(domain)
     aliases = {"haircut": "haircut"}
     fallback = TestLumaClient(test_aliases=aliases)
@@ -117,18 +116,18 @@ def test_adaptive_clarification_variant_after_retry():
         },
         fallback=fallback,
     )
-    _ = TestCatalogClient(test_aliases=aliases, domain=domain)
+    catalog_client = TestCatalogClient(test_aliases=aliases, domain=domain)
     _ = get_customer_details()
 
     class SessionStoreWrapper:
         def __init__(self, user_id):
             self.user_id = user_id
 
-        def get_session(self, user_id):
-            return get_session(user_id)
+        def get_session(self, organization_id, user_id):
+            return get_session(organization_id, user_id)
 
-        def save_session(self, user_id, session_state):
-            save_session(user_id, session_state)
+        def save_session(self, organization_id, user_id, session_state):
+            save_session(organization_id, user_id, session_state)
 
     session_store = SessionStoreWrapper(user_id)
 
@@ -136,28 +135,18 @@ def test_adaptive_clarification_variant_after_retry():
         text="book haircut",
         user_id=user_id,
         luma_client=luma_client,
+        catalog_client=catalog_client,
         organization_client=None,
         session_store=session_store,
     )
 
     _assert_ready_missing_client(result1, ["date", "time"])
 
-    outcome1 = result1.get("outcome") or {}
-    merged1 = result1.get("_merged_luma_response")
-    new_session1 = build_session_state_from_outcome(
-        outcome=outcome1,
-        outcome_status=outcome1.get("status"),
-        merged_luma_response=merged1,
-        previous_session_state=get_session(user_id),
-        user_id=user_id,
-    )
-    if new_session1:
-        save_session(user_id, new_session1)
-
     result2 = handle_message(
         text="still thinking",
         user_id=user_id,
         luma_client=luma_client,
+        catalog_client=catalog_client,
         organization_client=None,
         session_store=session_store,
     )

@@ -39,6 +39,7 @@ def resolve_effective_intent(
     luma_response: Dict[str, Any],
     session_state: Optional[Dict[str, Any]],
     user_id: str,
+    organization_id: int,
     transaction_id: Optional[str] = None,
 ) -> Tuple[str, bool]:
     """
@@ -339,7 +340,7 @@ def resolve_effective_intent(
                 if canonical_indicates_switch:
                     from core.session.session_manager import clear_session
 
-                    clear_session(user_id)
+                    clear_session(organization_id, user_id)
                     session_state = None
                     session_reset_occurred = True
                     logger.debug(
@@ -515,7 +516,7 @@ def resolve_effective_intent(
                             clear_session,
                         )
 
-                        clear_session(user_id)
+                        clear_session(organization_id, user_id)
                         session_state = None
                         session_reset_occurred = True
                         logger.debug(

@@ -1,0 +1,2 @@
+# Recorded Luma /resolve responses for live E2E (RecordingLumaClient).
+# Files are named <sha256(key)[:16]>.json and created on cache miss or --recache-luma.

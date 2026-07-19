@@ -189,10 +189,10 @@ def test_core_e2e_followup_availability_time_provided_later():
     # Create a simple session store mock that returns session_state
     class MockSessionStore:
         def __init__(self, session_state):
-            self.session_state = session_state
+            self.sessions = {(1, user_id): session_state}
 
-        def get_session(self, user_id):
-            return self.session_state
+        def get_session(self, organization_id, user_id):
+            return self.sessions[(organization_id, user_id)]
 
     session_store = MockSessionStore(session_state)
 
@@ -216,7 +216,7 @@ def test_core_e2e_followup_availability_time_provided_later():
 
     # Extract plan and execution result from turn 2
     plan_turn2 = result_turn2.get("plan")
-    execution_result_turn2 = result_turn2.get("result")
+    execution_result_turn2 = result_turn2.get("outcome")
 
     # Assert plan exists and has correct action
     assert plan_turn2 is not None, "Turn 2: Expected plan in result"
@@ -260,17 +260,18 @@ def test_core_e2e_followup_availability_time_provided_later():
     # Assert execution result structure
     assert execution_result_turn2 is not None, "Turn 2: Expected execution result"
     assert (
-        execution_result_turn2.get("type") == "availability"
-    ), f"Turn 2: Expected result.type 'availability', got {execution_result_turn2.get('type')}"
+        execution_result_turn2.get("schema_version") == 1
+    ), "Turn 2: Expected canonical execution schema"
     assert (
-        execution_result_turn2.get("status") == "success"
-    ), f"Turn 2: Expected result.status 'success', got {execution_result_turn2.get('status')}"
+        execution_result_turn2.get("status") == "succeeded"
+    ), f"Turn 2: Expected result.status 'succeeded', got {execution_result_turn2.get('status')}"
+    availability = execution_result_turn2.get("availability") or {}
     assert (
-        "slots" in execution_result_turn2
+        "slots" in availability
     ), "Turn 2: Expected 'slots' in execution result"
 
     # Assert returned slots are normalized
-    slots = execution_result_turn2["slots"]
+    slots = availability["slots"]
     assert isinstance(slots, list), "Turn 2: Expected slots to be a list"
     assert len(slots) == 2, f"Turn 2: Expected 2 slots, got {len(slots)}"
 

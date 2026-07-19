@@ -367,7 +367,11 @@ class StageRunner:
             state_snapshot={
                 "plan_action": plan_action,
                 "execution_status": execution_result.get("status"),
-                "execution_type": execution_result.get("type"),
+                "execution_type": (
+                    execution_result.get("subject", {}).get("kind")
+                    if isinstance(execution_result.get("subject"), dict)
+                    else None
+                ),
             },
         )
 

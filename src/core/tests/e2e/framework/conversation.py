@@ -440,29 +440,128 @@ def assert_no_booking_execution(
     )
 
 
+_EXECUTION_OUTCOME_STATUSES = frozenset(
+    {"success", "succeeded", "failed", "partial", "EXECUTED"}
+)
+
+
+def _planner_fields_from_decision_trace(
+    body: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Extract planner status/stage/action from decision_trace when HTTP omits plan."""
+    if not isinstance(body, dict):
+        return {}
+    trace = body.get("decision_trace")
+    if not isinstance(trace, dict):
+        return {}
+
+    # Summary projection embeds planner fields directly (no forensic records).
+    if trace.get("view") == "summary" or "planner_status" in trace:
+        fields: Dict[str, Any] = {}
+        if trace.get("planner_status") is not None:
+            fields["status"] = trace.get("planner_status")
+        if "execution_stage" in trace:
+            fields["stage"] = trace.get("execution_stage")
+        if "action" in trace:
+            fields["action"] = trace.get("action")
+        if trace.get("awaiting") is not None:
+            fields["awaiting"] = trace.get("awaiting")
+        if trace.get("time_match_outcome") is not None:
+            fields["time_match_outcome"] = trace.get("time_match_outcome")
+        return fields
+
+    try:
+        from core.tracing.views import _find_record
+    except ImportError:
+        return {}
+
+    fields = {}
+    post_exec = _find_record(trace, "evidence.planning.post_execution")
+    if post_exec:
+        facts = post_exec.get("facts") if isinstance(post_exec.get("facts"), dict) else {}
+        if facts.get("status") is not None:
+            fields["status"] = facts.get("status")
+        if "stage" in facts:
+            fields["stage"] = facts.get("stage")
+        if "action" in facts:
+            fields["action"] = facts.get("action")
+        if facts.get("awaiting") is not None:
+            fields["awaiting"] = facts.get("awaiting")
+        if facts.get("time_match_outcome") is not None:
+            fields["time_match_outcome"] = facts.get("time_match_outcome")
+
+    status_rec = _find_record(trace, "decision.planner.status")
+    if status_rec and status_rec.get("winner") is not None and "status" not in fields:
+        fields["status"] = status_rec.get("winner")
+    stage_rec = _find_record(trace, "decision.planner.select_stage")
+    if stage_rec and "winner" in stage_rec and "stage" not in fields:
+        fields["stage"] = stage_rec.get("winner")
+    action_rec = _find_record(trace, "decision.planner.select_action")
+    if action_rec and "winner" in action_rec and "action" not in fields:
+        fields["action"] = action_rec.get("winner")
+    if post_exec and "awaiting" not in fields:
+        facts = post_exec.get("facts") if isinstance(post_exec.get("facts"), dict) else {}
+        if facts.get("awaiting") is not None:
+            fields["awaiting"] = facts.get("awaiting")
+    return fields
+
+
+def _coerce_planner_status(value: Any) -> Optional[str]:
+    """Return value only when it is a planner status, not an execution outcome."""
+    if value is None:
+        return None
+    text = str(value)
+    if text in _EXECUTION_OUTCOME_STATUSES:
+        return None
+    return text
+
+
 def _plan_view(outcome: Dict[str, Any], body: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Canonical planner view for E2E assertions.
 
     Prefer the root decision ``body.plan`` over nested ``outcome.plan``.
-    Execution outcomes often nest a stale plan stub (e.g. previous
-    ``AWAITING_CONFIRMATION``) while ``body.plan`` matches
-    ``decision.planner.status`` shown in the Decision Trace.
+    After execution, HTTP ``MessageResponse`` often omits root ``plan`` and the
+    outcome is an execution artifact (``status=succeeded``). Planner status must
+    never be taken from that execution outcome status — use decision_trace
+    (``decision.planner.status``) when the plan object is missing.
     """
     nested = outcome.get("plan") if isinstance(outcome.get("plan"), dict) else {}
     root_plan = (body or {}).get("plan") if isinstance((body or {}).get("plan"), dict) else {}
     # Root decision plan wins over nested execution stub.
     merged = {**nested, **root_plan}
-    status = merged.get("status")
-    if not status or status == "success":
-        outcome_status = outcome.get("status")
-        if outcome_status and outcome_status != "success":
-            status = outcome_status
+    trace_fields = _planner_fields_from_decision_trace(body)
+
+    status = _coerce_planner_status(trace_fields.get("status"))
+    if status is None:
+        status = _coerce_planner_status(merged.get("status"))
+    if status is None:
+        # Non-executed turns copy planner status onto outcome.status.
+        status = _coerce_planner_status(outcome.get("status"))
+
+    stage = trace_fields.get("stage")
+    if stage is None:
+        stage = merged.get("stage")
+    if stage is None:
+        stage = outcome.get("stage")
+
+    if "action" in trace_fields:
+        action = trace_fields.get("action")
+    elif "action" in merged:
+        action = merged.get("action")
+    else:
+        # Execution artifacts expose the executed action; that is fine for asserts.
+        action = outcome.get("action")
+
     return {
         "status": status,
-        "stage": merged.get("stage") or outcome.get("stage"),
-        "action": merged.get("action") if "action" in merged else outcome.get("action"),
-        "awaiting": outcome.get("awaiting") or merged.get("awaiting"),
-        "time_match_outcome": merged.get("time_match_outcome") or outcome.get("time_match_outcome"),
+        "stage": stage,
+        "action": action,
+        "awaiting": trace_fields.get("awaiting")
+        or outcome.get("awaiting")
+        or merged.get("awaiting"),
+        "time_match_outcome": trace_fields.get("time_match_outcome")
+        or merged.get("time_match_outcome")
+        or outcome.get("time_match_outcome"),
     }
 
 
@@ -498,7 +597,10 @@ class BookingConversation:
 
     def send(self, text: str, *, trace: Optional[str] = None) -> Dict[str, Any]:
         self.turn += 1
-        params = {"trace": trace} if trace else None
+        # MessageResponse omits root ``plan``; after execution ``outcome.status`` is
+        # the tool result (``succeeded``). Always request decision_trace so
+        # ``assert_planner_status`` can read ``decision.planner.status``.
+        params = {"trace": trace or "summary"}
         self.last_http = self.api_client.post(
             "/api/message",
             params=params,
@@ -524,7 +626,7 @@ class BookingConversation:
         return _plan_view(self.outcome, self.last_body)
 
     def session(self) -> Optional[Dict[str, Any]]:
-        return get_session(self.user_id)
+        return get_session(self.organization_id, self.user_id)
 
     def _assert(self, condition: bool, message: str) -> None:
         if not condition:
@@ -843,7 +945,7 @@ def _reach_july_9_availability(conv: BookingConversation) -> List[str]:
     )
     conv.send("premium")
     conv.assert_turn(
-        response_status="success",
+        response_status="succeeded",
         planner_status="READY",
         stage="AVAILABILITY",
         action="SEARCH_AVAILABILITY",
@@ -854,7 +956,7 @@ def _reach_july_9_availability(conv: BookingConversation) -> List[str]:
     conv.send("actually July 9")
     conv.assert_turn(
         intent="CREATE_APPOINTMENT",
-        response_status="success",
+        response_status="succeeded",
         action="SEARCH_AVAILABILITY",
         execution_type="availability",
         has_availability_slots=True,

@@ -62,6 +62,70 @@ class ScriptedLumaClient(LumaClient):  # noqa: N801
         )
 
 
+class NluServiceResolutionScriptedLumaClient(ScriptedLumaClient):  # noqa: N801
+    __test__ = False
+
+    """Scripted Luma that applies production NLU service post-process.
+
+    Stage-2 scripts may set ``facts.service_id`` without ``service_term``
+    (AVAILABILITY shape). Running ``_resolve_service_ambiguity`` reproduces the
+    production overwrite of current-turn Flexi by session ``resolved_service_id``.
+    """
+
+    def resolve(
+        self,
+        user_id: str,
+        text: str,
+        domain: str = "service",
+        timezone: str = "UTC",
+        tenant_context: Optional[Dict[str, Any]] = None,
+        conversation_context: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        response = super().resolve(
+            user_id,
+            text,
+            domain,
+            timezone,
+            tenant_context,
+            conversation_context=conversation_context,
+        )
+        intent = response.get("intent") or {}
+        intent_name = intent.get("name") if isinstance(intent, dict) else intent
+        if intent_name != "AVAILABILITY":
+            return response
+
+        import sys
+        from unittest.mock import MagicMock
+
+        sys.modules.setdefault("anthropic", MagicMock())
+        from nlu.pipeline import NLUPipeline
+
+        facts = response.get("facts") if isinstance(response.get("facts"), dict) else {}
+        slm = {
+            "intent": "AVAILABILITY",
+            "facts": dict(facts),
+            "service_term": response.get("service_term"),
+            "service_candidates": list(response.get("service_candidates") or []),
+        }
+        resolved = NLUPipeline()._resolve_service_ambiguity(
+            slm,
+            tenant_context if isinstance(tenant_context, dict) else {},
+            conversation_context,
+        )
+        response = {
+            **response,
+            "facts": resolved.get("facts") or facts,
+            "service_candidates": resolved.get("service_candidates") or [],
+        }
+        slots = response.get("slots")
+        if isinstance(slots, dict):
+            service_id = (resolved.get("facts") or {}).get("service_id")
+            if service_id:
+                response["slots"] = {**slots, "service_id": service_id}
+        self.last_response = response
+        return response
+
+
 class TestLumaClient(LumaClient):  # noqa: N801
     __test__ = False
 
@@ -145,3 +209,15 @@ class TestCatalogClient(CatalogClient):  # noqa: N801
             "room_types": rooms,
             "extras": [],
         }
+
+
+def stub_catalog_client(
+    *,
+    aliases: Optional[Dict[str, str]] = None,
+    domain: str = "service",
+) -> TestCatalogClient:
+    """In-memory catalog client for handle_message / planning tests (no HTTP)."""
+    return TestCatalogClient(
+        test_aliases=aliases or {"haircut": "haircut"},
+        domain=domain,
+    )

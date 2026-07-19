@@ -1,20 +1,16 @@
 """
-Orchestration Layer - Context Clients
+Adapter context clients.
 
-This package contains HTTP clients for context building during orchestration.
-These clients are used to fetch tenant context (catalog, customer, organization)
-needed for planning decisions.
+HTTP clients for tenant context needed during planning (catalog, organization).
 
-Note: Execution clients (booking, payment, availability, staff) have been moved
-to core.execution.clients. Luma NLU client has been moved to core.adapters.nlu.
+Execution clients (booking, availability) live in core.execution.clients.
+Luma NLU client lives in core.adapters.nlu.
 """
 
 from core.adapters.clients.catalog_client import CatalogClient
-from core.adapters.clients.customer_client import CustomerClient
 from core.adapters.clients.organization_client import OrganizationClient
 
 __all__ = [
     "CatalogClient",
-    "CustomerClient",
     "OrganizationClient",
 ]

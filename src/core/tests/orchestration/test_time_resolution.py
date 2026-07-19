@@ -1,18 +1,20 @@
 """Tests for deterministic time resolution after availability search."""
 
+from core.planning.pipeline.decision_finalization import (
+    TimeResolutionEvidence,
+    finalize_decision_after_time_resolution,
+)
 from core.planning.time_resolution import (
     TIME_MATCH_EXACT,
     TIME_MATCH_MISMATCH,
     TIME_MATCH_NOT_APPLICABLE,
     apply_post_bind_time_resolution,
-    apply_time_match_exact_to_plan,
-    apply_time_match_mismatch_to_plan,
     resolve_time_after_availability,
 )
-from core.planning.planner.plan_builder import build_decision_plan
-from core.rendering.availability_renderer import (
+from core.tests.harness.planning_compat import build_decision_plan
+from core.rendering.availability_renderer import build_availability_render_request
+from core.workflows.availability.presentation import (
     build_availability_presentation,
-    build_availability_render_request,
     build_presented_availability,
     build_presented_availability_page,
 )
@@ -90,23 +92,28 @@ def test_not_applicable_without_exact_time_proposal():
 
 def test_render_request_exact_match_includes_resolution():
     execution = {
-        "type": "availability",
-        "status": "success",
-        "slots": [
-            {
-                "starts_at": "2026-07-09T09:00:00.000Z",
-                "ends_at": "2026-07-09T09:30:00.000Z",
-            }
-        ],
-        "time_resolution": {
-            "outcome": TIME_MATCH_EXACT,
-            "requested_time": "09:00",
-            "matched_offer": "2026-07-09T09:00:00.000Z",
+        "schema_version": 1,
+        "status": "succeeded",
+        "subject": {"service_name": "haircut"},
+        "availability": {
+            "slots": [
+                {
+                    "starts_at": "2026-07-09T09:00:00.000Z",
+                    "ends_at": "2026-07-09T09:30:00.000Z",
+                }
+            ],
+            "time_resolution": {
+                "outcome": TIME_MATCH_EXACT,
+                "requested_time": "09:00",
+                "matched_offer": "2026-07-09T09:00:00.000Z",
+            },
         },
     }
+    presented = build_presented_availability(execution["availability"]["slots"])
     req = build_availability_render_request(
         {"facts": {"slots": {"service_id": "haircut"}}},
         execution,
+        presented=presented,
     )
     assert req is not None
     assert req.facts["time_resolution"]["outcome"] == TIME_MATCH_EXACT
@@ -116,23 +123,28 @@ def test_render_request_exact_match_includes_resolution():
 
 def test_render_request_no_match_uses_alternatives():
     execution = {
-        "type": "availability",
-        "status": "success",
-        "slots": [
-            {
-                "starts_at": "2026-07-09T09:30:00.000Z",
-                "ends_at": "2026-07-09T10:00:00.000Z",
-            }
-        ],
-        "time_resolution": {
-            "outcome": TIME_MATCH_MISMATCH,
-            "requested_time": "09:00",
-            "alternatives": ["2026-07-09T09:30:00.000Z"],
+        "schema_version": 1,
+        "status": "succeeded",
+        "subject": {"service_name": "haircut"},
+        "availability": {
+            "slots": [
+                {
+                    "starts_at": "2026-07-09T09:30:00.000Z",
+                    "ends_at": "2026-07-09T10:00:00.000Z",
+                }
+            ],
+            "time_resolution": {
+                "outcome": TIME_MATCH_MISMATCH,
+                "requested_time": "09:00",
+                "alternatives": ["2026-07-09T09:30:00.000Z"],
+            },
         },
     }
+    presented = build_presented_availability(execution["availability"]["slots"])
     req = build_availability_render_request(
         {"facts": {"slots": {"service_id": "haircut"}}},
         execution,
+        presented=presented,
     )
     assert req is not None
     assert req.facts["time_resolution"]["outcome"] == TIME_MATCH_MISMATCH
@@ -157,10 +169,14 @@ def test_apply_time_match_exact_updates_plan_status():
             "end": "2026-07-09T09:30:00.000Z",
         },
     }
-    apply_time_match_exact_to_plan(
+    finalize_decision_after_time_resolution(
         plan,
-        bind_result=bind_result,
-        time_resolution={"outcome": TIME_MATCH_EXACT, "requested_time": "09:00"},
+        evidence=TimeResolutionEvidence(
+            outcome=TIME_MATCH_EXACT,
+            time_resolution={"outcome": TIME_MATCH_EXACT, "requested_time": "09:00"},
+            bind_result=bind_result,
+            apply_confirmation_transition=False,
+        ),
     )
     assert plan["status"] == "AWAITING_CONFIRMATION"
     assert plan["time_match_outcome"] == TIME_MATCH_EXACT
@@ -184,10 +200,14 @@ def test_apply_time_match_mismatch_requires_clarification():
         "requested_time": "09:15",
         "alternatives": ["2026-07-09T09:00:00.000Z", "2026-07-09T09:30:00.000Z"],
     }
-    apply_time_match_mismatch_to_plan(
+    finalize_decision_after_time_resolution(
         plan,
-        time_resolution=resolution,
-        time_proposal={"mode": "exact", "value": "09:15"},
+        evidence=TimeResolutionEvidence(
+            outcome=TIME_MATCH_MISMATCH,
+            time_resolution=resolution,
+            time_proposal={"mode": "exact", "value": "09:15"},
+            apply_confirmation_transition=False,
+        ),
     )
     assert plan["status"] == "NEEDS_CLARIFICATION"
     assert plan["time_match_outcome"] == TIME_MATCH_MISMATCH
@@ -216,6 +236,7 @@ def test_plan_builder_forces_mismatch_clarification_not_ready():
         "CREATE_APPOINTMENT",
         luma_response,
         "service",
+        organization_id=1,
         availability_resolved=True,
     )
     assert plan["status"] == "NEEDS_CLARIFICATION"
@@ -226,16 +247,26 @@ def test_plan_builder_forces_mismatch_clarification_not_ready():
 
 def test_render_request_no_match_without_alternatives():
     execution = {
-        "type": "availability",
-        "status": "success",
-        "slots": [],
-        "time_resolution": {
-            "outcome": TIME_MATCH_MISMATCH,
-            "requested_time": "09:00",
-            "alternatives": [],
+        "schema_version": 1,
+        "status": "succeeded",
+        "subject": {"service_name": None},
+        "availability": {
+            "slots": [],
+            "time_resolution": {
+                "outcome": TIME_MATCH_MISMATCH,
+                "requested_time": "09:00",
+                "alternatives": [],
+            },
         },
     }
-    req = build_availability_render_request({}, execution)
+    presented = {
+        "search_date": None,
+        "slots": [],
+        "times": [],
+        "more_count": 0,
+        "total_unique": 0,
+    }
+    req = build_availability_render_request({}, execution, presented=presented)
     assert req is not None
     assert "no alternative" in req.render_instruction.lower()
 

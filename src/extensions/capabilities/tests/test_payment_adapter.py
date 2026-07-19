@@ -111,15 +111,15 @@ def test_start_creates_payment_intent():
         # Assert - verify payment intent was created
         from extensions.capabilities.clients.payment.mock_payment import _PAYMENT_STATE
 
-        assert "booking_123" in _PAYMENT_STATE, (
+        assert (1, "booking_123") in _PAYMENT_STATE, (
             f"Payment intent should exist for booking_code 'booking_123' after start(). "
             f"Available booking codes: {list(_PAYMENT_STATE.keys())}"
         )
-        assert _PAYMENT_STATE["booking_123"].get(
+        assert _PAYMENT_STATE[(1, "booking_123")].get(
             "intent_created"
         ), "Payment intent should be marked as created for booking_code 'booking_123'"
         assert (
-            _PAYMENT_STATE["booking_123"].get("paid") is not True
+            _PAYMENT_STATE[(1, "booking_123")].get("paid") is not True
         ), "Payment should not be marked as paid during initiation"
 
         print("  PASS: start() creates payment intent as side-effect")
@@ -170,7 +170,7 @@ def test_handle_input_when_unpaid():
         ), f"handle_input() should return empty facts when unpaid, got: {response.facts}"
 
         # Verify payment is still unpaid
-        status = payment_client.get_payment_status("booking_456")
+        status = payment_client.get_payment_status(1, "booking_456")
         assert (
             status["data"]["payment_status"] == "unpaid"
         ), "Payment should still be unpaid"
@@ -202,10 +202,10 @@ def test_handle_input_when_paid():
     assert start_response.completed is False, "Payment intent should be created"
 
     # Mark payment as paid (simulate webhook)
-    mark_payment_as_paid("booking_789")
+    mark_payment_as_paid(1, "booking_789")
 
     # Verify payment is marked as paid
-    status = payment_client.get_payment_status("booking_789")
+    status = payment_client.get_payment_status(1, "booking_789")
     assert (
         status["data"]["payment_status"] == "paid"
     ), "Payment should be marked as paid"
@@ -280,7 +280,7 @@ def test_idempotency():
         assert url1 == url2, f"Payment URLs should be identical: {url1} vs {url2}"
 
         # Verify only one payment intent exists (check via status)
-        status = payment_client.get_payment_status("booking_999")
+        status = payment_client.get_payment_status(1, "booking_999")
         assert status["data"]["payment_status"] in [
             "unpaid",
             "paid",
@@ -398,7 +398,7 @@ def test_abort_does_nothing():
     adapter.start(context)
 
     # Verify intent exists
-    status_before = payment_client.get_payment_status("booking_111")
+    status_before = payment_client.get_payment_status(1, "booking_111")
     assert (
         status_before["data"]["payment_status"] != "none"
     ), "Payment intent should exist before abort"
@@ -408,7 +408,7 @@ def test_abort_does_nothing():
         adapter.abort("test_reason", context)
 
         # Assert - payment intent should still exist (no cleanup)
-        status_after = payment_client.get_payment_status("booking_111")
+        status_after = payment_client.get_payment_status(1, "booking_111")
         assert (
             status_after["data"]["payment_status"] != "none"
         ), "Payment intent should still exist after abort"

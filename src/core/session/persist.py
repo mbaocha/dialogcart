@@ -74,6 +74,62 @@ def _normalize_execution_outcome(
     """Promote execution artifact fields into the shape persistence expects."""
     normalized = dict(outcome)
 
+    refs = normalized.get("refs")
+    if isinstance(refs, dict):
+        for key in ("booking_id", "booking_code"):
+            value = refs.get(key)
+            if value:
+                normalized[key] = value
+        ref_slots = {
+            key: refs.get(key)
+            for key in (
+                "organization_id",
+                "customer_id",
+                "booking_id",
+                "booking_code",
+            )
+            if refs.get(key) is not None
+        }
+        slots = dict(normalized.get("slots") or {})
+        slots.update(ref_slots)
+        normalized["slots"] = slots
+
+    subject = normalized.get("subject")
+    if isinstance(subject, dict):
+        booking = subject.get("booking")
+        cancellation = subject.get("cancellation")
+        if isinstance(booking, dict):
+            normalized["booking"] = booking
+            # Subject booking payloads commonly use ``id`` rather than ``booking_id``.
+            booking_id = (
+                booking.get("booking_id")
+                or booking.get("id")
+                or normalized.get("booking_id")
+            )
+            booking_code = (
+                booking.get("booking_code")
+                or booking.get("code")
+                or normalized.get("booking_code")
+            )
+            if booking_id:
+                normalized["booking_id"] = booking_id
+            if booking_code:
+                normalized["booking_code"] = booking_code
+        if isinstance(cancellation, dict):
+            normalized["cancellation"] = cancellation
+        subject_slots = {
+            key: value
+            for key, value in {
+                "service_name": subject.get("service_name"),
+                "total_amount": subject.get("total_amount"),
+                "currency": subject.get("currency"),
+            }.items()
+            if value is not None
+        }
+        slots = dict(normalized.get("slots") or {})
+        slots.update(subject_slots)
+        normalized["slots"] = slots
+
     facts = normalized.get("facts")
     if isinstance(facts, dict):
         if not normalized.get("intent_name") and not normalized.get("intent"):
@@ -116,9 +172,62 @@ def _normalize_execution_outcome(
     return normalized
 
 
+def _materialize_committed_booking_identifiers(
+    slots: Dict[str, Any],
+    outcome: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Overlay execution-owned booking identifiers onto the slot bag for persistence.
+
+    ``merged_luma_response.slots`` are planning-time slots and intentionally omit
+    committed identifiers. Execution owns ``booking_id`` / ``booking_code``; the
+    projector materializes them here so Session V2 ``booking.*`` receives them.
+    """
+    merged = dict(slots or {})
+    refs = outcome.get("refs") if isinstance(outcome.get("refs"), dict) else {}
+    outcome_slots = (
+        outcome.get("slots") if isinstance(outcome.get("slots"), dict) else {}
+    )
+    facts = outcome.get("facts") if isinstance(outcome.get("facts"), dict) else {}
+    fact_slots = facts.get("slots") if isinstance(facts.get("slots"), dict) else {}
+    subject = outcome.get("subject") if isinstance(outcome.get("subject"), dict) else {}
+    subject_booking = (
+        subject.get("booking") if isinstance(subject.get("booking"), dict) else {}
+    )
+    legacy_booking = (
+        outcome.get("booking") if isinstance(outcome.get("booking"), dict) else {}
+    )
+
+    booking_id = (
+        refs.get("booking_id")
+        or outcome.get("booking_id")
+        or outcome_slots.get("booking_id")
+        or fact_slots.get("booking_id")
+        or subject_booking.get("booking_id")
+        or subject_booking.get("id")
+        or legacy_booking.get("booking_id")
+        or legacy_booking.get("id")
+    )
+    booking_code = (
+        refs.get("booking_code")
+        or outcome.get("booking_code")
+        or outcome_slots.get("booking_code")
+        or fact_slots.get("booking_code")
+        or subject_booking.get("booking_code")
+        or subject_booking.get("code")
+        or legacy_booking.get("booking_code")
+        or legacy_booking.get("code")
+    )
+    if booking_id is not None and booking_id != "":
+        merged["booking_id"] = booking_id
+    if booking_code is not None and booking_code != "":
+        merged["booking_code"] = booking_code
+    return merged
+
+
 def build_session_state_from_outcome(
     outcome: Dict[str, Any],
     outcome_status: str,
+    organization_id: int,
     merged_luma_response: Optional[Dict[str, Any]] = None,
     previous_session_state: Optional[Dict[str, Any]] = None,
     user_id: Optional[str] = None,
@@ -262,6 +371,11 @@ def build_session_state_from_outcome(
                 f"[SESSION_MERGE] Using outcome.slots as fallback: {list(slots.keys())}"
             )
 
+    # Execution owns committed booking identifiers. Overlay them onto the
+    # planning-time slot bag so Session V2 booking.* can materialize them.
+    if isinstance(outcome, dict):
+        slots = _materialize_committed_booking_identifiers(slots, outcome)
+
     intent_name = resolve_durable_intent_for_session(
         outcome, previous_session_state, outcome_status
     )
@@ -271,14 +385,27 @@ def build_session_state_from_outcome(
         strip_unconfirmed_temporal_slots,
     )
 
-    slots = strip_unconfirmed_temporal_slots(
-        slots,
-        intent_name,
-        previous_session_state,
-        confirmed=has_bound_booking_datetime(
-            slots, previous_session_state, merged_luma_response
-        ),
+    # Planning owns post-reject slot retention (REJECT_CONFIRMATION keeps date).
+    # Persistence must materialize that decision — not re-strip temporal keys.
+    planning_owned_reject = bool(
+        isinstance(merged_luma_response, dict)
+        and merged_luma_response.get("_booking_confirmation_rejected")
     )
+    if planning_owned_reject:
+        outcome_slots = (
+            outcome.get("slots") if isinstance(outcome.get("slots"), dict) else {}
+        )
+        if outcome_slots:
+            slots = dict(outcome_slots)
+    else:
+        slots = strip_unconfirmed_temporal_slots(
+            slots,
+            intent_name,
+            session_state=None,
+            confirmed=has_bound_booking_datetime(
+                slots, session_state=None, merged=merged_luma_response
+            ),
+        )
 
     should_clear, _clear_reason = should_clear_session_on_ready(outcome_status, intent_name)
     if should_clear:
@@ -290,7 +417,7 @@ def build_session_state_from_outcome(
     if should_clear_executed:
         return None
 
-    # Resolve missing_slots (single source of truth)
+    # Resolve missing_slots from planner outcome (no independent recomputation)
     recomputed_missing_slots = resolve_missing_slots_for_persist(
         outcome,
         intent_name,
@@ -309,7 +436,7 @@ def build_session_state_from_outcome(
     )
 
     # Build session state WITH missing_slots (for conversation continuity)
-    # missing_slots are recomputed from effective_collected_slots (post-promotion) and persisted
+    # missing_slots come from the planner outcome and are persisted unchanged
     # awaiting_slot removed - slots are treated as unordered, additive map
     # slots already filtered to raw slots above
 
@@ -352,7 +479,7 @@ def build_session_state_from_outcome(
     if not isinstance(slot_attempts, dict):
         slot_attempts = {}
 
-    # Determine missing_slots to persist (recomputed from effective_collected_slots)
+    # Determine missing_slots to persist (canonical planner outcome value)
     missing_slots_to_persist = (
         recomputed_missing_slots if recomputed_missing_slots is not None else []
     )
@@ -606,8 +733,6 @@ def build_session_state_from_outcome(
         outcome,
         merged_luma_response,
         previous_session_state,
-        session_store,
-        user_id,
     )
 
     # Before persisting session

@@ -22,10 +22,8 @@ from core.config.capabilities_loader import load_capability_policies
 from core.adapters.clients.organization_client import OrganizationClient
 from core.adapters.nlu import LumaClient
 from core.api.compat import handle_message
-from core.planning.planner.plan_builder import (
-    _evaluate_condition,
-    build_decision_plan,
-)
+from core.planning.pipeline.stage07_capability import _evaluate_condition
+from core.tests.harness.planning_compat import build_decision_plan
 
 
 def test_org_payment_required_false_no_blocking():

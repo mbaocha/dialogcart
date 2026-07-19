@@ -22,7 +22,7 @@ def build_capability_context(
     session_state: Optional[Dict[str, Any]],
     domain: Optional[str],
     timezone: Optional[str],
-    organization_id: Optional[int],
+    organization_id: int,
     transaction_id: Optional[str],
     decision: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
@@ -70,40 +70,6 @@ def build_capability_context(
         "organization_id": organization_id,
         "transaction_id": transaction_id,
     }
-
-
-
-
-def _verify_payment_intent_if_required(
-    active_capability: str,
-    context: Dict[str, Any],
-) -> None:
-    if active_capability != "payment":
-        return
-    session_slots = context.get("session_slots", {})
-    session_facts = context.get("session_facts", {})
-    booking_code = session_slots.get("booking_code") or session_facts.get(
-        "booking_code"
-    )
-    if not booking_code:
-        return
-    try:
-        from extensions.capabilities.clients.payment.mock_payment import _PAYMENT_STATE
-    except ImportError:
-        return
-
-    if booking_code not in _PAYMENT_STATE:
-        raise AssertionError(
-            f"[CAPABILITY_GUARD] Payment capability invoked but payment intent not found "
-            f"for booking_code: {booking_code}."
-        )
-    if not _PAYMENT_STATE[booking_code].get("intent_created"):
-        raise AssertionError(
-            f"[CAPABILITY_GUARD] Payment capability invoked but payment intent not created "
-            f"for booking_code: {booking_code}."
-        )
-
-
 def apply_capability_to_result(
     result: Dict[str, Any],
     runner: Any,
@@ -113,7 +79,7 @@ def apply_capability_to_result(
     session_state: Optional[Dict[str, Any]],
     domain: Optional[str] = "service",
     timezone: Optional[str] = "UTC",
-    organization_id: Optional[int] = None,
+    organization_id: int,
     transaction_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
@@ -149,8 +115,6 @@ def apply_capability_to_result(
         core_outcome=outcome,
         context=context,
     )
-
-    _verify_payment_intent_if_required(active_capability, context)
 
     if not runner_result.passthrough:
         adapter_text = runner_result.text or ""

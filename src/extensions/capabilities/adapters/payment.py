@@ -64,6 +64,11 @@ class PaymentAdapter(CapabilityAdapter):
         """
         session_facts = context.get("session_facts", {})
         session_slots = context.get("session_slots", {})
+        organization_id = context.get("organization_id")
+        if not isinstance(organization_id, int) or organization_id <= 0:
+            raise ValueError(
+                "organization_id missing or invalid in payment capability context"
+            )
 
         # Try to extract booking_id (int)
         booking_id = None
@@ -137,6 +142,7 @@ class PaymentAdapter(CapabilityAdapter):
         booking_code = str(booking_code)
 
         return {
+            "organization_id": organization_id,
             "booking_id": booking_id,
             "booking_code": booking_code,
             "amount": amount,
@@ -167,6 +173,7 @@ class PaymentAdapter(CapabilityAdapter):
                 completed=False, text=f"Payment setup error: {str(e)}", facts={}
             )
 
+        organization_id = booking_info["organization_id"]
         booking_id = booking_info["booking_id"]
         booking_code = booking_info["booking_code"]
         amount = booking_info["amount"]
@@ -175,7 +182,10 @@ class PaymentAdapter(CapabilityAdapter):
         # Create payment intent (idempotent - won't duplicate if already exists)
         try:
             intent_response = self.payment_client.create_payment_intent(
-                booking_id=booking_id, amount=amount, currency=currency
+                organization_id=organization_id,
+                booking_id=booking_id,
+                amount=amount,
+                currency=currency,
             )
 
             if not intent_response.get("success"):
@@ -193,7 +203,9 @@ class PaymentAdapter(CapabilityAdapter):
             )
 
         # Fetch payment URL (should exist after intent creation)
-        url_response = self.payment_client.get_payment_url(booking_code)
+        url_response = self.payment_client.get_payment_url(
+            organization_id, booking_code
+        )
 
         if not url_response.get("success") or not url_response["data"].get(
             "has_payment_intent"
@@ -243,11 +255,14 @@ class PaymentAdapter(CapabilityAdapter):
                 completed=False, text=f"Payment error: {str(e)}", facts={}
             )
 
+        organization_id = booking_info["organization_id"]
         booking_code = booking_info["booking_code"]
 
         # Check payment status
         try:
-            status_response = self.payment_client.get_payment_status(booking_code)
+            status_response = self.payment_client.get_payment_status(
+                organization_id, booking_code
+            )
 
             if not status_response.get("success"):
                 return AdapterResponse(
@@ -294,7 +309,9 @@ class PaymentAdapter(CapabilityAdapter):
             return AdapterResponse(completed=True, text=None, facts=completion_facts)
 
         # Payment not complete - re-send payment link
-        url_response = self.payment_client.get_payment_url(booking_code)
+        url_response = self.payment_client.get_payment_url(
+            organization_id, booking_code
+        )
 
         if url_response.get("success") and url_response["data"].get(
             "has_payment_intent"

@@ -20,6 +20,8 @@ Constraints:
 - Uses JSON serialization only (no pickles, no model objects)
 - TTL: 20 minutes (reset on save)
 - Stateless session logic at API boundary only
+- Keys are scoped by organization and user: session:{organization_id}:{user_id}
+- Legacy session:{user_id} keys are intentionally ignored; active sessions reset once
 """
 
 import json
@@ -38,11 +40,18 @@ SESSION_TTL_SECONDS_FALLBACK = 30 * 60  # 30 minutes for in-memory fallback
 
 
 def _normalize_loaded_session(session_state: Dict[str, Any]) -> Dict[str, Any]:
-    """Normalize confirmation_state on load/save (booking is canonical)."""
+    """Normalize confirmation state and canonical Session V2 shape for runtime use."""
     try:
         from core.session.confirmation_gate import normalize_confirmation_state
 
-        return normalize_confirmation_state(session_state)
+        session_state = normalize_confirmation_state(session_state)
+    except Exception:
+        pass
+
+    try:
+        from core.session.session_schema_v2 import prepare_session_for_load
+
+        return prepare_session_for_load(session_state)
     except Exception:
         return session_state
 
@@ -109,9 +118,11 @@ def _get_redis_client():
         return None
 
 
-def _get_session_key(user_id: str) -> str:
-    """Generate Redis key for user session."""
-    return f"{SESSION_KEY_PREFIX}{user_id}"
+def _get_session_key(organization_id: int, user_id: str) -> str:
+    """Generate the tenant-scoped Redis key for a conversation session."""
+    if organization_id <= 0:
+        raise ValueError("organization_id must be positive")
+    return f"{SESSION_KEY_PREFIX}{organization_id}:{user_id}"
 
 
 def validate_redis_connection():
@@ -183,7 +194,7 @@ def validate_redis_connection():
         sys.exit(1)
 
 
-def get_session(user_id: str) -> Optional[Dict[str, Any]]:
+def get_session(organization_id: int, user_id: str) -> Optional[Dict[str, Any]]:
     """
     Retrieve session state for a user.
 
@@ -197,7 +208,7 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
 
     logger = logging.getLogger(__name__)
 
-    key = _get_session_key(user_id)
+    key = _get_session_key(organization_id, user_id)
     logger.debug("[SESSION_LOAD] user_id=%s key=%s", user_id, key)
 
     redis_client = _get_redis_client()
@@ -227,11 +238,11 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
             pass
 
     # In-memory fallback
-    if user_id in _in_memory_sessions:
-        session_data = _in_memory_sessions[user_id]
+    if key in _in_memory_sessions:
+        session_data = _in_memory_sessions[key]
         stored_at = session_data.get("_stored_at", 0)
         if time.time() - stored_at > SESSION_TTL_SECONDS_FALLBACK:
-            del _in_memory_sessions[user_id]
+            del _in_memory_sessions[key]
             logger.debug("[SESSION_LOAD] expired in-memory: user_id=%s", user_id)
             return None
         session_state = {k: v for k, v in session_data.items() if not k.startswith("_")}
@@ -248,7 +259,9 @@ def get_session(user_id: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
+def save_session(
+    organization_id: int, user_id: str, session_state: Dict[str, Any]
+) -> None:
     """
     Save session state for a user.
 
@@ -275,42 +288,47 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
 
     _normalize_loaded_session(session_state)
 
-    # HARD GUARD: Ensure session_state["facts"] is always present as a dict before saving
-    # This invariant must hold for all sessions, especially those with active_capability
-    # Session facts are first-class and must never be omitted, even if empty
-    if "facts" not in session_state:
-        logger.warning(
-            f"[SESSION_SAVE] Missing 'facts' key in session_state, adding empty dict. "
-            f"user_id={user_id}, session_state keys: {list(session_state.keys())}"
-        )
-        session_state["facts"] = {}
-    elif session_state["facts"] is None:
-        logger.warning(
-            f"[SESSION_SAVE] session_state['facts'] is None, replacing with empty dict. user_id={user_id}"
-        )
-        session_state["facts"] = {}
-    elif not isinstance(session_state["facts"], dict):
-        logger.warning(
-            f"[SESSION_SAVE] session_state['facts'] is not a dict (type: {type(session_state['facts'])}), "
-            f"replacing with empty dict. user_id={user_id}"
-        )
-        session_state["facts"] = {}
-
-    # Hard assertion: facts must be a dict
-    assert isinstance(session_state["facts"], dict), (
-        f"CRITICAL: session_state['facts'] must be a dict before save_session. "
-        f"user_id={user_id}, Got type: {type(session_state.get('facts'))}, value: {session_state.get('facts')}"
+    from core.session.session_schema_v2 import (
+        is_session_v2,
+        prepare_session_for_persist,
     )
+
+    session_state = prepare_session_for_persist(session_state)
+
+    # Legacy guard: in-memory compat may still carry facts; pure V2 persist does not.
+    if not is_session_v2(session_state):
+        if "facts" not in session_state:
+            logger.warning(
+                f"[SESSION_SAVE] Missing 'facts' key in session_state, adding empty dict. "
+                f"user_id={user_id}, session_state keys: {list(session_state.keys())}"
+            )
+            session_state["facts"] = {}
+        elif session_state["facts"] is None:
+            logger.warning(
+                f"[SESSION_SAVE] session_state['facts'] is None, replacing with empty dict. user_id={user_id}"
+            )
+            session_state["facts"] = {}
+        elif not isinstance(session_state["facts"], dict):
+            logger.warning(
+                f"[SESSION_SAVE] session_state['facts'] is not a dict (type: {type(session_state['facts'])}), "
+                f"replacing with empty dict. user_id={user_id}"
+            )
+            session_state["facts"] = {}
+
+        assert isinstance(session_state.get("facts"), dict), (
+            f"CRITICAL: session_state['facts'] must be a dict before save_session. "
+            f"user_id={user_id}, Got type: {type(session_state.get('facts'))}, "
+            f"value: {session_state.get('facts')}"
+        )
 
     # Log session save with key verification
-    intent_name = session_state.get("intent_name")
-    status = session_state.get("status")
-    slots_keys = list(session_state.get("slots", {}).keys())
-    facts_keys = (
-        list(session_state.get("facts", {}).keys())
-        if isinstance(session_state.get("facts"), dict)
-        else []
-    )
+    from core.session.session_schema_v2 import get_intent_name, get_planning_status
+
+    intent_name = get_intent_name(session_state)
+    status = get_planning_status(session_state)
+    slots_keys = list((session_state.get("planning", {}) or {}).get("slots", {}).keys())
+    if not slots_keys:
+        slots_keys = list((session_state.get("slots") or {}).keys())
     logger.debug(
         "[SESSION_SAVE] user_id=%s intent_name=%r status=%r slots_keys=%s",
         user_id,
@@ -323,7 +341,7 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
     if redis_client:
         # Try Redis first
         try:
-            key = _get_session_key(user_id)
+            key = _get_session_key(organization_id, user_id)
             serialized = json.dumps(session_state)
             redis_client.setex(key, SESSION_TTL_SECONDS, serialized)
             logger.debug("[SESSION_SAVE] saved to Redis: user_id=%s", user_id)
@@ -340,11 +358,12 @@ def save_session(user_id: str, session_state: Dict[str, Any]) -> None:
     # In-memory fallback
     session_data = session_state.copy()
     session_data["_stored_at"] = time.time()
-    _in_memory_sessions[user_id] = session_data
+    key = _get_session_key(organization_id, user_id)
+    _in_memory_sessions[key] = session_data
     logger.debug("[SESSION_SAVE] saved to in-memory: user_id=%s", user_id)
 
 
-def clear_session(user_id: str) -> None:
+def clear_session(organization_id: int, user_id: str) -> None:
     """
     Clear session state for a user.
 
@@ -355,14 +374,14 @@ def clear_session(user_id: str) -> None:
     if redis_client:
         # Try Redis first
         try:
-            key = _get_session_key(user_id)
+            key = _get_session_key(organization_id, user_id)
             redis_client.delete(key)
         except Exception:
             # Fall through to in-memory fallback
             pass
 
     # In-memory fallback
-    _in_memory_sessions.pop(user_id, None)
+    _in_memory_sessions.pop(_get_session_key(organization_id, user_id), None)
 
 
 # Validate Redis connection at startup if REDIS_URL is configured

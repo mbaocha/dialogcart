@@ -15,7 +15,6 @@ This test proves that:
 from unittest.mock import Mock
 
 from core.adapters.clients.catalog_client import CatalogClient
-from core.adapters.clients.customer_client import CustomerClient
 from core.adapters.clients.organization_client import OrganizationClient
 from core.execution.clients.booking_client import BookingClient
 from core.adapters.nlu import LumaClient
@@ -41,7 +40,6 @@ def test_lifecycle_notification_flow(verbose: bool = False):
     # Setup: Mock clients
     mock_luma_client = Mock(spec=LumaClient)
     mock_booking_client = Mock(spec=BookingClient)
-    mock_customer_client = Mock(spec=CustomerClient)
     mock_catalog_client = Mock(spec=CatalogClient)
     mock_org_client = Mock(spec=OrganizationClient)
 
@@ -65,9 +63,6 @@ def test_lifecycle_notification_flow(verbose: bool = False):
         ],
     }
     mock_catalog_client.get_reservation.return_value = {"room_types": [], "extras": []}
-
-    # Mock customer response
-    mock_customer_client.get_customer.return_value = {"customer_id": 100, "id": 100}
 
     # Mock booking creation response
     mock_booking_client.create_booking.return_value = {
@@ -130,7 +125,6 @@ def test_lifecycle_notification_flow(verbose: bool = False):
         customer_id=100,
         luma_client=mock_luma_client,
         booking_client=mock_booking_client,
-        customer_client=mock_customer_client,
         catalog_client=mock_catalog_client,
         organization_client=mock_org_client,
     )
@@ -203,7 +197,6 @@ def test_lifecycle_notification_flow(verbose: bool = False):
         customer_id=100,
         luma_client=mock_luma_client,
         booking_client=mock_booking_client,
-        customer_client=mock_customer_client,
         catalog_client=mock_catalog_client,
         organization_client=mock_org_client,
     )

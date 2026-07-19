@@ -13,7 +13,6 @@ location/staff/resource when applicable.
 import hashlib
 import json
 import logging
-import os
 import re
 from typing import Any, Dict, Optional
 
@@ -100,19 +99,6 @@ def _extract_normalized_slots(
     return (normalized_org, normalized_service, normalized_date, normalized_time)
 
 
-def _get_default_organization_id() -> int:
-    """Return organization_id from ORG_ID env var with safe default."""
-    value = os.getenv("ORG_ID", "1")
-    try:
-        org_id = int(value)
-        if org_id <= 0:
-            raise ValueError("ORG_ID must be positive")
-        return org_id
-    except Exception:  # noqa: BLE001
-        logger.warning("Invalid ORG_ID env value '%s', defaulting to 1", value)
-        return 1
-
-
 def _resolve_fingerprint_proposals(
     *,
     luma_response: Optional[Dict[str, Any]] = None,
@@ -141,23 +127,17 @@ def _resolve_fingerprint_proposals(
 
 
 def _resolve_organization_id_for_fingerprint(
-    slots: Dict[str, Any],
-    organization_id: Optional[int] = None,
-) -> Any:
-    """Resolve request-scoped organization_id for fingerprint (never from durable session)."""
-    if organization_id is not None:
-        return organization_id
-    slot_org = (slots or {}).get("organization_id")
-    if slot_org is not None and slot_org != "":
-        return slot_org
-    return _get_default_organization_id()
+    organization_id: int,
+) -> int:
+    """Return request-scoped organization_id for fingerprint (never derived elsewhere)."""
+    return organization_id
 
 
 def build_availability_fingerprint_slots(
     slots: Dict[str, Any],
     *,
     intent_name: Optional[str] = None,
-    organization_id: Optional[int] = None,
+    organization_id: int,
     date_proposal: Optional[Dict[str, Any]] = None,
     time_proposal: Optional[Dict[str, Any]] = None,
     date_constraint: Optional[Dict[str, Any]] = None,
@@ -230,7 +210,7 @@ def build_availability_fingerprint_slots(
     expanded.pop("time", None)
     expanded.pop("datetime_range", None)
     expanded["organization_id"] = _resolve_organization_id_for_fingerprint(
-        slots, organization_id
+        organization_id
     )
 
     logger.debug(

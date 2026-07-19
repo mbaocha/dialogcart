@@ -12,7 +12,7 @@ TraceView = Literal["summary", "reasoning", "forensic"]
 TRACE_VIEWS: Tuple[TraceView, ...] = ("summary", "reasoning", "forensic")
 DEFAULT_TRACE_VIEW: TraceView = "summary"
 
-_LEGACY_FORENSIC_ALIASES = frozenset({"decision", "full", "forensic"})
+_LEGACY_FORENSIC_ALIASES = frozenset({"1", "decision", "full", "forensic"})
 
 _SESSION_DIFF_FIELDS = frozenset(
     {
@@ -190,7 +190,18 @@ def _session_merge_label(trace: Mapping[str, Any]) -> str:
     return merge.get("reason_text") or "No merge"
 
 
+def _post_execution_planning_facts(trace: Mapping[str, Any]) -> Dict[str, Any]:
+    post_exec = _find_record(trace, "evidence.planning.post_execution")
+    if not post_exec:
+        return {}
+    facts = post_exec.get("facts")
+    return dict(facts) if isinstance(facts, dict) else {}
+
+
 def _planner_status(trace: Mapping[str, Any]) -> str:
+    post_exec = _post_execution_planning_facts(trace)
+    if post_exec.get("status") is not None:
+        return str(post_exec["status"])
     status = _find_record(trace, "decision.planner.status")
     if not status:
         return ""
@@ -217,6 +228,9 @@ def _missing_slots(trace: Mapping[str, Any]) -> List[str]:
 
 
 def _selected_action(trace: Mapping[str, Any]) -> Any:
+    post_exec = _post_execution_planning_facts(trace)
+    if "action" in post_exec:
+        return post_exec.get("action")
     action = _find_record(trace, "decision.planner.select_action")
     if action:
         return action.get("winner")
@@ -227,6 +241,9 @@ def _selected_action(trace: Mapping[str, Any]) -> Any:
 
 
 def _selected_stage(trace: Mapping[str, Any]) -> Any:
+    post_exec = _post_execution_planning_facts(trace)
+    if post_exec.get("stage") is not None:
+        return post_exec.get("stage")
     stage = _find_record(trace, "decision.planner.select_stage")
     if stage:
         return stage.get("winner")
@@ -293,6 +310,7 @@ def project_summary(trace: Mapping[str, Any]) -> Dict[str, Any]:
     """Structured summary projection (10–20 line equivalent)."""
     payload = _normalize_trace(trace)
     turn = payload.get("turn") if isinstance(payload.get("turn"), dict) else {}
+    post_exec = _post_execution_planning_facts(payload)
     return {
         "view": "summary",
         "user": turn.get("text", ""),
@@ -302,6 +320,8 @@ def project_summary(trace: Mapping[str, Any]) -> Dict[str, Any]:
         "missing": _missing_slots(payload),
         "execution_stage": _selected_stage(payload),
         "action": _selected_action(payload),
+        "awaiting": post_exec.get("awaiting"),
+        "time_match_outcome": post_exec.get("time_match_outcome"),
         "reason": _primary_reason(payload),
         "outcome": _outcome_label(payload),
         "session_changes": extract_session_changes(payload),

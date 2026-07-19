@@ -10,15 +10,38 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.execution.catalog_resolver import resolve_catalog_item_id
+from core.execution.result import ExecutionResult, normalize_execution_result
 
 logger = logging.getLogger(__name__)
+
+
+def _validate_booking_organization(
+    booking_response: Any, organization_id: int
+) -> None:
+    """Reject booking lookup data that explicitly belongs to another tenant."""
+    if not isinstance(booking_response, dict):
+        return
+    booking = booking_response.get("booking", booking_response)
+    if not isinstance(booking, dict):
+        return
+    response_org_id = booking.get("organization_id")
+    if response_org_id is None:
+        response_org_id = booking.get("organizationId")
+    organization = booking.get("organization")
+    if response_org_id is None and isinstance(organization, dict):
+        response_org_id = organization.get("id")
+    if response_org_id is not None and int(response_org_id) != organization_id:
+        raise ValueError(
+            "Booking organization_id conflicts with request tenant: "
+            f"expected {organization_id}, got {response_org_id}"
+        )
 
 
 def execute(
     plan: Dict[str, Any],
     availability_client: Optional[Any] = None,
     booking_client: Optional[Any] = None,
-) -> Dict[str, Any]:
+) -> ExecutionResult:
     """
     Execute a planning result using injected clients.
 
@@ -34,25 +57,8 @@ def execute(
         booking_client: Injected booking client instance (required for CONFIRM_APPOINTMENT and CONFIRM_CANCELLATION)
 
     Returns:
-        Execution result dictionary with normalized structure:
-        - For SEARCH_AVAILABILITY:
-          {
-              "type": "availability",
-              "status": "success",
-              "slots": [...]
-          }
-        - For CONFIRM_APPOINTMENT:
-          {
-              "status": "EXECUTED",
-              "booking": <booking object>,
-              "facts": <original facts>
-          }
-        - For CONFIRM_CANCELLATION:
-          {
-              "status": "EXECUTED",
-              "cancellation": <cancellation object>,
-              "facts": <original facts>
-          }
+        Canonical ``core.execution.result.ExecutionResult``. Client-specific
+        response shapes are normalized before leaving this boundary.
 
     Raises:
         ValueError: If action is not supported or required slots/clients are missing
@@ -60,49 +66,54 @@ def execute(
     """
     action = plan.get("action")
 
-    # Route based on action
+    # Route based on action. Private handlers keep client-specific response
+    # parsing local; this public boundary always returns one canonical artifact.
     if action == "SEARCH_AVAILABILITY":
         if not availability_client:
             raise ValueError(
                 "availability_client is required for SEARCH_AVAILABILITY action"
             )
-        return _execute_search_availability(plan, availability_client, booking_client)
+        raw_result = _execute_search_availability(
+            plan, availability_client, booking_client
+        )
     elif action == "CONFIRM_APPOINTMENT":
         if not booking_client:
             raise ValueError(
                 "booking_client is required for CONFIRM_APPOINTMENT action"
             )
-        return _execute_confirm_appointment(plan, booking_client)
+        raw_result = _execute_confirm_appointment(plan, booking_client)
     elif action == "CONFIRM_CANCELLATION":
         if not booking_client:
             raise ValueError(
                 "booking_client is required for CONFIRM_CANCELLATION action"
             )
-        return _execute_confirm_cancellation(plan, booking_client)
+        raw_result = _execute_confirm_cancellation(plan, booking_client)
     elif action == "APPLY_MODIFICATION":
         if not booking_client:
             raise ValueError("booking_client is required for APPLY_MODIFICATION action")
-        return _execute_apply_modification(plan, booking_client)
+        raw_result = _execute_apply_modification(plan, booking_client)
     elif action == "FETCH_BOOKING":
         if not booking_client:
             raise ValueError("booking_client is required for FETCH_BOOKING action")
-        return _execute_fetch_booking(plan, booking_client)
+        raw_result = _execute_fetch_booking(plan, booking_client)
     elif action == "CREATE_BOOKING_HOLD":
         if not booking_client:
             raise ValueError(
                 "booking_client is required for CREATE_BOOKING_HOLD action"
             )
-        return _execute_create_booking_hold(plan, booking_client)
+        raw_result = _execute_create_booking_hold(plan, booking_client)
     elif action == "FINALIZE_RESERVATION":
         if not booking_client:
             raise ValueError(
                 "booking_client is required for FINALIZE_RESERVATION action"
             )
-        return _execute_finalize_reservation(plan, booking_client)
+        raw_result = _execute_finalize_reservation(plan, booking_client)
     else:
         raise ValueError(
             f"Unsupported action: {action}. Supported actions: SEARCH_AVAILABILITY, CONFIRM_APPOINTMENT, CONFIRM_CANCELLATION, APPLY_MODIFICATION, FETCH_BOOKING, CREATE_BOOKING_HOLD, FINALIZE_RESERVATION"
         )
+
+    return normalize_execution_result(plan, raw_result)
 
 
 def _execute_search_availability(
@@ -286,30 +297,37 @@ def _execute_confirm_appointment(
 
     # Extract booking object from response
     booking = (
-        booking_response.get("booking")
+        booking_response.get("booking", booking_response)
         if isinstance(booking_response, dict)
         else booking_response
     )
 
     # Extract booking_id from booking object for idempotency
     booking_id = None
+    booking_code = None
     if isinstance(booking, dict):
         booking_id = (
             booking.get("id")
             or booking.get("booking_id")
             or booking.get("booking_code")
         )
+        booking_code = booking.get("booking_code") or booking.get("code")
     elif hasattr(booking, "id"):
         booking_id = booking.id
+        booking_code = getattr(booking, "booking_code", None)
     elif hasattr(booking, "booking_id"):
         booking_id = booking.booking_id
+        booking_code = getattr(booking, "booking_code", None)
     elif hasattr(booking, "booking_code"):
         booking_id = booking.booking_code
+        booking_code = booking.booking_code
 
-    # Store booking_id in slots for idempotency (prevent duplicate creation on next confirmation)
+    # Store booking identifiers in slots for idempotency / projection.
     if booking_id:
         slots["booking_id"] = booking_id
         logger.debug(f"Stored booking_id={booking_id} in slots for idempotency")
+    if booking_code:
+        slots["booking_code"] = booking_code
 
     # Build execution result
     # Include original facts (slots) in the result
@@ -319,9 +337,11 @@ def _execute_confirm_appointment(
 
     result = {"status": "EXECUTED", "booking": booking, "facts": facts}
 
-    # Include booking_id in result for test compatibility
+    # Include booking identifiers in result for normalization / projection
     if booking_id:
         result["booking_id"] = booking_id
+    if booking_code:
+        result["booking_code"] = booking_code
 
     return result
 
@@ -395,7 +415,7 @@ def _execute_confirm_cancellation(
 
     # Extract cancellation object from response
     cancellation = (
-        cancellation_response.get("cancellation")
+        cancellation_response.get("cancellation", cancellation_response)
         if isinstance(cancellation_response, dict)
         else cancellation_response
     )
@@ -454,6 +474,9 @@ def _execute_fetch_booking(plan: Dict[str, Any], booking_client: Any) -> Dict[st
     """
     slots = plan.get("slots", {})
     intent_name = plan.get("intent_name", "")
+    organization_id = slots.get("organization_id")
+    if not organization_id:
+        raise ValueError("organization_id is required in slots for booking lookup")
 
     # Extract booking_id or booking_code from slots
     # Try booking_id first, then booking_code
@@ -470,16 +493,11 @@ def _execute_fetch_booking(plan: Dict[str, Any], booking_client: Any) -> Dict[st
         if hasattr(booking_client, "get_most_recent_booking"):
             try:
                 # Extract organization_id from slots, or try to get from plan context
-                organization_id = slots.get("organization_id")
-                if not organization_id:
-                    # Try to get from plan's context or use default for testing
-                    # Default to 1 for testing
-                    organization_id = plan.get("organization_id") or 1
-
                 most_recent = booking_client.get_most_recent_booking(
                     organization_id=organization_id,
                     customer_id=slots.get("customer_id"),
                 )
+                _validate_booking_organization(most_recent, organization_id)
                 logger.debug(
                     f"[FETCH_BOOKING] get_most_recent_booking returned: {most_recent}"
                 )
@@ -516,7 +534,10 @@ def _execute_fetch_booking(plan: Dict[str, Any], booking_client: Any) -> Dict[st
 
     # Call booking client
     try:
-        booking_response = booking_client.get_booking(booking_code_to_fetch)
+        booking_response = booking_client.get_booking(
+            booking_code_to_fetch, organization_id=organization_id
+        )
+        _validate_booking_organization(booking_response, organization_id)
     except AttributeError as e:
         raise AttributeError(f"booking_client must have get_booking method: {e}") from e
     except Exception as e:
@@ -526,7 +547,7 @@ def _execute_fetch_booking(plan: Dict[str, Any], booking_client: Any) -> Dict[st
 
     # Extract booking object from response
     booking = (
-        booking_response.get("booking")
+        booking_response.get("booking", booking_response)
         if isinstance(booking_response, dict)
         else booking_response
     )
@@ -675,7 +696,7 @@ def _execute_apply_modification(
 
     # Extract booking object from response
     booking = (
-        modification_response.get("booking")
+        modification_response.get("booking", modification_response)
         if isinstance(modification_response, dict)
         else modification_response
     )
@@ -865,7 +886,7 @@ def _execute_create_booking_hold(
 
     # Extract booking object from response
     booking = (
-        booking_response.get("booking")
+        booking_response.get("booking", booking_response)
         if isinstance(booking_response, dict)
         else booking_response
     )
@@ -989,7 +1010,10 @@ def _execute_finalize_reservation(
     # GUARD 2: Idempotency check - prevent duplicate confirmation
     # Fetch booking before confirming to check if already confirmed
     try:
-        existing_booking = booking_client.get_booking(booking_code)
+        existing_booking = booking_client.get_booking(
+            booking_code, organization_id=organization_id
+        )
+        _validate_booking_organization(existing_booking, organization_id)
         if isinstance(existing_booking, dict):
             booking_status = existing_booking.get("status")
             # Check if booking is already confirmed
@@ -1045,7 +1069,7 @@ def _execute_finalize_reservation(
 
     # Extract booking object from response
     booking = (
-        confirmation_response.get("booking")
+        confirmation_response.get("booking", confirmation_response)
         if isinstance(confirmation_response, dict)
         else confirmation_response
     )
@@ -1152,7 +1176,10 @@ def _execute_service_availability(
         booking_id = slots.get("booking_id")
         if booking_id:
             try:
-                booking = booking_client.get_booking(str(booking_id))
+                booking = booking_client.get_booking(
+                    str(booking_id), organization_id=organization_id
+                )
+                _validate_booking_organization(booking, organization_id)
                 # Extract service_id from booking (could be in different fields depending on API response)
                 if isinstance(booking, dict):
                     # Try common field names for service_id in booking response

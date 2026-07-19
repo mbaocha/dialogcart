@@ -1,38 +1,22 @@
 """Outcome dict construction utilities.
 
-Neutral module extracted from orchestrator.py so that both orchestrator.py
-and turn_planner.py can import these helpers without a circular dependency.
+Shared helpers for planning and execution response shaping (used by
+ConversationEngine / ExecutionCoordinator and planning outcome builders).
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
 
-def _build_planning_outcome(
-    intent_name: str,
-    slots: Dict[str, Any],
-    missing_slots: List[str],
-    executable_actions: List[str],
-    dialog_instruction: Optional[Dict[str, Any]] = None,
-    status: str = "READY",
-) -> Dict[str, Any]:
-    """Build planning-only outcome structure.
-
-    Core NEVER executes — only returns planning information.
-    """
-    outcome: Dict[str, Any] = {
-        "intent": intent_name,
-        "slots": slots,
-        "missing_slots": missing_slots,
-        "executable_actions": executable_actions,
-    }
-    if dialog_instruction:
-        outcome["dialog_instruction"] = dialog_instruction
-    return outcome
+def _copy_fallback_metadata(source: Dict[str, Any], target: Dict[str, Any]) -> None:
+    """Preserve explicit NLU-fallback markers through response shaping."""
+    for key in ("recovered", "recovery_reason", "message_applied"):
+        if key in source:
+            target[key] = source[key]
 
 
 def build_outcome_from_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
@@ -70,6 +54,10 @@ def build_outcome_from_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
         "stage": plan.get("stage"),
         "action": plan.get("action"),
     }
+    if plan.get("turn_operation"):
+        plan_obj["turn_operation"] = plan.get("turn_operation")
+    if plan.get("availability_reshow"):
+        plan_obj["availability_reshow"] = True
 
     outcome: Dict[str, Any] = {
         "intent_name": decision.get("intent_name", ""),
@@ -96,7 +84,7 @@ def build_planning_response_from_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
 
     Delegates to build_outcome_from_decision() when a decision exists;
     otherwise constructs the identical fallback outcome.  Consolidates three
-    previously duplicated blocks in orchestrator.handle_message().
+    previously duplicated blocks in the turn response path.
     """
     decision = plan.get("_decision")
     if decision:
@@ -135,6 +123,7 @@ def build_planning_response_from_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
         }
     if plan.get("active_capability"):
         outcome_dict["active_capability"] = plan.get("active_capability")
+    _copy_fallback_metadata(plan, outcome_dict)
     response: Dict[str, Any] = {
         "success": True,
         "result": outcome_dict,
@@ -190,6 +179,7 @@ def build_planning_only_response(plan: Dict[str, Any]) -> Dict[str, Any]:
         }
     if plan.get("active_capability"):
         outcome_dict["active_capability"] = plan.get("active_capability")
+    _copy_fallback_metadata(plan, outcome_dict)
     result: Dict[str, Any] = {
         "success": True,
         "result": outcome_dict,

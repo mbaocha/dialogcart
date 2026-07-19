@@ -43,13 +43,55 @@ except ImportError:
 except Exception:
     pass
 
-from core.session.persist import build_session_state_from_outcome
 from core.api.compat import handle_message
-from core.session.session_manager import clear_session, get_session, save_session
-
-# Import after path setup
-from core.tests.harness.clients import TestCatalogClient, TestLumaClient
+from core.session.session_manager import clear_session
+from core.tests.harness.clients import ScriptedLumaClient, TestCatalogClient, TestLumaClient
+from core.tests.harness.session_store import MockSessionStore
 from core.tests.harness.org_setup import get_customer_details, setup_test_org_domain
+
+ORG_ID = int(os.getenv("ORG_ID", "1"))
+
+
+def _planning_missing_slots(session_state: dict) -> list:
+    planning = session_state.get("planning") or {}
+    if isinstance(planning.get("missing_slots"), list):
+        return planning["missing_slots"]
+    return list(session_state.get("missing_slots") or [])
+
+
+def _reservation_response(
+    *,
+    slots: Dict[str, Any],
+    missing_slots: list,
+    date_range: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Scripted Luma payload for CREATE_RESERVATION awaiting_slot flow."""
+    durable_slots = dict(slots or {})
+    facts: Dict[str, Any] = {}
+    if "service_id" in durable_slots:
+        facts["service_id"] = durable_slots["service_id"]
+
+    response: Dict[str, Any] = {
+        "success": True,
+        "intent": {"name": "CREATE_RESERVATION", "confidence": 0.95},
+        "needs_clarification": bool(missing_slots),
+        "booking": {
+            "booking_type": "reservation",
+            "booking_state": "PARTIAL" if missing_slots else "RESOLVED",
+        },
+        "facts": facts,
+        "slots": durable_slots,
+        "missing_slots": list(missing_slots),
+        "context": {},
+    }
+    if date_range:
+        facts["date_range"] = date_range
+        response["date_proposal"] = {
+            "mode": "range",
+            "start": date_range.get("start"),
+            "end": date_range.get("end"),
+        }
+    return response
 
 
 def test_e2e_awaiting_slot_soft_guided_flow():
@@ -69,18 +111,33 @@ def test_e2e_awaiting_slot_soft_guided_flow():
     domain = "reservation"
 
     # Clean up any existing session
-    clear_session(user_id)
+    clear_session(ORG_ID, user_id)
 
     # Set up test clients
     aliases = {"Deluxe room": "lodging.room_type.deluxe"}
-    luma_client = TestLumaClient(test_aliases=aliases)
+    fallback = TestLumaClient(test_aliases=aliases)
+    luma_client = ScriptedLumaClient(
+        {
+            "from 5th oct to 8th oct": _reservation_response(
+                slots={},
+                missing_slots=["service_id"],
+                date_range={"start": "2026-10-05", "end": "2026-10-08"},
+            ),
+            "deluxe room": _reservation_response(
+                slots={"service_id": "Deluxe room"},
+                missing_slots=[],
+                date_range={"start": "2026-10-05", "end": "2026-10-08"},
+            ),
+        },
+        fallback=fallback,
+    )
     catalog_client = TestCatalogClient(test_aliases=aliases, domain=domain)
 
     # Set up org domain cache
     setup_test_org_domain(domain)
 
     # Get customer details
-    customer_details = get_customer_details()
+    _ = get_customer_details()
 
     # ============================================================================
     # TURN 0: Pre-seed session with awaiting_slot="service_id"
@@ -93,17 +150,11 @@ def test_e2e_awaiting_slot_soft_guided_flow():
         "status": "NEEDS_CLARIFICATION",
         "active_capability": None,
         "awaiting_slot": "service_id",
+        "missing_slots": ["service_id"],
     }
 
-    # Save initial session state
-    save_session(user_id, initial_session_state)
-
-    # Verify session was saved
-    saved_session = get_session(user_id)
-    assert saved_session is not None, "Session should be saved"
-    assert (
-        saved_session.get("awaiting_slot") == "service_id"
-    ), f"Expected awaiting_slot='service_id', got {saved_session.get('awaiting_slot')}"
+    session_store = MockSessionStore()
+    session_store.save_session(ORG_ID, user_id, initial_session_state)
 
     # ============================================================================
     # TURN 1: User provides date range "from 5th Oct to 8th Oct"
@@ -111,25 +162,12 @@ def test_e2e_awaiting_slot_soft_guided_flow():
 
     turn1_text = "from 5th Oct to 8th Oct"
 
-    # Create session_store wrapper for handle_message
-    # Must implement both get_session and save_session to match production behavior
-    class SessionStoreWrapper:
-        def __init__(self, user_id):
-            self.user_id = user_id
-
-        def get_session(self, user_id):
-            return get_session(user_id)
-
-        def save_session(self, user_id, session_state):
-            save_session(user_id, session_state)
-
-    session_store = SessionStoreWrapper(user_id)
-
     # Execute turn 1
     result_turn1 = handle_message(
         text=turn1_text,
         user_id=user_id,
         luma_client=luma_client,
+        catalog_client=catalog_client,
         organization_client=None,
         session_store=session_store,
     )
@@ -171,41 +209,34 @@ def test_e2e_awaiting_slot_soft_guided_flow():
 
     # Save session after turn 1 (matching production API behavior)
     # This ensures session is persisted with NEEDS_CLARIFICATION status and awaiting_slot
-    merged_luma_response_turn1 = result_turn1.get("_merged_luma_response")
     # Use initial_session_state as previous_session_state (session that was loaded before turn 1)
-    new_session_state_turn1 = build_session_state_from_outcome(
-        outcome=outcome_turn1,
-        outcome_status=status_turn1,
-        merged_luma_response=merged_luma_response_turn1,
-        previous_session_state=initial_session_state,
-        user_id=user_id,
-    )
-    if new_session_state_turn1:
-        save_session(user_id, new_session_state_turn1)
+    assert result_turn1.get("_projected_session_state") is not None
 
     # Verify session state after turn 1
-    session_after_turn1 = get_session(user_id)
+    session_after_turn1 = session_store.get_session(ORG_ID, user_id)
     assert session_after_turn1 is not None, "Session should exist after turn 1"
     assert (
         session_after_turn1.get("status") == "NEEDS_CLARIFICATION"
     ), f"Expected status=NEEDS_CLARIFICATION after turn 1, got {session_after_turn1.get('status')}"
+    missing_after_turn1 = _planning_missing_slots(session_after_turn1)
     assert (
-        session_after_turn1.get("awaiting_slot") == "service_id"
-    ), f"Expected awaiting_slot='service_id' to be preserved, got {session_after_turn1.get('awaiting_slot')}"
+        missing_after_turn1 and missing_after_turn1[0] == "service_id"
+    ), f"Expected service_id prioritized in planning.missing_slots, got {missing_after_turn1}"
 
     # ============================================================================
     # TURN 2: User provides service "Deluxe room"
     # ============================================================================
 
-    # Verify session state BEFORE turn 2 (ensures session is loaded with awaiting_slot)
-    session_before_turn2 = get_session(user_id)
+    # Verify session state BEFORE turn 2 (ensures session is loaded with prioritized missing slot)
+    session_before_turn2 = session_store.get_session(ORG_ID, user_id)
     assert session_before_turn2 is not None, "Session should exist before turn 2"
     assert (
         session_before_turn2.get("status") == "NEEDS_CLARIFICATION"
     ), f"Expected status=NEEDS_CLARIFICATION before turn 2 (so session is loaded), got {session_before_turn2.get('status')}"
+    missing_before_turn2 = _planning_missing_slots(session_before_turn2)
     assert (
-        session_before_turn2.get("awaiting_slot") == "service_id"
-    ), f"Expected awaiting_slot='service_id' to be present before turn 2, got {session_before_turn2.get('awaiting_slot')}"
+        missing_before_turn2 and missing_before_turn2[0] == "service_id"
+    ), f"Expected service_id prioritized before turn 2, got {missing_before_turn2}"
 
     turn2_text = "Deluxe room"
 
@@ -214,6 +245,7 @@ def test_e2e_awaiting_slot_soft_guided_flow():
         text=turn2_text,
         user_id=user_id,
         luma_client=luma_client,
+        catalog_client=catalog_client,
         organization_client=None,
         session_store=session_store,
     )
@@ -252,29 +284,19 @@ def test_e2e_awaiting_slot_soft_guided_flow():
 
     # Save session after turn 2 (matching production API behavior)
     # This ensures we can verify the persisted session state
-    merged_luma_response_turn2 = result_turn2.get("_merged_luma_response")
     # Use session_before_turn2 that was verified earlier (has awaiting_slot="service_id")
-    new_session_state_turn2 = build_session_state_from_outcome(
-        outcome=outcome_turn2,
-        outcome_status=status_turn2,
-        merged_luma_response=merged_luma_response_turn2,
-        previous_session_state=session_before_turn2,
-        user_id=user_id,
-    )
-    if new_session_state_turn2:
-        save_session(user_id, new_session_state_turn2)
+    assert result_turn2.get("_projected_session_state") is not None
 
     # Verify session state after turn 2 (read from persisted session)
-    session_after_turn2 = get_session(user_id)
+    session_after_turn2 = session_store.get_session(ORG_ID, user_id)
     if session_after_turn2 is not None:
-        # awaiting_slot should be cleared when slot is filled
-        awaiting_slot_after_turn2 = session_after_turn2.get("awaiting_slot")
+        missing_after_turn2 = _planning_missing_slots(session_after_turn2)
         assert (
-            awaiting_slot_after_turn2 is None
-        ), f"Expected awaiting_slot to be cleared (None) when slot is filled, got {awaiting_slot_after_turn2}"
+            "service_id" not in missing_after_turn2
+        ), f"Expected service_id cleared from planning.missing_slots, got {missing_after_turn2}"
 
     # Clean up
-    clear_session(user_id)
+    clear_session(ORG_ID, user_id)
 
 
 if __name__ == "__main__":

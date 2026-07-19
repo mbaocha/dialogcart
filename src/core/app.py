@@ -1,8 +1,7 @@
 """
 Dialogcart Core Application
 
-Legacy wrapper - use orchestrator.handle_message() directly.
-This file is kept for backward compatibility.
+Loads environment variables used by the Core API at startup.
 """
 
 from pathlib import Path
@@ -25,8 +24,3 @@ try:
 except ImportError:
     # python-dotenv not installed, skip .env loading
     pass
-
-from core.api.compat import handle_message
-
-# Re-export for backward compatibility
-process_message = handle_message

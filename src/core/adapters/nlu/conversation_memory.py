@@ -1,15 +1,15 @@
 """
 Conversation memory helpers for NLU context passing.
 
-Stores the last 5 turns under session["conversation"] so that follow-up messages
+Stores the last 5 turns under ``conversation.memory`` so that follow-up messages
 ("and for groups?", "how long is it?") can be resolved by NLU without the
 orchestrator needing to touch the booking kernel.
 
-Also maintains session["messages"] — a simple [{role, text}] list capped at 5
+Also maintains ``conversation.history`` — a simple [{role, text}] list capped at 5
 turn-pairs (10 entries) — written every turn for both durable and non-durable
 intents, enabling cross-turn RAG context regardless of intent type.
 
-Schema (session["conversation"]):
+Schema (session["conversation"]["memory"]):
     {
         "last_intent":      str | None,   # intent from the previous turn
         "last_search_query": str | None,  # search_query from the previous turn
@@ -23,10 +23,15 @@ Schema (session["conversation"]):
         ]
     }
 
-Schema (session["messages"]):
+Schema (session["conversation"]["history"]):
     [{"role": "user" | "assistant", "text": str}, ...]  # max 10 entries (5 turns)
 """
 from typing import Any, Dict, List, Optional
+
+from ...session.session_schema_v2 import (
+    get_conversation_history,
+    get_conversation_memory,
+)
 
 # Booking intents that accept bare slot-fill follow-ups (not FAQ/RAG).
 _SLOT_FILL_BOOKING_INTENTS = frozenset(
@@ -98,8 +103,8 @@ def build_conversation_context(
     """
     if not session or not isinstance(session, dict):
         return None
-    conv = session.get("conversation")
-    messages = session.get("messages")
+    conv = get_conversation_memory(session)
+    messages = get_conversation_history(session)
 
     has_conv = (
         isinstance(conv, dict)
@@ -167,7 +172,7 @@ def update_conversation(
     Appends the current turn to the turns list and caps the list at 5 (FIFO).
     Does NOT mutate the input dict.
     """
-    prev: Dict[str, Any] = (session or {}).get("conversation") or {}
+    prev = get_conversation_memory(session)
     turns: List[Dict[str, Any]] = list(prev.get("turns") or [])
 
     turn: Dict[str, Any] = {
@@ -187,7 +192,15 @@ def update_conversation(
         "last_search_query": search_query,
         "turns": turns,
     }
-    return {**session, "conversation": updated_conv}
+    result = dict(session)
+    conversation = result.get("conversation")
+    if isinstance(conversation, dict) and (
+        "memory" in conversation or "history" in conversation
+    ):
+        result["conversation"] = {**conversation, "memory": updated_conv}
+    else:
+        result["conversation"] = updated_conv
+    return result
 
 
 def append_messages_turn(
@@ -201,11 +214,17 @@ def append_messages_turn(
     Appends {role, text} entries for the user and (when present) assistant.
     Caps the list at max_turns * 2 entries (FIFO). Does NOT mutate the input.
     """
-    messages: List[Dict[str, str]] = list((session or {}).get("messages") or [])
+    messages: List[Dict[str, str]] = list(get_conversation_history(session))
     messages.append({"role": "user", "text": user_text})
     if assistant_text:
         messages.append({"role": "assistant", "text": assistant_text})
     max_entries = max_turns * 2
     if len(messages) > max_entries:
         messages = messages[-max_entries:]
-    return {**session, "messages": messages}
+    result = {**session, "messages": messages}
+    conversation = result.get("conversation")
+    if isinstance(conversation, dict) and (
+        "history" in conversation or "memory" in conversation
+    ):
+        result["conversation"] = {**conversation, "history": list(messages)}
+    return result

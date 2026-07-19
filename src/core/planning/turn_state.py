@@ -118,6 +118,131 @@ class TurnState:
         }
 
 
+def _slots_for_planning(merged_session_slots: Dict[str, Any]) -> Dict[str, Any]:
+    """Copy durable slots and substitute canonical service_id when present."""
+    slots = dict(merged_session_slots or {})
+    canonical = slots.get("_canonical_service_id")
+    if canonical is not None:
+        slots["service_id"] = canonical
+    return slots
+
+
+def _apply_appointment_time_constraint_satisfaction(
+    *,
+    intent_name: str,
+    missing_slots: List[str],
+    durable_slots: Dict[str, Any],
+    time_constraint: Any,
+) -> List[str]:
+    """Apply CREATE_APPOINTMENT time_constraint semantics to missing_slots.
+
+    Preserves historical processor behavior:
+    - exact (+ start) satisfies time
+    - bounded fuzzy/window satisfies time
+    - unbounded fuzzy/window forces time missing even if a prior virtual view cleared it
+    """
+    if intent_name != "CREATE_APPOINTMENT" or time_constraint is None:
+        return missing_slots
+    if not isinstance(time_constraint, dict):
+        return missing_slots
+
+    mode = time_constraint.get("mode")
+    start = time_constraint.get("start")
+    end = time_constraint.get("end")
+    has_start = start is not None and str(start).strip() != ""
+    has_end = end is not None and str(end).strip() != ""
+    is_bounded = has_start and has_end
+    has_concrete_time_slot = (
+        durable_slots.get("time") is not None if isinstance(durable_slots, dict) else False
+    )
+    is_exact_mode = mode == "exact"
+
+    if mode in ("fuzzy", "window"):
+        can_remove_time = has_concrete_time_slot or is_bounded
+    else:
+        can_remove_time = has_concrete_time_slot or is_exact_mode
+
+    result = list(missing_slots)
+
+    if is_bounded:
+        if "time" in result and can_remove_time:
+            result = [s for s in result if s != "time"]
+            logger.info(
+                "[FINALIZE_TURN_STATE] removed time (mode=%s bounded=%s concrete=%s)",
+                mode,
+                True,
+                has_concrete_time_slot,
+            )
+    elif mode == "exact" and has_start:
+        if "time" in result:
+            result = [s for s in result if s != "time"]
+            logger.info(
+                "[FINALIZE_TURN_STATE] removed time (mode=exact start=%s)",
+                start,
+            )
+    elif mode in ("fuzzy", "window") and "time" not in result:
+        result.append("time")
+        logger.info(
+            "[FINALIZE_TURN_STATE] added time (mode=%s unbounded)",
+            mode,
+        )
+
+    return result
+
+
+def _apply_modify_booking_issues_override(
+    *,
+    intent_name: str,
+    missing_slots: List[str],
+    planning_context: Dict[str, Any],
+) -> List[str]:
+    """When MODIFY_BOOKING has empty raw slots, derive missing from Luma issues."""
+    if intent_name != "MODIFY_BOOKING":
+        return missing_slots
+
+    raw_luma_slots = planning_context.get("raw_luma_slots") or {}
+    if isinstance(raw_luma_slots, dict) and raw_luma_slots:
+        return missing_slots
+
+    issues = planning_context.get("issues")
+    if not isinstance(issues, dict) or not issues:
+        return missing_slots
+
+    issues_missing_slots: List[str] = []
+    for key in issues.keys():
+        normalized_key = key.split(":")[0].strip().lower()
+        if normalized_key in ("date", "time", "booking_id"):
+            issues_missing_slots.append(normalized_key)
+
+    if not issues_missing_slots:
+        return missing_slots
+
+    if "booking_id" not in issues_missing_slots:
+        issues_missing_slots.append("booking_id")
+
+    result = sorted(set(issues_missing_slots))
+    logger.info(
+        "[FINALIZE_TURN_STATE] MODIFY_BOOKING derived missing_slots from issues: %s",
+        result,
+    )
+    return result
+
+
+def _prioritize_awaiting_slot(
+    missing_slots: List[str], awaiting_slot: Optional[str]
+) -> List[str]:
+    """Move awaiting_slot to index 0 when present in missing_slots (presentation order)."""
+    if awaiting_slot is None or awaiting_slot not in missing_slots:
+        return missing_slots
+    reordered = [s for s in missing_slots if s != awaiting_slot]
+    reordered.insert(0, awaiting_slot)
+    logger.debug(
+        "[FINALIZE_TURN_STATE] prioritized awaiting_slot=%s",
+        awaiting_slot,
+    )
+    return reordered
+
+
 def finalize_turn_state(
     intent_name: str,
     merged_session_slots: Dict[str, Any],
@@ -127,43 +252,35 @@ def finalize_turn_state(
     """
     Finalize turn state by computing effective_collected_slots, missing_slots, and status.
 
-    This function centralizes the decision logic for turn state:
-    - Uses planner to compute missing_slots from intent and collected slots
-    - Applies invariant: READY only if missing_slots empty
+    Canonical owner of effective missing_slots for Planning. Callers must not recompute
+    or mutate the returned missing_slots list for semantic reasons.
 
-    This is the single source of truth for turn state resolution. It does NOT handle:
-    - Intent logic (determines what intent is)
-    - Promotion logic (determines how slots are promoted)
-    - Persistence (determines what gets saved)
-
-    Only centralizes the decision about what slots are collected, what's missing, and status.
-
-    Args:
-        intent_name: Intent name (e.g., "CREATE_APPOINTMENT", "CREATE_RESERVATION")
-        merged_session_slots: Merged slots from session (after normalization, promotion, etc.)
-
-    Returns:
-        Dictionary with:
-        - effective_slots: Dict of effective collected slots (all non-None slots)
-        - missing_slots: List of missing slot names (computed by planner)
-        - status: "READY" or "NEEDS_CLARIFICATION" (based on missing_slots)
+    Status returned here is the slot-completeness base status only. Confirmation and
+    capability gating may override status downstream without rewriting missing_slots.
     """
     if not intent_name:
-        # No intent - return empty state
         return {
             "effective_slots": {},
             "missing_slots": [],
             "status": "NEEDS_CLARIFICATION",
         }
 
-    # Always recompute missing_slots from current slots + proposals.
-    # Stale missing_slots from session carry-over must not skip the planner.
-    from core.planning.temporal_proposal import expand_slots_for_planning
+    from core.planning.planner.missing_slots import (
+        get_planning_required_slots_for_intent,
+        normalize_modify_booking_missing_slots,
+    )
+    from core.planning.temporal_proposal import (
+        expand_slots_for_planning,
+        proposal_satisfies_planning_time,
+    )
 
-    policy = _get_planning_policy()
     pc = planning_context or {}
+    policy = _get_planning_policy()
+    durable_slots = dict(merged_session_slots or {})
+    slots_for_planning = _slots_for_planning(durable_slots)
+
     planning_slots = expand_slots_for_planning(
-        merged_session_slots,
+        slots_for_planning,
         date_proposal=pc.get("date_proposal"),
         time_proposal=pc.get("time_proposal"),
         date_constraint=pc.get("date_constraint"),
@@ -174,13 +291,32 @@ def finalize_turn_state(
     plan = plan_intent(intent_name, planning_slots, policy)
 
     collected_slot_names = set(plan["collected_slots"])
-    missing_slots = plan["missing_slots"]
+    missing_slots = list(plan["missing_slots"])
 
     if intent_name == "CREATE_APPOINTMENT":
-        from core.planning.temporal_proposal import proposal_satisfies_planning_time
-
-        if proposal_satisfies_planning_time(pc.get("time_proposal")) and "time" in missing_slots:
+        if (
+            proposal_satisfies_planning_time(pc.get("time_proposal"))
+            and "time" in missing_slots
+        ):
             missing_slots = [s for s in missing_slots if s != "time"]
+
+        missing_slots = _apply_appointment_time_constraint_satisfaction(
+            intent_name=intent_name,
+            missing_slots=missing_slots,
+            durable_slots=durable_slots,
+            time_constraint=pc.get("time_constraint"),
+        )
+
+    missing_slots = _apply_modify_booking_issues_override(
+        intent_name=intent_name,
+        missing_slots=missing_slots,
+        planning_context=pc,
+    )
+    missing_slots = normalize_modify_booking_missing_slots(
+        missing_slots,
+        intent_name=intent_name,
+    )
+    missing_slots = _prioritize_awaiting_slot(missing_slots, pc.get("awaiting_slot"))
 
     if existing_missing_slots is not None and existing_missing_slots != missing_slots:
         logger.debug(
@@ -190,10 +326,6 @@ def finalize_turn_state(
             existing_missing_slots,
             missing_slots,
         )
-
-    from core.planning.planner.missing_slots import (
-        get_planning_required_slots_for_intent,
-    )
 
     try:
         required_slots = get_planning_required_slots_for_intent(intent_name)
@@ -208,27 +340,20 @@ def finalize_turn_state(
         missing_slots,
     )
 
-    # Build effective_collected_slots from merged_session_slots
-    # Include all non-None slots (unordered, additive map)
     effective_collected_slots = {
         slot_name: slot_value
-        for slot_name, slot_value in merged_session_slots.items()
+        for slot_name, slot_value in durable_slots.items()
         if slot_value is not None
     }
 
-    # INVARIANT: READY only if missing_slots empty (and intent is not UNKNOWN)
-    # UNKNOWN means we don't know what the user wants — clarify regardless of missing_slots
     if intent_name == "UNKNOWN":
         status = "NEEDS_CLARIFICATION"
         logger.info(
             "[FINALIZE_TURN_STATE] UNKNOWN intent - forcing NEEDS_CLARIFICATION regardless of missing_slots"
         )
     elif len(missing_slots) > 0:
-        # Missing slots exist - must be NEEDS_CLARIFICATION
         status = "NEEDS_CLARIFICATION"
     else:
-        # No missing slots - can be READY
-        # (Note: Caller may still override with AWAITING_CONFIRMATION based on confirmation_state)
         status = "READY"
 
     logger.info(

@@ -13,13 +13,14 @@ Design:
 """
 
 import logging
-from typing import Dict, Optional
+from typing import Dict
 
 from .base import CapabilityAdapter
 
 logger = logging.getLogger(__name__)
 
-# Global adapter registry
+# Global, tenant-neutral adapter registry.
+# Registered adapters must not retain request organization identity.
 # Maps capability name (str) → adapter instance (CapabilityAdapter)
 ADAPTER_REGISTRY: Dict[str, CapabilityAdapter] = {}
 

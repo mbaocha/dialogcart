@@ -10,7 +10,7 @@ from core.workflows.availability.fingerprint import (
     build_availability_fingerprint_slots,
     compute_availability_fingerprint,
 )
-from core.planning.planner.plan_builder import build_decision_plan
+from core.tests.harness.planning_compat import build_decision_plan
 from core.tracing.decision_trace import (
     TRACE_ENV_VAR,
     TurnTrace,
@@ -113,7 +113,7 @@ def _build_create_appointment_luma(
         "context": {},
     }
     if confirmation_state is not None:
-        response["booking"] = {"confirmation_state": confirmation_state}
+        response["confirmation_state"] = confirmation_state
     if operation is not None:
         response["operation"] = operation
         response["facts"]["operation"] = operation
@@ -161,7 +161,7 @@ def test_bind_time_chosen_in_planner_trace():
     }
     session = _availability_cache_session(
         slots,
-        booking={"confirmation_state": "confirmed"},
+        confirmation_state="confirmed",
     )
     luma_response = _build_create_appointment_luma(
         slots,
@@ -228,7 +228,7 @@ def test_browse_chosen_in_planner_trace():
     }
     session = _availability_cache_session(
         slots,
-        booking={"confirmation_state": "pending"},
+        confirmation_state="pending",
     )
     luma_response = _build_create_appointment_luma(
         slots,
@@ -261,7 +261,7 @@ def test_confirmation_chosen_in_planner_trace():
     }
     session = _availability_cache_session(
         slots,
-        booking={"confirmation_state": "pending"},
+        confirmation_state="pending",
     )
     luma_response = _build_create_appointment_luma(
         slots,

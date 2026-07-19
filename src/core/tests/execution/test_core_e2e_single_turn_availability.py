@@ -127,7 +127,7 @@ def test_core_e2e_single_turn_availability():
 
     # Extract plan and execution result from response
     plan = result.get("plan")
-    execution_result = result.get("result")
+    execution_result = result.get("outcome")
 
     # Step 4: Assert planning result (post-resolution: confirmation path, no further execution)
     assert plan is not None
@@ -159,13 +159,14 @@ def test_core_e2e_single_turn_availability():
 
     # Step 6: Assert execution result structure
     assert execution_result is not None
-    assert execution_result.get("type") == "availability"
-    assert execution_result.get("status") == "success"
-    assert execution_result.get("time_resolution", {}).get("outcome") == "TIME_MATCH_EXACT"
-    assert "slots" in execution_result
+    assert execution_result.get("schema_version") == 1
+    assert execution_result.get("status") == "succeeded"
+    availability = execution_result.get("availability") or {}
+    assert availability.get("time_resolution", {}).get("outcome") == "TIME_MATCH_EXACT"
+    assert "slots" in availability
 
     # Step 7: Assert returned slots are normalized
-    slots = execution_result["slots"]
+    slots = availability["slots"]
     assert isinstance(slots, list)
     assert len(slots) == 2
 

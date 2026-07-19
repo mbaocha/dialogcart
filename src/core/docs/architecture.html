@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Core Architecture: One Conversation, Six Turns</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" id="hljs-light">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" id="hljs-dark" disabled>
+  <style>
+    :root {
+      --bg: #fafbfc;
+      --bg-elevated: #ffffff;
+      --bg-sidebar: #f3f4f6;
+      --text: #1f2937;
+      --text-muted: #6b7280;
+      --border: #e5e7eb;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+      --callout-note: #eff6ff;
+      --callout-note-border: #93c5fd;
+      --callout-important: #fef3c7;
+      --callout-important-border: #fbbf24;
+      --shadow: 0 1px 3px rgba(0,0,0,.08);
+      --radius: 8px;
+      --sidebar-width: 280px;
+      --header-height: 56px;
+      --font: 'Inter', system-ui, -apple-system, sans-serif;
+      --mono: 'JetBrains Mono', ui-monospace, monospace;
+    }
+    [data-theme="dark"] {
+      --bg: #0f1419;
+      --bg-elevated: #1a1f26;
+      --bg-sidebar: #141920;
+      --text: #e7ecf3;
+      --text-muted: #9aa5b4;
+      --border: #2d3748;
+      --accent: #60a5fa;
+      --accent-soft: #1e3a5f;
+      --callout-note: #172554;
+      --callout-note-border: #3b82f6;
+      --callout-important: #422006;
+      --callout-important-border: #d97706;
+      --shadow: 0 1px 3px rgba(0,0,0,.4);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      font-size: 16px;
+      line-height: 1.65;
+      color: var(--text);
+      background: var(--bg);
+    }
+    .app-header {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: var(--header-height);
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0 1.25rem;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+      z-index: 200;
+      box-shadow: var(--shadow);
+    }
+    .app-header h1 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 0 1 auto;
+      min-width: 0;
+    }
+    .search-wrap { flex: 1; max-width: 420px; position: relative; }
+    .search-wrap input {
+      width: 100%;
+      padding: .5rem .75rem .5rem 2.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--text);
+      font: inherit;
+    }
+    .search-wrap input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    .search-icon {
+      position: absolute; left: .65rem; top: 50%; transform: translateY(-50%);
+      color: var(--text-muted); pointer-events: none; font-size: .9rem;
+    }
+    .header-actions { display: flex; gap: .5rem; margin-left: auto; flex-shrink: 0; }
+    .btn-icon {
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      border-radius: var(--radius);
+      padding: .45rem .65rem;
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+    }
+    .btn-icon:hover { background: var(--accent-soft); border-color: var(--accent); }
+    .layout {
+      display: flex;
+      padding-top: var(--header-height);
+      min-height: 100vh;
+    }
+    .sidebar {
+      position: fixed;
+      top: var(--header-height);
+      left: 0;
+      width: var(--sidebar-width);
+      height: calc(100vh - var(--header-height));
+      overflow-y: auto;
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--border);
+      padding: 1rem 0;
+      z-index: 100;
+    }
+    .sidebar-title {
+      font-size: .7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--text-muted);
+      padding: 0 1rem .5rem;
+    }
+    .nav-list { list-style: none; margin: 0; padding: 0; }
+    .nav-list a {
+      display: block;
+      padding: .35rem 1rem;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: .875rem;
+      border-left: 2px solid transparent;
+      line-height: 1.4;
+    }
+    .nav-list a:hover { color: var(--accent); background: var(--accent-soft); }
+    .nav-list a.active { color: var(--accent); border-left-color: var(--accent); font-weight: 500; }
+    .nav-list .depth-1 { padding-left: 1rem; }
+    .nav-list .depth-2 { padding-left: 1.5rem; font-size: .8125rem; }
+    .nav-list .depth-3 { padding-left: 2rem; font-size: .75rem; }
+    .nav-list .depth-4 { padding-left: 2.5rem; font-size: .75rem; }
+    .nav-list .hidden-by-search { display: none; }
+    .main {
+      flex: 1;
+      margin-left: var(--sidebar-width);
+      padding: 2rem 2.5rem 4rem;
+      max-width: 960px;
+    }
+    .content > h1:first-child {
+      font-size: 2rem;
+      font-weight: 700;
+      margin: 0 0 1rem;
+      padding-bottom: .5rem;
+      border-bottom: 1px solid var(--border);
+      scroll-margin-top: calc(var(--header-height) + 1rem);
+    }
+    .content h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      margin: 2rem 0 1rem;
+      padding-bottom: .5rem;
+      border-bottom: 1px solid var(--border);
+      scroll-margin-top: calc(var(--header-height) + 1rem);
+    }
+    .content h2 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      margin: 2rem 0 .75rem;
+      scroll-margin-top: calc(var(--header-height) + 1rem);
+    }
+    .content h3 { font-size: 1.1rem; font-weight: 600; margin: 1.5rem 0 .5rem; scroll-margin-top: calc(var(--header-height) + 1rem); }
+    .content h4 { font-size: .95rem; font-weight: 600; margin: 1rem 0 .35rem; color: var(--text-muted); scroll-margin-top: calc(var(--header-height) + 1rem); }
+    .content p { margin: .75rem 0; }
+    .content a { color: var(--accent); }
+    .content hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+    .content ul, .content ol { padding-left: 1.5rem; margin: .75rem 0; }
+    .content li { margin: .25rem 0; }
+    .content blockquote {
+      margin: 1rem 0;
+      padding: .75rem 1rem;
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      border-radius: 0 var(--radius) var(--radius) 0;
+    }
+    .content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: .9rem;
+    }
+    .content th, .content td {
+      border: 1px solid var(--border);
+      padding: .5rem .75rem;
+      text-align: left;
+    }
+    .content th { background: var(--bg-sidebar); font-weight: 600; }
+    .content code {
+      font-family: var(--mono);
+      font-size: .875em;
+      background: var(--bg-sidebar);
+      padding: .15em .35em;
+      border-radius: 4px;
+    }
+    .content pre {
+      margin: 1rem 0;
+      border-radius: var(--radius);
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      background: var(--bg-elevated) !important;
+    }
+    .content pre code {
+      background: transparent;
+      padding: 1rem;
+      font-size: .8125rem;
+      display: block;
+    }
+    .callout {
+      margin: 1rem 0;
+      padding: .85rem 1rem;
+      border-radius: var(--radius);
+      border: 1px solid;
+    }
+    .callout-note { background: var(--callout-note); border-color: var(--callout-note-border); }
+    .callout-important { background: var(--callout-important); border-color: var(--callout-important-border); }
+    .callout strong { display: block; margin-bottom: .25rem; }
+    details.turn-section {
+      margin: 1.5rem 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg-elevated);
+      box-shadow: var(--shadow);
+    }
+    details.turn-section > summary {
+      cursor: pointer;
+      padding: 1rem 1.25rem;
+      font-size: 1.5rem;
+      font-weight: 700;
+      list-style: none;
+      user-select: none;
+    }
+    details.turn-section > summary::-webkit-details-marker { display: none; }
+    details.turn-section > summary::before {
+      content: '▸';
+      display: inline-block;
+      margin-right: .5rem;
+      transition: transform .2s;
+      color: var(--accent);
+    }
+    details.turn-section[open] > summary::before { transform: rotate(90deg); }
+    details.turn-section .turn-body { padding: 0 1.25rem 1.25rem; }
+    details.turn-section .turn-body > h1 { display: none; }
+    details.native-details {
+      margin: 1rem 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: .5rem 1rem;
+      background: var(--bg-elevated);
+    }
+    details.native-details summary { cursor: pointer; font-weight: 600; }
+    .mermaid {
+      margin: 1.25rem 0;
+      text-align: center;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+      overflow-x: auto;
+    }
+    .search-hidden { display: none !important; }
+    .turn-anchor {
+      display: block;
+      position: relative;
+      top: calc(-1 * var(--header-height) - 1rem);
+      visibility: hidden;
+    }
+    #back-to-top {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--bg-elevated);
+      color: var(--text);
+      font-size: 1.25rem;
+      cursor: pointer;
+      box-shadow: var(--shadow);
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity .2s, visibility .2s;
+      z-index: 150;
+    }
+    #back-to-top.visible { opacity: 1; visibility: visible; }
+    #back-to-top:hover { background: var(--accent-soft); border-color: var(--accent); }
+    .mobile-nav-toggle { display: none; }
+    @media (max-width: 960px) {
+      .sidebar {
+        transform: translateX(-100%);
+        transition: transform .25s;
+      }
+      .sidebar.open { transform: translateX(0); }
+      .main { margin-left: 0; padding: 1.25rem 1rem 3rem; }
+      .mobile-nav-toggle { display: inline-flex; }
+      .app-header h1 { display: none; }
+    }
+    .overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.4);
+      z-index: 90;
+    }
+    .overlay.visible { display: block; }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <button class="btn-icon mobile-nav-toggle" id="nav-toggle" aria-label="Toggle navigation">☰</button>
+    <h1>Core Architecture</h1>
+    <div class="search-wrap">
+      <span class="search-icon" aria-hidden="true">⌕</span>
+      <input type="search" id="search" placeholder="Search headings and content…" autocomplete="off">
+    </div>
+    <div class="header-actions">
+      <button class="btn-icon" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle theme">◐</button>
+    </div>
+  </header>
+  <div class="overlay" id="overlay"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar" aria-label="Table of contents">
+      <div class="sidebar-title">On this page</div>
+      <ul class="nav-list" id="nav-list"></ul>
+    </nav>
+    <main class="main">
+      <article class="content" id="content"></article>
+    </main>
+  </div>
+  <button id="back-to-top" aria-label="Back to top" title="Back to top">↑</button>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js"></script>
+  <script>
+(function () {
+  'use strict';
+
+  const SOURCE = "# Core Architecture: One Conversation, Six Turns\n\nThis guide follows one user through six requests. It is a guided debugger walkthrough of the current runtime under `src/core`, not a package catalog.\n\n> [!NOTE]\n> JSON values are representative snapshots, not complete payloads. Assume an organization timezone in which \u201ctomorrow\u201d resolves to `2026-07-16`, a catalog where `haircut` and `premium haircut` resolve to service IDs, and an availability backend that offers both 3pm and 4pm. Rendered wording is illustrative; the renderer may vary it.\n\n## Contents\n\n- [The runtime objects](#the-runtime-objects)\n- [The whole conversation](#the-whole-conversation)\n- [Turn 1 \u2014 Begin a durable booking](#turn-1)\n- [Turn 2 \u2014 Merge a refinement](#turn-2)\n- [Turn 3 \u2014 Bind a proposed time](#turn-3)\n- [Turn 4 \u2014 Confirm and commit](#turn-4)\n- [Turn 5 \u2014 Browse cached availability](#turn-5)\n- [Turn 6 \u2014 Replan after a completed booking](#turn-6)\n- [What the six turns reveal](#what-the-six-turns-reveal)\n- [Code navigation map](#code-navigation-map)\n\n---\n\n## The runtime objects\n\nThe walkthrough follows six runtime objects. They are related, but they are not interchangeable.\n\n```mermaid\nflowchart LR\n    U[\"User text<br/>one-turn input\"] --> N[\"NLU response<br/>one-turn interpretation\"]\n    S[\"Session<br/>durable conversation truth\"] --> M[\"Merged response<br/>session + NLU delta\"]\n    N --> M\n    M --> P[\"Plan<br/>what should happen now\"]\n    P --> E[\"Execution result<br/>what a backend did\"]\n    E --> O[\"Outcome<br/>turn result for API/rendering\"]\n    O --> S2[\"Next Session\"]\n```\n\n<details>\n<summary><strong>Object contracts</strong></summary>\n\n- **NLU response** \u2014 stateless interpretation of the current utterance: intent, facts, entities, constraints, and optional availability operation. NLU does not own booking state.\n- **Session** \u2014 persisted Core state across turns: durable intent, collected slots, proposals, confirmation state, availability cache, booking identifiers, and conversation memory.\n- **Merged response** \u2014 an in-request processing view combining the session with the current NLU delta. It is not a second source of truth.\n- **Plan** \u2014 ephemeral decision: `status`, `stage`, nullable `action`, `awaiting`, `missing_slots`, and business facts.\n- **Execution result** \u2014 normalized availability or booking backend response.\n- **Outcome** \u2014 engine result consumed by rendering and projected back into Session.\n\n</details>\n\n---\n\n## The whole conversation\n\n```mermaid\nstateDiagram-v2\n    [*] --> SearchingGeneric: Turn 1<br/>haircut + tomorrow proposal\n    SearchingGeneric --> SearchingPremium: Turn 2<br/>service refined; search refreshed\n    SearchingPremium --> Pending3pm: Turn 3<br/>3pm bound; confirmation pending\n    Pending3pm --> Booked3pm: Turn 4<br/>confirmed; booking committed\n    Booked3pm --> Booked3pmPage2: Turn 5<br/>cached results paginated\n    Booked3pmPage2 --> Pending4pmNew: Turn 6<br/>new booking replanned for 4pm\n```\n\nThe final transition matters: after Turn 4 there is no pending confirmation to revise. Successful commit consumes it. Turn 6 therefore begins a new booking plan; changing an existing booking would require a `MODIFY_BOOKING` turn with booking-identification semantics.\n\n---\n\n<a id=\"turn-1\"></a>\n# Turn 1\n\n## User input\n\n```text\nBook me a haircut tomorrow\n```\n\n---\n\n## What the system knows BEFORE this turn\n\n```json\n{}\n```\n\nThere is no durable intent, no booking state, and no availability cache.\n\n---\n\n## Step-by-step execution\n\n### HTTP\n\n#### Called by\n\nThe client via `POST /api/message`.\n\n#### Receives\n\n- `MessageRequest`\n- User and organization identifiers\n\n#### What changes here\n\nThe API validates the request and establishes the boundary for one turn.\n\n#### Produces\n\nArguments for session loading and the engine.\n\n#### Calls next\n\nSession load.\n\n### Session load\n\n#### Called by\n\nHTTP API.\n\n#### Receives\n\n- `user_id`\n\n#### What changes here\n\nNothing; the store returns no previous session.\n\n#### Produces\n\nAn empty session view.\n\n#### Calls next\n\n`ConversationEngine`.\n\n### ConversationEngine\n\n#### Called by\n\nHTTP API.\n\n#### Receives\n\n- User text\n- Empty session\n- Injected NLU, organization, availability, and booking clients\n\n#### What changes here\n\nThe engine opens the traced turn and becomes the owner of stage order.\n\n#### Produces\n\nPlanning input.\n\n#### Calls next\n\nPlanning.\n\n### Planning\n\n#### Called by\n\n`ConversationEngine`.\n\n#### Receives\n\n- Text and empty session\n- Organization identity\n\n#### What changes here\n\nPlanning resolves tenant/catalog context, invokes NLU, computes effective slots and missing slots, derives business facts, and selects a policy action. It does not call commerce backends.\n\n#### Produces\n\nA plan selecting exploratory `SEARCH_AVAILABILITY`.\n\n#### Calls next\n\nNLU, then merge, business facts, and decision internally; control returns to the engine.\n\n### NLU\n\n#### Called by\n\nPlanning.\n\n#### Receives\n\n- Current utterance\n- Tenant aliases and booking mode\n- Empty conversation context\n\n#### What changes here\n\nNothing durable. Luma identifies `CREATE_APPOINTMENT`, the haircut service, and a relative date.\n\n#### Produces\n\nA per-turn NLU response.\n\n#### Calls next\n\nMerge.\n\n### Merge\n\n#### Called by\n\nPlanning.\n\n#### Receives\n\n- NLU response\n- Empty session\n\n#### What changes here\n\nThe service becomes an effective collected slot. \u201cTomorrow\u201d remains a date proposal until an offered datetime is bound.\n\n#### Produces\n\nA merged processing view with `service_id`, `date_proposal`, and derived `missing_slots`.\n\n#### Calls next\n\nBusiness facts.\n\n### Business facts\n\n#### Called by\n\nPlan builder.\n\n#### Receives\n\n- Effective slots\n- Missing slots\n- Session and merged NLU evidence\n\n#### What changes here\n\nRuntime booleans establish that search prerequisites are met and no trustworthy availability exists yet.\n\n#### Produces\n\n`availability_check_required=true`.\n\n#### Calls next\n\nDecision.\n\n### Decision\n\n#### Called by\n\nPlanning.\n\n#### Receives\n\n- Business facts\n- `CREATE_APPOINTMENT` policy\n\n#### What changes here\n\nPolicy allows search with only `service_id`, even though date/time are not yet durable. The plan becomes executable but non-committing.\n\n#### Produces\n\n`status=READY`, `action=SEARCH_AVAILABILITY`.\n\n#### Calls next\n\nExecution gate.\n\n### Execution\n\n#### Called by\n\n`ConversationEngine` through `ExecutionCoordinator`.\n\n#### Receives\n\n- Plan\n- Availability client\n- Date proposal\n\n#### What changes here\n\nThe gate verifies the exploratory step requirements. `ActionRunner` delegates to `dispatcher.execute`, which calls the availability backend.\n\n#### Produces\n\nA normalized availability result.\n\n#### Calls next\n\nAvailability workflow.\n\n### Workflow\n\n#### Called by\n\n`ExecutionCoordinator` after successful dispatch.\n\n#### Receives\n\n- Search result\n- Plan and session view\n\n#### What changes here\n\nThe workflow computes a fingerprint for the search criteria, creates the first presented page, and caches the full result. No user time is bound.\n\n#### Produces\n\nAvailability presentation artifacts.\n\n#### Calls next\n\nRendering.\n\n### Rendering\n\n#### Called by\n\n`ConversationEngine`.\n\n#### Receives\n\n- Decision\n- Availability result\n- Session context\n\n#### What changes here\n\nThe renderer turns structured offers into user-facing text. It does not change the decision.\n\n#### Produces\n\nA response showing available times.\n\n#### Calls next\n\nSession persistence.\n\n### Session persistence\n\n#### Called by\n\nHTTP API after the engine returns.\n\n#### Receives\n\n- Outcome\n- Merged response\n- Previous empty session\n\n#### What changes here\n\n`SessionProjector` builds the next durable state. It persists the booking intent, service, proposal, conversation memory, and availability artifacts.\n\n#### Produces\n\nThe first stored session.\n\n#### Calls next\n\nHTTP response.\n\n---\n\n## Object evolution\n\nAfter NLU \u2014 the current utterance is understood, but nothing is durable yet:\n\n```json\n{\n  \"intent\": {\"name\": \"CREATE_APPOINTMENT\"},\n  \"facts\": {\"service_id\": \"haircut\"},\n  \"date_proposal\": {\"start\": \"2026-07-16\"}\n}\n```\n\nAfter merge \u2014 the service is collected; the relative date is still a proposal:\n\n```json\n{\n  \"slots\": {\"service_id\": \"haircut\"},\n  \"date_proposal\": {\"start\": \"2026-07-16\"},\n  \"missing_slots\": [\"date\", \"time\"]\n}\n```\n\nAfter business facts \u2014 search is required and policy prerequisites are satisfied:\n\n```json\n{\n  \"availability_check_required\": true,\n  \"availability_ready\": false\n}\n```\n\nAfter planning \u2014 exploratory execution is selected:\n\n```json\n{\n  \"status\": \"READY\",\n  \"stage\": \"AVAILABILITY\",\n  \"action\": \"SEARCH_AVAILABILITY\",\n  \"missing_slots\": [\"date\", \"time\"]\n}\n```\n\nAfter execution/workflow \u2014 a cache and first page now exist:\n\n```json\n{\n  \"last_execution_result\": {\n    \"type\": \"availability\",\n    \"status\": \"success\",\n    \"slots\": [\"09:00\", \"10:00\", \"15:00\", \"16:00\"]\n  },\n  \"presented_availability\": {\n    \"page_index\": 0,\n    \"slots\": [\"09:00\", \"10:00\", \"15:00\"]\n  },\n  \"availability_fingerprint\": \"fp:haircut:2026-07-16\"\n}\n```\n\nAfter persistence \u2014 only durable/continuity fields survive:\n\n```json\n{\n  \"intent_name\": \"CREATE_APPOINTMENT\",\n  \"status\": \"READY\",\n  \"slots\": {\"service_id\": \"haircut\"},\n  \"missing_slots\": [\"date\", \"time\"],\n  \"date_proposal\": {\"start\": \"2026-07-16\"},\n  \"availability_fingerprint\": \"fp:haircut:2026-07-16\",\n  \"presented_availability\": {\"page_index\": 0, \"slots\": [\"09:00\", \"10:00\", \"15:00\"]}\n}\n```\n\n---\n\n## Why this stage exists\n\nTurn 1 establishes the separation that protects the architecture: NLU describes one utterance, Planning combines that evidence with policy to choose an action, Execution alone performs backend I/O, Workflows convert raw results into reusable domain state, Rendering produces text, and Persistence makes only selected state available to the next turn.\n\n---\n\n## Files involved\n\n```text\napi/message.py\nengine/conversation_engine.py\nplanning/planning_service.py\nplanning/planner/turn_planner.py\nplanning/planner/plan_builder.py\nexecution/dispatcher.py\nworkflows/availability/workflow.py\nrendering/response_renderer.py\nsession/persist.py\n```\n\n---\n\n## Result\n\nResponse to user:\n\n> \u201cI found times for a haircut tomorrow, including 9:00am, 10:00am, and 3:00pm. Which works?\u201d\n\nSession after persistence:\n\n```json\n{\n  \"intent_name\": \"CREATE_APPOINTMENT\",\n  \"slots\": {\"service_id\": \"haircut\"},\n  \"date_proposal\": {\"start\": \"2026-07-16\"},\n  \"missing_slots\": [\"date\", \"time\"],\n  \"availability_fingerprint\": \"fp:haircut:2026-07-16\",\n  \"presented_availability\": {\"page_index\": 0, \"slots\": [\"09:00\", \"10:00\", \"15:00\"]}\n}\n```\n\n---\n\n<a id=\"turn-2\"></a>\n# Turn 2\n\n## User input\n\n```text\nPremium haircut\n```\n\n---\n\n## What the system knows BEFORE this turn\n\n```json\n{\n  \"intent_name\": \"CREATE_APPOINTMENT\",\n  \"slots\": {\"service_id\": \"haircut\"},\n  \"date_proposal\": {\"start\": \"2026-07-16\"},\n  \"missing_slots\": [\"date\", \"time\"],\n  \"availability_fingerprint\": \"fp:haircut:2026-07-16\"\n}\n```\n\n---\n\n## Step-by-step execution\n\n### HTTP and session load\n\n#### Called by\n\nThe client.\n\n#### Receives\n\n- `Premium haircut`\n- `user_id`\n\n#### What changes here\n\nThe API loads the entire prior session without pre-filtering it.\n\n#### Produces\n\nText plus durable conversation state.\n\n#### Calls next\n\n`ConversationEngine`.\n\n### ConversationEngine\n\n#### Called by\n\nHTTP API.\n\n#### Receives\n\n- Current text\n- Prior session\n\n#### What changes here\n\nThe engine starts the same stage sequence; it does not interpret the refinement itself.\n\n#### Produces\n\nPlanning input containing both current and prior state.\n\n#### Calls next\n\nPlanning.\n\n### NLU\n\n#### Called by\n\nPlanning.\n\n#### Receives\n\n- Current utterance\n- Conversation context saying a booking is active\n- Catalog aliases\n\n#### What changes here\n\nNothing durable. NLU resolves \u201cPremium haircut\u201d to the tenant\u2019s specific service.\n\n#### Produces\n\nA per-turn service delta.\n\n#### Calls next\n\nMerge.\n\n### Merge\n\n#### Called by\n\nPlanning.\n\n#### Receives\n\n- Prior durable session\n- Current service delta\n\n#### What changes here\n\nMerge preserves the durable appointment intent and date proposal while replacing the current service value. State is additive unless an explicit invalidation rule applies.\n\n#### Produces\n\nOne effective conversational view.\n\n#### Calls next\n\nBusiness facts.\n\n### Business facts and decision\n\n#### Called by\n\nPlan builder.\n\n#### Receives\n\n- Refined service\n- Old availability fingerprint\n- Date proposal\n\n#### What changes here\n\nThe refined criteria no longer match the old fingerprint. Availability is not trusted, so policy selects a fresh exploratory search.\n\n#### Produces\n\n`SEARCH_AVAILABILITY` for the premium service.\n\n#### Calls next\n\nExecution.\n\n### Execution and workflow\n\n#### Called by\n\n`ExecutionCoordinator`.\n\n#### Receives\n\n- Updated plan\n- Availability client\n\n#### What changes here\n\nThe dispatcher searches for the premium service. The workflow replaces the cached search, fingerprint, and first presented page.\n\n#### Produces\n\nFresh premium-haircut availability.\n\n#### Calls next\n\nRendering.\n\n### Rendering\n\n#### Called by\n\n`ConversationEngine`.\n\n#### Receives\n\n- New search result\n- Decision and conversation context\n\n#### What changes here\n\nOnly response text is added.\n\n#### Produces\n\nPremium-haircut options.\n\n#### Calls next\n\nSession persistence.\n\n### Session persistence\n\n#### Called by\n\nHTTP API.\n\n#### Receives\n\n- Turn outcome\n- Prior session\n\n#### What changes here\n\nThe session is rebuilt with the refined service while preserving the date proposal and replacing availability artifacts.\n\n#### Produces\n\nThe next durable session.\n\n#### Calls next\n\nHTTP response.\n\n---\n\n## Object evolution\n\nAfter NLU \u2014 only the refinement appears:\n\n```json\n{\n  \"intent\": {\"name\": \"CREATE_APPOINTMENT\"},\n  \"slots\": {\"service_id\": \"premium-haircut\"}\n}\n```\n\nAfter merge \u2014 prior date context survives:\n\n```json\n{\n  \"slots\": {\"service_id\": \"premium-haircut\"},\n  \"date_proposal\": {\"start\": \"2026-07-16\"},\n  \"missing_slots\": [\"date\", \"time\"]\n}\n```\n\nAfter fingerprint evaluation \u2014 old evidence is stale:\n\n```json\n{\n  \"stored_fingerprint\": \"fp:haircut:2026-07-16\",\n  \"current_fingerprint\": \"fp:premium-haircut:2026-07-16\",\n  \"availability_ready\": false\n}\n```\n\nAfter planning:\n\n```json\n{\n  \"status\": \"READY\",\n  \"action\": \"SEARCH_AVAILABILITY\",\n  \"slots\": {\"service_id\": \"premium-haircut\"}\n}\n```\n\nAfter persistence \u2014 the old cache is replaced:\n\n```json\n{\n  \"slots\": {\"service_id\": \"premium-haircut\"},\n  \"date_proposal\": {\"start\": \"2026-07-16\"},\n  \"availability_fingerprint\": \"fp:premium-haircut:2026-07-16\",\n  \"presented_availability\": {\"page_index\": 0, \"slots\": [\"13:00\", \"15:00\", \"16:00\"]}\n}\n```\n\n---\n\n## Why this stage exists\n\nMerge exists because the utterance \u201cPremium haircut\u201d is incomplete in isolation: the durable session supplies the active appointment intent and tomorrow proposal. Fingerprints then prevent Core from treating availability for the old service as evidence for the refined service.\n\n---\n\n## Files involved\n\n```text\nplanning/planner/turn_planner.py\nsession/merge.py\nplanning/facts/business_fact_registry.py\nworkflows/availability/fingerprint.py\nexecution/dispatcher.py\nsession/persist.py\n```\n\n---\n\n## Result\n\nResponse to user:\n\n> \u201cFor a premium haircut tomorrow, I can offer 1:00pm, 3:00pm, or 4:00pm.\u201d\n\nSession after persistence:\n\n```json\n{\n  \"intent_name\": \"CREATE_APPOINTMENT\",\n  \"slots\": {\"service_id\": \"premium-haircut\"},\n  \"date_proposal\": {\"start\": \"2026-07-16\"},\n  \"missing_slots\": [\"date\", \"time\"],\n  \"availability_fingerprint\": \"fp:premium-haircut:2026-07-16\",\n  \"presented_availability\": {\"page_index\": 0, \"slots\": [\"13:00\", \"15:00\", \"16:00\"]}\n}\n```\n\n---\n\n<a id=\"turn-3\"></a>\n# Turn 3\n\n## User input\n\n```text\n3pm\n```\n\n---\n\n## What the system knows BEFORE this turn\n\n```json\n{\n  \"intent_name\": \"CREATE_APPOINTMENT\",\n  \"slots\": {\"service_id\": \"premium-haircut\"},\n  \"date_proposal\": {\"start\": \"2026-07-16\"},\n  \"presented_availability\": {\n    \"search_date\": \"2026-07-16\",\n    \"slots\": [\"13:00\", \"15:00\", \"16:00\"]\n  },\n  \"confirmation_state\": null\n}\n```\n\n---\n\n## Step-by-step execution\n\n### HTTP, session load, and ConversationEngine\n\n#### Called by\n\nThe client.\n\n#### Receives\n\n- `3pm`\n- Prior booking session\n\n#### What changes here\n\nThe API loads prior state and the engine opens the turn; neither guesses which date \u201c3pm\u201d belongs to.\n\n#### Produces\n\nPlanning input.\n\n#### Calls next\n\nPlanning.\n\n### NLU\n\n#### Called by\n\nPlanning.\n\n#### Receives\n\n- `3pm`\n- Active booking context\n\n#### What changes here\n\nNLU emits an exact time proposal, not a fabricated offered slot.\n\n#### Produces\n\n`time_proposal={mode: exact, start: \"15:00\"}`.\n\n#### Calls next\n\nMerge.\n\n### Merge and exact-time binding\n\n#### Called by\n\nPlanning.\n\n#### Receives\n\n- Time proposal\n- Presented availability\n- Date proposal\n\n#### What changes here\n\nCore checks the proposal against the page actually shown to the user. Because 3pm is offered, it binds date/time and a backend datetime range. The proposal becomes durable booking truth only through this match.\n\n#### Produces\n\nBound slots and `TIME_MATCH_EXACT`.\n\n#### Calls next\n\nBusiness facts.\n\n### Business facts\n\n#### Called by\n\nPlan builder.\n\n#### Receives\n\n- Bound datetime\n- Matching availability fingerprint\n- No prior confirmation\n\n#### What changes here\n\nFacts now say availability and time selection are ready, but user confirmation is not satisfied.\n\n#### Produces\n\nCommit-readiness facts.\n\n#### Calls next\n\nDecision.\n\n### Decision\n\n#### Called by\n\nPlanning.\n\n#### Receives\n\n- Complete slots\n- Commit-readiness facts\n\n#### What changes here\n\nThe confirmation gate enters `pending`. Policy deliberately selects no execution action.\n\n#### Produces\n\n`AWAITING_CONFIRMATION`, `action=null`.\n\n#### Calls next\n\nEngine execution gate.\n\n### Execution gate\n\n#### Called by\n\n`ConversationEngine`.\n\n#### Receives\n\n- Plan with no action\n\n#### What changes here\n\nNothing. Tool execution is skipped; selecting a time does not book it.\n\n#### Produces\n\nA planning response.\n\n#### Calls next\n\nRendering.\n\n### Rendering\n\n#### Called by\n\nPlanning outcome / engine response path.\n\n#### Receives\n\n- Bound service/date/time\n- Pending confirmation state\n\n#### What changes here\n\nA confirmation prompt is produced.\n\n#### Produces\n\nUser-facing summary of the proposed commit.\n\n#### Calls next\n\nSession persistence.\n\n### Session persistence\n\n#### Called by\n\nHTTP API.\n\n#### Receives\n\n- `AWAITING_CONFIRMATION` outcome\n- Merged response with bound datetime\n\n#### What changes here\n\nBound slots, resolved range, cache, and `confirmation_state=pending` become durable.\n\n#### Produces\n\nCommit-ready session.\n\n#### Calls next\n\nHTTP response.\n\n---\n\n## Object evolution\n\nAfter NLU \u2014 an untrusted proposal:\n\n```json\n{\n  \"time_proposal\": {\n    \"mode\": \"exact\",\n    \"start\": \"15:00\"\n  }\n}\n```\n\nAfter merge/binding \u2014 the proposal matches an offered slot:\n\n```json\n{\n  \"slots\": {\n    \"service_id\": \"premium-haircut\",\n    \"date\": \"2026-07-16\",\n    \"time\": \"15:00\"\n  },\n  \"resolved_datetime_range\": {\n    \"start\": \"2026-07-16T15:00:00+01:00\",\n    \"end\": \"2026-07-16T16:00:00+01:00\"\n  },\n  \"time_match_outcome\": \"TIME_MATCH_EXACT\"\n}\n```\n\nAfter business facts:\n\n```json\n{\n  \"availability_ready\": true,\n  \"time_selection_ready\": true,\n  \"user_confirmation_satisfied\": false\n}\n```\n\nAfter planning:\n\n```json\n{\n  \"status\": \"AWAITING_CONFIRMATION\",\n  \"stage\": \"CONFIRM\",\n  \"action\": null,\n  \"awaiting\": \"USER_CONFIRMATION\",\n  \"missing_slots\": []\n}\n```\n\nAfter persistence:\n\n```json\n{\n  \"slots\": {\n    \"service_id\": \"premium-haircut\",\n    \"date\": \"2026-07-16\",\n    \"time\": \"15:00\"\n  },\n  \"confirmation_state\": \"pending\",\n  \"resolved_datetime_range\": {\n    \"start\": \"2026-07-16T15:00:00+01:00\"\n  }\n}\n```\n\n---\n\n## Why this stage exists\n\nTemporal proposals separate language understanding from booking truth: NLU may understand \u201c3pm,\u201d but only Core can verify that 3pm was actually offered for the active search. Exact binding establishes that evidence, and the confirmation gate then blocks the irreversible action until a later explicit acceptance.\n\n---\n\n## Files involved\n\n```text\nplanning/temporal_proposal.py\nplanning/time_resolution.py\nsession/merge.py\nsession/confirmation_gate.py\nplanning/planner/plan_builder.py\nsession/persist.py\n```\n\n---\n\n## Result\n\nResponse to user:\n\n> \u201cPremium haircut tomorrow at 3:00pm. Shall I book it?\u201d\n\nSession after persistence:\n\n```json\n{\n  \"intent_name\": \"CREATE_APPOINTMENT\",\n  \"status\": \"NEEDS_CLARIFICATION\",\n  \"slots\": {\n    \"service_id\": \"premium-haircut\",\n    \"date\": \"2026-07-16\",\n    \"time\": \"15:00\"\n  },\n  \"missing_slots\": [],\n  \"confirmation_state\": \"pending\",\n  \"availability_fingerprint\": \"fp:premium-haircut:2026-07-16\"\n}\n```\n\n---\n\n<a id=\"turn-4\"></a>\n# Turn 4\n\n## User input\n\n```text\nYes\n```\n\n---\n\n## What the system knows BEFORE this turn\n\n```json\n{\n  \"intent_name\": \"CREATE_APPOINTMENT\",\n  \"slots\": {\n    \"service_id\": \"premium-haircut\",\n    \"date\": \"2026-07-16\",\n    \"time\": \"15:00\"\n  },\n  \"confirmation_state\": \"pending\",\n  \"availability_fingerprint\": \"fp:premium-haircut:2026-07-16\"\n}\n```\n\n---\n\n## Step-by-step execution\n\n### HTTP, session load, and ConversationEngine\n\n#### Called by\n\nThe client.\n\n#### Receives\n\n- `Yes`\n- Pending-confirmation session\n\n#### What changes here\n\nThe full pending state is passed into Planning.\n\n#### Produces\n\nPlanning input.\n\n#### Calls next\n\nPlanning.\n\n### NLU\n\n#### Called by\n\nPlanning.\n\n#### Receives\n\n- `Yes`\n- Conversation context\n\n#### What changes here\n\nNothing durable. NLU classifies acceptance (commonly `CONFIRM_ACTION`).\n\n#### Produces\n\nAn acceptance delta.\n\n#### Calls next\n\nConfirmation classification.\n\n### Confirmation classification and merge\n\n#### Called by\n\nPlanning.\n\n#### Receives\n\n- Acceptance delta\n- `confirmation_state=pending`\n\n#### What changes here\n\nThe gate classifies `ACCEPT`, restores the durable booking intent, and marks confirmation satisfied for this turn. Existing slots remain intact.\n\n#### Produces\n\nA merged response with confirmed continuation.\n\n#### Calls next\n\nBusiness facts.\n\n### Business facts and decision\n\n#### Called by\n\nPlan builder.\n\n#### Receives\n\n- Bound slots\n- Trusted availability\n- Accepted confirmation\n\n#### What changes here\n\nAll `CONFIRM_APPOINTMENT` requirements are true. Policy selects the committing action and the engine independently verifies execution eligibility.\n\n#### Produces\n\n`status=READY`, `action=CONFIRM_APPOINTMENT`.\n\n#### Calls next\n\nExecution.\n\n### Execution\n\n#### Called by\n\n`ConversationEngine` through `ExecutionCoordinator`.\n\n#### Receives\n\n- Commit-ready plan\n- Booking client\n\n#### What changes here\n\n`ActionRunner` calls `dispatcher.execute`; the booking client creates the appointment. This is the irreversible boundary.\n\n#### Produces\n\nA normalized booking result containing `booking_id`.\n\n#### Calls next\n\nBooking workflow.\n\n### Workflow\n\n#### Called by\n\n`ExecutionCoordinator`.\n\n#### Receives\n\n- Booking execution result\n- Existing slots\n\n#### What changes here\n\n`BookingWorkflow.process_result` propagates booking identifiers into plan slots. The availability workflow is a no-op for this non-search result.\n\n#### Produces\n\nSlots containing the committed booking ID.\n\n#### Calls next\n\nRendering.\n\n### Rendering\n\n#### Called by\n\n`ConversationEngine`.\n\n#### Receives\n\n- Booking outcome\n- Service/date/time\n\n#### What changes here\n\nThe result is rendered as a booking confirmation.\n\n#### Produces\n\nUser-facing completion text.\n\n#### Calls next\n\nSession persistence.\n\n### Session persistence\n\n#### Called by\n\nHTTP API.\n\n#### Receives\n\n- Successful booking outcome\n- Prior durable session\n\n#### What changes here\n\nThe durable session is rebuilt with `booking_id`. Successful commit consumes confirmation, so `confirmation_state` is removed. Availability artifacts remain available for continuity and browsing.\n\n#### Produces\n\nA completed-booking session.\n\n#### Calls next\n\nHTTP response.\n\n---\n\n## Object evolution\n\nAfter NLU:\n\n```json\n{\n  \"intent\": {\"name\": \"CONFIRM_ACTION\"}\n}\n```\n\nAfter confirmation classification:\n\n```json\n{\n  \"_effective_intent\": \"CREATE_APPOINTMENT\",\n  \"_confirm_booking_continuation\": true,\n  \"confirmation_state\": \"confirmed\"\n}\n```\n\nAfter business facts:\n\n```json\n{\n  \"availability_ready\": true,\n  \"time_selection_ready\": true,\n  \"user_confirmation_satisfied\": true\n}\n```\n\nAfter planning:\n\n```json\n{\n  \"status\": \"READY\",\n  \"stage\": \"CONFIRM\",\n  \"action\": \"CONFIRM_APPOINTMENT\"\n}\n```\n\nAfter execution:\n\n```json\n{\n  \"status\": \"success\",\n  \"booking\": {\"id\": \"BK-1042\"},\n  \"slots\": {\"booking_id\": \"BK-1042\"}\n}\n```\n\nAfter persistence \u2014 confirmation is consumed:\n\n```json\n{\n  \"status\": \"READY\",\n  \"slots\": {\n    \"service_id\": \"premium-haircut\",\n    \"date\": \"2026-07-16\",\n    \"time\": \"15:00\",\n    \"booking_id\": \"BK-1042\"\n  },\n  \"confirmation_state\": null\n}\n```\n\n---\n\n## Why this stage exists\n\nConfirmation and execution are separate defenses: Planning proves that the user accepted the exact bound proposal, while the engine\u2019s execution gate proves that the selected committing step is eligible before dispatch. Persistence consumes the one-time authorization after success so a later \u201cyes\u201d cannot repeat the commit.\n\n---\n\n## Files involved\n\n```text\nsession/confirmation_gate.py\nplanning/facts/business_fact_registry.py\nplanning/planner/plan_builder.py\nengine/execution_coordinator.py\nexecution/action_runner.py\nexecution/dispatcher.py\nworkflows/booking/workflow.py\nsession/persist.py\n```\n\n---\n\n## Result\n\nResponse to user:\n\n> \u201cYour premium haircut is booked tomorrow at 3:00pm. Booking reference BK-1042.\u201d\n\nSession after persistence:\n\n```json\n{\n  \"intent_name\": \"CREATE_APPOINTMENT\",\n  \"slots\": {\n    \"service_id\": \"premium-haircut\",\n    \"date\": \"2026-07-16\",\n    \"time\": \"15:00\",\n    \"booking_id\": \"BK-1042\"\n  },\n  \"confirmation_state\": null,\n  \"availability_fingerprint\": \"fp:premium-haircut:2026-07-16\",\n  \"presented_availability\": {\"page_index\": 0, \"slots\": [\"13:00\", \"15:00\", \"16:00\"]}\n}\n```\n\n---\n\n<a id=\"turn-5\"></a>\n# Turn 5\n\n## User input\n\n```text\nShow me more times\n```\n\n---\n\n## What the system knows BEFORE this turn\n\n```json\n{\n  \"slots\": {\"booking_id\": \"BK-1042\"},\n  \"last_execution_result\": {\n    \"type\": \"availability\",\n    \"status\": \"success\",\n    \"slots\": [\"13:00\", \"15:00\", \"16:00\", \"16:30\", \"17:00\", \"17:30\"]\n  },\n  \"availability_presentation\": {\"page_index\": 0, \"page_size\": 3},\n  \"confirmation_state\": null\n}\n```\n\n---\n\n## Step-by-step execution\n\n### HTTP, session load, and ConversationEngine\n\n#### Called by\n\nThe client.\n\n#### Receives\n\n- Browse utterance\n- Completed booking session with cached availability\n\n#### What changes here\n\nThe session cache is made available to the engine.\n\n#### Produces\n\nPlanning input.\n\n#### Calls next\n\nPlanning.\n\n### NLU\n\n#### Called by\n\nPlanning.\n\n#### Receives\n\n- `Show me more times`\n- Conversation context\n\n#### What changes here\n\nNothing durable. NLU emits availability intent plus `operation=browse_next`.\n\n#### Produces\n\nA transient browse signal.\n\n#### Calls next\n\nMerge and planning.\n\n### Merge and decision\n\n#### Called by\n\nPlanning.\n\n#### Receives\n\n- Browse signal\n- Active durable session\n\n#### What changes here\n\nThe durable booking context remains visible, but the browse operation stays transient and is copied into the per-turn plan.\n\n#### Produces\n\nA plan carrying `_merged_luma_response.operation=browse_next`.\n\n#### Calls next\n\nBrowse branch.\n\n### Workflow browse branch\n\n#### Called by\n\n`ConversationEngine` before the normal execution gate.\n\n#### Receives\n\n- Browse operation\n- `last_execution_result`\n- Current page index\n\n#### What changes here\n\n`AvailabilityWorkflow` computes the next page from cached slots, updates only presentation state, and returns a complete turn result.\n\n#### Produces\n\nA synthetic availability result for page 2.\n\n#### Calls next\n\nWorkflow-local rendering, then persistence.\n\n### Execution\n\n#### Called by\n\nNobody on this branch.\n\n#### Receives\n\n- No dispatch request\n\n#### What changes here\n\nNothing. `SEARCH_AVAILABILITY` and booking APIs are not called.\n\n#### Produces\n\nNo backend execution result.\n\n#### Calls next\n\nNothing.\n\n### Rendering\n\n#### Called by\n\nAvailability pagination.\n\n#### Receives\n\n- Synthetic page-2 availability result\n- Conversation context\n\n#### What changes here\n\nThe cached page is rendered as if it were an availability result.\n\n#### Produces\n\nMore times.\n\n#### Calls next\n\nSession persistence.\n\n### Session persistence\n\n#### Called by\n\nHTTP API.\n\n#### Receives\n\n- Browse outcome\n- Previous cache\n\n#### What changes here\n\nThe full cached result and fingerprint are preserved; only `presented_availability` and `page_index` move forward. The browse signal is removed before persistence.\n\n#### Produces\n\nSession with page 2 active.\n\n#### Calls next\n\nHTTP response.\n\n---\n\n## Object evolution\n\nAfter NLU:\n\n```json\n{\n  \"intent\": {\"name\": \"AVAILABILITY\"},\n  \"operation\": \"browse_next\"\n}\n```\n\nAfter browse resolution:\n\n```json\n{\n  \"availability_browse\": {\"direction\": \"next\"},\n  \"current_page_index\": 0,\n  \"target_page_index\": 1\n}\n```\n\nAfter pagination:\n\n```json\n{\n  \"type\": \"availability\",\n  \"status\": \"success\",\n  \"slots\": [\"16:30\", \"17:00\", \"17:30\"],\n  \"availability_pagination\": {\n    \"direction\": \"next\",\n    \"page_index\": 1,\n    \"exhausted\": false\n  }\n}\n```\n\nAfter persistence \u2014 the operation is deliberately absent:\n\n```json\n{\n  \"availability_presentation\": {\"page_index\": 1, \"page_size\": 3},\n  \"presented_availability\": {\"slots\": [\"16:30\", \"17:00\", \"17:30\"]},\n  \"availability_fingerprint\": \"fp:premium-haircut:2026-07-16\"\n}\n```\n\n---\n\n## Why this stage exists\n\nBrowse is a workflow branch rather than a new search action because presentation movement is not commerce I/O. Keeping the full result in Session makes pagination cheap and stable; keeping the fingerprint unchanged proves that page 2 belongs to the same search criteria.\n\n---\n\n## Files involved\n\n```text\nengine/conversation_engine.py\nworkflows/availability/workflow.py\nworkflows/availability/browse.py\nworkflows/availability/pagination.py\nrendering/availability_renderer.py\nsession/persist.py\n```\n\n---\n\n## Result\n\nResponse to user:\n\n> \u201cMore times from that search: 4:30pm, 5:00pm, and 5:30pm.\u201d\n\nSession after persistence:\n\n```json\n{\n  \"slots\": {\n    \"booking_id\": \"BK-1042\",\n    \"service_id\": \"premium-haircut\",\n    \"date\": \"2026-07-16\",\n    \"time\": \"15:00\"\n  },\n  \"last_execution_result\": {\"type\": \"availability\", \"status\": \"success\"},\n  \"availability_presentation\": {\"page_index\": 1, \"page_size\": 3},\n  \"presented_availability\": {\"slots\": [\"16:30\", \"17:00\", \"17:30\"]},\n  \"availability_fingerprint\": \"fp:premium-haircut:2026-07-16\"\n}\n```\n\n---\n\n<a id=\"turn-6\"></a>\n# Turn 6\n\n## User input\n\n```text\nNo, make it 4pm instead\n```\n\n---\n\n## What the system knows BEFORE this turn\n\n```json\n{\n  \"intent_name\": \"CREATE_APPOINTMENT\",\n  \"slots\": {\n    \"service_id\": \"premium-haircut\",\n    \"date\": \"2026-07-16\",\n    \"time\": \"15:00\",\n    \"booking_id\": \"BK-1042\"\n  },\n  \"confirmation_state\": null,\n  \"availability_presentation\": {\"page_index\": 1}\n}\n```\n\nThe 3pm appointment is already committed. There is no open confirmation gate.\n\n---\n\n## Step-by-step execution\n\n### HTTP, session load, and ConversationEngine\n\n#### Called by\n\nThe client.\n\n#### Receives\n\n- Correction utterance\n- Completed booking session\n\n#### What changes here\n\nNothing; the engine forwards both to Planning.\n\n#### Produces\n\nPlanning input.\n\n#### Calls next\n\nPlanning.\n\n### NLU\n\n#### Called by\n\nPlanning.\n\n#### Receives\n\n- `No, make it 4pm instead`\n- Completed conversation context\n\n#### What changes here\n\nNothing durable. NLU emits a correction/refinement and an exact 4pm proposal.\n\n#### Produces\n\nA per-turn time revision delta.\n\n#### Calls next\n\nConfirmation classification.\n\n### Confirmation classification\n\n#### Called by\n\nPlanning.\n\n#### Receives\n\n- Revision language\n- `confirmation_state=null`\n\n#### What changes here\n\nNo pending confirmation can be rejected or revised. \u201cNo\u201d is not allowed to undo the already executed booking.\n\n#### Produces\n\nNo confirmation acceptance/rejection.\n\n#### Calls next\n\nIntent resolution and invalidation.\n\n### Invalidation and merge\n\n#### Called by\n\nPlanning/session merge.\n\n#### Receives\n\n- Existing committed `booking_id`\n- New booking temporal input\n\n#### What changes here\n\nCore treats new appointment slots on a completed `CREATE_APPOINTMENT` as a new booking request: stale commit identity and availability trust are invalidated before additive merge. The existing appointment is not modified.\n\n#### Produces\n\nA fresh appointment view with 4pm as a proposal and no reusable booking ID.\n\n#### Calls next\n\nBusiness facts.\n\n### Business facts and decision\n\n#### Called by\n\nPlan builder.\n\n#### Receives\n\n- New time proposal\n- Invalidated fingerprint\n- Carried service/date context\n\n#### What changes here\n\nBecause availability evidence is no longer trusted for the new request, policy selects `SEARCH_AVAILABILITY` again.\n\n#### Produces\n\nAn exploratory replan.\n\n#### Calls next\n\nExecution.\n\n### Execution and workflow\n\n#### Called by\n\n`ExecutionCoordinator`.\n\n#### Receives\n\n- Replanned search action\n- Availability client\n\n#### What changes here\n\nThe backend is searched for the new request. If 4pm is returned, the workflow binds it, sets a new fingerprint, and opens a new pending confirmation.\n\n#### Produces\n\nFresh availability plus a bound 4pm datetime.\n\n#### Calls next\n\nRendering.\n\n### Rendering\n\n#### Called by\n\n`ConversationEngine`.\n\n#### Receives\n\n- Exact-match result\n- New pending confirmation\n\n#### What changes here\n\nThe renderer acknowledges the new proposed time and asks for a new confirmation. It does not claim the old booking was changed.\n\n#### Produces\n\nA new-booking confirmation prompt.\n\n#### Calls next\n\nSession persistence.\n\n### Session persistence\n\n#### Called by\n\nHTTP API.\n\n#### Receives\n\n- Replanned outcome\n- Previous completed session\n\n#### What changes here\n\nThe session now represents the new uncommitted appointment proposal; the old `booking_id` is not carried into the new create flow.\n\n#### Produces\n\nNew pending booking state.\n\n#### Calls next\n\nHTTP response.\n\n---\n\n## Object evolution\n\nAfter NLU:\n\n```json\n{\n  \"intent\": {\"name\": \"CORRECTION\"},\n  \"time_proposal\": {\"mode\": \"exact\", \"start\": \"16:00\"}\n}\n```\n\nAfter confirmation classification \u2014 no gate is open:\n\n```json\n{\n  \"confirmation_state\": null,\n  \"gate_action\": \"none\"\n}\n```\n\nAfter invalidation/merge \u2014 completed identity and stale trust are removed:\n\n```json\n{\n  \"slots\": {\n    \"service_id\": \"premium-haircut\",\n    \"date\": \"2026-07-16\"\n  },\n  \"time_proposal\": {\"mode\": \"exact\", \"start\": \"16:00\"},\n  \"booking_id\": null,\n  \"availability_fingerprint\": null\n}\n```\n\nAfter planning:\n\n```json\n{\n  \"status\": \"READY\",\n  \"stage\": \"AVAILABILITY\",\n  \"action\": \"SEARCH_AVAILABILITY\"\n}\n```\n\nAfter search and exact binding:\n\n```json\n{\n  \"slots\": {\n    \"service_id\": \"premium-haircut\",\n    \"date\": \"2026-07-16\",\n    \"time\": \"16:00\"\n  },\n  \"time_match_outcome\": \"TIME_MATCH_EXACT\",\n  \"confirmation_state\": \"pending\"\n}\n```\n\nAfter persistence:\n\n```json\n{\n  \"intent_name\": \"CREATE_APPOINTMENT\",\n  \"slots\": {\n    \"service_id\": \"premium-haircut\",\n    \"date\": \"2026-07-16\",\n    \"time\": \"16:00\"\n  },\n  \"missing_slots\": [],\n  \"confirmation_state\": \"pending\",\n  \"availability_fingerprint\": \"fp:new:premium-haircut:2026-07-16\"\n}\n```\n\n---\n\n## Why this stage exists\n\nExplicit invalidation is the counterweight to additive merge: Core normally preserves durable state, so it needs named rules for the few moments when state becomes unsafe. Here the crucial safety rule is that a completed booking cannot be silently rewritten by a `CREATE_APPOINTMENT` correction; Core removes stale create-flow identity, replans, and requires confirmation again.\n\n---\n\n## Files involved\n\n```text\nplanning/planner/intent_resolution.py\nsession/confirmation_gate.py\nsession/invalidation.py\nsession/merge.py\nplanning/planner/plan_builder.py\nworkflows/availability/workflow.py\nsession/persist.py\n```\n\n---\n\n## Result\n\nResponse to user:\n\n> \u201c4:00pm is available for a new premium haircut appointment tomorrow. Shall I book it?\u201d\n\nSession after persistence:\n\n```json\n{\n  \"intent_name\": \"CREATE_APPOINTMENT\",\n  \"slots\": {\n    \"service_id\": \"premium-haircut\",\n    \"date\": \"2026-07-16\",\n    \"time\": \"16:00\"\n  },\n  \"confirmation_state\": \"pending\",\n  \"availability_fingerprint\": \"fp:new:premium-haircut:2026-07-16\"\n}\n```\n\n> [!IMPORTANT]\n> This turn did **not** modify booking `BK-1042`. A genuine modification must enter `MODIFY_BOOKING`, identify the booking, search replacement availability, obtain confirmation, and execute `APPLY_MODIFICATION`.\n\n---\n\n# What the six turns reveal\n\n## Session evolution\n\n```mermaid\nflowchart TD\n    S0[\"Before Turn 1<br/>{}\"]\n    S1[\"After Turn 1<br/>service=haircut<br/>date proposal<br/>availability page 1\"]\n    S2[\"After Turn 2<br/>service=premium<br/>refreshed fingerprint/cache\"]\n    S3[\"After Turn 3<br/>date+time bound<br/>confirmation=pending\"]\n    S4[\"After Turn 4<br/>booking_id=BK-1042<br/>confirmation consumed\"]\n    S5[\"After Turn 5<br/>same booking<br/>cache page=2\"]\n    S6[\"After Turn 6<br/>new 4pm create proposal<br/>no booking_id<br/>confirmation=pending\"]\n\n    S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6\n```\n\n## End-to-end runtime path\n\n```mermaid\nsequenceDiagram\n    actor User\n    participant API as api.message\n    participant Store as session\n    participant Engine as ConversationEngine\n    participant Plan as planning\n    participant NLU as adapters.nlu\n    participant Merge as session.merge\n    participant Policy as policy/config\n    participant Exec as execution\n    participant Flow as workflows\n    participant Render as rendering\n\n    User->>API: MessageRequest\n    API->>Store: get_session(user_id)\n    Store-->>API: durable state\n    API->>Engine: process_turn(text, session)\n    Engine->>Plan: plan_message\n    Plan->>NLU: resolve(text, context)\n    NLU-->>Plan: per-turn delta\n    Plan->>Merge: merge(delta, session)\n    Merge-->>Plan: effective response\n    Plan->>Policy: facts + select step\n    Policy-->>Engine: plan\n    alt browse operation\n        Engine->>Flow: paginate cached result\n    else executable action\n        Engine->>Exec: ActionRunner \u2192 dispatcher\n        Exec-->>Flow: normalized result\n        Flow-->>Engine: post-processed result\n    else no action\n        Note over Engine: planning response only\n    end\n    Engine->>Render: render structured result\n    Engine-->>API: outcome\n    API->>Store: project + save next session\n    API-->>User: MessageResponse\n```\n\n## Why the boundaries remain separate\n\n```mermaid\nflowchart LR\n    A[\"Adapters<br/>What did the user say?\"]\n    P[\"Planning<br/>What should happen next?\"]\n    X[\"Execution<br/>Perform selected I/O\"]\n    W[\"Workflows<br/>Interpret domain result\"]\n    R[\"Rendering<br/>How should it be said?\"]\n    S[\"Session<br/>What must survive?\"]\n\n    A --> P --> X --> W --> R\n    S --> P\n    W --> S\n    R -. \"text only\" .-> S\n```\n\n- **API** owns the external request and final persistence timing.\n- **Engine** owns turn order and execution eligibility.\n- **Adapters** provide stateless NLU and tenant context.\n- **Planning** derives facts and selects policy actions without commerce side effects.\n- **Execution** alone calls availability/booking backends.\n- **Workflows** own browse and post-execution domain processing, not dispatch.\n- **Rendering** adds user-facing text without changing business decisions.\n- **Session** is the only durable owner of booking conversation state.\n- **Tracing** observes every seam without becoming a business dependency.\n\n<details>\n<summary><strong>Planning in one diagram</strong></summary>\n\n```mermaid\nflowchart TD\n    I[\"text + Session\"] --> T[\"tenant/catalog context\"]\n    T --> N[\"NLU response\"]\n    N --> IR[\"effective intent\"]\n    IR --> G{\"durable flow<br/>merge eligible?\"}\n    G -->|yes| M[\"additive merge + explicit invalidation\"]\n    G -->|no| F[\"current-turn effective slots\"]\n    M --> MS[\"derive missing slots\"]\n    F --> MS\n    MS --> BF[\"derive business facts\"]\n    BF --> PS[\"policy selects next step\"]\n    PS --> O[\"plan: status/stage/action/awaiting\"]\n```\n\nPlanning has two distinct outputs: conversational state (`status`, `awaiting`, `missing_slots`) and an optional execution instruction (`action`). `READY` does not necessarily mean \u201call booking slots complete\u201d; an exploratory step can be ready when its own policy requirements are satisfied.\n\n</details>\n\n<details>\n<summary><strong>Decision Trace: how to debug this walkthrough</strong></summary>\n\nEnable Decision Trace with `DIALOGCART_TRACE_DECISIONS=1` (or the supported HTTP trace flag), then inspect evidence \u2192 decision \u2192 mutation nodes rather than reconstructing behavior from raw logs.\n\n```mermaid\nflowchart LR\n    E[\"Evidence<br/>NLU/session/fingerprint\"] --> D[\"Decision<br/>merge eligibility/action/gate\"]\n    D --> M[\"Mutation<br/>bind/invalidate/persist\"]\n    M --> V[\"Views<br/>summary/reasoning/Mermaid\"]\n```\n\nStart with:\n\n```text\ntracing/decision_trace.py\ntracing/stage_runner.py\ntracing/DECISION_TRACE.md\n```\n\n</details>\n\n---\n\n# Code navigation map\n\nUse the conversation question, not the package name, to choose a starting point.\n\n| Question | Start here |\n|---|---|\n| Where does an HTTP turn begin and end? | `api/message.py` |\n| Who controls stage order? | `engine/conversation_engine.py` |\n| Why did a tool run or not run? | `engine/execution_coordinator.py` and `planning/planner/plan_builder.py` |\n| How was the utterance understood? | `planning/nlu_invocation.py` and `adapters/nlu/` |\n| Why did old state survive? | `session/merge.py` |\n| Why was state removed? | `session/invalidation.py` |\n| Why is a slot still missing? | `planning/planner/missing_slots.py` and `config/intent_policy.yaml` |\n| Why did date/time remain a proposal? | `planning/temporal_proposal.py` |\n| How was an offered time bound? | `planning/time_resolution.py` |\n| What protects irreversible booking? | `session/confirmation_gate.py` |\n| Which backend call happened? | `execution/dispatcher.py` |\n| Why was availability searched again? | `planning/facts/business_fact_registry.py` and `workflows/availability/fingerprint.py` |\n| Why did browse avoid a search? | `workflows/availability/pagination.py` |\n| How was the reply produced? | `rendering/response_renderer.py` |\n| What becomes durable? | `session/persist.py` |\n| How do I see why a turn decided this? | `tracing/DECISION_TRACE.md` |\n\nThe invariant to carry into source changes is:\n\n> NLU supplies a per-turn delta. Session supplies durable truth. Planning decides. Execution performs. Workflows interpret. Rendering communicates. The API persists.\n";
+
+  function slugify(text) {
+    return text
+      .toLowerCase()
+      .trim()
+      .replace(/<[^>]+>/g, '')
+      .replace(/[^\w\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-');
+  }
+
+  function escapeHtml(s) {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function preprocessMarkdown(md) {
+    return md
+      .replace(/^> \[!NOTE\]\s*\n((?:>.*\n?)*)/gm, function (_, body) {
+        const inner = body.replace(/^> ?/gm, '').trim();
+        return '<div class="callout callout-note"><strong>Note</strong>\n\n' + inner + '\n\n</div>\n\n';
+      })
+      .replace(/^> \[!IMPORTANT\]\s*\n((?:>.*\n?)*)/gm, function (_, body) {
+        const inner = body.replace(/^> ?/gm, '').trim();
+        return '<div class="callout callout-important"><strong>Important</strong>\n\n' + inner + '\n\n</div>\n\n';
+      });
+  }
+
+  marked.setOptions({ gfm: true, breaks: false });
+
+  const renderer = new marked.Renderer();
+  const defaultCode = renderer.code.bind(renderer);
+  renderer.code = function (code, infostring) {
+    const lang = (infostring || '').trim().toLowerCase();
+    if (lang === 'mermaid') {
+      return '<div class="mermaid">' + code + '</div>';
+    }
+    if (lang === 'json') {
+      return '<pre><code class="language-json">' + escapeHtml(code) + '</code></pre>';
+    }
+    if (lang === 'text' || lang === 'txt') {
+      return '<pre><code class="language-plaintext">' + escapeHtml(code) + '</code></pre>';
+    }
+    return defaultCode(code, infostring);
+  };
+  marked.use({ renderer });
+
+  function addHeadingIds(container) {
+    const used = new Set();
+    container.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(function (h) {
+      let id = h.id;
+      if (!id) {
+        const base = slugify(h.textContent);
+        id = base;
+        let n = 2;
+        while (!id || used.has(id)) {
+          id = base + '-' + n++;
+        }
+      }
+      used.add(id);
+      h.id = id;
+      if (!h.querySelector('.heading-anchor')) {
+        const a = document.createElement('a');
+        a.className = 'heading-anchor';
+        a.href = '#' + id;
+        a.setAttribute('aria-hidden', 'true');
+        a.style.marginLeft = '.35rem';
+        a.style.opacity = '.35';
+        a.style.textDecoration = 'none';
+        a.textContent = '#';
+        h.appendChild(a);
+      }
+    });
+  }
+
+  function wrapTurnSections(container) {
+    const h1s = Array.from(container.children).filter(function (el) {
+      return el.tagName === 'H1' && /^Turn \d+$/.test(el.textContent.trim());
+    });
+
+    h1s.forEach(function (h1, idx) {
+      const prev = h1.previousElementSibling;
+      let anchorId = null;
+      if (prev && prev.tagName === 'A' && prev.id && prev.id.indexOf('turn-') === 0) {
+        anchorId = prev.id;
+        prev.remove();
+      }
+
+      const details = document.createElement('details');
+      details.className = 'turn-section';
+      details.open = true;
+
+      const summary = document.createElement('summary');
+      summary.textContent = h1.textContent.trim();
+
+      const body = document.createElement('div');
+      body.className = 'turn-body';
+
+      const stop = h1s[idx + 1] || null;
+      body.appendChild(h1);
+      let n = h1.nextSibling;
+      while (n && n !== stop) {
+        const next = n.nextSibling;
+        body.appendChild(n);
+        n = next;
+      }
+
+      details.appendChild(summary);
+      details.appendChild(body);
+
+      const insertPoint = stop;
+      if (anchorId) {
+        const anchor = document.createElement('span');
+        anchor.id = anchorId;
+        anchor.className = 'turn-anchor';
+        container.insertBefore(anchor, insertPoint);
+      }
+      container.insertBefore(details, insertPoint);
+    });
+  }
+
+  function buildNav(container) {
+    const nav = document.getElementById('nav-list');
+    nav.innerHTML = '';
+    container.querySelectorAll('h1,h2,h3,h4').forEach(function (h) {
+      if (h.closest('details.turn-section > .turn-body') && h.tagName === 'H1') return;
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = '#' + h.id;
+      a.textContent = h.textContent.replace(/\s*#$/, '').trim();
+      const depth = parseInt(h.tagName.charAt(1), 10);
+      a.className = 'depth-' + Math.min(depth, 4);
+      a.dataset.headingId = h.id;
+      li.appendChild(a);
+      nav.appendChild(li);
+    });
+  }
+
+  function highlightCode(container) {
+    container.querySelectorAll('pre code').forEach(function (block) {
+      hljs.highlightElement(block);
+    });
+  }
+
+  async function renderMermaid() {
+    const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default';
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: theme,
+      securityLevel: 'loose',
+      flowchart: { useMaxWidth: true, htmlLabels: true }
+    });
+    const nodes = document.querySelectorAll('.mermaid');
+    if (!nodes.length) return;
+    await mermaid.run({ nodes: nodes });
+  }
+
+  function setTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('arch-theme', theme);
+    document.getElementById('hljs-light').disabled = theme === 'dark';
+    document.getElementById('hljs-dark').disabled = theme !== 'dark';
+    renderMermaid().catch(console.error);
+  }
+
+  function initTheme() {
+    const saved = localStorage.getItem('arch-theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    setTheme(saved || (prefersDark ? 'dark' : 'light'));
+    document.getElementById('theme-toggle').addEventListener('click', function () {
+      const cur = document.documentElement.getAttribute('data-theme');
+      setTheme(cur === 'dark' ? 'light' : 'dark');
+    });
+  }
+
+  function initSearch() {
+    const input = document.getElementById('search');
+    const content = document.getElementById('content');
+
+    input.addEventListener('input', function () {
+      const q = input.value.trim().toLowerCase();
+      document.querySelectorAll('#nav-list a').forEach(function (a) {
+        a.classList.remove('hidden-by-search');
+      });
+      content.querySelectorAll('.search-hidden').forEach(function (el) {
+        el.classList.remove('search-hidden');
+      });
+
+      if (!q) return;
+
+      const matchedIds = new Set();
+      const sections = content.querySelectorAll('details.turn-section');
+      const blocks = content.querySelectorAll('h1,h2,h3,h4,p,li,td,th,blockquote,.callout,pre,details.turn-section');
+
+      blocks.forEach(function (el) {
+        const text = el.textContent.toLowerCase();
+        const hit = text.indexOf(q) !== -1;
+
+        if (el.matches('details.turn-section')) {
+          const childHit = Array.from(el.querySelectorAll('h2,h3,h4,p,li,pre,td')).some(function (c) {
+            return c.textContent.toLowerCase().indexOf(q) !== -1;
+          });
+          const visible = hit || childHit;
+          el.classList.toggle('search-hidden', !visible);
+          if (visible) {
+            el.open = true;
+            el.querySelectorAll('h1,h2,h3,h4').forEach(function (h) { matchedIds.add(h.id); });
+          }
+          return;
+        }
+
+        if (hit) {
+          el.classList.remove('search-hidden');
+          let p = el;
+          while (p && p !== content) {
+            if (/^H[1-4]$/.test(p.tagName)) matchedIds.add(p.id);
+            if (p.matches && p.matches('details.turn-section')) {
+              p.classList.remove('search-hidden');
+              p.open = true;
+            }
+            p = p.parentElement;
+          }
+        } else if (el.matches('p,li,pre,blockquote,td')) {
+          const inOpenSection = el.closest('details.turn-section:not(.search-hidden)');
+          if (!inOpenSection) el.classList.add('search-hidden');
+        }
+      });
+
+      document.querySelectorAll('#nav-list a').forEach(function (a) {
+        const id = a.dataset.headingId;
+        const navHit = a.textContent.toLowerCase().indexOf(q) !== -1;
+        const visible = navHit || matchedIds.has(id);
+        a.classList.toggle('hidden-by-search', !visible);
+      });
+    });
+  }
+
+  function initScrollSpy() {
+    const links = Array.from(document.querySelectorAll('#nav-list a'));
+    const headings = document.querySelectorAll('#content h1,#content h2,#content h3,#content h4');
+    const observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          links.forEach(function (l) {
+            l.classList.toggle('active', l.getAttribute('href') === '#' + entry.target.id);
+          });
+        }
+      });
+    }, { rootMargin: '-20% 0px -70% 0px', threshold: 0 });
+    headings.forEach(function (h) { observer.observe(h); });
+  }
+
+  function initBackToTop() {
+    const btn = document.getElementById('back-to-top');
+    window.addEventListener('scroll', function () {
+      btn.classList.toggle('visible', window.scrollY > 400);
+    });
+    btn.addEventListener('click', function () {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }
+
+  function initMobileNav() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('overlay');
+    function toggle() {
+      sidebar.classList.toggle('open');
+      overlay.classList.toggle('visible');
+    }
+    document.getElementById('nav-toggle').addEventListener('click', toggle);
+    overlay.addEventListener('click', toggle);
+    sidebar.querySelectorAll('a').forEach(function (a) {
+      a.addEventListener('click', function () {
+        sidebar.classList.remove('open');
+        overlay.classList.remove('visible');
+      });
+    });
+  }
+
+  async function main() {
+    const content = document.getElementById('content');
+    content.innerHTML = marked.parse(preprocessMarkdown(SOURCE));
+    addHeadingIds(content);
+    wrapTurnSections(content);
+    addHeadingIds(content);
+    content.querySelectorAll('details:not(.turn-section)').forEach(function (d) {
+      d.classList.add('native-details');
+    });
+    buildNav(content);
+    highlightCode(content);
+    initTheme();
+    await renderMermaid();
+    initSearch();
+    initScrollSpy();
+    initBackToTop();
+    initMobileNav();
+  }
+
+  main().catch(console.error);
+})();
+  </script>
+</body>
+</html>

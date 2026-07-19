@@ -32,7 +32,7 @@ from extensions.capabilities.clients.payment import (
 from extensions.capabilities.registry import clear_registry, register_adapter
 from extensions.capabilities.runner import CapabilityRunner
 from core.api.capability_boundary import apply_capability_to_result
-from core.session.persist import build_session_state_from_outcome
+from core.session.turn_persistence import project_and_persist_turn_result
 from core.adapters.clients.organization_client import OrganizationClient
 from core.adapters.nlu import LumaClient
 from core.api.compat import handle_message
@@ -70,7 +70,7 @@ def _simulate_post_message(
         transaction_id = str(uuid.uuid4())
 
     # Load session (only if status is NEEDS_CLARIFICATION or AWAITING_CAPABILITY)
-    session_state = get_session(user_id)
+    session_state = get_session(organization_id, user_id)
     if session_state and session_state.get("status") not in (
         "NEEDS_CLARIFICATION",
         "AWAITING_CAPABILITY",
@@ -119,12 +119,15 @@ def _simulate_post_message(
 
         if outcome_status in ("NEEDS_CLARIFICATION", "AWAITING_CAPABILITY"):
             # Save session state for follow-up
-            merged_luma_response = result.get("_merged_luma_response")
-            new_session_state = build_session_state_from_outcome(
-                outcome, outcome_status, merged_luma_response, session_state, user_id
+            project_and_persist_turn_result(
+                result=result,
+                outcome=outcome,
+                outcome_status=outcome_status,
+                organization_id=organization_id,
+                previous_session_state=session_state,
+                working_session_state=result.get("_working_session") or session_state,
+                user_id=user_id,
             )
-            if new_session_state:
-                save_session(user_id, new_session_state)
 
     return result
 
@@ -146,7 +149,7 @@ def test_core_capability_payment_end_to_end():
     text = "hello"
 
     # Cleanup
-    clear_session(user_id)
+    clear_session(1, user_id)
     clear_registry()
     reset_payment_store()
 
@@ -207,7 +210,7 @@ def test_core_capability_payment_end_to_end():
             "status": "READY",
             "active_capability": "payment",
         }
-        save_session(user_id, session_state)
+        save_session(1, user_id, session_state)
 
         # ============================================================
         # Act (First Turn): Call post_message() once
@@ -266,7 +269,7 @@ def test_core_capability_payment_end_to_end():
         # (Model B: capabilities are execution workflows, not planner side-effects)
         # ============================================================
         # Load session state to get booking data for capability execution
-        session_state_for_execution = get_session(user_id)
+        session_state_for_execution = get_session(1, user_id)
         if not session_state_for_execution:
             # Fall back to initial session state if not yet saved
             session_state_for_execution = session_state
@@ -354,11 +357,11 @@ def test_core_capability_payment_end_to_end():
         # ============================================================
         # Mark payment as paid in mock payment store (the backend the capability reads from)
         # This writes to _PAYMENT_STATE, which payment_client.get_payment_status() reads
-        mark_payment_as_paid("booking_123")
+        mark_payment_as_paid(1, "booking_123")
 
         # Verify payment is marked as paid in backend (the channel capability reads from)
         # E2E test verifies the payment status check succeeds - exact structure is tested in unit tests
-        payment_status_check = payment_client.get_payment_status("booking_123")
+        payment_status_check = payment_client.get_payment_status(1, "booking_123")
         assert (
             payment_status_check.get("success") is True
         ), "Payment status check should succeed"
@@ -373,7 +376,7 @@ def test_core_capability_payment_end_to_end():
         # (Model B: capabilities are execution workflows, not planner side-effects)
         # ============================================================
         # Load session state to get booking data for capability execution
-        session_state_for_reconciliation = get_session(user_id)
+        session_state_for_reconciliation = get_session(1, user_id)
         if not session_state_for_reconciliation:
             session_state_for_reconciliation = session_state
 
@@ -457,7 +460,7 @@ def test_core_capability_payment_end_to_end():
         # Merge capability reconciliation facts into session state so they're available to core
         # ============================================================
         # Load current session state
-        current_session = get_session(user_id)
+        current_session = get_session(1, user_id)
         if not current_session:
             current_session = session_state_for_reconciliation
 
@@ -472,7 +475,7 @@ def test_core_capability_payment_end_to_end():
             current_session["facts"].update(reconciliation_result.facts)
 
             # Save updated session state (now contains payment_satisfied=True)
-            save_session(user_id, current_session)
+            save_session(1, user_id, current_session)
 
         # ============================================================
         # Act (Third Turn - Reconciliation): Call post_message() with noop input
@@ -582,7 +585,7 @@ def test_core_capability_payment_end_to_end():
 
     finally:
         # Cleanup
-        clear_session(user_id)
+        clear_session(1, user_id)
         clear_registry()
         reset_payment_store()
 

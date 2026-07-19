@@ -7,10 +7,8 @@ Moved from capabilities/tests/mocks.py to follow client interface pattern.
 
 from typing import Any, Dict
 
-from .payment import PaymentClient
-
-# In-memory store: booking_code -> payment_state
-_PAYMENT_STATE: Dict[str, Dict[str, Any]] = {}
+# In-memory test/local store: (organization_id, booking_code) -> payment_state
+_PAYMENT_STATE: Dict[tuple[int, str], Dict[str, Any]] = {}
 
 
 def reset_payment_store():
@@ -18,7 +16,6 @@ def reset_payment_store():
     Reset the payment store (call in test setup/teardown).
     Ensures no shared state leaks across tests.
     """
-    global _PAYMENT_STATE
     _PAYMENT_STATE.clear()
 
 
@@ -30,7 +27,7 @@ def _get_booking_code(booking_id: int) -> str:
     return f"booking_{booking_id}"
 
 
-def mark_payment_as_paid(booking_code: str) -> None:
+def mark_payment_as_paid(organization_id: int, booking_code: str) -> None:
     """
     Marks booking as fully paid.
 
@@ -43,13 +40,14 @@ def mark_payment_as_paid(booking_code: str) -> None:
     Raises:
         KeyError: If booking_code has no payment intent
     """
-    if booking_code not in _PAYMENT_STATE:
+    key = (organization_id, booking_code)
+    if key not in _PAYMENT_STATE:
         raise KeyError(f"No payment intent found for booking_code: {booking_code}")
 
-    if not _PAYMENT_STATE[booking_code].get("intent_created"):
+    if not _PAYMENT_STATE[key].get("intent_created"):
         raise ValueError(f"Payment intent not created for booking_code: {booking_code}")
 
-    _PAYMENT_STATE[booking_code]["paid"] = True
+    _PAYMENT_STATE[key]["paid"] = True
 
 
 class MockPaymentClient:
@@ -61,6 +59,7 @@ class MockPaymentClient:
 
     def create_payment_intent(
         self,
+        organization_id: int,
         booking_id: int,
         amount: float,
         currency: str = "USD",
@@ -87,12 +86,13 @@ class MockPaymentClient:
             }
         """
         booking_code = _get_booking_code(booking_id)
+        key = (organization_id, booking_code)
 
         # Idempotent: if intent already exists, return it
-        if booking_code in _PAYMENT_STATE and _PAYMENT_STATE[booking_code].get(
+        if key in _PAYMENT_STATE and _PAYMENT_STATE[key].get(
             "intent_created"
         ):
-            existing = _PAYMENT_STATE[booking_code]
+            existing = _PAYMENT_STATE[key]
             return {
                 "success": True,
                 "data": {
@@ -102,11 +102,13 @@ class MockPaymentClient:
             }
 
         # Create new payment intent
-        payment_intent_id = f"pi_test_{booking_id}_{len(_PAYMENT_STATE)}"
-        payment_url = f"https://pay.test/{booking_code}"
+        payment_intent_id = (
+            f"pi_test_{organization_id}_{booking_id}_{len(_PAYMENT_STATE)}"
+        )
+        payment_url = f"https://pay.test/{organization_id}/{booking_code}"
 
         # Store payment state
-        _PAYMENT_STATE[booking_code] = {
+        _PAYMENT_STATE[key] = {
             "intent_created": True,
             "payment_intent_id": payment_intent_id,
             "payment_url": payment_url,
@@ -124,7 +126,9 @@ class MockPaymentClient:
             },
         }
 
-    def get_payment_url(self, booking_code: str) -> Dict[str, Any]:
+    def get_payment_url(
+        self, organization_id: int, booking_code: str
+    ) -> Dict[str, Any]:
         """
         Simulates GET /api/internal/bookings/{bookingCode}/payment-url
 
@@ -143,7 +147,8 @@ class MockPaymentClient:
                 }
             }
         """
-        if booking_code not in _PAYMENT_STATE:
+        key = (organization_id, booking_code)
+        if key not in _PAYMENT_STATE:
             return {
                 "success": True,
                 "data": {
@@ -151,7 +156,7 @@ class MockPaymentClient:
                 },
             }
 
-        state = _PAYMENT_STATE[booking_code]
+        state = _PAYMENT_STATE[key]
         if not state.get("intent_created"):
             return {
                 "success": True,
@@ -168,7 +173,9 @@ class MockPaymentClient:
             },
         }
 
-    def get_payment_status(self, booking_code: str) -> Dict[str, Any]:
+    def get_payment_status(
+        self, organization_id: int, booking_code: str
+    ) -> Dict[str, Any]:
         """
         Simulates GET /api/internal/bookings/{bookingCode}/payment-status
 
@@ -190,7 +197,8 @@ class MockPaymentClient:
                 }
             }
         """
-        if booking_code not in _PAYMENT_STATE:
+        key = (organization_id, booking_code)
+        if key not in _PAYMENT_STATE:
             # No payment intent created yet
             return {
                 "success": True,
@@ -201,7 +209,7 @@ class MockPaymentClient:
                 },
             }
 
-        state = _PAYMENT_STATE[booking_code]
+        state = _PAYMENT_STATE[key]
 
         if not state.get("intent_created"):
             return {

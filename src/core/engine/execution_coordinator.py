@@ -46,11 +46,12 @@ class ExecutionRunResult:
     can_execute: bool = False
     execution_result: Optional[Dict[str, Any]] = None
     session_state: Optional[Dict[str, Any]] = None
+    workflow_result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
 
 
 class ExecutionCoordinator:
-    """Coordinates policy eligibility, prep, ActionRunner, and workflow hooks."""
+    """Coordinates policy eligibility, dispatch, and workflow hooks."""
 
     def resolve(
         self,
@@ -61,11 +62,11 @@ class ExecutionCoordinator:
         user_id: str,
         availability_client: Optional[Any],
         organization_client: Optional[Any],
-        organization_id: Optional[int],
+        organization_id: int,
         kwargs: Dict[str, Any],
     ) -> ExecutionGateResult:
         """Eligibility gate + execution preparation (no tool I/O)."""
-        from core.config.org_resolver import _get_org_id_from_env
+        _ = session_store, user_id  # Compatibility-only; session is already loaded.
         from core.engine.outcome_builder import (
             build_planning_only_response,
             build_planning_response_from_plan,
@@ -192,10 +193,24 @@ class ExecutionCoordinator:
                 can_execute=False,
             )
 
-        if not slots.get("organization_id") and organization_id is not None:
-            slots["organization_id"] = organization_id
-        elif not slots.get("organization_id"):
-            slots["organization_id"] = _get_org_id_from_env()
+        slot_org = slots.get("organization_id")
+        if slot_org is not None and int(slot_org) != int(organization_id):
+            logger.warning(
+                "Ignoring conflicting slots.organization_id=%s (request=%s)",
+                slot_org,
+                organization_id,
+            )
+        slots["organization_id"] = organization_id
+
+        customer_id = kwargs.get("customer_id")
+        if customer_id is not None:
+            try:
+                customer_id = int(customer_id)
+            except (TypeError, ValueError):
+                logger.warning("Ignoring invalid customer_id=%r", customer_id)
+                customer_id = None
+            if customer_id is not None and customer_id > 0:
+                slots["customer_id"] = customer_id
 
         if action == "SEARCH_AVAILABILITY":
             from core.planning.temporal_proposal import (
@@ -203,7 +218,11 @@ class ExecutionCoordinator:
                 slots_for_availability_search,
             )
 
-            _exec_proposals = resolve_execution_proposals(plan, session_state)
+            _exec_proposals = resolve_execution_proposals(
+                plan,
+                session_state,
+                context=plan.get("execution_proposal_context"),
+            )
             slots = slots_for_availability_search(
                 slots,
                 _exec_proposals["date_proposal"],
@@ -217,11 +236,8 @@ class ExecutionCoordinator:
                 load_sku_to_catalog_id_for_org,
             )
 
-            _org_for_catalog = int(
-                slots.get("organization_id") or organization_id or 1
-            )
             plan["sku_to_catalog_id"] = load_sku_to_catalog_id_for_org(
-                _org_for_catalog, organization_client
+                organization_id, organization_client
             )
         except Exception as e:
             logger.debug("Could not load sku_to_catalog_id for execution: %s", e)
@@ -236,7 +252,7 @@ class ExecutionCoordinator:
                 if not isinstance(plan_facts, dict):
                     plan_facts = {}
 
-            if organization_client and organization_id:
+            if organization_client:
                 if not plan_facts.get("org"):
                     try:
                         org_details = organization_client.get_details(organization_id)
@@ -266,33 +282,17 @@ class ExecutionCoordinator:
                 slots.get("datetime_range"), dict
             ):
                 resolved_datetime_range = None
-                current_session = session_state or {}
 
                 if isinstance(session_state, dict):
                     resolved_datetime_range = session_state.get(
                         "resolved_datetime_range"
                     )
-
-                if not resolved_datetime_range and session_store is not None:
-                    try:
-                        if hasattr(session_store, "get_session"):
-                            current_session = (
-                                session_store.get_session(user_id) or current_session
+                    if not resolved_datetime_range:
+                        planning = session_state.get("planning")
+                        if isinstance(planning, dict):
+                            resolved_datetime_range = planning.get(
+                                "bound_datetime"
                             )
-                        elif callable(session_store):
-                            current_session = (
-                                session_store(user_id) or current_session
-                            )
-
-                        if isinstance(current_session, dict):
-                            resolved_datetime_range = current_session.get(
-                                "resolved_datetime_range"
-                            )
-                    except Exception as e:
-                        logger.debug(
-                            "Failed to get resolved_datetime_range from "
-                            f"session_store: {e}"
-                        )
 
                 if resolved_datetime_range and isinstance(
                     resolved_datetime_range, dict
@@ -326,20 +326,16 @@ class ExecutionCoordinator:
         *,
         session_store: Optional[Any],
         user_id: str,
-        organization_id: Optional[int],
-        action_runner: Any,
+        organization_id: int,
         workflow_router: Any,
         booking_workflow: Any,
         availability_workflow: Any,
         kwargs: Dict[str, Any],
     ) -> ExecutionRunResult:
-        """Dispatch ActionRunner and run booking/availability post-processing."""
+        """Dispatch the selected action and run domain post-processing."""
+        from core.execution.dispatcher import execute
         from core.engine.outcome_builder import (
-            build_outcome_from_decision,
             build_planning_response_from_plan,
-        )
-        from core.planning.time_resolution import (
-            sync_execution_plan_from_time_resolution,
         )
 
         assert gate.path == "ready"
@@ -354,6 +350,7 @@ class ExecutionCoordinator:
         intent_name = gate.intent_name
         slots = gate.slots
         session_state = gate.session_state
+        workflow_result = None
 
         try:
             _route = workflow_router.get_route(client_name)
@@ -361,13 +358,13 @@ class ExecutionCoordinator:
                 booking_client_for_execution = None
                 if intent_name == "MODIFY_BOOKING":
                     booking_client_for_execution = kwargs.get("booking_client")
-                execution_result = action_runner.run(
+                execution_result = execute(
                     plan=plan,
                     availability_client=execution_client,
                     booking_client=booking_client_for_execution,
                 )
             elif _route == "booking":
-                execution_result = action_runner.run(
+                execution_result = execute(
                     plan=plan, booking_client=execution_client
                 )
             else:
@@ -389,13 +386,18 @@ class ExecutionCoordinator:
                 plan=plan,
                 slots=slots,
                 action=action,
+                session_state=session_state,
             )
 
             if (
-                execution_result.get("type") == "availability"
-                and execution_result.get("status") == "success"
+                execution_result.get("status") == "succeeded"
+                and isinstance(execution_result.get("availability"), dict)
             ):
-                slots, session_state = availability_workflow.process_search_result(
+                (
+                    slots,
+                    session_state,
+                    workflow_result,
+                ) = availability_workflow.process_search_result(
                     execution_result=execution_result,
                     plan=plan,
                     slots=slots,
@@ -405,54 +407,56 @@ class ExecutionCoordinator:
                     organization_id=organization_id,
                 )
 
-            decision = plan.get("_decision")
-            if decision:
-                outcome_from_decision = build_outcome_from_decision(decision)
-                if not isinstance(execution_result, dict):
-                    execution_result = {}
-                if "plan" not in execution_result or not isinstance(
-                    execution_result.get("plan"), dict
-                ):
-                    execution_result["plan"] = {}
-                execution_result["plan"]["status"] = outcome_from_decision.get(
-                    "plan", {}
-                ).get("status")
-                execution_result["plan"]["stage"] = outcome_from_decision.get(
-                    "plan", {}
-                ).get("stage")
-                execution_result["plan"]["action"] = outcome_from_decision.get(
-                    "plan", {}
-                ).get("action")
-            else:
-                plan_obj = plan.get("plan", {})
-                if not isinstance(plan_obj, dict):
-                    plan_obj = {}
-                if not isinstance(execution_result, dict):
-                    execution_result = {}
-                if "plan" not in execution_result or not isinstance(
-                    execution_result.get("plan"), dict
-                ):
-                    execution_result["plan"] = {}
-                execution_result["plan"]["status"] = plan_obj.get(
-                    "status"
-                ) or plan.get("status")
-                execution_result["plan"]["stage"] = plan_obj.get(
-                    "stage"
-                ) or plan.get("stage")
-                execution_result["plan"]["action"] = plan_obj.get(
-                    "action"
-                ) or plan.get("action")
+            # Carry planner-owned missing_slots onto the execution outcome so
+            # persistence consumes Planning's canonical list (never recomputes).
+            outcome = dict(execution_result)
+            plan_missing = plan.get("missing_slots")
+            if isinstance(plan_missing, list):
+                outcome["missing_slots"] = list(plan_missing)
+                plan_facts = plan.get("facts")
+                facts = (
+                    dict(plan_facts)
+                    if isinstance(plan_facts, dict)
+                    else {}
+                )
+                facts.setdefault("missing_slots", list(plan_missing))
+                if isinstance(plan.get("slots"), dict):
+                    facts.setdefault("slots", dict(plan["slots"]))
+                outcome["facts"] = facts
+            if not outcome.get("intent_name") and not outcome.get("intent"):
+                intent_name = plan.get("intent_name") or plan.get("intent")
+                if intent_name:
+                    outcome["intent_name"] = intent_name
 
-            sync_execution_plan_from_time_resolution(plan, execution_result)
+            # Preserve planner-owned turn_operation on the HTTP outcome envelope.
+            if plan.get("turn_operation"):
+                nested_plan = outcome.get("plan")
+                nested = dict(nested_plan) if isinstance(nested_plan, dict) else {}
+                nested["turn_operation"] = plan.get("turn_operation")
+                outcome["plan"] = nested
 
             result = {
-                "success": True,
-                "result": execution_result,
-                "outcome": execution_result,
+                "success": execution_result.get("status") != "failed",
+                "outcome": outcome,
                 "plan": plan,
+                "_execution_result": execution_result,
+                "_working_session": session_state,
             }
+            if isinstance(workflow_result, dict):
+                result["_workflow_result"] = workflow_result
             result.setdefault("ui_actions", [])
             result["_merged_luma_response"] = plan.get("_merged_luma_response")
+
+            from core.planning.planner.plan_builder import (
+                overlay_post_execution_planning_on_outcome,
+                post_execution_planner_status,
+            )
+
+            overlay_post_execution_planning_on_outcome(plan, outcome)
+            _post_status = post_execution_planner_status(result)
+            if _post_status:
+                plan_status = _post_status
+                result["projection_status"] = _post_status
 
             return ExecutionRunResult(
                 path="executed",
@@ -463,6 +467,7 @@ class ExecutionCoordinator:
                 can_execute=True,
                 execution_result=execution_result,
                 session_state=session_state,
+                workflow_result=workflow_result,
             )
         except Exception as e:
             logger.error(f"Execution failed for action {action}: {e}")

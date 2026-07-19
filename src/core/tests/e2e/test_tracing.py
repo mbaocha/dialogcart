@@ -42,9 +42,9 @@ def _trace_record(trace: dict, record_id: str) -> dict:
 @pytest.fixture
 def trace_user_id():
     user_id = "test-decision-trace"
-    clear_session(user_id)
+    clear_session(1, user_id)
     yield user_id
-    clear_session(user_id)
+    clear_session(1, user_id)
 
 
 @pytest.fixture
@@ -111,7 +111,7 @@ def handle_message_with_booking_mocks(booking_message_mocks, monkeypatch):
         merged = {**booking_message_mocks, **kwargs}
         return real_handle_message(**merged)
 
-    monkeypatch.setattr(message_api, "handle_message", _handle_message)
+    monkeypatch.setattr(message_api._engine, "process_turn", _handle_message)
     return _handle_message
 
 

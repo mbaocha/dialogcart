@@ -10,9 +10,9 @@ from core.session.session_manager import clear_session, get_session, save_sessio
 @pytest.fixture
 def user_id():
     uid = "test-ready-persist-user"
-    clear_session(uid)
+    clear_session(1, uid)
     yield uid
-    clear_session(uid)
+    clear_session(1, uid)
 
 
 def _turn1_session():
@@ -60,18 +60,28 @@ def _executed_success_after_premium_outcome():
         "success": True,
         "text": "Here are available times for Premium Haircut.",
         "outcome": {
-            "status": "success",
-            "type": "availability",
-            "slots": [
-                {
-                    "starts_at": "2026-07-03T09:00:00Z",
-                    "ends_at": "2026-07-03T09:30:00Z",
-                }
-            ],
+            "schema_version": 1,
+            "status": "succeeded",
+            "intent_name": "CREATE_APPOINTMENT",
+            "missing_slots": ["date", "time"],
+            "facts": {
+                "slots": {"service_id": "premium haircut"},
+                "missing_slots": ["date", "time"],
+            },
+            "subject": {"kind": "availability"},
+            "availability": {
+                "slots": [
+                    {
+                        "starts_at": "2026-07-03T09:00:00Z",
+                        "ends_at": "2026-07-03T09:30:00Z",
+                    }
+                ]
+            },
             "plan": {
                 "status": "READY",
                 "stage": "AVAILABILITY",
                 "action": "SEARCH_AVAILABILITY",
+                "missing_slots": ["date", "time"],
             },
         },
         "plan": {
@@ -79,6 +89,12 @@ def _executed_success_after_premium_outcome():
             "status": "READY",
             "stage": "AVAILABILITY",
             "action": "SEARCH_AVAILABILITY",
+            "missing_slots": ["date", "time"],
+            "slots": {"service_id": "premium haircut"},
+            "facts": {
+                "slots": {"service_id": "premium haircut"},
+                "missing_slots": ["date", "time"],
+            },
         },
         "_merged_luma_response": {
             "intent": {"name": "CREATE_APPOINTMENT"},
@@ -92,10 +108,10 @@ def _executed_success_after_premium_outcome():
 
 def test_ready_outcome_persists_service_id_slots(user_id, api_client):
     """Simulate turn 2 (premium → SEARCH_AVAILABILITY): slots must survive on disk."""
-    save_session(user_id, _turn1_session())
+    save_session(1, user_id, _turn1_session())
 
     with patch(
-        "core.api.message.handle_message",
+        "core.api.message._engine.process_turn",
         return_value=_ready_after_premium_outcome(),
     ):
         resp = api_client.post(
@@ -104,7 +120,7 @@ def test_ready_outcome_persists_service_id_slots(user_id, api_client):
         )
 
     assert resp.status_code == 200
-    session = get_session(user_id)
+    session = get_session(1, user_id)
     assert session is not None
     assert session.get("slots", {}).get("service_id") == "premium haircut"
     assert session.get("status") == "READY"
@@ -115,11 +131,11 @@ def test_ready_outcome_persists_service_id_slots(user_id, api_client):
 
 
 def test_executed_success_outcome_persists_service_id_slots(user_id, api_client):
-    """Availability execution with status=success must still persist merged booking slots."""
-    save_session(user_id, _turn1_session())
+    """Availability execution with status=succeeded must still persist merged booking slots."""
+    save_session(1, user_id, _turn1_session())
 
     with patch(
-        "core.api.message.handle_message",
+        "core.api.message._engine.process_turn",
         return_value=_executed_success_after_premium_outcome(),
     ):
         resp = api_client.post(
@@ -128,7 +144,7 @@ def test_executed_success_outcome_persists_service_id_slots(user_id, api_client)
         )
 
     assert resp.status_code == 200
-    session = get_session(user_id)
+    session = get_session(1, user_id)
     assert session is not None
     assert session.get("slots", {}).get("service_id") == "premium haircut"
     assert "service_id" not in (session.get("missing_slots") or [])
@@ -172,7 +188,7 @@ def _awaiting_confirmation_after_time_bind_outcome():
                 "time": "14:30",
             },
             "missing_slots": [],
-            "booking": {"confirmation_state": "pending"},
+            "confirmation_state": "pending",
             "facts": {
                 "slots": {
                     "service_id": "premium haircut",
@@ -207,17 +223,17 @@ def _awaiting_confirmation_after_time_bind_outcome():
                 "start": "2026-07-03T14:30:00Z",
                 "end": "2026-07-03T15:00:00Z",
             },
-            "booking": {"confirmation_state": "pending"},
+            "confirmation_state": "pending",
         },
     }
 
 
 def test_awaiting_confirmation_outcome_persists_bound_datetime_and_pending(user_id, api_client):
     """Time-bind turn (AWAITING_CONFIRMATION) must persist slots and confirmation_state."""
-    save_session(user_id, _session_after_availability_search())
+    save_session(1, user_id, _session_after_availability_search())
 
     with patch(
-        "core.api.message.handle_message",
+        "core.api.message._engine.process_turn",
         return_value=_awaiting_confirmation_after_time_bind_outcome(),
     ):
         resp = api_client.post(
@@ -226,15 +242,14 @@ def test_awaiting_confirmation_outcome_persists_bound_datetime_and_pending(user_
         )
 
     assert resp.status_code == 200
-    session = get_session(user_id)
+    session = get_session(1, user_id)
     assert session is not None
     slots = session.get("slots") or {}
     assert slots.get("date") == "2026-07-03"
     assert slots.get("time") == "14:30"
     resolved = session.get("resolved_datetime_range") or {}
     assert resolved.get("start") == "2026-07-03T14:30:00Z"
-    booking = session.get("booking") or {}
-    assert booking.get("confirmation_state") == "pending"
     assert session.get("confirmation_state") == "pending"
+    assert "confirmation_state" not in (session.get("booking") or {})
     assert session.get("status") == "NEEDS_CLARIFICATION"
     assert session.get("missing_slots") == []

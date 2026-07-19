@@ -15,14 +15,25 @@ from core.planning.temporal_proposal import (
     apply_time_constraint_to_missing_slots,
     datetime_range_from_availability_result,
     enrich_last_execution_result,
-    get_cached_availability_offers,
+    get_presented_availability_offers,
     resolve_execution_proposals,
     slots_for_availability_search,
     strip_unconfirmed_temporal_slots,
     temporal_slots_confirmed,
     try_bind_offered_time_selection,
 )
-from core.rendering.availability_renderer import build_presented_availability
+from core.workflows.availability.discovery.bridge import present_via_discovery
+
+
+def _cache_and_presented(slots, *, search_date: str):
+    """Build AvailabilityCache + Discovery Navigator presented window."""
+    cache = {
+        "type": "availability",
+        "status": "success",
+        "slots": list(slots),
+        "search_date": search_date,
+    }
+    return cache, present_via_discovery(cache, search_date=search_date)
 
 
 # ---------------------------------------------------------------------------
@@ -137,17 +148,19 @@ class TestSlotsForAvailabilitySearch:
 
 class TestTryBindOfferedTimeSelection:
     def test_binds_matching_offered_time(self):
+        slots = [
+            {
+                "starts_at": "2026-07-06T09:00:00Z",
+                "ends_at": "2026-07-06T09:30:00Z",
+            }
+        ]
+        cache, presented = _cache_and_presented(slots, search_date="2026-07-06")
         session = {
             "last_execution_result": {
-                "type": "availability",
-                "status": "success",
-                "slots": [
-                    {
-                        "starts_at": "2026-07-06T09:00:00Z",
-                        "ends_at": "2026-07-06T09:30:00Z",
-                    }
-                ],
-            }
+                **cache,
+                "availability_fingerprint": None,
+            },
+            "presented_availability": presented,
         }
         result = try_bind_offered_time_selection(
             {"service_id": "premium haircut"},
@@ -161,17 +174,16 @@ class TestTryBindOfferedTimeSelection:
         assert result["resolved_datetime_range"]["start"] == "2026-07-06T09:00:00Z"
 
     def test_rejects_time_not_in_offers(self):
-        session = {
-            "last_execution_result": {
-                "type": "availability",
-                "status": "success",
-                "slots": [
-                    {
-                        "starts_at": "2026-07-06T09:00:00Z",
-                        "ends_at": "2026-07-06T09:30:00Z",
-                    }
-                ],
+        slots = [
+            {
+                "starts_at": "2026-07-06T09:00:00Z",
+                "ends_at": "2026-07-06T09:30:00Z",
             }
+        ]
+        cache, presented = _cache_and_presented(slots, search_date="2026-07-06")
+        session = {
+            "last_execution_result": cache,
+            "presented_availability": presented,
         }
         result = try_bind_offered_time_selection(
             {"service_id": "premium haircut"},
@@ -183,22 +195,20 @@ class TestTryBindOfferedTimeSelection:
 
     def test_binds_latest_presented_date_not_stale_date_proposal(self):
         """User picks from July 3 offers; stale date_proposal must not force July 6."""
+        slots = [
+            {
+                "starts_at": "2026-07-03T09:00:00Z",
+                "ends_at": "2026-07-03T09:30:00Z",
+            },
+            {
+                "starts_at": "2026-07-03T09:30:00Z",
+                "ends_at": "2026-07-03T10:00:00Z",
+            },
+        ]
+        cache, presented = _cache_and_presented(slots, search_date="2026-07-03")
         session = {
-            "last_execution_result": {
-                "type": "availability",
-                "status": "success",
-                "search_date": "2026-07-03",
-                "slots": [
-                    {
-                        "starts_at": "2026-07-03T09:00:00Z",
-                        "ends_at": "2026-07-03T09:30:00Z",
-                    },
-                    {
-                        "starts_at": "2026-07-03T09:30:00Z",
-                        "ends_at": "2026-07-03T10:00:00Z",
-                    },
-                ],
-            }
+            "last_execution_result": cache,
+            "presented_availability": presented,
         }
         result = try_bind_offered_time_selection(
             {"service_id": "premium haircut", "date": "2026-07-06"},
@@ -218,6 +228,7 @@ class TestTryBindOfferedTimeSelection:
                 "ends_at": "2026-07-06T09:30:00Z",
             }
         ]
+        cache, presented = _cache_and_presented(july6_slots, search_date="2026-07-06")
         session = {
             "last_execution_result": enrich_last_execution_result(
                 {
@@ -227,9 +238,7 @@ class TestTryBindOfferedTimeSelection:
                 },
                 search_date="2026-07-06",
             ),
-            "presented_availability": build_presented_availability(
-                july6_slots, search_date="2026-07-06"
-            ),
+            "presented_availability": presented,
         }
         result = try_bind_offered_time_selection(
             {"service_id": "premium haircut"},
@@ -248,13 +257,9 @@ class TestTryBindOfferedTimeSelection:
             {"starts_at": "2026-07-09T11:00:00Z", "ends_at": "2026-07-09T11:30:00Z"},
             {"starts_at": "2026-07-09T17:00:00Z", "ends_at": "2026-07-09T17:30:00Z"},
         ]
-        presented = build_presented_availability(
-            [
-                full_slots[0],
-                full_slots[1],
-                full_slots[3],
-            ],
-            search_date="2026-07-09",
+        presented_slots = [full_slots[0], full_slots[1], full_slots[3]]
+        _, presented = _cache_and_presented(
+            presented_slots, search_date="2026-07-09"
         )
         session = {
             "last_execution_result": {
@@ -282,7 +287,7 @@ class TestTryBindOfferedTimeSelection:
         assert result["slots"]["time"] == "17:00"
 
     def test_legacy_fallback_caps_to_presentation_size(self):
-        """Without presented_availability, only the UI-sized prefix is selectable."""
+        """Discovery presentation window caps selectable times to the UI page size."""
         slots = [
             {
                 "starts_at": f"2026-07-06T{h:02d}:00:00Z",
@@ -290,15 +295,13 @@ class TestTryBindOfferedTimeSelection:
             }
             for h in range(9, 18)
         ]
+        cache, presented = _cache_and_presented(slots, search_date="2026-07-06")
+        # First page only (default max times); 16:00 is not in the presented window
+        assert len(presented.get("slots") or []) <= 6
         session = {
-            "last_execution_result": {
-                "type": "availability",
-                "status": "success",
-                "search_date": "2026-07-06",
-                "slots": slots,
-            }
+            "last_execution_result": cache,
+            "presented_availability": presented,
         }
-        # First 6 hours (9-14) are presented; 16:00 is not
         assert try_bind_offered_time_selection(
             {"service_id": "premium haircut"},
             session,
@@ -332,7 +335,7 @@ class TestGetCachedAvailabilityOffers:
                 ],
             },
         }
-        offers = get_cached_availability_offers(session)
+        offers = get_presented_availability_offers(session)
         assert len(offers) == 1
         assert offers[0]["starts_at"].startswith("2026-07-09T09:00")
 
@@ -349,7 +352,7 @@ class TestGetCachedAvailabilityOffers:
                 ],
             }
         }
-        offers = get_cached_availability_offers(session)
+        offers = get_presented_availability_offers(session)
         assert len(offers) == 2
         assert all("2026-07-03" in (o.get("starts_at") or "") for o in offers)
 
@@ -481,6 +484,62 @@ class TestResolveExecutionProposals:
         assert result["date_proposal"]["start"] == "2026-01-14"
         assert result["time_proposal"]["value"] == "15:00"
 
+    def test_typed_invalidation_suppresses_only_session_time_proposal(self):
+        context = {
+            "current_turn_time_proposal": None,
+            "current_turn_time_constraint": None,
+            "current_turn_has_explicit_time": False,
+            "session_time_proposal_reuse_allowed": False,
+            "confirmation_continuation": False,
+            "availability_invalidated": True,
+            "bound_datetime_cleared": True,
+        }
+        session = {
+            "date_proposal": {"mode": "single_day", "start": "2026-07-21"},
+            "time_proposal": {"mode": "exact", "value": "09:00"},
+        }
+
+        result = resolve_execution_proposals({}, session, context=context)
+
+        assert result["date_proposal"]["start"] == "2026-07-21"
+        assert result["time_proposal"] is None
+
+    def test_current_turn_time_wins_when_session_reuse_is_suppressed(self):
+        context = {
+            "current_turn_time_proposal": {"mode": "exact", "value": "10:00"},
+            "current_turn_time_constraint": None,
+            "current_turn_has_explicit_time": True,
+            "session_time_proposal_reuse_allowed": False,
+            "confirmation_continuation": False,
+            "availability_invalidated": True,
+            "bound_datetime_cleared": True,
+        }
+        session = {"time_proposal": {"mode": "exact", "value": "09:00"}}
+
+        result = resolve_execution_proposals({}, session, context=context)
+
+        assert result["time_proposal"]["value"] == "10:00"
+
+    def test_current_turn_constraint_precedes_reusable_session_time(self):
+        context = {
+            "current_turn_time_proposal": None,
+            "current_turn_time_constraint": {
+                "mode": "exact",
+                "start": "10:00",
+                "end": "10:00",
+            },
+            "current_turn_has_explicit_time": True,
+            "session_time_proposal_reuse_allowed": True,
+            "confirmation_continuation": False,
+            "availability_invalidated": False,
+            "bound_datetime_cleared": False,
+        }
+        session = {"time_proposal": {"mode": "exact", "value": "09:00"}}
+
+        result = resolve_execution_proposals({}, session, context=context)
+
+        assert result["time_proposal"]["value"] == "10:00"
+
 
 # ---------------------------------------------------------------------------
 # Multi-turn durability: date_proposal persists when next turn gives only time
@@ -572,12 +631,14 @@ class TestDatetimeRangeFromAvailabilityResult:
     def test_extracts_from_starts_at_ends_at(self):
         result = datetime_range_from_availability_result(
             {
-                "slots": [
-                    {
-                        "starts_at": "2026-03-05T15:00:00Z",
-                        "ends_at": "2026-03-08T11:00:00Z",
-                    }
-                ]
+                "availability": {
+                    "slots": [
+                        {
+                            "starts_at": "2026-03-05T15:00:00Z",
+                            "ends_at": "2026-03-08T11:00:00Z",
+                        }
+                    ]
+                }
             }
         )
         assert result == {
@@ -587,11 +648,25 @@ class TestDatetimeRangeFromAvailabilityResult:
 
     def test_extracts_from_start_end_keys(self):
         result = datetime_range_from_availability_result(
-            {"slots": [{"start": "2026-01-16T15:00:00Z", "end": "2026-01-16T16:00:00Z"}]}
+            {
+                "availability": {
+                    "slots": [
+                        {
+                            "start": "2026-01-16T15:00:00Z",
+                            "end": "2026-01-16T16:00:00Z",
+                        }
+                    ]
+                }
+            }
         )
         assert result["start"] == "2026-01-16T15:00:00Z"
         assert result["end"] == "2026-01-16T16:00:00Z"
 
     def test_empty_slots_returns_none(self):
-        assert datetime_range_from_availability_result({"slots": []}) is None
+        assert (
+            datetime_range_from_availability_result(
+                {"availability": {"slots": []}}
+            )
+            is None
+        )
         assert datetime_range_from_availability_result(None) is None

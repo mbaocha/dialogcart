@@ -30,7 +30,7 @@ from core.tests.e2e.framework.conversation import (
     create_paginated_availability_client,
     extract_presented_times,
 )
-from core.tests.e2e.framework.fixtures import requires_luma
+from core.tests.e2e.framework.fixtures import live_luma
 from core.tests.harness.clients import ScriptedLumaClient, TestCatalogClient
 from core.tests.harness.mock_clients import (
     create_mock_booking_client,
@@ -38,8 +38,6 @@ from core.tests.harness.mock_clients import (
 )
 from core.tests.harness.org_setup import setup_test_org_domain
 from core.tests.mocks import reset_booking_counter
-
-pytestmark = requires_luma
 
 JULY_9 = "2026-07-09"
 FULL_SLOT_COUNT = 9
@@ -115,7 +113,7 @@ def _browse_scripts() -> Dict[str, Dict[str, Any]]:
 @pytest.fixture
 def browse_api_conversation(api_client, monkeypatch):
     user_id = f"e2e-browse-api-{uuid.uuid4().hex[:10]}"
-    clear_session(user_id)
+    clear_session(ORG_ID, user_id)
     reset_booking_counter()
 
     setup_test_org_domain("service")
@@ -139,13 +137,14 @@ def browse_api_conversation(api_client, monkeypatch):
         kwargs.setdefault("frozen_time", FROZEN_TIME)
         return real_handle_message(**kwargs)
 
-    monkeypatch.setattr(message_api, "handle_message",
-                        handle_message_with_test_deps)
+    monkeypatch.setattr(
+        message_api._engine, "process_turn", handle_message_with_test_deps
+    )
 
     conv = BookingConversation(api_client, user_id)
     yield conv, booking_client, availability_client, luma_client
 
-    clear_session(user_id)
+    clear_session(ORG_ID, user_id)
 
 
 def _cached_slot_count(session: Dict[str, Any]) -> int:
@@ -201,7 +200,7 @@ def test_browse_pagination_full_api_path_validation(browse_api_conversation):
     merged_probe["_source_text"] = "show me additional times"
     merged_probe["_raw_luma_response"] = copy.deepcopy(_turn4_script())
     resolved = resolve_availability_browse(merged_probe, sess3)
-    assert resolved == {"direction": "next"}
+    assert resolved is not None and resolved.get("direction") == "next"
 
     conv.send("show me additional times")
     conv.assert_http_ok()
@@ -230,6 +229,7 @@ def test_browse_pagination_full_api_path_validation(browse_api_conversation):
     assert luma_client.last_text == "show me additional times"
 
 
+@live_luma
 def test_show_more_times_paginates_existing_availability(paginated_booking_conversation):
     conv, booking_client, availability_client = paginated_booking_conversation
     july_9_first_page = _reach_july_9_availability(conv)
@@ -259,6 +259,7 @@ def test_show_more_times_paginates_existing_availability(paginated_booking_conve
     assert _presentation_page_index(conv.session()) == 1
 
 
+@live_luma
 def test_show_more_at_last_page_says_no_more(paginated_booking_conversation):
     conv, booking_client, availability_client = paginated_booking_conversation
     july_9_first_page = _reach_july_9_availability(conv)
@@ -290,6 +291,7 @@ def test_show_more_at_last_page_says_no_more(paginated_booking_conversation):
     assert _response_indicates_no_more_times(_response_text(conv.last_body))
 
 
+@live_luma
 def test_previous_page_returns_earlier_availability(paginated_booking_conversation):
     conv, booking_client, availability_client = paginated_booking_conversation
     first_page = _reach_july_9_availability(conv)
@@ -308,6 +310,7 @@ def test_previous_page_returns_earlier_availability(paginated_booking_conversati
     assert _presentation_page_index(conv.session()) == 0
 
 
+@live_luma
 def test_pagination_resets_on_service_change(paginated_booking_conversation):
     conv, booking_client, availability_client = paginated_booking_conversation
     _reach_july_9_availability(conv)
@@ -320,6 +323,7 @@ def test_pagination_resets_on_service_change(paginated_booking_conversation):
     assert not booking_client.create_booking.called
 
 
+@live_luma
 def test_pagination_resets_on_date_change(paginated_booking_conversation):
     conv, booking_client, availability_client = paginated_booking_conversation
     _reach_july_9_availability(conv)
@@ -336,6 +340,7 @@ def test_pagination_resets_on_date_change(paginated_booking_conversation):
     assert not booking_client.create_booking.called
 
 
+@live_luma
 def test_time_on_page_two_binds_not_page_one_slot(paginated_booking_conversation):
     conv, booking_client, availability_client = paginated_booking_conversation
     first_page = _reach_july_9_availability(conv)

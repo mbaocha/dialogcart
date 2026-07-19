@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, List, Mapping, Optional
 
 from core.tracing.decision_trace import Candidate, TurnTrace, decide, emit_evidence, emit_mutation
 from core.tracing.reason_codes import (
@@ -11,8 +11,7 @@ from core.tracing.reason_codes import (
     CONFIRMATION_GATE_CLOSED,
     CONFIRMATION_GATE_OPEN,
     CONFIRMATION_REJECT,
-    CONFIRMATION_REQUIRED,
-    CONFIRMATION_REVISE,
+    CONFIRMATION_ANOTHER_REQUEST,
     INPUT_IGNORED_NOT_APPLICABLE,
 )
 
@@ -94,7 +93,6 @@ def emit_confirmation_classify_trace(
     gate_action: str,
     gate_open: bool,
     raw_intent: str = "",
-    has_revision: bool = False,
     gate_open_id: Optional[str] = None,
 ) -> Optional[str]:
     trace = TurnTrace.current()
@@ -106,10 +104,7 @@ def emit_confirmation_classify_trace(
     raw_id = emit_evidence(
         "LUMA_RAW_INTENT",
         subsystem="orchestration",
-        facts={
-            "raw_intent": raw_intent,
-            "has_revision": has_revision,
-        },
+        facts={"raw_intent": raw_intent},
         node_id=CONFIRMATION_EVIDENCE_RAW_INTENT_ID,
         source="luma_response",
         observed_at_stage="confirmation",
@@ -117,7 +112,7 @@ def emit_confirmation_classify_trace(
 
     deps = [dep for dep in (gate_open_id, raw_id) if dep]
 
-    if not gate_open or gate_action == "NONE":
+    if not gate_open or not gate_action:
         return decide(
             "CONFIRMATION_CLASSIFY",
             subsystem="session",
@@ -131,9 +126,12 @@ def emit_confirmation_classify_trace(
         )
 
     reason_map = {
-        "ACCEPT": (CONFIRMATION_ACCEPT, "User accepted booking confirmation"),
-        "REJECT": (CONFIRMATION_REJECT, "User rejected booking confirmation"),
-        "REVISE": (CONFIRMATION_REVISE, "User revised booking details during confirmation"),
+        "YES": (CONFIRMATION_ACCEPT, "User accepted booking confirmation"),
+        "NO": (CONFIRMATION_REJECT, "User rejected booking confirmation"),
+        "ANOTHER_REQUEST": (
+            CONFIRMATION_ANOTHER_REQUEST,
+            "Another request superseded the pending confirmation",
+        ),
     }
     code, text = reason_map.get(gate_action, (INPUT_IGNORED_NOT_APPLICABLE, "No gate action"))
 
@@ -148,25 +146,25 @@ def emit_confirmation_classify_trace(
         category=ROUTING_CATEGORY,
         candidates=[
             Candidate(
-                id="REVISE",
-                matched=gate_action == "REVISE",
-                reason_code=CONFIRMATION_REVISE,
-                reason_text="Revision facts take priority",
-            ),
-            Candidate(
-                id="ACCEPT",
-                matched=gate_action == "ACCEPT",
+                id="YES",
+                matched=gate_action == "YES",
                 reason_code=CONFIRMATION_ACCEPT,
                 reason_text="Raw CONFIRM_ACTION intent",
             ),
             Candidate(
-                id="REJECT",
-                matched=gate_action == "REJECT",
+                id="NO",
+                matched=gate_action == "NO",
                 reason_code=CONFIRMATION_REJECT,
                 reason_text="Raw REJECT_ACTION intent",
             ),
+            Candidate(
+                id="ANOTHER_REQUEST",
+                matched=gate_action == "ANOTHER_REQUEST",
+                reason_code=CONFIRMATION_ANOTHER_REQUEST,
+                reason_text="Any other dominant intent",
+            ),
         ],
-        inputs_evaluated={"raw_intent": raw_intent, "has_revision": has_revision},
+        inputs_evaluated={"raw_intent": raw_intent},
     )
 
 
@@ -229,7 +227,7 @@ def emit_confirmation_enter_pending_trace(
         emit_mutation(
             decision_id,
             subsystem="session",
-            field="booking.confirmation_state",
+            field="confirmation_state",
             previous=previous_state,
             new="pending",
             reason_code=CONFIRMATION_ENTER_PENDING,

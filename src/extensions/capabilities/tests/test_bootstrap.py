@@ -30,7 +30,7 @@ def test_register_default_adapters_registers_payment():
         get_adapter("payment")
 
     # Register default adapters
-    register_default_adapters(organization_id=1)
+    register_default_adapters()
 
     # Verify payment adapter is now registered
     adapter = get_adapter("payment")
@@ -48,10 +48,10 @@ def test_register_default_adapters_idempotent():
     clear_registry()
 
     # Register twice
-    register_default_adapters(organization_id=1)
+    register_default_adapters()
     adapter1 = get_adapter("payment")
 
-    register_default_adapters(organization_id=2)
+    register_default_adapters()
     adapter2 = get_adapter("payment")
 
     # Should still work (second registration overwrites first)
@@ -66,7 +66,7 @@ def test_register_default_adapters_without_organization_id():
     clear_registry()
 
     # Register without organization_id
-    register_default_adapters(organization_id=None)
+    register_default_adapters()
 
     # Verify payment adapter is registered
     adapter = get_adapter("payment")

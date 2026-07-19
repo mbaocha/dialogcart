@@ -112,13 +112,13 @@ def test_bootstrap_only_runs_once():
     try:
         from extensions.capabilities.bootstrap import register_default_adapters
 
-        register_default_adapters(organization_id=1)
+        register_default_adapters()
 
         # Verify adapter is registered
         adapter1 = get_adapter("payment")
 
         # Call again (should be idempotent)
-        register_default_adapters(organization_id=2)
+        register_default_adapters()
         adapter2 = get_adapter("payment")
 
         # Both should work (second call overwrites, but doesn't crash)

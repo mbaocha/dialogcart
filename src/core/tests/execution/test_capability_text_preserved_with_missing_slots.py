@@ -44,7 +44,7 @@ def test_capability_text_preserved_when_missing_slots_present():
     frozen_time = datetime(2026, 1, 15, 10, 0, 0, tzinfo=timezone.utc)
 
     # Cleanup
-    clear_session(user_id)
+    clear_session(1, user_id)
     clear_registry()
     reset_payment_store()
 
@@ -106,7 +106,7 @@ def test_capability_text_preserved_when_missing_slots_present():
         from extensions.capabilities.clients.payment.mock_payment import _PAYMENT_STATE
 
         booking_code = "BOOK123"  # From mock response booking.code
-        _PAYMENT_STATE[booking_code] = {
+        _PAYMENT_STATE[(1, booking_code)] = {
             "intent_created": True,
             "payment_intent_id": "pi_test_123",
             "payment_url": f"https://pay.test/{booking_code}",
@@ -162,7 +162,7 @@ def test_capability_text_preserved_when_missing_slots_present():
 
     finally:
         # Cleanup
-        clear_session(user_id)
+        clear_session(1, user_id)
         clear_registry()
         reset_payment_store()
 

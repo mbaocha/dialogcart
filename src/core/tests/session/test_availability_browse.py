@@ -8,8 +8,8 @@ from core.workflows.availability.browse import (
     normalize_availability_operation,
     resolve_availability_browse,
 )
-from core.session.persist import build_session_state_from_outcome
-from core.rendering.availability_renderer import (
+from core.session.turn_persistence import project_and_persist_turn_result
+from core.workflows.availability.presentation import (
     build_availability_presentation,
     build_presented_availability_page,
 )
@@ -26,25 +26,14 @@ def _cached_slots(hours=range(9, 18)):
     ]
 
 
-class _BrowseSessionStore:
-    def __init__(self, session):
-        self._session = dict(session)
-
-    def get_session(self, _user_id):
-        return dict(self._session)
-
-    def save_session(self, _user_id, session):
-        self._session = dict(session)
-
-
 class TestNormalizeAvailabilityOperation:
     @pytest.mark.parametrize(
         "raw,expected",
         [
-            ("browse_next", {"direction": "next"}),
-            ("browse_previous", {"direction": "previous"}),
-            ("BROWSE_NEXT", {"direction": "next"}),
-            ("browse-next", {"direction": "next"}),
+            ("browse_next", {"direction": "next", "axis_hint": "any"}),
+            ("browse_previous", {"direction": "previous", "axis_hint": "any"}),
+            ("BROWSE_NEXT", {"direction": "next", "axis_hint": "any"}),
+            ("browse-next", {"direction": "next", "axis_hint": "any"}),
             ("search", None),
             (None, None),
             ("", None),
@@ -60,21 +49,21 @@ class TestExtractAvailabilityBrowse:
             "intent": {"name": "AVAILABILITY"},
             "operation": "browse_next",
         }
-        assert extract_availability_browse(response) == {"direction": "next"}
+        assert extract_availability_browse(response) == {"direction": "next", "axis_hint": "any"}
 
     def test_reads_facts_operation(self):
         response = {
             "intent": {"name": "AVAILABILITY"},
             "facts": {"operation": "browse_previous"},
         }
-        assert extract_availability_browse(response) == {"direction": "previous"}
+        assert extract_availability_browse(response) == {"direction": "previous", "axis_hint": "any"}
 
     def test_reads_availability_browse_field(self):
         response = {
             "intent": {"name": "AVAILABILITY"},
             "availability_browse": {"direction": "next"},
         }
-        assert extract_availability_browse(response) == {"direction": "next"}
+        assert extract_availability_browse(response) == {"direction": "next", "axis_hint": "any"}
 
     def test_resolve_falls_back_to_text_with_availability_intent(self):
         merged = {
@@ -89,7 +78,7 @@ class TestExtractAvailabilityBrowse:
                 "slots": [{"starts_at": "2026-07-09T09:00:00Z"}],
             }
         }
-        assert resolve_availability_browse(merged, session) == {"direction": "next"}
+        assert resolve_availability_browse(merged, session)["direction"] == "next"
 
     def test_resolve_does_not_infer_without_cached_availability(self):
         merged = {
@@ -113,7 +102,7 @@ class TestExtractAvailabilityBrowse:
                 "slots": [{"starts_at": "2026-07-09T09:00:00Z"}],
             },
         }
-        assert resolve_availability_browse(merged, session) == {"direction": "next"}
+        assert resolve_availability_browse(merged, session)["direction"] == "next"
 
     def test_resolve_does_not_infer_create_appointment_without_cached_availability(self):
         merged = {
@@ -139,7 +128,7 @@ class TestExtractAvailabilityBrowse:
         if expected is None:
             assert inferred is None
         else:
-            assert inferred == {"direction": expected}
+            assert inferred is not None and inferred["direction"] == expected
 
 
 class TestMergeAvailabilityBrowse:
@@ -167,7 +156,7 @@ class TestMergeAvailabilityBrowse:
             "slots": {},
         }
         merged = merge_luma_with_session(luma, self._session())
-        assert merged.get("availability_browse") == {"direction": "next"}
+        assert merged.get("availability_browse", {}).get("direction") == "next"
 
     def test_merge_does_not_modify_slots_or_presented_availability(self):
         session = self._session()
@@ -201,6 +190,7 @@ class TestBrowseNotPersistedToSession:
             "status": "READY",
             "facts": {
                 "slots": {"service_id": "premium haircut"},
+                "missing_slots": ["date", "time"],
                 "availability_browse": {"direction": "next"},
             },
         }
@@ -210,10 +200,16 @@ class TestBrowseNotPersistedToSession:
             "availability_browse": {"direction": "next"},
             "operation": "browse_next",
         }
-        session = build_session_state_from_outcome(
-            outcome=outcome,
+        session = project_and_persist_turn_result(
+            result={
+                "outcome": outcome,
+                "plan": outcome,
+                "_merged_luma_response": merged,
+            },
             outcome_status="READY",
-            merged_luma_response=merged,
+            organization_id=1,
+            user_id="u1",
+            save=False,
         )
         assert session is not None
         assert "availability_browse" not in session
@@ -248,13 +244,6 @@ class TestBrowsePaginationSessionPersistence:
                 raw, page_index=0, page_size=6
             ),
         }
-        store = _BrowseSessionStore(
-            {
-                **previous,
-                "presented_availability": page1_presented,
-                "availability_presentation": page1_presentation,
-            }
-        )
         outcome = {
             "intent_name": "CREATE_APPOINTMENT",
             "status": "success",
@@ -275,13 +264,29 @@ class TestBrowsePaginationSessionPersistence:
             "slots": {"service_id": "premium haircut"},
             "operation": "browse_next",
         }
-        session = build_session_state_from_outcome(
-            outcome=outcome,
+        session = project_and_persist_turn_result(
+            result={
+                "outcome": outcome,
+                "plan": {
+                    "intent_name": "CREATE_APPOINTMENT",
+                    "status": "READY",
+                    "missing_slots": ["time"],
+                },
+                "_merged_luma_response": merged,
+                "_workflow_result": {
+                    "kind": "availability_pagination",
+                    "presented_availability": page1_presented,
+                    "availability_presentation": page1_presentation,
+                    "page_index": 1,
+                    "page_size": 6,
+                },
+            },
             outcome_status="success",
-            merged_luma_response=merged,
+            organization_id=1,
             previous_session_state=previous,
+            working_session_state=previous,
             user_id="u1",
-            session_store=store,
+            save=False,
         )
         assert session is not None
         assert session["availability_presentation"]["page_index"] == 1

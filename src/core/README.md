@@ -90,7 +90,7 @@ User message
 | System | Relationship |
 |--------|-------------|
 | **Luma** | Core calls Luma once per turn. Luma returns a structured delta. Core owns what to do with it. Core never trusts Luma to carry forward session context — that is Core's job. |
-| **Availability API** | Called by Core's `availability_client` when `SEARCH_AVAILABILITY` is the planned action. Exploratory — no side effects. Results are cached in session as `last_execution_result`. |
+| **Availability API** | Called by Core's `availability_client` when `SEARCH_AVAILABILITY` is the planned action. Exploratory — no side effects. Results are cached as domain `AvailabilityCache` (persisted today under the legacy session field `last_execution_result`). |
 | **Booking API** | Called by Core's `booking_client` when `CONFIRM_APPOINTMENT` is the planned action. Committing — irreversible. Requires explicit user confirmation before dispatch. |
 | **Extensions** | Activated by Core when a capability gate is triggered (e.g., payment). Extensions are called, their outcomes are merged into session facts, and Core plans the next turn. Extensions never own conversation state. |
 
@@ -350,11 +350,10 @@ This is the most complex step. Merge does, in order:
 **Purpose:** Own the confirmation lifecycle — entering, classifying, exiting.
 
 **Responsibilities:**
-- `get_confirmation_state()` / `set_confirmation_state()` — canonical read/write (reads `booking.confirmation_state` first, falls back to top-level for legacy compatibility)
+- `get_confirmation_state()` / `set_confirmation_state()` — canonical top-level read/write, with temporary fallback reads from legacy `booking.confirmation_state`
 - `classify_confirmation_gate_turn()` — per-turn classification: ACCEPT, REJECT, REVISE, NONE
 - `is_confirmation_gate_open()` — is the user currently at the confirmation prompt?
 - `detect_booking_revision()` — which booking fields does this turn change?
-- `apply_booking_revision()` — invalidate pending confirmation and affected fields
 - `clear_pending_confirmation()` — authoritative clear with fine-grained field control
 - `has_actionable_booking_facts()` — does this turn have facts that must reach binding/planning (prevents informational-turn short-circuit from skipping revisions)
 
@@ -547,7 +546,7 @@ Session state is a Python dict persisted between turns. It is the single source 
 | Field | Value |
 |-------|-------|
 | **Purpose** | Tracks whether the user has been asked to confirm their booking and whether they have agreed |
-| **Owner** | Core session (canonical location: `booking.confirmation_state`) |
+| **Owner** | Core session (canonical location: `confirmation_state`) |
 | **Written by** | `set_confirmation_state()` in confirmation_gate — the only authorised writer |
 | **Read by** | `get_confirmation_state()`, plan_builder, business_fact_registry |
 | **Values** | `None` (no active confirmation), `"pending"` (waiting for user), `"confirmed"` (transient — consumed immediately after commit) |
@@ -1179,7 +1178,7 @@ All intent durable flags, required slots, and execution steps come from `core/co
 | `presented_availability` | Core session | persist (after search execution) | binder, renderer | Until search parameters change |
 | `last_execution_result` | Core session | persist | legacy binder fallback, renderer | Until new search |
 | `availability_fingerprint` | Core session | orchestrator (after search execution) | business_fact_registry (`availability_ready`) | Until search parameters change |
-| `confirmation_state` | Core session | `set_confirmation_state()` only | plan_builder, business facts, orchestrator | None → pending → None |
+| `confirmation_state` | Core session top level | `set_confirmation_state()` only | plan_builder, business facts, orchestrator | None → pending → None |
 | `booking_id` | Core session (`slots`) | persist (after commit) | `has_committed_create_appointment`, plan_builder | Permanent until `NEW_BOOKING_REQUEST` |
 | `resolved_datetime_range` | Core session | binder (via merge, then persist) | business facts, renderer | Until revision |
 | `missing_slots` | Derived (not persisted) | merge (re-derives each turn) | plan_builder, planner | One turn only |
@@ -1214,8 +1213,8 @@ All intent durable flags, required slots, and execution steps come from `core/co
 **Symptom 2:** Confirmation is never entered even though all slots are present.
 **Diagnosis:** Check `_maybe_enter_booking_confirmation_pending` entry conditions: `missing_slots`, `needs_clarification`, `availability_resolved`. Any of these can block entry. Check `[BOOKING_CONFIRMATION]` log entries.
 
-**Symptom 3:** `confirmation_state` diverges between `booking.confirmation_state` and top-level `confirmation_state`.
-**Diagnosis:** A writer bypassed `set_confirmation_state()` and wrote directly to `state["confirmation_state"]`. All writes must go through the canonical function.
+**Symptom 3:** A legacy session still contains `booking.confirmation_state`.
+**Diagnosis:** Session normalization migrates it to canonical top-level `confirmation_state` and removes the nested value.
 
 ---
 

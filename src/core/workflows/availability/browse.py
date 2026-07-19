@@ -5,52 +5,81 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional
 
+from core.workflows.availability.contracts import BrowseIntent
+
 logger = logging.getLogger(__name__)
 
 _BROWSE_OPERATIONS = {
-    "browse_next": "next",
-    "browse_previous": "previous",
+    "browse_next": ("next", "any"),
+    "browse_previous": ("previous", "any"),
+    "browse_next_day": ("next", "date"),
+    "browse_previous_day": ("previous", "date"),
+    "browse_next_times": ("next", "time"),
+    "browse_previous_times": ("previous", "time"),
 }
 
-_BROWSE_NEXT_PHRASES = (
+# Most specific phrases first.
+_DATE_NEXT_PHRASES = (
+    "next day",
+    "next available day",
+    "following day",
+    "another day",
+)
+_DATE_PREV_PHRASES = (
+    "previous day",
+    "prev day",
+    "earlier day",
+)
+_TIME_NEXT_PHRASES = (
+    "more times",
+    "more time",
+    "additional times",
+    "additional time",
+    "later times",
+    "later time",
+)
+_TIME_PREV_PHRASES = (
+    "earlier times",
+    "earlier time",
+    "previous time",
+    "previous page",
+)
+_ANY_NEXT_PHRASES = (
     "show more",
     "show me additional",
-    "additional time",
-    "additional times",
-    "more time",
-    "more times",
     "other time",
     "other times",
     "next time",
     "next page",
-    "later time",
-    "later times",
     "see more",
     "any more",
     "what else",
 )
-
-_BROWSE_PREVIOUS_PHRASES = (
-    "earlier time",
-    "earlier times",
-    "previous page",
-    "previous time",
+_ANY_PREV_PHRASES = (
     "go back",
     "before that",
 )
 
 
-def normalize_availability_operation(raw: Any) -> Optional[Dict[str, str]]:
-    """Normalize Luma ``operation`` to ``{"direction": "next"|"previous"}``."""
+def _intent(direction: str, axis_hint: Optional[str] = "any") -> BrowseIntent:
+    return {"direction": direction, "axis_hint": axis_hint}  # type: ignore[typeddict-item]
+
+
+def normalize_availability_operation(raw: Any) -> Optional[BrowseIntent]:
+    """Normalize Luma ``operation`` to a BrowseIntent."""
     if raw is None:
         return None
     operation = str(raw).strip().lower().replace("-", "_")
     if not operation:
         return None
-    direction = _BROWSE_OPERATIONS.get(operation)
-    if not direction:
+    mapped = _BROWSE_OPERATIONS.get(operation)
+    if not mapped:
+        # Legacy bare directions
+        if operation in ("next", "previous"):
+            return _intent(operation, "any")
         return None
-    return {"direction": direction}
+    direction, axis = mapped
+    return _intent(direction, axis)
 
 
 def _operation_from_luma(luma_response: Dict[str, Any]) -> Any:
@@ -65,20 +94,23 @@ def _operation_from_luma(luma_response: Dict[str, Any]) -> Any:
 
 def _browse_from_availability_browse_field(
     luma_response: Dict[str, Any],
-) -> Optional[Dict[str, str]]:
+) -> Optional[BrowseIntent]:
     """Read explicit ``availability_browse`` from NLU or merge."""
     browse_field = luma_response.get("availability_browse")
     if not isinstance(browse_field, dict):
         return None
     direction = browse_field.get("direction")
-    if direction in ("next", "previous"):
-        return {"direction": str(direction)}
-    return None
+    if direction not in ("next", "previous"):
+        return None
+    axis = browse_field.get("axis_hint") or browse_field.get("axis")
+    if axis not in ("any", "time", "date", None):
+        axis = "any"
+    return _intent(str(direction), axis or "any")
 
 
 def extract_availability_browse(
     luma_response: Optional[Dict[str, Any]],
-) -> Optional[Dict[str, str]]:
+) -> Optional[BrowseIntent]:
     """Read a browse signal from structured NLU fields on a Luma/merged response."""
     if not isinstance(luma_response, dict):
         return None
@@ -102,15 +134,9 @@ def _luma_intent_name(luma_response: Dict[str, Any]) -> str:
 
 
 def _has_cached_availability(session_state: Optional[Dict[str, Any]]) -> bool:
-    if not isinstance(session_state, dict):
-        return False
-    last_result = session_state.get("last_execution_result")
-    return (
-        isinstance(last_result, dict)
-        and last_result.get("type") == "availability"
-        and last_result.get("status") == "success"
-        and bool(last_result.get("slots"))
-    )
+    from core.workflows.availability.presentation import has_trusted_availability_cache
+
+    return has_trusted_availability_cache(session_state)
 
 
 def _session_intent_name(session_state: Dict[str, Any]) -> str:
@@ -151,34 +177,56 @@ def _allows_browse_text_fallback(
     return _session_has_durable_booking_intent(session_state)
 
 
-def infer_browse_direction_from_text(text: str) -> Optional[Dict[str, str]]:
-    """Infer browse direction from user text when NLU omits structured operation."""
+def infer_browse_direction_from_text(text: str) -> Optional[BrowseIntent]:
+    """Infer BrowseIntent from user text when NLU omits structured operation."""
     lowered = (text or "").lower().strip()
     if not lowered:
         return None
-    for phrase in _BROWSE_PREVIOUS_PHRASES:
+
+    for phrase in _DATE_PREV_PHRASES:
         if phrase in lowered:
-            return {"direction": "previous"}
-    for phrase in _BROWSE_NEXT_PHRASES:
+            return _intent("previous", "date")
+    for phrase in _DATE_NEXT_PHRASES:
         if phrase in lowered:
-            return {"direction": "next"}
+            return _intent("next", "date")
+    for phrase in _TIME_PREV_PHRASES:
+        if phrase in lowered:
+            return _intent("previous", "time")
+    for phrase in _TIME_NEXT_PHRASES:
+        if phrase in lowered:
+            return _intent("next", "time")
+    for phrase in _ANY_PREV_PHRASES:
+        if phrase in lowered:
+            return _intent("previous", "any")
+    for phrase in _ANY_NEXT_PHRASES:
+        if phrase in lowered:
+            return _intent("next", "any")
     if "additional" in lowered and any(
         token in lowered for token in ("time", "times", "slot", "show")
     ):
-        return {"direction": "next"}
+        return _intent("next", "time")
     return None
 
 
-def resolve_availability_browse(
+def resolve_browse_intent(
     merged: Optional[Dict[str, Any]],
     session_state: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, str]]:
-    """Resolve browse direction from NLU contract fields or safe text fallback."""
+) -> Optional[BrowseIntent]:
+    """Resolve BrowseIntent from NLU contract fields or safe text fallback."""
     if not isinstance(merged, dict):
         return None
 
     browse = extract_availability_browse(merged)
     if browse:
+        # Structured NLU often only supplies direction; refine axis from text when present.
+        if (browse.get("axis_hint") or "any") == "any":
+            source_text = merged.get("_source_text") or ""
+            inferred = infer_browse_direction_from_text(str(source_text))
+            if inferred and inferred.get("axis_hint") in ("time", "date"):
+                browse = {
+                    "direction": browse.get("direction") or inferred.get("direction"),
+                    "axis_hint": inferred.get("axis_hint"),
+                }
         try:
             from core.tracing.browse import emit_browse_resolve_trace
 
@@ -201,9 +249,10 @@ def resolve_availability_browse(
     inferred = infer_browse_direction_from_text(str(source_text))
     if inferred:
         logger.info(
-            "[AVAILABILITY_BROWSE] inferred direction=%s from cached availability "
+            "[AVAILABILITY_BROWSE] inferred direction=%s axis=%s from cached availability "
             "and user text (luma_intent=%s session_intent=%s)",
             inferred.get("direction"),
+            inferred.get("axis_hint"),
             _luma_intent_name(merged) or None,
             _session_intent_name(session_state) if isinstance(session_state, dict) else None,
         )
@@ -223,6 +272,10 @@ def resolve_availability_browse(
     return None
 
 
+# Backward-compatible alias.
+resolve_availability_browse = resolve_browse_intent
+
+
 def apply_availability_browse_signal(
     merged: Dict[str, Any],
     luma_response: Dict[str, Any],
@@ -235,10 +288,19 @@ def apply_availability_browse_signal(
     """
     browse = extract_availability_browse(luma_response)
     if browse:
+        # Prefer text-refined axis when structured signal is direction-only.
+        source_text = merged.get("_source_text") or luma_response.get("_source_text") or ""
+        inferred = infer_browse_direction_from_text(str(source_text))
+        if inferred and inferred.get("axis_hint") in ("time", "date"):
+            browse = {
+                "direction": browse.get("direction") or inferred.get("direction"),
+                "axis_hint": inferred.get("axis_hint"),
+            }
         merged["availability_browse"] = browse
         logger.info(
-            "[AVAILABILITY_BROWSE] detected direction=%s",
+            "[AVAILABILITY_BROWSE] detected direction=%s axis=%s",
             browse.get("direction"),
+            browse.get("axis_hint"),
         )
     else:
         merged.pop("availability_browse", None)

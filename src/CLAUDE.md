@@ -23,9 +23,9 @@ This file exists to minimize repository exploration. Read this first. Read only 
 | `core/session/` | Session schema, merge eligibility, invalidation, confirmation gate, persistence |
 | `core/rendering/` | LLM-rendered reply text (availability, booking confirmation) |
 | `core/planning/policy/` | Handler router, base intents, intent→action mapping |
-| `core/workflows/` | Domain workflows + extensibility registry |
+| `core/workflows/` | Domain workflows (availability, booking) + WorkflowRouter |
 | `core/tracing/` | Decision trace, invariant trace, spine, formatters |
-| `core/config/` | `intent_policy.yaml`, `capabilities.yaml`, `dialog_policy.yaml` |
+| `core/config/` | `intent_policy.yaml`, `capabilities.yaml` |
 | `extensions/` | Capability adapters (payment, noop) |
 | `core/tests/` | All test suites |
 
@@ -34,8 +34,8 @@ This file exists to minimize repository exploration. Read this first. Read only 
 | Entry Point | Purpose |
 |---|---|
 | `app.py:lambda_handler()` | AWS Lambda entry; routes to `route_event()` |
-| `core/orchestration/orchestrator.py:handle_message()` | Canonical per-turn entry for orchestration + execution |
-| `core/orchestration/orchestrator.py:plan_message()` | Planning-only wrapper (calls `plan_turn`) |
+| `core/api/compat.py:handle_message()` | Compat entry; session load then `ConversationEngine.process_turn` |
+| `core/planning/planning_service.py:plan_message()` | Planning-only wrapper (calls `plan_turn`) |
 | `core/planning/planner/turn_planner.py:plan_turn()` | NLU → session merge → plan, called by plan_message |
 | `nlu/pipeline.py:NLUPipeline.run()` | Production NLU pipeline entry |
 | `nlu/api.py` | Production NLU HTTP service (`/resolve`, default port 9002) |
@@ -216,7 +216,7 @@ Before searching, check if the file is listed in section 2 (Fast Navigation) for
 
 ### Prefer Known Entry Points
 
-For any orchestration change: start at `core/orchestration/orchestrator.py:handle_message()`.
+For any orchestration change: start at `core/engine/conversation_engine.py:process_turn()` (or `core.api.compat.handle_message`).
 For any planning change: start at `core/planning/planner/turn_planner.py:plan_turn()`.
 For any NLU change: start at `nlu/pipeline.py:NLUPipeline.run()`.
 For any policy change: start at `core/config/intent_policy.yaml`.

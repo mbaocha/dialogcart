@@ -1,9 +1,12 @@
 """
 Intent Planning Module
 
-Pure, stateless planning functions for intent execution planning.
+Public planning API for ConversationEngine: ``planning_service.plan_message``.
 
-Public planning API for ConversationEngine: planning_service.plan_message.
+Package roles:
+- ``pipeline`` — turn orchestration (CurrentRequest → Attach → Evidence → Decision)
+- ``planner`` — planning algorithms and supporting helpers used by the pipeline
+- ``policy`` — static intent/action policy tables
 """
 
 from .planning_service import plan_message

@@ -1,8 +1,8 @@
 """AvailabilityWorkflow — availability domain boundary.
 
-Phase 1: thin delegation facade.
-Phase 2: owns all post-search processing (fingerprint, time resolution,
-         presentation payloads, session persistence).
+Owns browse/pagination, fingerprints, and post-search processing.
+Tool dispatch (SEARCH_AVAILABILITY) is owned by the execution dispatcher;
+this workflow must not initiate execution.
 """
 
 from __future__ import annotations
@@ -14,13 +14,9 @@ logger = logging.getLogger(__name__)
 
 
 class AvailabilityWorkflow:
-    """Facade for all availability-domain operations.
+    """Availability-domain operations after planning/eligibility.
 
-    Phase 1: thin delegation to the existing implementations in
-             core.workflows.availability.pagination,
-             core.workflows.availability.fingerprint,
-             and core.execution.clients.availability_client.
-
+    Browse short-circuit and post-search processing only.
     Availability is a CORE workflow, not an extension.
     """
 
@@ -34,6 +30,7 @@ class AvailabilityWorkflow:
         plan: Dict[str, Any],
         session_state: Optional[Dict[str, Any]],
         session_store: Optional[Any],
+        organization_id: int,
         user_id: str,
     ) -> Optional[Dict[str, Any]]:
         """Attempt to handle a browse/pagination turn.
@@ -49,6 +46,7 @@ class AvailabilityWorkflow:
             plan=plan,
             session_state=session_state,
             session_store=session_store,
+            organization_id=organization_id,
             user_id=user_id,
         )
 
@@ -77,30 +75,7 @@ class AvailabilityWorkflow:
         return slots_match_availability_fingerprint(slots, fingerprint)
 
     # ------------------------------------------------------------------
-    # Search execution
-    # ------------------------------------------------------------------
-
-    def search(
-        self,
-        plan: Dict[str, Any],
-        client: Optional[Any] = None,
-    ) -> Dict[str, Any]:
-        """Execute an availability search for *plan* using *client*.
-
-        *client* defaults to a fresh AvailabilityClient when not supplied.
-        """
-        from core.execution.clients.availability_client import (
-            AvailabilityClient,
-        )
-        from core.execution.dispatcher import execute
-
-        return execute(
-            plan=plan,
-            availability_client=client or AvailabilityClient(),
-        )
-
-    # ------------------------------------------------------------------
-    # Post-search result processing (Phase 2 ownership transfer)
+    # Post-search result processing
     # ------------------------------------------------------------------
 
     def process_search_result(
@@ -111,19 +86,22 @@ class AvailabilityWorkflow:
         session_state: Optional[Dict[str, Any]],
         session_store: Optional[Any],
         user_id: str,
-        organization_id: Optional[int] = None,
-    ) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+        organization_id: int,
+    ) -> Tuple[
+        Dict[str, Any],
+        Optional[Dict[str, Any]],
+        Dict[str, Any],
+    ]:
         """Process a successful availability search result in-place.
 
-        Computes the fingerprint, resolves time matching, builds presentation
-        payloads, and persists session keys.  All availability post-processing
-        that previously lived in handle_message() now belongs here.
+        Computes the fingerprint, resolves time matching, and returns explicit
+        projection artifacts. Session materialization belongs to SessionProjector.
 
         Mutates *execution_result* and *plan* in-place.
-        Returns ``(updated_slots, updated_session_state)`` because both may be
-        rebound during time-match resolution.
+        Returns updated slots, working session, and the explicit projection
+        artifact produced by availability post-processing.
         """
-        from core.session.session_ops import _persist_to_session
+        _ = session_store, user_id  # Compatibility-only; no workflow storage I/O.
         from core.workflows.availability.fingerprint import (
             build_availability_fingerprint_slots,
             compute_availability_fingerprint,
@@ -135,19 +113,34 @@ class AvailabilityWorkflow:
         from core.planning.time_resolution import (
             TIME_MATCH_EXACT,
             TIME_MATCH_MISMATCH,
-            apply_time_match_exact_to_plan,
-            apply_time_match_mismatch_to_plan,
             resolve_time_after_availability,
         )
-        from core.rendering.availability_renderer import (
-            build_availability_presentation,
-            build_presented_availability,
+        from core.workflows.availability.discovery.bridge import (
+            present_via_discovery,
+            search_via_discovery,
         )
+        from core.workflows.availability.presentation import (
+            presentation_meta_from_presented,
+        )
+
+        availability = execution_result.get("availability")
+        if not isinstance(availability, dict):
+            return slots, session_state, {}
+        session_state = session_state if isinstance(session_state, dict) else {}
+        workflow_result: Dict[str, Any] = {"kind": "availability_search"}
+        offers = availability.get("slots")
+        if not isinstance(offers, list):
+            offers = []
+            availability["slots"] = offers
 
         # ---- fingerprint ------------------------------------------------
         plan_intent_name = plan.get("intent_name") or plan.get("intent")
 
-        _exec_proposals = resolve_execution_proposals(plan, session_state)
+        _exec_proposals = resolve_execution_proposals(
+            plan,
+            session_state,
+            context=plan.get("execution_proposal_context"),
+        )
         fingerprint_slots = build_availability_fingerprint_slots(
             slots,
             intent_name=plan_intent_name,
@@ -161,14 +154,7 @@ class AvailabilityWorkflow:
         )
 
         if availability_fingerprint:
-            execution_result["availability_fingerprint"] = availability_fingerprint
-            session_state = _persist_to_session(
-                session_store,
-                user_id,
-                session_state or {},
-                "availability_fingerprint",
-                availability_fingerprint,
-            )
+            workflow_result["availability_fingerprint"] = availability_fingerprint
             logger.debug(
                 "[AVAILABILITY_FINGERPRINT] fingerprint=%s service_id=%s date=%s time=%s",
                 availability_fingerprint,
@@ -187,7 +173,7 @@ class AvailabilityWorkflow:
                 search_date = _dp_start.split("T")[0].split(" ")[0]
 
         _resolution_payload = resolve_time_after_availability(
-            offers=execution_result.get("slots") or [],
+            offers=offers,
             time_proposal=_exec_proposals.get("time_proposal"),
             date_proposal=_exec_proposals.get("date_proposal"),
             search_date=search_date,
@@ -195,7 +181,7 @@ class AvailabilityWorkflow:
         )
         _time_resolution = _resolution_payload.get("time_resolution")
         if isinstance(_time_resolution, dict):
-            execution_result["time_resolution"] = _time_resolution
+            availability["time_resolution"] = _time_resolution
         _bind_result = _resolution_payload.get("bind_result")
         _resolution_outcome = (
             _time_resolution.get("outcome")
@@ -207,87 +193,123 @@ class AvailabilityWorkflow:
             and isinstance(_bind_result, dict)
             and _bind_result
         ):
-            execution_result["resolved_datetime_range"] = _bind_result.get(
-                "resolved_datetime_range"
-            )
+            resolved_range = _bind_result.get("resolved_datetime_range")
+            subject = execution_result.get("subject")
+            if isinstance(subject, dict) and isinstance(resolved_range, dict):
+                subject["starts_at"] = resolved_range.get("start")
+                subject["ends_at"] = resolved_range.get("end")
             slots = _bind_result.get("slots") or slots
             plan["slots"] = slots
-            apply_time_match_exact_to_plan(
-                plan,
-                bind_result=_bind_result,
-                time_resolution=_time_resolution,
+            from core.planning.pipeline.requests import (
+                is_availability_turn_operation,
             )
-            session_state = _persist_to_session(
-                session_store,
-                user_id,
-                session_state or {},
-                "resolved_datetime_range",
-                _bind_result.get("resolved_datetime_range"),
-            )
-            try:
-                from core.session.confirmation_gate import set_confirmation_state
 
-                session_state = set_confirmation_state(session_state or {}, "pending")
-            except ImportError:
-                pass
+            availability_op = is_availability_turn_operation(plan.get("turn_operation"))
+            from core.planning.pipeline.decision_finalization import (
+                TimeResolutionEvidence,
+                finalize_decision_after_time_resolution,
+            )
+
+            finalize_decision_after_time_resolution(
+                plan,
+                evidence=TimeResolutionEvidence(
+                    outcome=TIME_MATCH_EXACT,
+                    time_resolution=_time_resolution,
+                    bind_result=_bind_result,
+                    enter_confirmation=not availability_op,
+                    apply_confirmation_transition=not availability_op,
+                ),
+            )
+            workflow_result["resolved_datetime_range"] = _bind_result.get(
+                "resolved_datetime_range"
+            )
         elif _resolution_outcome == TIME_MATCH_MISMATCH and isinstance(
             _time_resolution, dict
         ):
-            apply_time_match_mismatch_to_plan(
-                plan,
-                time_resolution=_time_resolution,
-                time_proposal=_exec_proposals.get("time_proposal"),
+            from core.planning.pipeline.decision_finalization import (
+                TimeResolutionEvidence,
+                finalize_decision_after_time_resolution,
             )
 
-        # ---- presentation payloads --------------------------------------
+            finalize_decision_after_time_resolution(
+                plan,
+                evidence=TimeResolutionEvidence(
+                    outcome=TIME_MATCH_MISMATCH,
+                    time_resolution=_time_resolution,
+                    time_proposal=_exec_proposals.get("time_proposal"),
+                    apply_confirmation_transition=True,
+                ),
+            )
+
+        # ---- presentation payloads (Discovery Search + Navigator) -------
+        legacy_availability_result: Dict[str, Any] = {
+            "type": "availability",
+            "status": "success",
+            "slots": offers,
+        }
+        if availability_fingerprint:
+            legacy_availability_result[
+                "availability_fingerprint"
+            ] = availability_fingerprint
         last_execution_payload = enrich_last_execution_result(
-            execution_result, search_date=search_date
+            legacy_availability_result, search_date=search_date
         )
         if isinstance(_time_resolution, dict):
             last_execution_payload["time_resolution"] = _time_resolution
-        presented_payload = build_presented_availability(
-            execution_result.get("slots") or [],
-            search_date=last_execution_payload.get("search_date") or search_date,
+
+        fingerprint_criteria = dict(fingerprint_slots)
+        if availability_fingerprint:
+            # Keep identity aligned with the fingerprint already computed above.
+            fingerprint_criteria.setdefault("service_id", slots.get("service_id"))
+
+        def _execute_search(_criteria: Dict[str, Any]) -> list:
+            return list(offers)
+
+        discovery_cache, _ = search_via_discovery(
+            fingerprint_criteria,
+            execute_search=_execute_search,
+            existing_cache=None,
         )
-        session_state = _persist_to_session(
-            session_store,
-            user_id,
-            session_state or {},
-            "last_execution_result",
-            last_execution_payload,
+        if availability_fingerprint:
+            discovery_cache["fingerprint"] = availability_fingerprint
+        resolved_search_date = (
+            last_execution_payload.get("search_date") or search_date
         )
-        session_state = _persist_to_session(
-            session_store,
-            user_id,
-            session_state or {},
-            "presented_availability",
-            presented_payload,
+        if resolved_search_date:
+            discovery_cache["search_date"] = resolved_search_date
+        if isinstance(_time_resolution, dict):
+            discovery_cache["time_resolution"] = _time_resolution
+
+        presented_payload = present_via_discovery(
+            discovery_cache,
+            search_date=resolved_search_date,
         )
-        presentation_payload = build_availability_presentation(
-            execution_result.get("slots") or []
-        )
-        session_state = _persist_to_session(
-            session_store,
-            user_id,
-            session_state or {},
-            "availability_presentation",
-            presentation_payload,
+        presentation_payload = presentation_meta_from_presented(presented_payload)
+        workflow_result.update(
+            {
+                "last_execution_result": last_execution_payload,
+                "presented_availability": presented_payload,
+                "availability_presentation": presentation_payload,
+            }
         )
 
         # ---- attach fingerprint / datetime_range to plan ----------------
         # Ensures these survive even when session_store is None
         # (build_session_state_from_outcome reads them from plan).
-        if execution_result.get("availability_fingerprint"):
-            plan["availability_fingerprint"] = execution_result["availability_fingerprint"]
+        if availability_fingerprint:
+            plan["availability_fingerprint"] = availability_fingerprint
             logger.debug(
                 "[AVAILABILITY_FINGERPRINT] Attached to plan: %s",
-                execution_result["availability_fingerprint"],
+                availability_fingerprint,
             )
-        if execution_result.get("resolved_datetime_range"):
-            plan["resolved_datetime_range"] = execution_result["resolved_datetime_range"]
+        resolved_range = _bind_result.get("resolved_datetime_range") if isinstance(
+            _bind_result, dict
+        ) else None
+        if isinstance(resolved_range, dict):
+            plan["resolved_datetime_range"] = resolved_range
             logger.debug(
                 "[DATETIME_RANGE] Attached to plan: %s",
-                execution_result["resolved_datetime_range"].get("start"),
+                resolved_range.get("start"),
             )
 
-        return slots, session_state
+        return slots, session_state, workflow_result

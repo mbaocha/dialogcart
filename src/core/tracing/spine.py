@@ -224,7 +224,7 @@ def resolve_turn_outcome(
             TURN_OUTCOME_HANDLER_DELEGATED,
             "Turn delegated to an external intent handler",
         )
-    if status in {"SUCCESS", "EXECUTED"} or outcome.get("type") == "availability":
+    if status in {"SUCCESS", "SUCCEEDED", "EXECUTED"}:
         return (
             winner,
             TURN_OUTCOME_EXECUTED,

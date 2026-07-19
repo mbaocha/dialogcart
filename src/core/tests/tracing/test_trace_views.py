@@ -137,6 +137,7 @@ def test_parse_trace_view_values():
     assert parse_trace_view("reasoning") == "reasoning"
     assert parse_trace_view("forensic") == "forensic"
     assert parse_trace_view("decision") == "forensic"
+    assert parse_trace_view("1") == "forensic"
     assert parse_trace_view(None) is None
     assert parse_trace_view("invalid") is None
 

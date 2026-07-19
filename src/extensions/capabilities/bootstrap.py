@@ -6,7 +6,6 @@ This module is called once at application startup to ensure adapters are availab
 """
 
 import logging
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +23,7 @@ except ImportError as e:
     register_adapter = None
 
 
-def register_default_adapters(*, organization_id: Optional[int] = None) -> None:
+def register_default_adapters() -> None:
     """
     Register default capability adapters for production use.
 
@@ -34,14 +33,10 @@ def register_default_adapters(*, organization_id: Optional[int] = None) -> None:
     Currently registers:
     - PaymentAdapter with HttpPaymentClient
 
-    Args:
-        organization_id: Optional organization ID for payment client initialization.
-                        If None, HttpPaymentClient will use default behavior.
-
     Example:
         # At application startup
         from extensions.capabilities.bootstrap import register_default_adapters
-        register_default_adapters(organization_id=1)
+        register_default_adapters()
     """
     if PaymentAdapter is None or HttpPaymentClient is None or register_adapter is None:
         logger.warning(
@@ -52,14 +47,11 @@ def register_default_adapters(*, organization_id: Optional[int] = None) -> None:
 
     try:
         # Register payment adapter with HTTP client
-        payment_client = HttpPaymentClient(organization_id=organization_id)
+        payment_client = HttpPaymentClient()
         payment_adapter = PaymentAdapter(payment_client=payment_client)
         register_adapter(payment_adapter)
 
-        logger.info(
-            f"Registered default capability adapters (payment) "
-            f"organization_id={organization_id}"
-        )
+        logger.info("Registered default capability adapters (payment)")
     except Exception as e:
         logger.error(
             f"Failed to register default adapters: {e}. "

@@ -48,7 +48,7 @@ def test_core_capability_noop_end_to_end():
     text = "hello"
 
     # Cleanup
-    clear_session(user_id)
+    clear_session(1, user_id)
     clear_registry()
 
     # Register noop adapter
@@ -97,7 +97,7 @@ def test_core_capability_noop_end_to_end():
             "status": "READY",
             "active_capability": "noop",
         }
-        save_session(user_id, session_state)
+        save_session(1, user_id, session_state)
 
         # Step 1: Call core - should emit AWAITING_CAPABILITY
         result = handle_message(
@@ -209,7 +209,7 @@ def test_core_capability_noop_end_to_end():
 
         # Step 7: Re-enter core with merged facts (simulating what API endpoint does)
         # Update session with merged facts and cleared active_capability
-        updated_session = get_session(user_id) or session_state.copy()
+        updated_session = get_session(1, user_id) or session_state.copy()
         if runner_result.facts:
             # Merge facts into session context for core to read
             if "facts" not in updated_session:
@@ -218,7 +218,7 @@ def test_core_capability_noop_end_to_end():
         updated_session["active_capability"] = None  # Clear capability
 
         # Save updated session so core reads it
-        save_session(user_id, updated_session)
+        save_session(1, user_id, updated_session)
 
         # Create a new mock Luma response without active_capability for the second call
         # Include merged facts so they appear in the outcome
@@ -278,7 +278,7 @@ def test_core_capability_noop_end_to_end():
 
     finally:
         # Cleanup
-        clear_session(user_id)
+        clear_session(1, user_id)
         clear_registry()
 
 

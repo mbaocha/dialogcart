@@ -11,7 +11,7 @@ time is always extracted to slots.
 
 import pytest
 
-from core.adapters.nlu.luma_response_processor import process_luma_response
+from core.tests.harness.planning_compat import process_luma_response
 
 
 def test_noon_normalization():
@@ -35,7 +35,9 @@ def test_noon_normalization():
     }
 
     # Process response
-    decision = process_luma_response(luma_response, "service", "test_user")
+    decision = process_luma_response(
+        luma_response, "service", "test_user", organization_id=1
+    )
 
     # Verify time_constraint is preserved in context
     facts = decision.get("facts", {})
@@ -72,7 +74,9 @@ def test_noon_normalization_string():
         "booking": {"services": [{"text": "haircut"}]},
     }
 
-    decision = process_luma_response(luma_response, "service", "test_user")
+    decision = process_luma_response(
+        luma_response, "service", "test_user", organization_id=1
+    )
 
     facts = decision.get("facts", {})
     context = facts.get("context", {})
@@ -106,7 +110,9 @@ def test_morning_normalization():
         "booking": {"services": [{"text": "haircut"}]},
     }
 
-    decision = process_luma_response(luma_response, "service", "test_user")
+    decision = process_luma_response(
+        luma_response, "service", "test_user", organization_id=1
+    )
 
     facts = decision.get("facts", {})
     context = facts.get("context", {})
@@ -140,7 +146,9 @@ def test_time_already_in_slots():
         "booking": {"services": [{"text": "haircut"}]},
     }
 
-    decision = process_luma_response(luma_response, "service", "test_user")
+    decision = process_luma_response(
+        luma_response, "service", "test_user", organization_id=1
+    )
 
     facts = decision.get("facts", {})
     slots = facts.get("slots", {})
@@ -197,7 +205,9 @@ def test_time_normalized_not_in_missing_slots():
     }
 
     # Process response
-    decision = process_luma_response(luma_response, "service", "test_user")
+    decision = process_luma_response(
+        luma_response, "service", "test_user", organization_id=1
+    )
 
     facts = decision.get("facts", {})
     slots = facts.get("slots", {})

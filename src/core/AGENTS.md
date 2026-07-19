@@ -37,6 +37,21 @@ The production owner of each conversational turn within Core is **ConversationEn
 - Session intent is immutable within a turn unless explicitly reset.
 - `missing_slots` are derived from intent policy and effective slots, computed once per turn.
 
+### Session schema V2
+
+- Persisted sessions use ``schema_version: 2`` with nested sections: ``conversation``, ``planning``, ``booking``, ``availability``, ``confirmation_state``, ``capability``.
+- V1 sessions are normalized on load; legacy top-level mirrors are hydrated in memory for existing consumers.
+- ``core.session.session_schema_v2`` owns shape, validation, and migration only—not planning or execution decisions.
+- **Planning** owns ``planning.*``, including ``planning.slots`` and ``planning.bound_datetime``.
+- **Execution** results are ephemeral. The projector persists only durable committed identifiers and availability artifacts.
+- **Booking** contains only successfully committed ``booking_id`` and ``booking_code`` values.
+- **SessionProjectorV2** owns durable turn-end writes (no direct storage I/O).
+- **Confirmation gate** owns ``confirmation_state``.
+- **API** owns persisted ``conversation.history``; NLU conversation continuation data lives in ``conversation.memory``.
+- **Capabilities** produce ``capability.active`` and minimal ``capability.results`` continuation facts.
+- **Rendering** and **NLU** do not own persisted session fields.
+- The raw NLU ``facts`` bag is not persisted in V2; only explicitly mapped continuation keys (e.g. ``payment_satisfied``) live under ``capability.results``.
+
 ---
 
 ## Proposals and durable slots
@@ -53,8 +68,10 @@ The production owner of each conversational turn within Core is **ConversationEn
 
 - Core owns explicit user approval before irreversible booking actions.
 - `confirmation_state` (`pending`, `confirmed`, cleared) is managed via the confirmation gate.
+- `session.confirmation_state` is the canonical authorization field; it is not nested booking state.
 - Committing steps require confirmation when policy and workflow state demand it.
-- While `pending`, each turn is classified once (accept, reject, revise, none); downstream branches on that decision—not re-derived.
+- While `pending`, each turn is classified once as `YES`, `NO`, or `ANOTHER_REQUEST`; downstream branches on that decision—not re-derived. The gate does not interpret the request that supersedes confirmation.
+- On `ANOTHER_REQUEST`, the gate consumes only confirmation authorization. Planning owns all resulting booking-slot and availability invalidation.
 - `confirmation_state` exists only to authorize a pending irreversible operation; it is not durable booking truth.
 - Lifecycle: `pending` → confirmation required; `confirmed` → transient authorization for the current commit only; cleared → no active workflow.
 - A successful commit **consumes** `confirmation_state`; it must not remain after completion.
@@ -71,18 +88,27 @@ The production owner of each conversational turn within Core is **ConversationEn
 - A prior search is not trusted after booking parameters change.
 - Parameter changes require re-established availability before committing steps proceed.
 - `availability_ready` reflects trust at planning time.
-- `last_execution_result` is the authoritative cached search until invalidated.
-- `presented_availability` is the only selectable availability set.
-- Presentation is a view over cached search; it does not own booking truth.
+- `AvailabilityCache` is the authoritative trusted search result until invalidated. It is currently persisted using the legacy session field `last_execution_result`; that storage key is not part of the domain contract.
+- `PresentedAvailability` is the current discovery/disambiguation window shown to the user.
+- Domain modules read cache and presentation via the availability presentation session adapter—not by storage-field name.
+- Slot selection is hybrid: ambiguous or presentation-anchored choices resolve against the current presented availability only (never cache fallthrough); explicit complete current-turn choices may resolve against the trusted availability cache when they uniquely identify one offer; slots absent from that cache must not bind.
+- Current-turn explicit date/time provenance (`_current_turn_has_date` / `_current_turn_has_time`) distinguishes utterance facts from carried session proposals; session date alone must not activate cache selection.
+- Date-only current-turn dates project the first page of that date when present in cache; missing dates return `target_date_not_in_cache` without inventing empty groups.
+- Browse exhaustion preserves the last successful `PresentedAvailability` as the ambiguous-selection window.
+- Presentation is a view over cached search used for discovery and disambiguation; it does not own booking truth.
+- The availability renderer formats prepared `PresentedAvailability` only; it does not derive presentation windows from raw slots.
 - Browsing availability must **never** execute `SEARCH_AVAILABILITY`.
 - Only search-parameter changes may invalidate cache and require a new search.
 - Search parameters: service, date, duration, resource, location.
 - Presentation state must not modify booking slots, proposals, fingerprints, or other durable state.
 - Pagination is presentation state only.
+- Availability browsing is unified across times and dates within the trusted cache: general browse advances remaining times on the current date before moving to the next date with availability; time-axis browse stays on the current date; date-axis browse jumps to the first page of another available date.
+- Browse intent is `direction` plus optional `axis_hint` (`any` | `time` | `date`); cursor and grouping stay private to the availability presentation component.
 - NLU emits `AVAILABILITY` with `operation: browse_next | browse_previous | null`.
-- Core consumes structured `operation` only—not raw user text for browse direction.
+- Core may refine axis from deterministic phrase fallbacks (for example `more times`, `next day`, `go back`) without requiring NLU schema changes.
+- Core owns the browse execution decision; browsing never executes `SEARCH_AVAILABILITY`.
 - NLU classifies intent and operation; Core owns the execution decision.
-- Core may reuse cache, paginate, or execute `SEARCH_AVAILABILITY`.
+- Core may reuse cache, paginate/browse presentation, or execute `SEARCH_AVAILABILITY`.
 - NLU never instructs Core to search.
 
 Reference: [`AVAILABILITY_INTERACTION_CONTRACT.md`](orchestration/contracts/AVAILABILITY_INTERACTION_CONTRACT.md)
@@ -110,6 +136,17 @@ Reference: [`AVAILABILITY_INTERACTION_CONTRACT.md`](orchestration/contracts/AVAI
 - Awaiting confirmation (no commit): `status=AWAITING_CONFIRMATION`, `stage=CONFIRM`, `awaiting=USER_CONFIRMATION`, `action=null`.
 - After user confirmation, policy may select a commit step (e.g. `CONFIRM_APPOINTMENT`).
 - Eligibility inputs: business facts. Sequencing: policy + generic selector. Fact computation: runtime fact registry. Conversation phase/UI: presentation fields. Slot completeness and safety checks belong to planning infrastructure—not sequencing. Whether and how `plan.action` runs belongs to **execution coordination**—not the planner.
+
+### Planning ownership model (Phase 1 — boundaries only)
+
+Target inputs: **Workflow**, **Current Request**, **Conversation Context** (previous Decision outputs). Evidence producers feed a pure **Relationship Evaluator**; **Decision** is the intended aggregate root for action/stage/status/next context.
+
+```text
+CurrentRequest  →  Attach  →  AttachedRequest
+     (NLU)      Stage 2    (planning_intent, turn_operation, …)
+```
+
+Numbered Stage 01–09 modules expose the unchanged runtime order. Macro-phase classification: [`planning/pipeline/MACRO_PHASES.md`](planning/pipeline/MACRO_PHASES.md). Phase 5 completes Decision ownership: `decide()` selects planning-turn outcomes; `finalize_decision_after_time_resolution()` owns post-execution / time-match finalization. `nlu_failure_fallback` remains a planner admission boundary (pre-Attach). Decision Trace records CurrentRequest, AttachedRequest, DecisionInput, Decision, and DecisionFinalization.
 
 ---
 

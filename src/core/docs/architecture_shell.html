@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Core Architecture: One Conversation, Six Turns</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" id="hljs-light">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css" id="hljs-dark" disabled>
+  <style>
+    :root {
+      --bg: #fafbfc;
+      --bg-elevated: #ffffff;
+      --bg-sidebar: #f3f4f6;
+      --text: #1f2937;
+      --text-muted: #6b7280;
+      --border: #e5e7eb;
+      --accent: #2563eb;
+      --accent-soft: #dbeafe;
+      --callout-note: #eff6ff;
+      --callout-note-border: #93c5fd;
+      --callout-important: #fef3c7;
+      --callout-important-border: #fbbf24;
+      --shadow: 0 1px 3px rgba(0,0,0,.08);
+      --radius: 8px;
+      --sidebar-width: 280px;
+      --header-height: 56px;
+      --font: 'Inter', system-ui, -apple-system, sans-serif;
+      --mono: 'JetBrains Mono', ui-monospace, monospace;
+    }
+    [data-theme="dark"] {
+      --bg: #0f1419;
+      --bg-elevated: #1a1f26;
+      --bg-sidebar: #141920;
+      --text: #e7ecf3;
+      --text-muted: #9aa5b4;
+      --border: #2d3748;
+      --accent: #60a5fa;
+      --accent-soft: #1e3a5f;
+      --callout-note: #172554;
+      --callout-note-border: #3b82f6;
+      --callout-important: #422006;
+      --callout-important-border: #d97706;
+      --shadow: 0 1px 3px rgba(0,0,0,.4);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      font-size: 16px;
+      line-height: 1.65;
+      color: var(--text);
+      background: var(--bg);
+    }
+    .app-header {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: var(--header-height);
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 0 1.25rem;
+      background: var(--bg-elevated);
+      border-bottom: 1px solid var(--border);
+      z-index: 200;
+      box-shadow: var(--shadow);
+    }
+    .app-header h1 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin: 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      flex: 0 1 auto;
+      min-width: 0;
+    }
+    .search-wrap { flex: 1; max-width: 420px; position: relative; }
+    .search-wrap input {
+      width: 100%;
+      padding: .5rem .75rem .5rem 2.25rem;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg);
+      color: var(--text);
+      font: inherit;
+    }
+    .search-wrap input:focus { outline: 2px solid var(--accent); border-color: transparent; }
+    .search-icon {
+      position: absolute; left: .65rem; top: 50%; transform: translateY(-50%);
+      color: var(--text-muted); pointer-events: none; font-size: .9rem;
+    }
+    .header-actions { display: flex; gap: .5rem; margin-left: auto; flex-shrink: 0; }
+    .btn-icon {
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text);
+      border-radius: var(--radius);
+      padding: .45rem .65rem;
+      cursor: pointer;
+      font-size: 1rem;
+      line-height: 1;
+    }
+    .btn-icon:hover { background: var(--accent-soft); border-color: var(--accent); }
+    .layout {
+      display: flex;
+      padding-top: var(--header-height);
+      min-height: 100vh;
+    }
+    .sidebar {
+      position: fixed;
+      top: var(--header-height);
+      left: 0;
+      width: var(--sidebar-width);
+      height: calc(100vh - var(--header-height));
+      overflow-y: auto;
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--border);
+      padding: 1rem 0;
+      z-index: 100;
+    }
+    .sidebar-title {
+      font-size: .7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .06em;
+      color: var(--text-muted);
+      padding: 0 1rem .5rem;
+    }
+    .nav-list { list-style: none; margin: 0; padding: 0; }
+    .nav-list a {
+      display: block;
+      padding: .35rem 1rem;
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: .875rem;
+      border-left: 2px solid transparent;
+      line-height: 1.4;
+    }
+    .nav-list a:hover { color: var(--accent); background: var(--accent-soft); }
+    .nav-list a.active { color: var(--accent); border-left-color: var(--accent); font-weight: 500; }
+    .nav-list .depth-1 { padding-left: 1rem; }
+    .nav-list .depth-2 { padding-left: 1.5rem; font-size: .8125rem; }
+    .nav-list .depth-3 { padding-left: 2rem; font-size: .75rem; }
+    .nav-list .depth-4 { padding-left: 2.5rem; font-size: .75rem; }
+    .nav-list .hidden-by-search { display: none; }
+    .main {
+      flex: 1;
+      margin-left: var(--sidebar-width);
+      padding: 2rem 2.5rem 4rem;
+      max-width: 960px;
+    }
+    .content > h1:first-child {
+      font-size: 2rem;
+      font-weight: 700;
+      margin: 0 0 1rem;
+      padding-bottom: .5rem;
+      border-bottom: 1px solid var(--border);
+      scroll-margin-top: calc(var(--header-height) + 1rem);
+    }
+    .content h1 {
+      font-size: 2rem;
+      font-weight: 700;
+      margin: 2rem 0 1rem;
+      padding-bottom: .5rem;
+      border-bottom: 1px solid var(--border);
+      scroll-margin-top: calc(var(--header-height) + 1rem);
+    }
+    .content h2 {
+      font-size: 1.35rem;
+      font-weight: 600;
+      margin: 2rem 0 .75rem;
+      scroll-margin-top: calc(var(--header-height) + 1rem);
+    }
+    .content h3 { font-size: 1.1rem; font-weight: 600; margin: 1.5rem 0 .5rem; scroll-margin-top: calc(var(--header-height) + 1rem); }
+    .content h4 { font-size: .95rem; font-weight: 600; margin: 1rem 0 .35rem; color: var(--text-muted); scroll-margin-top: calc(var(--header-height) + 1rem); }
+    .content p { margin: .75rem 0; }
+    .content a { color: var(--accent); }
+    .content hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+    .content ul, .content ol { padding-left: 1.5rem; margin: .75rem 0; }
+    .content li { margin: .25rem 0; }
+    .content blockquote {
+      margin: 1rem 0;
+      padding: .75rem 1rem;
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      border-radius: 0 var(--radius) var(--radius) 0;
+    }
+    .content table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 1rem 0;
+      font-size: .9rem;
+    }
+    .content th, .content td {
+      border: 1px solid var(--border);
+      padding: .5rem .75rem;
+      text-align: left;
+    }
+    .content th { background: var(--bg-sidebar); font-weight: 600; }
+    .content code {
+      font-family: var(--mono);
+      font-size: .875em;
+      background: var(--bg-sidebar);
+      padding: .15em .35em;
+      border-radius: 4px;
+    }
+    .content pre {
+      margin: 1rem 0;
+      border-radius: var(--radius);
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      background: var(--bg-elevated) !important;
+    }
+    .content pre code {
+      background: transparent;
+      padding: 1rem;
+      font-size: .8125rem;
+      display: block;
+    }
+    .callout {
+      margin: 1rem 0;
+      padding: .85rem 1rem;
+      border-radius: var(--radius);
+      border: 1px solid;
+    }
+    .callout-note { background: var(--callout-note); border-color: var(--callout-note-border); }
+    .callout-important { background: var(--callout-important); border-color: var(--callout-important-border); }
+    .callout strong { display: block; margin-bottom: .25rem; }
+    details.turn-section {
+      margin: 1.5rem 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: var(--bg-elevated);
+      box-shadow: var(--shadow);
+    }
+    details.turn-section > summary {
+      cursor: pointer;
+      padding: 1rem 1.25rem;
+      font-size: 1.5rem;
+      font-weight: 700;
+      list-style: none;
+      user-select: none;
+    }
+    details.turn-section > summary::-webkit-details-marker { display: none; }
+    details.turn-section > summary::before {
+      content: '▸';
+      display: inline-block;
+      margin-right: .5rem;
+      transition: transform .2s;
+      color: var(--accent);
+    }
+    details.turn-section[open] > summary::before { transform: rotate(90deg); }
+    details.turn-section .turn-body { padding: 0 1.25rem 1.25rem; }
+    details.turn-section .turn-body > h1 { display: none; }
+    details.native-details {
+      margin: 1rem 0;
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: .5rem 1rem;
+      background: var(--bg-elevated);
+    }
+    details.native-details summary { cursor: pointer; font-weight: 600; }
+    .mermaid {
+      margin: 1.25rem 0;
+      text-align: center;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 1rem;
+      overflow-x: auto;
+    }
+    .search-hidden { display: none !important; }
+    .turn-anchor {
+      display: block;
+      position: relative;
+      top: calc(-1 * var(--header-height) - 1rem);
+      visibility: hidden;
+    }
+    #back-to-top {
+      position: fixed;
+      bottom: 1.5rem;
+      right: 1.5rem;
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      border: 1px solid var(--border);
+      background: var(--bg-elevated);
+      color: var(--text);
+      font-size: 1.25rem;
+      cursor: pointer;
+      box-shadow: var(--shadow);
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity .2s, visibility .2s;
+      z-index: 150;
+    }
+    #back-to-top.visible { opacity: 1; visibility: visible; }
+    #back-to-top:hover { background: var(--accent-soft); border-color: var(--accent); }
+    .mobile-nav-toggle { display: none; }
+    @media (max-width: 960px) {
+      .sidebar {
+        transform: translateX(-100%);
+        transition: transform .25s;
+      }
+      .sidebar.open { transform: translateX(0); }
+      .main { margin-left: 0; padding: 1.25rem 1rem 3rem; }
+      .mobile-nav-toggle { display: inline-flex; }
+      .app-header h1 { display: none; }
+    }
+    .overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,.4);
+      z-index: 90;
+    }
+    .overlay.visible { display: block; }
+  </style>
+</head>
+<body>
+  <header class="app-header">
+    <button class="btn-icon mobile-nav-toggle" id="nav-toggle" aria-label="Toggle navigation">☰</button>
+    <h1>Core Architecture</h1>
+    <div class="search-wrap">
+      <span class="search-icon" aria-hidden="true">⌕</span>
+      <input type="search" id="search" placeholder="Search headings and content…" autocomplete="off">
+    </div>
+    <div class="header-actions">
+      <button class="btn-icon" id="theme-toggle" aria-label="Toggle dark mode" title="Toggle theme">◐</button>
+    </div>
+  </header>
+  <div class="overlay" id="overlay"></div>
+  <div class="layout">
+    <nav class="sidebar" id="sidebar" aria-label="Table of contents">
+      <div class="sidebar-title">On this page</div>
+      <ul class="nav-list" id="nav-list"></ul>
+    </nav>
+    <main class="main">
+      <article class="content" id="content"></article>
+    </main>
+  </div>
+  <button id="back-to-top" aria-label="Back to top" title="Back to top">↑</button>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.3/dist/mermaid.min.js"></script>
+  <script>
+(function () {
+  'use strict';
+
+  const SOURCE = __MARKDOWN_JSON__;
+
+  function slugify(text) {
+    return text
+      .toLowerCase()
+      .trim()
+      .replace(/<[^>]+>/g, '')
+      .replace(/[^\w\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-');
+  }
+
+  function escapeHtml(s) {
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function preprocessMarkdown(md) {
+    return md
+      .replace(/^> \[!NOTE\]\s*\n((?:>.*\n?)*)/gm, function (_, body) {
+        const inner = body.replace(/^> ?/gm, '').trim();
+        return '<div class="callout callout-note"><strong>Note</strong>\n\n' + inner + '\n\n</div>\n\n';
+      })
+      .replace(/^> \[!IMPORTANT\]\s*\n((?:>.*\n?)*)/gm, function (_, body) {
+        const inner = body.replace(/^> ?/gm, '').trim();
+        return '<div class="callout callout-important"><strong>Important</strong>\n\n' + inner + '\n\n</div>\n\n';
+      });
+  }
+
+  marked.setOptions({ gfm: true, breaks: false });
+
+  const renderer = new marked.Renderer();
+  const defaultCode = renderer.code.bind(renderer);
+  renderer.code = function (code, infostring) {
+    const lang = (infostring || '').trim().toLowerCase();
+    if (lang === 'mermaid') {
+      return '<div class="mermaid">' + code + '</div>';
+    }
+    if (lang === 'json') {
+      return '<pre><code class="language-json">' + escapeHtml(code) + '</code></pre>';
+    }
+    if (lang === 'text' || lang === 'txt') {
+      return '<pre><code class="language-plaintext">' + escapeHtml(code) + '</code></pre>';
+    }
+    return defaultCode(code, infostring);
+  };
+  marked.use({ renderer });
+
+  function addHeadingIds(container) {
+    const used = new Set();
+    container.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach(function (h) {
+      let id = h.id;
+      if (!id) {
+        const base = slugify(h.textContent);
+        id = base;
+        let n = 2;
+        while (!id || used.has(id)) {
+          id = base + '-' + n++;
+        }
+      }
+      used.add(id);
+      h.id = id;
+      if (!h.querySelector('.heading-anchor')) {
+        const a = document.createElement('a');
+        a.className = 'heading-anchor';
+        a.href = '#' + id;
+        a.setAttribute('aria-hidden', 'true');
+        a.style.marginLeft = '.35rem';
+        a.style.opacity = '.35';
+        a.style.textDecoration = 'none';
+        a.textContent = '#';
+        h.appendChild(a);
+      }
+    });
+  }
+
+  function wrapTurnSections(container) {
+    const h1s = Array.from(container.children).filter(function (el) {
+      return el.tagName === 'H1' && /^Turn \d+$/.test(el.textContent.trim());
+    });
+
+    h1s.forEach(function (h1, idx) {
+      const prev = h1.previousElementSibling;
+      let anchorId = null;
+      if (prev && prev.tagName === 'A' && prev.id && prev.id.indexOf('turn-') === 0) {
+        anchorId = prev.id;
+        prev.remove();
+      }
+
+      const details = document.createElement('details');
+      details.className = 'turn-section';
+      details.open = true;
+
+      const summary = document.createElement('summary');
+      summary.textContent = h1.textContent.trim();
+
+      const body = document.createElement('div');
+      body.className = 'turn-body';
+
+      const stop = h1s[idx + 1] || null;
+      body.appendChild(h1);
+      let n = h1.nextSibling;
+      while (n && n !== stop) {
+        const next = n.nextSibling;
+        body.appendChild(n);
+        n = next;
+      }
+
+      details.appendChild(summary);
+      details.appendChild(body);
+
+      const insertPoint = stop;
+      if (anchorId) {
+        const anchor = document.createElement('span');
+        anchor.id = anchorId;
+        anchor.className = 'turn-anchor';
+        container.insertBefore(anchor, insertPoint);
+      }
+      container.insertBefore(details, insertPoint);
+    });
+  }
+
+  function buildNav(container) {
+    const nav = document.getElementById('nav-list');
+    nav.innerHTML = '';
+    container.querySelectorAll('h1,h2,h3,h4').forEach(function (h) {
+      if (h.closest('details.turn-section > .turn-body') && h.tagName === 'H1') return;
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = '#' + h.id;
+      a.textContent = h.textContent.replace(/\s*#$/, '').trim();
+      const depth = parseInt(h.tagName.charAt(1), 10);
+      a.className = 'depth-' + Math.min(depth, 4);
+      a.dataset.headingId = h.id;
+      li.appendChild(a);
+      nav.appendChild(li);
+    });
+  }
+
+  function highlightCode(container) {
+    container.querySelectorAll('pre code').forEach(function (block) {
+      hljs.highlightElement(block);
+    });
+  }
+
+  async function renderMermaid() {
+    const theme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default';
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: theme,
+      securityLevel: 'loose',
+      flowchart: { useMaxWidth: true, htmlLabels: true }
+    });
+    const nodes = document.querySelectorAll('.mermaid');
+    if (!nodes.length) return;
+    await mermaid.run({ nodes: nodes });
+  }
+
+  function setTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    localStorage.setItem('arch-theme', theme);
+    document.getElementById('hljs-light').disabled = theme === 'dark';
+    document.getElementById('hljs-dark').disabled = theme !== 'dark';
+    renderMermaid().catch(console.error);
+  }
+
+  function initTheme() {
+    const saved = localStorage.getItem('arch-theme');
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    setTheme(saved || (prefersDark ? 'dark' : 'light'));
+    document.getElementById('theme-toggle').addEventListener('click', function () {
+      const cur = document.documentElement.getAttribute('data-theme');
+      setTheme(cur === 'dark' ? 'light' : 'dark');
+    });
+  }
+
+  function initSearch() {
+    const input = document.getElementById('search');
+    const content = document.getElementById('content');
+
+    input.addEventListener('input', function () {
+      const q = input.value.trim().toLowerCase();
+      document.querySelectorAll('#nav-list a').forEach(function (a) {
+        a.classList.remove('hidden-by-search');
+      });
+      content.querySelectorAll('.search-hidden').forEach(function (el) {
+        el.classList.remove('search-hidden');
+      });
+
+      if (!q) return;
+
+      const matchedIds = new Set();
+      const sections = content.querySelectorAll('details.turn-section');
+      const blocks = content.querySelectorAll('h1,h2,h3,h4,p,li,td,th,blockquote,.callout,pre,details.turn-section');
+
+      blocks.forEach(function (el) {
+        const text = el.textContent.toLowerCase();
+        const hit = text.indexOf(q) !== -1;
+
+        if (el.matches('details.turn-section')) {
+          const childHit = Array.from(el.querySelectorAll('h2,h3,h4,p,li,pre,td')).some(function (c) {
+            return c.textContent.toLowerCase().indexOf(q) !== -1;
+          });
+          const visible = hit || childHit;
+          el.classList.toggle('search-hidden', !visible);
+          if (visible) {
+            el.open = true;
+            el.querySelectorAll('h1,h2,h3,h4').forEach(function (h) { matchedIds.add(h.id); });
+          }
+          return;
+        }
+
+        if (hit) {
+          el.classList.remove('search-hidden');
+          let p = el;
+          while (p && p !== content) {
+            if (/^H[1-4]$/.test(p.tagName)) matchedIds.add(p.id);
+            if (p.matches && p.matches('details.turn-section')) {
+              p.classList.remove('search-hidden');
+              p.open = true;
+            }
+            p = p.parentElement;
+          }
+        } else if (el.matches('p,li,pre,blockquote,td')) {
+          const inOpenSection = el.closest('details.turn-section:not(.search-hidden)');
+          if (!inOpenSection) el.classList.add('search-hidden');
+        }
+      });
+
+      document.querySelectorAll('#nav-list a').forEach(function (a) {
+        const id = a.dataset.headingId;
+        const navHit = a.textContent.toLowerCase().indexOf(q) !== -1;
+        const visible = navHit || matchedIds.has(id);
+        a.classList.toggle('hidden-by-search', !visible);
+      });
+    });
+  }
+
+  function initScrollSpy() {
+    const links = Array.from(document.querySelectorAll('#nav-list a'));
+    const headings = document.querySelectorAll('#content h1,#content h2,#content h3,#content h4');
+    const observer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          links.forEach(function (l) {
+            l.classList.toggle('active', l.getAttribute('href') === '#' + entry.target.id);
+          });
+        }
+      });
+    }, { rootMargin: '-20% 0px -70% 0px', threshold: 0 });
+    headings.forEach(function (h) { observer.observe(h); });
+  }
+
+  function initBackToTop() {
+    const btn = document.getElementById('back-to-top');
+    window.addEventListener('scroll', function () {
+      btn.classList.toggle('visible', window.scrollY > 400);
+    });
+    btn.addEventListener('click', function () {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  }
+
+  function initMobileNav() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('overlay');
+    function toggle() {
+      sidebar.classList.toggle('open');
+      overlay.classList.toggle('visible');
+    }
+    document.getElementById('nav-toggle').addEventListener('click', toggle);
+    overlay.addEventListener('click', toggle);
+    sidebar.querySelectorAll('a').forEach(function (a) {
+      a.addEventListener('click', function () {
+        sidebar.classList.remove('open');
+        overlay.classList.remove('visible');
+      });
+    });
+  }
+
+  async function main() {
+    const content = document.getElementById('content');
+    content.innerHTML = marked.parse(preprocessMarkdown(SOURCE));
+    addHeadingIds(content);
+    wrapTurnSections(content);
+    addHeadingIds(content);
+    content.querySelectorAll('details:not(.turn-section)').forEach(function (d) {
+      d.classList.add('native-details');
+    });
+    buildNav(content);
+    highlightCode(content);
+    initTheme();
+    await renderMermaid();
+    initSearch();
+    initScrollSpy();
+    initBackToTop();
+    initMobileNav();
+  }
+
+  main().catch(console.error);
+})();
+  </script>
+</body>
+</html>

@@ -1,50 +1,22 @@
 """
-Tests for non-core intent pass-through behavior.
+Tests for non-core / non-durable intent pass-through via the live turn path.
 
-Verifies that non-core intents are passed through as non-orchestrated signals
-rather than being rejected as errors.
+Verifies that non-durable intents are short-circuited rather than rejected as
+errors, and that core base-intent membership remains correct.
 """
 
 from unittest.mock import Mock
 
-import pytest
-
 from core.api.compat import handle_message
-from core.api.legacy_helpers import _handle_non_core_intent
-from core.planning.policy.base_intents import CORE_BASE_INTENTS
+from core.planning.policy.base_intents import CORE_BASE_INTENTS, is_core_intent
+from core.tests.harness.clients import stub_catalog_client
 
 
 class TestNonCoreIntentPassthrough:
-    """Test that non-core intents are passed through correctly."""
+    """Test that non-durable intents are passed through correctly."""
 
-    def test_handle_non_core_intent_returns_non_orchestrated_outcome(self):
-        """Verify _handle_non_core_intent returns correct outcome structure."""
-        luma_response = {
-            "success": True,
-            "intent": {"name": "PAYMENT", "confidence": 0.9},
-            "slots": {"amount": "100"},
-            "booking": {},
-            "needs_clarification": False,
-        }
-        decision = {
-            "intent_name": "PAYMENT",
-            "facts": {"slots": {"amount": "100"}},
-            "booking": {},
-        }
-        user_id = "test_user_123"
-
-        result = _handle_non_core_intent(luma_response, decision, user_id)
-
-        assert result["success"] is True
-        assert result["outcome"]["status"] == "NON_CORE_INTENT"
-        assert result["outcome"]["intent_name"] == "PAYMENT"
-        assert "facts" in result["outcome"]
-        assert "slots" in result["outcome"]["facts"]
-        assert result["outcome"]["facts"]["slots"]["amount"] == "100"
-
-    def test_non_core_intent_passed_through_in_handle_message(self):
-        """Verify handle_message passes through non-core intents."""
-        # Setup mock Luma response with non-core intent
+    def test_non_durable_intent_passed_through_in_handle_message(self):
+        """Verify handle_message short-circuits non-durable intents without error."""
         mock_luma_instance = Mock()
         mock_luma_instance.resolve.return_value = {
             "success": True,
@@ -57,7 +29,7 @@ class TestNonCoreIntentPassthrough:
 
         mock_org_instance = Mock()
         mock_org_instance.get_details.return_value = {
-            "organization": {"id": 1, "domain": "service"}
+            "organization": {"id": 1, "businessCategoryId": 1}
         }
 
         result = handle_message(
@@ -65,157 +37,28 @@ class TestNonCoreIntentPassthrough:
             text="what is my booking status?",
             luma_client=mock_luma_instance,
             organization_client=mock_org_instance,
+            catalog_client=stub_catalog_client(),
+            organization_id=1,
         )
 
-        # Should pass through, not error
         assert result["success"] is True
         plan = result["result"]
         assert (
-            plan.get("status") == "NON_CORE_INTENT"
+            plan.get("status") == "NON_DURABLE_INTENT"
             or plan.get("intent_name") == "BOOKING_INQUIRY"
         )
-        # Facts may be in plan or result structure
         assert "facts" in plan or "slots" in plan
 
-    def test_core_intents_still_orchestrated(self):
-        """Verify core intents are still orchestrated normally."""
-        # This is a sanity check - core intents should not be passed through
+    def test_core_intents_still_recognized(self):
+        """Verify core intents are still recognized as core."""
         for intent in CORE_BASE_INTENTS:
-            # Just verify the intent is recognized as core
-            from core.planning.policy.base_intents import is_core_intent
-
             assert is_core_intent(intent) is True
-
-    def test_non_core_intent_preserves_luma_data(self):
-        """Verify non-core intent handler preserves Luma response data in facts."""
-        luma_response = {
-            "success": True,
-            "intent": {"name": "QUOTE", "confidence": 0.8},
-            "slots": {
-                "service_id": "haircut",
-                "datetime_range": {"start": "2025-01-01T10:00:00Z"},
-            },
-            "booking": {"confirmation_state": "pending"},
-            "needs_clarification": False,
-            "clarification_reason": None,
-            "issues": {},
-        }
-        decision = {
-            "intent_name": "QUOTE",
-            "facts": {"slots": {"service_id": "haircut"}},
-            "booking": {"confirmation_state": "pending"},
-        }
-
-        result = _handle_non_core_intent(luma_response, decision, "test_user")
-
-        # Verify facts structure preserves slots
-        facts = result["outcome"]["facts"]
-        assert facts["slots"]["service_id"] == "haircut"
-        # datetime_range may be in context or slots, depending on how Luma structures it
-        # The handler preserves slots from Luma response, but datetime_range might be in context
-        if "datetime_range" in facts.get("slots", {}):
-            assert facts["slots"]["datetime_range"]["start"] == "2025-01-01T10:00:00Z"
-        elif "datetime_range" in facts.get("context", {}):
-            # datetime_range might be in context instead
-            pass
-
-
-class TestNonCoreIntentExamples:
-    """Test specific non-core intent examples."""
-
-    def test_payment_intent_passed_through(self):
-        """Verify PAYMENT intent is passed through."""
-        luma_response = {
-            "success": True,
-            "intent": {"name": "PAYMENT", "confidence": 1.0},
-            "slots": {},
-            "booking": {},
-        }
-        decision = {"intent_name": "PAYMENT", "facts": {}, "booking": {}}
-
-        result = _handle_non_core_intent(luma_response, decision, "user")
-        assert result["outcome"]["intent_name"] == "PAYMENT"
-        assert result["outcome"]["status"] == "NON_CORE_INTENT"
-
-    def test_booking_inquiry_passed_through(self):
-        """Verify BOOKING_INQUIRY intent is passed through."""
-        luma_response = {
-            "success": True,
-            "intent": {"name": "BOOKING_INQUIRY", "confidence": 0.9},
-            "slots": {},
-            "booking": {},
-        }
-        decision = {"intent_name": "BOOKING_INQUIRY", "facts": {}, "booking": {}}
-
-        result = _handle_non_core_intent(luma_response, decision, "user")
-        assert result["outcome"]["intent_name"] == "BOOKING_INQUIRY"
-        assert result["outcome"]["status"] == "NON_CORE_INTENT"
-
-    def test_availability_intent_passed_through(self):
-        """Verify AVAILABILITY intent is passed through."""
-        luma_response = {
-            "success": True,
-            "intent": {"name": "AVAILABILITY", "confidence": 0.85},
-            "slots": {},
-            "booking": {},
-        }
-        decision = {"intent_name": "AVAILABILITY", "facts": {}, "booking": {}}
-
-        result = _handle_non_core_intent(luma_response, decision, "user")
-        assert result["outcome"]["intent_name"] == "AVAILABILITY"
-        assert result["outcome"]["status"] == "NON_CORE_INTENT"
 
 
 class TestNonCoreIntentInvariants:
-    """Test invariants for non-core intent handling."""
-
-    def test_non_core_intents_never_error(self):
-        """Verify non-core intents never return success=False."""
-        luma_response = {
-            "success": True,
-            "intent": {"name": "PAYMENT", "confidence": 0.9},
-            "slots": {},
-        }
-        decision = {"intent_name": "PAYMENT", "facts": {}}
-
-        result = _handle_non_core_intent(luma_response, decision, "user")
-        assert result["success"] is True
-        assert "error" not in result
-
-    def test_non_core_intents_preserve_facts_structure(self):
-        """Verify facts structure includes slots, missing_slots, and context."""
-        luma_response = {
-            "success": True,
-            "intent": {"name": "QUOTE", "confidence": 0.8},
-            "slots": {"service_id": "haircut"},
-            "missing_slots": ["date"],
-            "context": {"previous_intent": "CREATE_APPOINTMENT"},
-        }
-        decision = {
-            "intent_name": "QUOTE",
-            "facts": {
-                "slots": {"service_id": "haircut"},
-                "missing_slots": ["date"],
-                "context": {"previous_intent": "CREATE_APPOINTMENT"},
-            },
-        }
-
-        result = _handle_non_core_intent(luma_response, decision, "user")
-        facts = result["outcome"]["facts"]
-
-        assert "slots" in facts
-        assert "missing_slots" in facts
-        assert "context" in facts
-        assert facts["slots"]["service_id"] == "haircut"
-        assert facts["missing_slots"] == ["date"]
-        assert facts["context"]["previous_intent"] == "CREATE_APPOINTMENT"
+    """Test invariants for non-core intent membership."""
 
     def test_core_intents_not_affected(self):
-        """Verify core intents are not affected by non-core intent handling."""
-        from core.planning.policy.base_intents import CORE_BASE_INTENTS
-
-        # All core intents should still be recognized as core
+        """Verify core intents remain recognized as core."""
         for intent in CORE_BASE_INTENTS:
-            from core.planning.policy.base_intents import is_core_intent
-
             assert is_core_intent(intent) is True

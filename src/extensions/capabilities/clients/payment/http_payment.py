@@ -31,26 +31,21 @@ class HttpPaymentClient(BaseClient, PaymentClient):
     - Handles HTTP errors via BaseClient error handling
     """
 
-    def __init__(
-        self, base_url: Optional[str] = None, organization_id: Optional[int] = None
-    ):
+    def __init__(self, base_url: Optional[str] = None):
         """
         Initialize HTTP payment client.
 
         Args:
             base_url: API base URL (overrides INTERNAL_API_BASE_URL env var)
-            organization_id: Organization ID for payment API calls (optional,
-                can be provided per-call if needed)
         """
         super().__init__(
             base_url=base_url,
             env_var="INTERNAL_API_BASE_URL",
             default_url="http://localhost:3000",
         )
-        self.organization_id = organization_id
-
     def create_payment_intent(
         self,
+        organization_id: int,
         booking_id: int,
         amount: float,
         currency: str = "USD",
@@ -76,6 +71,7 @@ class HttpPaymentClient(BaseClient, PaymentClient):
             }
         """
         payload = {
+            "organization_id": organization_id,
             "booking_id": booking_id,
             "payment": {
                 "amount": amount,
@@ -121,7 +117,9 @@ class HttpPaymentClient(BaseClient, PaymentClient):
         # Fallback: wrap unknown response structure
         return {"success": True, "data": {"payment_intent_id": "", "payment_url": None}}
 
-    def get_payment_url(self, booking_code: str) -> Dict[str, Any]:
+    def get_payment_url(
+        self, organization_id: int, booking_code: str
+    ) -> Dict[str, Any]:
         """
         Get payment URL for a booking.
 
@@ -141,15 +139,10 @@ class HttpPaymentClient(BaseClient, PaymentClient):
                 }
             }
         """
-        # Use organization_id from constructor
-        org_id = self.organization_id
-
-        params = {}
-        if org_id is not None:
-            params["organization_id"] = org_id
-
         path = f"/api/internal/bookings/{booking_code}/payment-url"
-        response = self._request("GET", path, params=params if params else None)
+        response = self._request(
+            "GET", path, params={"organization_id": organization_id}
+        )
 
         # Normalize response to match Protocol contract
         if isinstance(response, dict):
@@ -185,7 +178,9 @@ class HttpPaymentClient(BaseClient, PaymentClient):
             },
         }
 
-    def get_payment_status(self, booking_code: str) -> Dict[str, Any]:
+    def get_payment_status(
+        self, organization_id: int, booking_code: str
+    ) -> Dict[str, Any]:
         """
         Get payment status for a booking.
 
@@ -210,15 +205,10 @@ class HttpPaymentClient(BaseClient, PaymentClient):
                 }
             }
         """
-        # Use organization_id from constructor
-        org_id = self.organization_id
-
-        params = {}
-        if org_id is not None:
-            params["organization_id"] = org_id
-
         path = f"/api/internal/bookings/{booking_code}/payment-status"
-        response = self._request("GET", path, params=params if params else None)
+        response = self._request(
+            "GET", path, params={"organization_id": organization_id}
+        )
 
         # Normalize response to match Protocol contract
         if isinstance(response, dict):

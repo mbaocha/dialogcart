@@ -36,7 +36,6 @@ except ImportError:
 except Exception:
     pass
 
-from core.session.persist import build_session_state_from_outcome
 from core.api.compat import handle_message
 from core.session.session_manager import clear_session, get_session, save_session
 
@@ -48,6 +47,7 @@ _TEMPORAL_SLOT_KEYS = frozenset(
 )
 _APPOINTMENT_DATE = "2026-01-16"
 _APPOINTMENT_TIME = "14:00"
+ORG_ID = int(os.getenv("ORG_ID", "1"))
 
 
 def _missing_slots(outcome: Dict[str, Any]) -> list:
@@ -135,7 +135,7 @@ def _create_appointment_response(
 
 def _seed_presented_availability_for_time_bind(user_id: str) -> None:
     """Ensure the 2pm turn can bind against a presented 14:00 offer."""
-    session = get_session(user_id) or {}
+    session = get_session(ORG_ID, user_id) or {}
     session["presented_availability"] = {
         "search_date": _APPOINTMENT_DATE,
         "slots": [
@@ -156,7 +156,7 @@ def _seed_presented_availability_for_time_bind(user_id: str) -> None:
         facts = {}
     facts.setdefault("dates", [_APPOINTMENT_DATE])
     session["facts"] = facts
-    save_session(user_id, session)
+    save_session(ORG_ID, user_id, session)
 
 
 def test_e2e_slot_retry_tracking_increment_and_reset():
@@ -170,7 +170,7 @@ def test_e2e_slot_retry_tracking_increment_and_reset():
     user_id = "test_slot_retry_tracking_001"
     domain = "service"
 
-    clear_session(user_id)
+    clear_session(ORG_ID, user_id)
     setup_test_org_domain(domain)
     aliases = {"haircut": "haircut"}
     fallback = TestLumaClient(test_aliases=aliases)
@@ -198,18 +198,18 @@ def test_e2e_slot_retry_tracking_increment_and_reset():
         },
         fallback=fallback,
     )
-    _ = TestCatalogClient(test_aliases=aliases, domain=domain)
+    catalog_client = TestCatalogClient(test_aliases=aliases, domain=domain)
     _ = get_customer_details()
 
     class SessionStoreWrapper:
         def __init__(self, user_id):
             self.user_id = user_id
 
-        def get_session(self, user_id):
-            return get_session(user_id)
+        def get_session(self, organization_id, user_id):
+            return get_session(organization_id, user_id)
 
-        def save_session(self, user_id, session_state):
-            save_session(user_id, session_state)
+        def save_session(self, organization_id, user_id, session_state):
+            save_session(organization_id, user_id, session_state)
 
     session_store = SessionStoreWrapper(user_id)
 
@@ -218,63 +218,39 @@ def test_e2e_slot_retry_tracking_increment_and_reset():
         text="book haircut",
         user_id=user_id,
         luma_client=luma_client,
+        catalog_client=catalog_client,
         organization_client=None,
         session_store=session_store,
     )
     _assert_ready_missing_client(result_turn1, ["date", "time"])
 
-    outcome_turn1 = result_turn1.get("outcome") or {}
-    new_session_state_turn1 = build_session_state_from_outcome(
-        outcome=outcome_turn1,
-        outcome_status=outcome_turn1.get("status"),
-        merged_luma_response=result_turn1.get("_merged_luma_response"),
-        previous_session_state=get_session(user_id),
-        user_id=user_id,
-    )
-    if new_session_state_turn1:
-        save_session(user_id, new_session_state_turn1)
+    assert result_turn1.get("_projected_session_state") is not None
 
     # TURN 2: no new slots (scripted CREATE_APPOINTMENT — not live "still thinking" NLU)
     result_turn2 = handle_message(
         text="still thinking",
         user_id=user_id,
         luma_client=luma_client,
+        catalog_client=catalog_client,
         organization_client=None,
         session_store=session_store,
     )
     _assert_ready_missing_client(result_turn2, ["date", "time"])
 
-    outcome_turn2 = result_turn2.get("outcome") or {}
-    new_session_state_turn2 = build_session_state_from_outcome(
-        outcome=outcome_turn2,
-        outcome_status=outcome_turn2.get("status"),
-        merged_luma_response=result_turn2.get("_merged_luma_response"),
-        previous_session_state=get_session(user_id),
-        user_id=user_id,
-    )
-    if new_session_state_turn2:
-        save_session(user_id, new_session_state_turn2)
+    assert result_turn2.get("_projected_session_state") is not None
 
     # TURN 3: date filled (canonical proposal), time still missing → still READY exploratory
     result_turn3 = handle_message(
         text="tomorrow",
         user_id=user_id,
         luma_client=luma_client,
+        catalog_client=catalog_client,
         organization_client=None,
         session_store=session_store,
     )
     _assert_ready_missing_client(result_turn3, ["time"])
 
-    outcome_turn3 = result_turn3.get("outcome") or {}
-    new_session_state_turn3 = build_session_state_from_outcome(
-        outcome=outcome_turn3,
-        outcome_status=outcome_turn3.get("status"),
-        merged_luma_response=result_turn3.get("_merged_luma_response"),
-        previous_session_state=get_session(user_id),
-        user_id=user_id,
-    )
-    if new_session_state_turn3:
-        save_session(user_id, new_session_state_turn3)
+    assert result_turn3.get("_projected_session_state") is not None
 
     # Seed presented 14:00 offer so the time-selection turn can bind deterministically.
     _seed_presented_availability_for_time_bind(user_id)
@@ -284,6 +260,7 @@ def test_e2e_slot_retry_tracking_increment_and_reset():
         text="2pm",
         user_id=user_id,
         luma_client=luma_client,
+        catalog_client=catalog_client,
         organization_client=None,
         session_store=session_store,
     )

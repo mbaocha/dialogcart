@@ -18,6 +18,7 @@ class PaymentClient(Protocol):
 
     def create_payment_intent(
         self,
+        organization_id: int,
         booking_id: int,
         amount: float,
         currency: str = "USD",
@@ -42,7 +43,9 @@ class PaymentClient(Protocol):
         """
         ...
 
-    def get_payment_url(self, booking_code: str) -> Dict[str, Any]:
+    def get_payment_url(
+        self, organization_id: int, booking_code: str
+    ) -> Dict[str, Any]:
         """
         Get payment URL for a booking.
 
@@ -61,7 +64,9 @@ class PaymentClient(Protocol):
         """
         ...
 
-    def get_payment_status(self, booking_code: str) -> Dict[str, Any]:
+    def get_payment_status(
+        self, organization_id: int, booking_code: str
+    ) -> Dict[str, Any]:
         """
         Get payment status for a booking.
 

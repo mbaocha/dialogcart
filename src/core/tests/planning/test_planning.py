@@ -28,11 +28,10 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from core.session.persist import build_session_state_from_outcome
 from core.adapters.cache.catalog_cache import catalog_cache
 from core.api.compat import handle_message
 from core.session.durable_intents import is_durable_intent
-from core.session.session_manager import clear_session, get_session, save_session
+from core.session.session_manager import clear_session, get_session
 from core.tests.harness.clients import TestCatalogClient, TestLumaClient
 from core.tests.harness.org_setup import get_customer_details, setup_test_org_domain
 from core.tests.planning.adapter import normalize_planning_outcome
@@ -456,7 +455,7 @@ def _test_scenario(
         user_id = f"test_session_{scenario_id:03d}_{int(time.time())}"
 
     # Clear session before test
-    clear_session(user_id)
+    clear_session(1, user_id)
 
     # Create test clients
     luma_client = TestLumaClient(test_aliases=aliases)
@@ -488,7 +487,7 @@ def _test_scenario(
             # Load session state before each turn
             # SESSION LIFECYCLE RULE: Durable intents preserve sessions on READY
             # Load sessions with status NEEDS_CLARIFICATION OR READY (for durable intents)
-            session_state = get_session(user_id)
+            session_state = get_session(1, user_id)
             if session_state:
                 session_status = session_state.get("status")
                 session_intent_name = session_state.get("intent_name")
@@ -520,11 +519,11 @@ def _test_scenario(
                 def __init__(self, user_id):
                     self.user_id = user_id
 
-                def get_session(self, user_id):
+                def get_session(self, organization_id, user_id):
                     # Retrieve session dynamically to get the latest saved state
                     # This ensures durable intents can be recovered from session
                     # even when Luma returns UNKNOWN/empty/error on follow-up turns
-                    return get_session(user_id)
+                    return get_session(organization_id, user_id)
 
             # Always create session_store wrapper (even if current session_state is None)
             # The wrapper will dynamically retrieve sessions, allowing durable intent recovery
@@ -578,19 +577,10 @@ def _test_scenario(
                     )
                 # Initialize new_session_state for all paths
                 new_session_state = None
-                merged_luma_response = result.get("_merged_luma_response")
-
                 if outcome_status == "NEEDS_CLARIFICATION":
                     # Save session state for follow-up
-                    new_session_state = build_session_state_from_outcome(
-                        outcome,
-                        outcome_status,
-                        merged_luma_response,
-                        session_state,
-                        user_id,
-                    )
+                    new_session_state = result.get("_projected_session_state")
                     if new_session_state:
-                        save_session(user_id, new_session_state)
                         if verbose:
                             print(
                                 f"\n[SESSION AFTER TURN {turn_index + 1}] SAVED "
@@ -605,21 +595,14 @@ def _test_scenario(
                     # EXECUTED/AWAITING_CONFIRMATION also try to build (but will return None)
                     # DURABLE INTENT CONTRACT: Durable intents (as defined in intent_policy.yaml) preserve sessions on READY
                     # This allows follow-up modifications (e.g., "make it 4pm" after booking is ready)
-                    new_session_state = build_session_state_from_outcome(
-                        outcome,
-                        outcome_status,
-                        merged_luma_response,
-                        session_state,
-                        user_id,
-                    )
+                    new_session_state = result.get("_projected_session_state")
                     if new_session_state is None:
-                        clear_session(user_id)
+                        clear_session(1, user_id)
                         if verbose:
                             print(
                                 f"\n[SESSION AFTER TURN {turn_index + 1}] CLEARED (status={outcome_status})"
                             )
                     else:
-                        save_session(user_id, new_session_state)
                         if verbose:
                             print(
                                 f"\n[SESSION AFTER TURN {turn_index + 1}] SAVED (status={outcome_status}) "
@@ -644,7 +627,7 @@ def _test_scenario(
             }
 
             # Session state after this turn (for failure diagnostics)
-            session_state_after = get_session(user_id)
+            session_state_after = get_session(1, user_id)
 
             # Assert expectations
             error_msg = assert_turn_expectations(
@@ -688,7 +671,7 @@ def _test_scenario(
         # Durable intents preserve session on READY (allows follow-up modifications)
         # HANDLER_DELEGATED turns do not persist session — skip lifecycle check
         if final_missing_slots == [] and final_status != "HANDLER_DELEGATED":
-            session_state = get_session(user_id)
+            session_state = get_session(1, user_id)
             # Check session intent_name (session stores intent_name, not intent)
             # Also check expected intent from test scenario
             session_intent_name = None
@@ -781,7 +764,7 @@ def _test_scenario(
     except (AssertionError, Exception) as e:
         session_state_before = None
         try:
-            session_state_before = get_session(user_id)
+            session_state_before = get_session(1, user_id)
         except Exception:
             pass
 
@@ -804,7 +787,7 @@ def _test_scenario(
         return False, f"{error_msg}\n{tb}", user_id
     finally:
         # Always clear session after test
-        clear_session(user_id)
+        clear_session(1, user_id)
 
 
 def cleanup_test_sessions(verbose: bool = False) -> None:
@@ -836,7 +819,7 @@ def cleanup_test_sessions(verbose: bool = False) -> None:
             return
 
         # Find all test session keys
-        pattern = f"{SESSION_KEY_PREFIX}test_session_*"
+        pattern = f"{SESSION_KEY_PREFIX}*:test_session_*"
         keys_to_delete = []
 
         # Scan for matching keys (Redis SCAN is safer than KEYS for production)

@@ -1,9 +1,11 @@
 """
-Planner implementation package.
+Planning algorithms and supporting logic.
 
-Internal planning modules (not a turn-orchestration layer):
-- turn_planner: Single-turn NLU merge, planning sequencing, and outcome handoff
-- intent_resolution: Intent resolution and merge logic
-- missing_slots: Missing slot computation
-- plan_builder: Decision plan construction
+Not the turn-orchestration layer — that lives in ``planning.pipeline``.
+
+Modules:
+- turn_planner: Thin production entry that delegates to ``run_planning_pipeline``
+- intent_resolution: Effective-intent resolution and merge rules
+- missing_slots: Policy required-slot lookup and MODIFY_BOOKING normalization
+- plan_builder: Post-execution outcome overlay / status projection helpers
 """

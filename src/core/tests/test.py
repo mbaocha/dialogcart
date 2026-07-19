@@ -8,6 +8,7 @@ Usage:
     RUN_REAL_LUMA_E2E=true python core/tests/test.py --category smoke
     python core/tests/test.py --category unit
     python core/tests/test.py --category e2e
+    python core/tests/test.py --category e2e --recache-luma
     python core/tests/test.py --list
 """
 
@@ -16,6 +17,9 @@ import os
 import subprocess
 import sys
 from pathlib import Path
+
+# Keep in sync with core.tests.harness.recording_luma_client.RECACHE_ENV
+RECACHE_ENV = "DIALOGCART_RECACHE_LUMA"
 
 
 def setup_path():
@@ -53,7 +57,6 @@ UNIT_PATHS = [
     "core/tests/routing",
     "core/tests/intents",
     "core/tests/workflows",
-    "core/tests/execution/test_test_backend.py",
     "core/tests/execution/test_booking_execution.py",
     "core/tests/execution/test_availability_execution.py",
     "core/tests/execution/test_confirmation_execution.py",
@@ -69,7 +72,12 @@ def _src_dir() -> Path:
     return base_path
 
 
-def run_tests(category: str = "all", pytest_args: list = None) -> int:
+def run_tests(
+    category: str = "all",
+    pytest_args: list = None,
+    *,
+    recache_luma: bool = False,
+) -> int:
     if category not in TEST_CATEGORIES and category != "unit":
         print(f"Error: Unknown test category '{category}'")
         print(f"Available: {', '.join(list(TEST_CATEGORIES.keys()) + ['unit'])}")
@@ -88,12 +96,18 @@ def run_tests(category: str = "all", pytest_args: list = None) -> int:
     if pytest_args:
         cmd.extend(pytest_args)
 
+    env = os.environ.copy()
+    if recache_luma:
+        env[RECACHE_ENV] = "1"
+
     print("=" * 80)
     print(f"Running tests: {category}")
     print(f"Path: {path_display}")
     print(f"Working directory: {src_dir}")
     if pytest_args:
         print(f"Pytest args: {' '.join(pytest_args)}")
+    if recache_luma:
+        print(f"Luma recordings: recache ({RECACHE_ENV}=1)")
     print("=" * 80)
     print()
 
@@ -102,7 +116,7 @@ def run_tests(category: str = "all", pytest_args: list = None) -> int:
         print()
 
     try:
-        return subprocess.run(cmd, cwd=src_dir).returncode
+        return subprocess.run(cmd, cwd=src_dir, env=env).returncode
     except KeyboardInterrupt:
         print("\n\nTest run interrupted by user.")
         return 130
@@ -122,6 +136,8 @@ Examples:
   python core/tests/test.py --category execution
   RUN_REAL_LUMA_E2E=true python core/tests/test.py --category smoke
   python core/tests/test.py --category unit
+  python core/tests/test.py --category e2e
+  python core/tests/test.py --category e2e --recache-luma
   python core/tests/test.py --category planning -- -k scenario_22
         """,
     )
@@ -138,6 +154,14 @@ Examples:
         action="store_true",
         help="List all available test categories",
     )
+    parser.add_argument(
+        "--recache-luma",
+        action="store_true",
+        help=(
+            "Force live Luma /resolve and overwrite E2E recordings "
+            f"(sets {RECACHE_ENV}=1)"
+        ),
+    )
 
     args, pytest_args = parser.parse_known_args()
 
@@ -149,7 +173,9 @@ Examples:
         return 0
 
     setup_path()
-    return run_tests(args.category, pytest_args)
+    return run_tests(
+        args.category, pytest_args, recache_luma=args.recache_luma
+    )
 
 
 if __name__ == "__main__":

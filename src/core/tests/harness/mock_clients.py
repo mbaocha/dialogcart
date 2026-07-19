@@ -70,8 +70,11 @@ def create_mock_availability_client(
             else:
                 resolved_date = "2026-01-16"
 
+        if organization_id is None:
+            raise ValueError("organization_id is required for mock availability")
+
         return mock_get_service_availability(
-            organization_id=organization_id or 1,
+            organization_id=organization_id,
             service_id=service_id_int,
             date=resolved_date,
             time_constraint=time_constraint,
@@ -88,8 +91,11 @@ def create_mock_availability_client(
         extra_params=None,
         **kwargs,
     ):
+        if organization_id is None:
+            raise ValueError("organization_id is required for mock reservation availability")
+
         return mock_get_reservation_availability(
-            organization_id=organization_id or 1,
+            organization_id=organization_id,
             start_date=start_date or "2026-03-05",
             end_date=end_date or "2026-03-08",
             extra_params=extra_params,
@@ -118,8 +124,11 @@ def create_mock_booking_client(*, reject_duplicate_cancel: bool = False) -> Mock
         end_time=None,
         **kwargs,
     ):
+        if organization_id is None:
+            raise ValueError("organization_id is required for mock booking")
+
         return mock_create_booking(
-            organization_id=organization_id or 1,
+            organization_id=organization_id,
             customer_id=customer_id or 1,
             booking_type=booking_type or "service",
             item_id=item_id or 1,
@@ -174,8 +183,11 @@ def create_mock_booking_client(*, reject_duplicate_cancel: bool = False) -> Mock
         return mock_cancel_booking(booking_code=booking_code, **kwargs)
 
     def confirm_booking_wrapper(booking_code: str, organization_id=None, **kwargs):
+        if organization_id is None:
+            raise ValueError("organization_id is required for mock confirm booking")
+
         return mock_confirm_booking(
-            booking_code=booking_code, organization_id=organization_id or 1, **kwargs
+            booking_code=booking_code, organization_id=organization_id, **kwargs
         )
 
     def update_booking_wrapper(

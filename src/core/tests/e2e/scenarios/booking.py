@@ -28,10 +28,22 @@ def _assert_booking_created(conv, booking_client, _availability=None) -> None:
     assert booking_client.create_booking.called, (
         f"turn {conv.turn}: expected create_booking after confirmation"
     )
+    assert booking_client.create_booking.call_count == 1, (
+        f"turn {conv.turn}: expected exactly one CONFIRM_APPOINTMENT/"
+        f"create_booking, got {booking_client.create_booking.call_count}"
+    )
     sess = conv.session() or {}
     slots = sess.get("slots") or {}
-    assert slots.get("booking_id") or slots.get("booking_code"), (
-        f"turn {conv.turn}: expected booking_id or booking_code in session slots"
+    booking = sess.get("booking") or {}
+    booking_id = booking.get("booking_id") or slots.get("booking_id")
+    booking_code = booking.get("booking_code") or slots.get("booking_code")
+    assert booking_id, (
+        f"turn {conv.turn}: expected booking_id in session "
+        f"(booking={booking!r}, slots_keys={list(slots.keys())})"
+    )
+    assert booking_code, (
+        f"turn {conv.turn}: expected booking_code in session "
+        f"(booking={booking!r}, slots_keys={list(slots.keys())})"
     )
 
 
@@ -133,7 +145,7 @@ def _clear_sticky_temporal_facts(conv, _booking=None, _availability=None) -> Non
         sess["facts"] = facts
     sess.pop("time_proposal", None)
     sess.pop("time_constraint", None)
-    save_session(conv.user_id, sess)
+    save_session(conv.organization_id, conv.user_id, sess)
 
 
 def _assert_service_revision(conv, booking, availability) -> None:
@@ -189,7 +201,7 @@ _register(
         Turn(
             "premium",
             Expect(
-                response_status="success",
+                response_status="succeeded",
                 planner="READY",
                 stage="AVAILABILITY",
                 action="SEARCH_AVAILABILITY",
@@ -251,7 +263,7 @@ _register(
         Turn(
             "premium",
             Expect(
-                response_status="success",
+                response_status="succeeded",
                 planner="READY",
                 stage="AVAILABILITY",
                 action="SEARCH_AVAILABILITY",
@@ -320,7 +332,7 @@ _register(
         Turn(
             "premium",
             Expect(
-                response_status="success",
+                response_status="succeeded",
                 planner="READY",
                 stage="AVAILABILITY",
                 action="SEARCH_AVAILABILITY",
@@ -352,6 +364,80 @@ _register(
 # ---------------------------------------------------------------------------
 # Service revision invalidates availability
 # ---------------------------------------------------------------------------
+
+_SEARCH_FLEXI_STATE: Dict[str, Any] = {}
+
+
+def _capture_searches_before_flexi(_conv, _booking, availability) -> None:
+    _SEARCH_FLEXI_STATE["count"] = availability.get_service_availability.call_count
+
+
+def _assert_availability_searched_flexi(conv, booking, availability) -> None:
+    """Bug 2: AvailabilityClient must search Flexi, not the prior Premium session service."""
+    baseline = _SEARCH_FLEXI_STATE.get("count", 0)
+    assert availability.get_service_availability.call_count == baseline + 1, (
+        f"turn {conv.turn}: expected exactly one SEARCH_AVAILABILITY for flexi, "
+        f"got {availability.get_service_availability.call_count - baseline}"
+    )
+    call = availability.get_service_availability.call_args
+    kwargs = call.kwargs if call else {}
+    searched = kwargs.get("service_id")
+    assert searched == FLEXI_SERVICE, (
+        f"turn {conv.turn}: AvailabilityClient must receive Flexi service_id, "
+        f"got {searched!r} (Premium overwrite is Bug 2)"
+    )
+    assert searched != PREMIUM_SERVICE
+    sess = conv.session() or {}
+    slots = sess.get("slots") if isinstance(sess.get("slots"), dict) else {}
+    planning = sess.get("planning") if isinstance(sess.get("planning"), dict) else {}
+    planning_slots = (
+        planning.get("slots") if isinstance(planning.get("slots"), dict) else {}
+    )
+    effective = planning_slots.get("service_id") or slots.get("service_id")
+    assert effective == FLEXI_SERVICE, (
+        f"turn {conv.turn}: session service_id expected Flexi, got {effective!r}"
+    )
+    assert not booking.create_booking.called
+
+
+_register(
+    Scenario(
+        "Availability service revision searches Flexi not Premium",
+        Turn("book haircut"),
+        Turn(
+            "premium",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+            ),
+            after=_capture_searches_before_flexi,
+        ),
+        Turn(
+            "show availability for flexi",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": FLEXI_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                availability_invalidated=True,
+            ),
+            after=_assert_availability_searched_flexi,
+        ),
+        fixture="scripted_availability_service_revision",
+        tags=["booking", "availability", "service-revision", "bug2"],
+        id="availability-service-revision-flexi",
+    )
+)
+
 
 _register(
     Scenario(
@@ -408,7 +494,7 @@ _register(
             "actually July 11",
             Expect(
                 intent="CREATE_APPOINTMENT",
-                response_status="success",
+                response_status="succeeded",
                 planner="READY",
                 stage="AVAILABILITY",
                 action="SEARCH_AVAILABILITY",
@@ -503,7 +589,7 @@ _register(
         Turn(
             "premium",
             Expect(
-                response_status="success",
+                response_status="succeeded",
                 execution="availability",
                 has_availability_slots=True,
                 time_match=TIME_MATCH_EXACT,
@@ -539,7 +625,7 @@ _register(
         Turn(
             "premium",
             Expect(
-                response_status="success",
+                response_status="succeeded",
                 execution="availability",
                 has_availability_slots=True,
                 time_match=TIME_MATCH_EXACT,
@@ -586,7 +672,7 @@ _register(
         Turn(
             "premium",
             Expect(
-                response_status="success",
+                response_status="succeeded",
                 planner="READY",
                 stage="AVAILABILITY",
                 action="SEARCH_AVAILABILITY",
@@ -643,7 +729,7 @@ _register(
         Turn(
             "premium",
             Expect(
-                response_status="success",
+                response_status="succeeded",
                 time_match=TIME_MATCH_EXACT,
                 planner="AWAITING_CONFIRMATION",
                 action=None,
@@ -672,7 +758,7 @@ _register(
         Turn(
             "premium",
             Expect(
-                response_status="success",
+                response_status="succeeded",
                 time_match=TIME_MATCH_MISMATCH,
                 planner="NEEDS_CLARIFICATION",
                 action=None,
@@ -697,7 +783,7 @@ _register(
         Turn(
             "premium",
             Expect(
-                response_status="success",
+                response_status="succeeded",
                 execution="availability",
                 has_availability_slots=False,
                 time_match=TIME_MATCH_MISMATCH,

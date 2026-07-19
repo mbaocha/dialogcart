@@ -17,7 +17,7 @@ src_path = Path(__file__).parent.parent.parent.parent
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
-from core.session.persist import build_session_state_from_outcome
+from core.session.turn_persistence import project_and_persist_turn_result
 from core.adapters.clients.organization_client import OrganizationClient
 from core.execution.clients.availability_client import AvailabilityClient
 from core.adapters.nlu import LumaClient
@@ -26,35 +26,29 @@ from core.api.compat import handle_message
 
 class _StatefulSessionStore:
     def __init__(self, state=None):
-        self._state = state or {}
+        self._sessions = {}
+        if state:
+            self._sessions[(1, "u1")] = state
 
-    def get_session(self, _user_id):
-        return self._state
+    def get_session(self, organization_id, user_id):
+        return self._sessions.get((organization_id, user_id), {})
 
-    def save_session(self, _user_id, state):
-        self._state = state
+    def save_session(self, organization_id, user_id, state):
+        self._sessions[(organization_id, user_id)] = state
 
 
 def _persist_session_from_result(result, previous_session, user_id, session_store):
-    outcome = dict(result.get("outcome") or result.get("result") or {})
-    plan = result.get("plan") or {}
-    if not outcome.get("intent_name") and not outcome.get("intent"):
-        plan_intent = plan.get("intent_name") or plan.get("intent")
-        if plan_intent:
-            outcome["intent_name"] = plan_intent
-    outcome_status = outcome.get("status") or "success"
-    merged = result.get("_merged_luma_response")
-    new_session = build_session_state_from_outcome(
-        outcome,
-        outcome_status,
-        merged,
-        previous_session,
-        user_id,
-        session_store,
+    projected = result.get("_projected_session_state")
+    if isinstance(projected, dict):
+        return projected
+    return project_and_persist_turn_result(
+        result=result,
+        organization_id=1,
+        user_id=user_id,
+        previous_session_state=previous_session,
+        working_session_state=result.get("_working_session") or previous_session,
+        session_store=session_store,
     )
-    if new_session and session_store is not None:
-        session_store.save_session(user_id, new_session)
-    return new_session
 
 
 def test_flexi_after_temporal_proposals_triggers_availability_search():
@@ -152,8 +146,10 @@ def test_flexi_after_temporal_proposals_triggers_availability_search():
 
     mock_availability_client.get_service_availability.assert_called_once()
 
-    execution_result = result2.get("result") or {}
-    assert execution_result.get("type") == "availability"
-    assert execution_result.get("status") == "success"
-    assert execution_result.get("slots"), "expected availability slots in response"
+    execution_result = result2.get("outcome") or {}
+    assert execution_result.get("schema_version") == 1
+    assert execution_result.get("status") == "succeeded"
+    assert (execution_result.get("availability") or {}).get(
+        "slots"
+    ), "expected availability slots in response"
     assert result2.get("text"), "expected rendered availability text, not empty success"

@@ -6,9 +6,9 @@ Calls TurnPlanner.plan_turn(..., planning_only=True) and normalizes the result.
 
 from __future__ import annotations
 
-from datetime import datetime
 from typing import Any, Dict, Optional
 
+from core.adapters.clients.catalog_client import CatalogClient
 from core.adapters.clients.organization_client import OrganizationClient
 from core.adapters.nlu import LumaClient
 
@@ -16,18 +16,17 @@ from core.adapters.nlu import LumaClient
 def plan_message(
     text: str,
     user_id: str,
+    organization_id: int,
     session_state: Optional[Dict[str, Any]] = None,
     luma_client: Optional[LumaClient] = None,
+    catalog_client: Optional[CatalogClient] = None,
     organization_client: Optional[OrganizationClient] = None,
-    frozen_time: Optional[datetime] = None,
-    organization_id: Optional[int] = None,
 ) -> Dict[str, Any]:
     """
     Planning-only entry point: NLU → session merge → plan, without execution.
 
     Delegates to plan_turn() with planning_only=True. Returns a structured
-    planning result dict. Called from ConversationEngine.process_turn() and
-    ConversationEngine.plan_turn().
+    planning result dict. Called from ConversationEngine.process_turn().
 
     Domain is not accepted; plan_turn derives it from organization_id.
 
@@ -42,9 +41,11 @@ def plan_message(
         text=text,
         session_state=session_state,
         luma_client=luma_client,
+        catalog_client=catalog_client,
         organization_client=organization_client,
         organization_id=organization_id,
         planning_only=True,
+        apply_domain_filter=True,
     )
 
     # Extract planning result from outcome
@@ -100,6 +101,24 @@ def plan_message(
         # Include decision information for ConversationEngine / early-return paths
         "_decision": result.get("_decision"),
     }
+    turn_operation = outcome_plan.get("turn_operation") or outcome.get("turn_operation")
+    if turn_operation:
+        planning_result["turn_operation"] = turn_operation
+        plan_structure.setdefault("turn_operation", turn_operation)
+    if outcome_plan.get("availability_reshow"):
+        planning_result["availability_reshow"] = True
+        plan_structure.setdefault("availability_reshow", True)
+    proposal_context = outcome_plan.get("execution_proposal_context")
+    if isinstance(proposal_context, dict):
+        planning_result["execution_proposal_context"] = dict(proposal_context)
+        plan_structure.setdefault(
+            "execution_proposal_context", dict(proposal_context)
+        )
+
+    # Preserve explicit degraded-turn metadata through the engine boundary.
+    for fallback_key in ("recovered", "recovery_reason", "message_applied"):
+        if fallback_key in outcome:
+            planning_result[fallback_key] = outcome[fallback_key]
 
     # Carry HANDLER_DELEGATED routing fields — stripped by standard planning_result construction
     if outcome.get("status") == "HANDLER_DELEGATED":

@@ -17,13 +17,12 @@ from core.tests.orchestration.test_availability_pagination_flow import (
     pagination_harness,
 )
 from core.tracing.binding import BIND_TIME_DECISION_ID
-from core.tracing.browse import PAGINATION_HANDLE_ID, PAGINATION_PAGE_TARGET_ID
+from core.tracing.browse import PAGINATION_HANDLE_ID
 from core.tracing.decision_trace import finalize_turn_trace, reset_decision_trace_state, trace_to_dict
 from core.tracing.planner import PLANNER_SELECT_ACTION_ID
 from core.tracing.reason_codes import (
     BIND_EXACT_TIME_MATCH,
     BIND_TIME_MISMATCH,
-    BROWSE_EXHAUSTED,
     BROWSE_NEXT,
     PAGINATION_HANDLED,
     PAGINATION_SHORT_CIRCUIT,
@@ -107,7 +106,7 @@ def test_decision_trace_explains_show_more_pagination(traced_pagination_harness)
     assert "SEARCH_AVAILABILITY" in rejected
 
     assert availability_client.get_service_availability.call_count == searches_before
-    session = session_store.get_session(user_id)
+    session = session_store.get_session(1, user_id)
     second_page = _presented_starts(session)
     assert second_page != first_page
     assert _page_index(session) == 1
@@ -135,9 +134,18 @@ def test_decision_trace_explains_exhausted_pagination(traced_pagination_harness)
     )
     trace = _trace_from_result(result)
 
-    page_target = _decision(trace, PAGINATION_PAGE_TARGET_ID)
-    assert page_target is not None
-    assert page_target.get("reason_code") == BROWSE_EXHAUSTED
+    handle = _decision(trace, PAGINATION_HANDLE_ID)
+    assert handle is not None
+    assert handle.get("reason_code") == PAGINATION_HANDLED
+
+    outcome = result.get("outcome") or result.get("result") or {}
+    pagination = (
+        outcome.get("availability_pagination")
+        or result.get("availability_pagination")
+        or {}
+    )
+    assert pagination.get("exhausted") is True
+    assert pagination.get("direction") == "next"
 
     execution = _decision(trace, SPINE_EXECUTION_ID)
     assert execution is not None

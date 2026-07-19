@@ -14,6 +14,7 @@ Matrix:
   F  service_candidates in context + stale flexi in turns      → list pick resolves "premium"
   G  resolved_service_id + no service_term (date-only turn)   → reuse locked service
   H  resolved_service_id + context-leaked service_term on 12pm → strip term, reuse locked
+  I  resolved_service_id + facts.service_id Flexi (AVAILABILITY) → keep Flexi
 """
 import sys
 from unittest.mock import MagicMock
@@ -125,6 +126,28 @@ class TestServiceAmbiguityContext:
         service_id, candidates = _resolve(None, ctx)
         assert service_id == "premium haircut"
         assert candidates == []
+
+    def test_I_availability_facts_service_id_overrides_resolved_session(self):
+        """I: AVAILABILITY extracted Flexi must not be overwritten by Premium session."""
+        ctx = {
+            "last_intent": "CREATE_APPOINTMENT",
+            "missing_slots": ["date", "time"],
+            "resolved_service_id": "premium haircut",
+            "turns": [
+                {"user": "book me a haircut", "intent": "CREATE_APPOINTMENT"},
+                {"user": "premium", "intent": "CREATE_APPOINTMENT"},
+            ],
+        }
+        pipeline = NLUPipeline()
+        slm = {
+            "intent": "AVAILABILITY",
+            "facts": {"service_id": "flexi haircut + prunning"},
+            "service_candidates": [],
+            "service_term": None,
+        }
+        result = pipeline._resolve_service_ambiguity(slm, _TENANT_CONTEXT, ctx)
+        assert result["facts"].get("service_id") == "flexi haircut + prunning"
+        assert result.get("service_candidates") == []
 
     def test_H_resolved_service_id_strips_context_leaked_term_on_12pm(self):
         """H: LLM leaks service_term from context on time-only turn — strip before resolve."""
