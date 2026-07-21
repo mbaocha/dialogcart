@@ -66,14 +66,23 @@ def _apply_field_aware_invalidation(
 
     if revision.service or revision.date:
         # Genuine mid-flow replacements only (first acquisition is not a
-        # revision). Stale temporal constraints / proposals would rebind against
-        # the old presented offers and undo availability invalidation.
+        # revision). Stale time proposals would rebind against the old presented
+        # offers and undo availability invalidation.
         if not payload.get("_current_turn_has_time"):
             payload.pop("time_constraint", None)
+            payload.pop("date_constraint", None)
             payload.pop("time_proposal", None)
-        # Keep current-turn date when service+date both revise.
-        if revision.service and not revision.date:
-            payload.pop("date_proposal", None)
+            temporal = payload.get("temporal")
+            if isinstance(temporal, dict):
+                temporal = dict(temporal)
+                temporal["start_time"] = None
+                temporal["end_time"] = None
+                temporal["start_time_expression"] = None
+                temporal["end_time_expression"] = None
+                payload["temporal"] = temporal
+        # Service-only revision must keep the active search date_proposal so the
+        # new service is searched on the same day. Date revisions arrive as a
+        # current-turn proposal and replace the prior value without popping here.
         payload["_revision_invalidated_availability"] = True
         payload.pop("resolved_datetime_range", None)
 

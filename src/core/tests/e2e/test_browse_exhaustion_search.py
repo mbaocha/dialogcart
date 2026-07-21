@@ -19,7 +19,7 @@ from core.tests.e2e.scenarios.browse_exhaustion_search import (
 
 @pytest.fixture(autouse=True)
 def _deterministic_availability_llm(monkeypatch):
-    """Avoid ANTHROPIC_API_KEY dependency for availability rendering asserts."""
+    """Avoid ANTHROPIC_API_KEY; render only the current search date + times."""
 
     def _fake_render(request):
         facts = getattr(request, "facts", None) or {}
@@ -35,13 +35,35 @@ def _deterministic_availability_llm(monkeypatch):
         ).lower()
         if browse_status in {"exhausted", "no_more_times_for_date"} or "no more" in browse_status:
             return "There are no more available times to show from your last search."
+        date_label = str(availability.get("date") or "").strip()
+        if date_label == "2026-07-21":
+            date_phrase = "July 21"
+        elif date_label == "2026-07-20":
+            date_phrase = "July 20"
+        else:
+            date_phrase = date_label
         times = availability.get("times") or []
         if times:
             lines = "\n".join(f"- {t}" for t in times[:5])
+            if date_phrase:
+                return (
+                    f"Here are the available times for {date_phrase}:\n"
+                    f"{lines}\nWhich would you like?"
+                )
             return f"Here are the available times:\n{lines}\nWhich would you like?"
+        if date_phrase:
+            return (
+                f"Here are the available appointment times for {date_phrase}. "
+                "Which would you like?"
+            )
         return "Here are the available appointment times. Which would you like?"
 
+    # Cover every import site that may call render_llm for availability text.
     monkeypatch.setattr("core.rendering.llm_renderer.render_llm", _fake_render)
+    monkeypatch.setattr(
+        "core.rendering.response_renderer.render_llm",
+        _fake_render,
+    )
     monkeypatch.setattr(
         "core.workflows.availability.pagination.render_llm",
         _fake_render,

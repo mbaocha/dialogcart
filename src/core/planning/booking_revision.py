@@ -51,6 +51,30 @@ def _meaningful_text(value: Any) -> Optional[str]:
     return text or None
 
 
+def _active_search_date(session_state: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Canonical active search date for revision comparison.
+
+    Prefer durable ``slots.date``. After exploratory availability search the
+    date often lives only in the carried ``date_proposal`` (fingerprint /
+    search criteria), not in durable slots — that proposal is still the
+    active search date and must participate in revision detection.
+    """
+    if not isinstance(session_state, dict):
+        return None
+    session_slots = session_state.get("slots")
+    if isinstance(session_slots, dict):
+        slotted = _normalize_date_value(session_slots.get("date"))
+        if slotted:
+            return slotted
+
+    from core.planning.temporal_proposal import _session_date_proposal
+
+    proposal = _session_date_proposal(session_state)
+    if isinstance(proposal, dict):
+        return _normalize_date_value(proposal.get("start"))
+    return None
+
+
 def detect_booking_revision(
     luma_response: Optional[Dict[str, Any]],
     session_state: Optional[Dict[str, Any]],
@@ -60,6 +84,10 @@ def detect_booking_revision(
     First acquisition (None → value), same-value restatement, and absent current-turn
     values are not revisions. Only a prior durable value replaced by a different
     meaningful value is classified as a revision (and may invalidate availability).
+
+    For dates, the prior value is the active search date: durable ``slots.date``
+    when present, otherwise the carried session ``date_proposal`` from the last
+    exploratory search. Proposal-only search context must still revise.
     """
     session_slots = (
         session_state.get("slots") if isinstance(session_state, dict) else None
@@ -92,7 +120,7 @@ def detect_booking_revision(
             dates = facts.get("dates")
             if isinstance(dates, list) and dates:
                 new_date = _normalize_date_value(dates[0])
-    current_date = _normalize_date_value(session_slots.get("date"))
+    current_date = _active_search_date(session_state)
     if new_date and current_date and new_date != current_date:
         date_changed = True
         changes.append(FieldChange("date", current_date, new_date))
@@ -121,34 +149,45 @@ def detect_booking_revision(
 
 
 def has_revision_facts(luma_response: Optional[Dict[str, Any]]) -> bool:
-    """True when this turn carries actionable booking revision facts."""
+    """True when this turn carries actionable booking revision facts.
+
+    Must ignore session-carried date/time that Stage 02 / merge already projected
+    onto the working payload (``date_proposal``, merged Temporal). Prefer
+    ``_current_turn_has_date`` / ``_current_turn_has_time`` provenance when set.
+    """
     if not isinstance(luma_response, dict):
         return False
 
-    from core.planning.temporal_proposal import (
-        exact_time_proposal_from_luma,
-        extract_nlu_proposals,
+    # Stage 02 stamps these from NLU-only proposals before session merge.
+    if "_current_turn_has_date" in luma_response or "_current_turn_has_time" in luma_response:
+        return bool(
+            luma_response.get("_current_turn_has_date")
+            or luma_response.get("_current_turn_has_time")
+        )
+
+    from core.planning.temporal_contract import (
+        get_temporal,
+        temporal_has_date_material,
+        temporal_has_time_material,
     )
+    from core.planning.temporal_proposal import exact_time_proposal_from_luma
 
     if exact_time_proposal_from_luma(luma_response):
         return True
-    date_proposal = extract_nlu_proposals(luma_response).get("date_proposal")
-    if isinstance(date_proposal, dict) and date_proposal.get("start"):
+
+    temporal = get_temporal(luma_response)
+    if temporal_has_date_material(temporal) or temporal_has_time_material(temporal):
         return True
 
     facts = luma_response.get("facts")
     if isinstance(facts, dict):
+        # Inbound compat for fixtures that still only populate legacy bags.
         if isinstance(facts.get("times"), list) and facts["times"]:
             return True
         if isinstance(facts.get("dates"), list) and facts["dates"]:
             return True
 
-    time_constraint = luma_response.get("time_constraint")
-    return bool(
-        isinstance(time_constraint, dict)
-        and time_constraint.get("mode") == "exact"
-        and time_constraint.get("start")
-    )
+    return False
 
 
 def has_actionable_booking_facts(

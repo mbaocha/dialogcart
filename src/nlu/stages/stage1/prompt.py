@@ -52,14 +52,17 @@ CLASSIFICATION RULES
 SLOT-FILL CONTINUATION (active booking context only):
 When CONVERSATION CONTEXT shows last_intent or active_booking_intent is
 CREATE_APPOINTMENT, CREATE_RESERVATION, or MODIFY_BOOKING, AND the user
-supplies ONLY missing slot material (bare date, bare time, date range, or service name/choice) with
-NO new booking verb and NO correction language:
+does NOT express a new booking verb, correction, cancel, informational question,
+or off-topic digression:
 → Return the SAME booking intent from context (NOT UNKNOWN, NOT CORRECTION).
+  This includes slot replies AND uninterpretable in-flow input with no competing act.
   last_intent=CREATE_APPOINTMENT + "tomorrow"         → CREATE_APPOINTMENT
   last_intent=CREATE_APPOINTMENT + "11am"             → CREATE_APPOINTMENT
   last_intent=CREATE_RESERVATION + "march 10 to 15"  → CREATE_RESERVATION
   last_intent=CREATE_APPOINTMENT + "premium"          → CREATE_APPOINTMENT  (service reply)
   last_intent=CREATE_APPOINTMENT + "the standard one" → CREATE_APPOINTMENT  (service reply)
+  last_intent=CREATE_APPOINTMENT + "aaaa"             → CREATE_APPOINTMENT  (in-flow, no competing act)
+  last_intent=CREATE_APPOINTMENT + "tell me a joke"   → OFF_TOPIC  (off-topic digression)
 Do NOT apply without CONVERSATION CONTEXT (cold start).
 Explicit booking verb in the utterance → classify normally, not slot-fill.
 
@@ -73,6 +76,17 @@ An explicit booking verb (book, schedule, reserve, cancel, modify, change, resch
 sufficient to classify the intent — even when the service is generic or unspecified.
 Service resolution is Stage 2's responsibility. Never return UNKNOWN when a booking verb is present.
 
+GENERAL_INQUIRY vs OFF_TOPIC vs UNKNOWN:
+  GENERAL_INQUIRY — business-scoped FAQ (hours, location, policies, payments, store info).
+  OFF_TOPIC — coherent request outside this business (world knowledge, jokes, unrelated tech).
+  UNKNOWN — not understood (gibberish, bare fragments with no clear act).
+  "where are you located?"              → GENERAL_INQUIRY
+  "how much is a premium haircut?"      → QUOTE (or GENERAL_INQUIRY if no price intent)
+  "who is the president of Nigeria?"    → OFF_TOPIC
+  "tell me a joke"                      → OFF_TOPIC
+  "explain Java virtual threads"        → OFF_TOPIC
+  "aaa"                                 → UNKNOWN
+
 COLD-START examples (no CONVERSATION CONTEXT):
   "haircut tomorrow"               → UNKNOWN  (no booking verb)
   "friday"                         → UNKNOWN  (bare weekday, no context)
@@ -81,7 +95,9 @@ COLD-START examples (no CONVERSATION CONTEXT):
   "book something for friday"      → CREATE_APPOINTMENT  (booking verb present; service unspecified)
   "i'd like to make a reservation" → CREATE_RESERVATION  (booking verb present)
   "cancel my booking"              → CANCEL_BOOKING
-  "what services do you have"      → DISCOVERY"""
+  "what services do you have"      → DISCOVERY
+  "who is the president of Nigeria?" → OFF_TOPIC
+  "aaa"                            → UNKNOWN"""
 
 
 def get_tool() -> dict:

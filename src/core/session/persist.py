@@ -690,9 +690,10 @@ def build_session_state_from_outcome(
     if _persisted_proposals["time_proposal"] is not None:
         session_state["time_proposal"] = _persisted_proposals["time_proposal"]
     if merged_luma_response and isinstance(merged_luma_response, dict):
-        date_constraint = merged_luma_response.get("date_constraint")
-        if date_constraint is not None:
-            session_state["date_constraint"] = date_constraint
+        from core.planning.temporal_contract import get_temporal
+
+        session_state["temporal"] = get_temporal(merged_luma_response)
+        session_state.pop("date_constraint", None)
 
     _apply_service_candidates_to_session(session_state, merged_luma_response, outcome)
 
@@ -723,9 +724,10 @@ def build_session_state_from_outcome(
         )
 
     if merged_luma_response and isinstance(merged_luma_response, dict):
-        date_constraint = merged_luma_response.get("date_constraint")
-        if date_constraint is not None:
-            session_state["date_constraint"] = date_constraint
+        from core.planning.temporal_contract import get_temporal
+
+        session_state["temporal"] = get_temporal(merged_luma_response)
+        session_state.pop("date_constraint", None)
 
     apply_create_appointment_extensions(
         session_state,

@@ -1,8 +1,8 @@
 """
 Stage 2 group: CREATE — handles CREATE_APPOINTMENT, CREATE_RESERVATION, CORRECTION.
 
-Slot focus: service_id, date(s), time, date_range.
-Includes service alias injection and booking-mode-specific guidance.
+Slot focus: service_term + canonical temporal.
+Legacy dates/times/time_constraint are projected from Temporal.
 """
 import logging
 import os
@@ -12,12 +12,17 @@ import anthropic
 
 from ..base_prompt import (
     build_tool,
-    date_rules,
     intent_validation_section,
     service_rules,
-    time_rules,
+    temporal_rules,
 )
+from ..in_flow_validation import in_flow_act_validation_rules
 from ...shared.context import format_conversation_context
+from ...shared.in_flow_act import promote_in_flow_booking_intent
+from ....temporal.stage2_output import (
+    empty_temporal_dict,
+    materialize_temporal_ownership,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,8 +31,8 @@ _MODEL = "claude-haiku-4-5-20251001"
 _TOOL = build_tool(
     name="extract_create_slots",
     description="Extract slots for CREATE_APPOINTMENT, CREATE_RESERVATION, or CORRECTION intents.",
-    facts_fields=["dates", "times", "date_time_pairs", "service_term"],
-    include_time_constraint=True,
+    facts_fields=["service_term"],
+    include_temporal=True,
     include_validated_intent=True,
 )
 
@@ -36,12 +41,12 @@ def _booking_mode_guidance(booking_mode: str) -> str:
     if booking_mode == "reservation":
         return """BOOKING MODE: reservation (accommodation / multi-night stays)
 - "book room", "reserve suite" → CREATE_RESERVATION (never UNKNOWN)
-- Required slots: date_range (check-in → check-out), not single date + time
-- "book room march 5-10" → dates=[start ISO, end ISO]"""
+- Required: date range (check-in → check-out), not single date + time
+- "book room march 5-10" → temporal.start_date + temporal.end_date (ISO)"""
     return """BOOKING MODE: service (timed appointments)
 - "book haircut", "schedule massage" → CREATE_APPOINTMENT
 - Appointments need service + date + time
-- "book haircut at 10am" → dates=[], times=["10:00"]  (date NOT invented)"""
+- "book haircut at 10am" → temporal date fields null; start_time="10:00"  (date NOT invented)"""
 
 
 def _system_prompt(
@@ -57,17 +62,17 @@ def _system_prompt(
     return f"""You are a slot extractor for a booking platform.
 Extract booking slots from the user message. You are also the final authority on intent.
 
-Current date/time: {now}
+Current date/time (tenant-local): {now}
 {ctx_section}
 {intent_validation_section(candidate_intent)}
+
+{in_flow_act_validation_rules(candidate_intent)}
 
 {_booking_mode_guidance(booking_mode)}
 
 {service_rules(aliases)}
 
-{date_rules(now)}
-
-{time_rules()}"""
+{temporal_rules(now)}"""
 
 
 class CreateGroupExtractor:
@@ -107,41 +112,72 @@ class CreateGroupExtractor:
             )
         except Exception:
             logger.exception("CreateGroupExtractor failed for text=%r", text)
-            return _empty(candidate_intent)
+            return _empty(candidate_intent, text, conversation_context)
 
         for block in response.content:
             if block.type == "tool_use" and block.name == "extract_create_slots":
-                return _merge(block.input, candidate_intent)
+                return _merge(
+                    block.input,
+                    candidate_intent,
+                    text=text,
+                    conversation_context=conversation_context,
+                )
 
         logger.warning("CreateGroupExtractor: no tool_use block for text=%r", text)
-        return _empty(candidate_intent)
+        return _empty(candidate_intent, text, conversation_context)
 
 
-def _merge(raw: Dict[str, Any], candidate_intent: str) -> Dict[str, Any]:
+def _merge(
+    raw: Dict[str, Any],
+    candidate_intent: str,
+    *,
+    text: str = "",
+    conversation_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     validated = raw.get("validated_intent") or candidate_intent
+    validated = promote_in_flow_booking_intent(
+        validated, text, conversation_context
+    )
+    confidence = float(raw.get("confidence", 0.8))
     facts = raw.get("facts") or {}
+    temporal, temporal_facts, time_constraint = materialize_temporal_ownership(
+        raw, confidence=confidence
+    )
     return {
         "intent": validated,
-        "confidence": float(raw.get("confidence", 0.8)),
+        "confidence": confidence,
         "facts": {
-            "dates": facts.get("dates") or [],
-            "times": facts.get("times") or [],
-            "date_time_pairs": facts.get("date_time_pairs") or [],
+            **temporal_facts,
             "service_id": None,
             "booking_id": None,
         },
         "service_term": facts.get("service_term"),
-        "time_constraint": raw.get("time_constraint"),
+        "time_constraint": time_constraint,
         "search_query": None,
         "service_candidates": [],
+        "temporal": temporal,
     }
 
 
-def _empty(candidate_intent: str) -> Dict[str, Any]:
+def _empty(
+    candidate_intent: str,
+    text: str = "",
+    conversation_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    intent = promote_in_flow_booking_intent(
+        candidate_intent, text, conversation_context
+    )
     return {
-        "intent": candidate_intent,
+        "intent": intent,
         "confidence": 0.0,
-        "facts": {"dates": [], "times": [], "date_time_pairs": [], "service_id": None, "booking_id": None},
+        "facts": {
+            "dates": [],
+            "times": [],
+            "date_time_pairs": [],
+            "service_id": None,
+            "booking_id": None,
+        },
         "time_constraint": None,
         "search_query": None,
+        "temporal": empty_temporal_dict(0.0),
     }

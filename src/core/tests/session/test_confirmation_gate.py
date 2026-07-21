@@ -254,6 +254,67 @@ def test_detect_date_revision():
     assert revision.changes[0].to_value == "2026-07-11"
 
 
+def test_detect_date_revision_against_date_proposal_when_slots_date_null():
+    """Exploratory search keeps date in date_proposal; a new date must still revise."""
+    revision = detect_booking_revision(
+        {
+            "facts": {"service_id": "premium haircut"},
+            "temporal": {
+                "start_date": "2026-07-30",
+                "mode": "single_day",
+                "confidence": 1.0,
+            },
+        },
+        {
+            "intent_name": "CREATE_APPOINTMENT",
+            "slots": {"service_id": "premium haircut"},
+            "date_proposal": {"mode": "single_day", "start": "2026-07-28"},
+            "availability_fingerprint": "fp-july-28",
+        },
+    )
+    assert revision.date is True
+    assert revision.service is False
+    assert revision.time is False
+    assert revision.changes[0].field == "date"
+    assert revision.changes[0].from_value == "2026-07-28"
+    assert revision.changes[0].to_value == "2026-07-30"
+
+
+def test_same_date_proposal_restatement_is_not_revision():
+    revision = detect_booking_revision(
+        {
+            "temporal": {
+                "start_date": "2026-07-28",
+                "mode": "single_day",
+                "confidence": 1.0,
+            },
+        },
+        {
+            "slots": {"service_id": "premium haircut"},
+            "date_proposal": {"mode": "single_day", "start": "2026-07-28"},
+        },
+    )
+    assert revision.date is False
+    assert revision.any is False
+
+
+def test_browse_without_new_date_is_not_revision():
+    revision = detect_booking_revision(
+        {
+            "intent": {"name": "AVAILABILITY"},
+            "operation": "browse_next",
+            "facts": {"operation": "browse_next", "service_id": "premium haircut"},
+        },
+        {
+            "slots": {"service_id": "premium haircut"},
+            "date_proposal": {"mode": "single_day", "start": "2026-07-28"},
+            "availability_fingerprint": "fp",
+        },
+    )
+    assert revision.date is False
+    assert revision.any is False
+
+
 def test_detect_service_revision():
     revision = detect_booking_revision(
         {"facts": {"service_id": "flexi haircut + pruning"}},

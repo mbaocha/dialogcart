@@ -13,6 +13,7 @@ from .entity_loading import (
     load_normalization_entities,
     load_relative_date_offsets,
     load_time_window_bounds,
+    normalize_utterance_aliases,
 )
 
 __all__ = [
@@ -24,4 +25,5 @@ __all__ = [
     "load_normalization_entities",
     "load_relative_date_offsets",
     "load_time_window_bounds",
+    "normalize_utterance_aliases",
 ]

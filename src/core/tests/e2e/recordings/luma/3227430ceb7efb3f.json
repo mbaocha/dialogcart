@@ -38,9 +38,6 @@
     "timezone": "UTC"
   },
   "response": {
-    "date_constraint": {
-      "mode": "flexible"
-    },
     "facts": {
       "booking_id": null,
       "date_time_pairs": [],
@@ -51,6 +48,22 @@
     "intent": {
       "confidence": 0.95,
       "name": "CONFIRM_ACTION"
+    },
+    "temporal": {
+      "confidence": 0.0,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": null,
+      "mode": "none",
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
     }
   }
 }

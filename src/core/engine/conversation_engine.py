@@ -145,11 +145,31 @@ class ConversationEngine:
         return result
 
     def _finish_gate(
-        self, stages: StageRunner, gate: ExecutionGateResult
+        self,
+        stages: StageRunner,
+        gate: ExecutionGateResult,
+        *,
+        session_state: Optional[Dict[str, Any]] = None,
+        availability_client: Optional[Any] = None,
+        user_text: Optional[str] = None,
     ) -> Dict[str, Any]:
         assert gate.response is not None and gate.plan is not None
         if gate.path == "skipped":
             stages.tool_execution_skipped(plan_action=gate.plan_action)
+            from core.rendering.response_renderer import ResponseRenderer
+
+            renderer = ResponseRenderer()
+            decision = (
+                gate.plan.get("_decision") if isinstance(gate.plan, dict) else None
+            )
+            renderer.render_recovery(
+                gate.response,
+                plan=gate.plan,
+                session_state=session_state,
+                user_input=user_text,
+                availability_client_present=availability_client is not None,
+                decision=decision if isinstance(decision, dict) else None,
+            )
             return stages.finish(
                 gate.response,
                 plan=gate.plan,
@@ -284,10 +304,19 @@ class ConversationEngine:
                     "intent_name": plan.get("intent_name", ""),
                     "active_handler": plan.get("active_handler"),
                     "search_query": plan.get("search_query"),
+                    "off_topic_query": plan.get("off_topic_query"),
                     "slots": plan.get("slots", {}),
                     "missing_slots": plan.get("missing_slots", []),
                     "facts": plan.get("facts", {}),
                 }
+                turn = plan.get("turn")
+                if isinstance(turn, dict) and turn:
+                    hd_outcome["turn"] = dict(turn)
+                nested_plan = plan.get("plan")
+                if isinstance(nested_plan, dict) and isinstance(
+                    nested_plan.get("turn"), dict
+                ):
+                    hd_outcome.setdefault("turn", dict(nested_plan["turn"]))
                 hd_response = {
                     "success": True,
                     "outcome": hd_outcome,
@@ -331,7 +360,13 @@ class ConversationEngine:
                 kwargs=kwargs,
             )
             if gate.path != "ready":
-                return self._finish_gate(stages, gate)
+                return self._finish_gate(
+                    stages,
+                    gate,
+                    session_state=session_state,
+                    availability_client=availability_client,
+                    user_text=text,
+                )
 
             # Timing: route → run → post-process → render (legacy boundary).
             with stages.execution_timer() as timer:

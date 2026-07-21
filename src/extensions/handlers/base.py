@@ -48,6 +48,7 @@ class IntentHandler(ABC):
                 "user_text": str,
                 "intent_name": str,
                 "search_query": str | None,
+                "off_topic_query": str | None,  # OFF_TOPIC canonical question
                 "slots": dict,
                 "session_slots": dict,   # persisted booking-kernel slots
                 "session": dict,         # full raw session (read-only)

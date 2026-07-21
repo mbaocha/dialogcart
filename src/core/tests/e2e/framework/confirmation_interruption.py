@@ -13,6 +13,10 @@ from core.tests.e2e.framework.conversation import (
     extract_presented_times,
 )
 from core.tests.e2e.framework.fixtures import TARGET_DATE
+from core.tests.e2e.framework.scripted_temporal import (
+    exact_time_temporal,
+    single_day_temporal,
+)
 
 
 def _planning_section(session: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -339,9 +343,9 @@ def premium_booking_start_script() -> Dict[str, Any]:
         "intent": {"name": "CREATE_APPOINTMENT"},
         "facts": {
             "service_id": PREMIUM_SERVICE,
-            "dates": [TARGET_DATE],
         },
         "slots": {"service_id": PREMIUM_SERVICE},
+        "temporal": single_day_temporal(TARGET_DATE),
         "missing_slots": ["time"],
     }
 
@@ -358,10 +362,9 @@ def availability_date_change_script(date_value: str) -> Dict[str, Any]:
         "success": True,
         "intent": {"name": "AVAILABILITY"},
         "facts": {
-            "dates": [date_value],
             "service_id": PREMIUM_SERVICE,
         },
-        "date_proposal": {"mode": "single_day", "start": date_value},
+        "temporal": single_day_temporal(date_value),
     }
 
 

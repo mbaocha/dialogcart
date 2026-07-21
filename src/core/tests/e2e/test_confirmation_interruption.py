@@ -26,14 +26,43 @@ def _deterministic_availability_llm(monkeypatch):
         availability = facts.get("availability") if isinstance(facts, dict) else {}
         if not isinstance(availability, dict):
             availability = {}
+        date_label = str(availability.get("date") or "").strip()
+        date_phrases = {
+            "2026-07-02": "July 2",
+            "2026-07-03": "July 3",
+            "2026-07-20": "July 20",
+            "2026-07-21": "July 21",
+            "2026-07-22": "July 22",
+            "2026-07-23": "July 23",
+            "2026-07-24": "July 24",
+        }
+        date_phrase = date_phrases.get(date_label, date_label)
         times = availability.get("times") or []
         if times:
             lines = "\n".join(f"- {t}" for t in times[:5])
+            if date_phrase:
+                return (
+                    f"Here are the available times for {date_phrase}:\n"
+                    f"{lines}\nWhich would you like?"
+                )
             return f"Here are the available times:\n{lines}\nWhich would you like?"
+        if date_phrase:
+            return (
+                f"Here are the available appointment times for {date_phrase}. "
+                "Which would you like?"
+            )
         return "Here are the available appointment times. Which would you like?"
 
     monkeypatch.setattr(
+        "core.rendering.llm_renderer.render_llm",
+        _fake_render,
+    )
+    monkeypatch.setattr(
         "core.rendering.response_renderer.render_llm",
+        _fake_render,
+    )
+    monkeypatch.setattr(
+        "core.workflows.availability.pagination.render_llm",
         _fake_render,
     )
 

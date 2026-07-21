@@ -379,6 +379,8 @@ _NO_MORE_TIMES_PHRASES = (
     "that's all",
     "thats all",
     "all available",
+    "all the available",
+    "those are all",
 )
 
 

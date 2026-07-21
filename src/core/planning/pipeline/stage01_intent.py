@@ -280,6 +280,7 @@ def reconcile_intent(
 
 
                     handler = resolve_handler(planning_intent)
+                    has_handler = handler is not None
 
                     turn_operation = derive_turn_operation(
 
@@ -312,17 +313,19 @@ def reconcile_intent(
 
                         gate_action=gate_action,
 
-                        handler_delegated=handler == "rag",
+                        handler_delegated=has_handler,
 
                         handler_name=handler,
 
                         non_durable_status=(
 
-                            "HANDLER_DELEGATED" if handler == "rag" else "NON_DURABLE_INTENT"
+                            "HANDLER_DELEGATED" if has_handler else "NON_DURABLE_INTENT"
 
                         ),
 
                         delegated_search_query=luma_response.get("search_query"),
+
+                        delegated_off_topic_query=luma_response.get("off_topic_query"),
 
                         delegated_slots=slots,
 

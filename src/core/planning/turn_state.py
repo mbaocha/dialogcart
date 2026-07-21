@@ -127,28 +127,49 @@ def _slots_for_planning(merged_session_slots: Dict[str, Any]) -> Dict[str, Any]:
     return slots
 
 
-def _apply_appointment_time_constraint_satisfaction(
+def _apply_appointment_temporal_time_satisfaction(
     *,
     intent_name: str,
     missing_slots: List[str],
     durable_slots: Dict[str, Any],
-    time_constraint: Any,
+    temporal: Any,
+    time_proposal: Any = None,
 ) -> List[str]:
-    """Apply CREATE_APPOINTMENT time_constraint semantics to missing_slots.
+    """Apply CREATE_APPOINTMENT Temporal/time_proposal semantics to missing_slots.
 
     Preserves historical processor behavior:
-    - exact (+ start) satisfies time
+    - exact start_time satisfies time
     - bounded fuzzy/window satisfies time
     - unbounded fuzzy/window forces time missing even if a prior virtual view cleared it
     """
-    if intent_name != "CREATE_APPOINTMENT" or time_constraint is None:
-        return missing_slots
-    if not isinstance(time_constraint, dict):
+    if intent_name != "CREATE_APPOINTMENT":
         return missing_slots
 
-    mode = time_constraint.get("mode")
-    start = time_constraint.get("start")
-    end = time_constraint.get("end")
+    mode = None
+    start = None
+    end = None
+    if isinstance(time_proposal, dict):
+        mode = time_proposal.get("mode")
+        if mode == "exact":
+            start = time_proposal.get("value")
+        else:
+            start = time_proposal.get("start")
+            end = time_proposal.get("end")
+    elif isinstance(temporal, dict):
+        if temporal.get("start_time"):
+            mode = "exact"
+            start = temporal.get("start_time")
+            end = temporal.get("end_time")
+        else:
+            label = (temporal.get("start_time_expression") or "").strip().lower()
+            if label in ("morning", "afternoon", "evening", "night"):
+                mode = "fuzzy"
+                start = temporal.get("start_time")
+                end = temporal.get("end_time")
+
+    if mode is None:
+        return missing_slots
+
     has_start = start is not None and str(start).strip() != ""
     has_end = end is not None and str(end).strip() != ""
     is_bounded = has_start and has_end
@@ -283,10 +304,9 @@ def finalize_turn_state(
         slots_for_planning,
         date_proposal=pc.get("date_proposal"),
         time_proposal=pc.get("time_proposal"),
-        date_constraint=pc.get("date_constraint"),
         nlu_facts=pc.get("nlu_facts"),
-        time_constraint=pc.get("time_constraint"),
         intent_name=intent_name,
+        temporal=pc.get("temporal"),
     )
     plan = plan_intent(intent_name, planning_slots, policy)
 
@@ -300,11 +320,12 @@ def finalize_turn_state(
         ):
             missing_slots = [s for s in missing_slots if s != "time"]
 
-        missing_slots = _apply_appointment_time_constraint_satisfaction(
+        missing_slots = _apply_appointment_temporal_time_satisfaction(
             intent_name=intent_name,
             missing_slots=missing_slots,
             durable_slots=durable_slots,
-            time_constraint=pc.get("time_constraint"),
+            temporal=pc.get("temporal"),
+            time_proposal=pc.get("time_proposal"),
         )
 
     missing_slots = _apply_modify_booking_issues_override(

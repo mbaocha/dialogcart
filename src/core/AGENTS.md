@@ -14,12 +14,13 @@ The production owner of each conversational turn within Core is **ConversationEn
 
 ## Turn orchestration
 
-- Durable orchestration stages for a turn are **Planning → Execution → Rendering**.
+- The primary durable orchestration lifecycle for a turn is **Planning → Execution → Rendering**.
 - The engine sequences those stages. It must not re-implement planning, booking dispatch, or domain post-processing owned elsewhere.
 - **Planning** produces the plan (intent, status, stage, action, slots, missing slots, and related planning artifacts).
 - **Execution** decides whether a policy-selected step runs and, when it does, performs coordination through to pre-render business outcomes.
-- **Rendering** turns plan and execution artifacts into the user-facing response.
+- **Rendering** produces the user-facing response from plan, execution, and other supplied evidence (see Rendering).
 - Planning failure, handler delegation, browse/pagination, and clarification-without-tool-run are **control-flow branches**, not peer orchestration stages.
+- Rendering may also be invoked from those branches when a user-facing reply is required; that does not create additional durable stages.
 - Browse/pagination remains presentation routing after planning; it must not become a fourth durable stage.
 - Non-execute and clarification response shapes belong with outcome builders—not ad hoc in the turn owner.
 - Grow turn-lifecycle behaviour in the engine and its execution-coordination boundary—not in orchestration compat shims.
@@ -126,9 +127,9 @@ Reference: [`AVAILABILITY_INTERACTION_CONTRACT.md`](orchestration/contracts/AVAI
 ## Planner
 
 - Runtime derives business facts from session, slots, fingerprints, confirmation gates, and workflow state.
-- Policy owns business sequencing via `intent_policy.yaml` and `requires`.
-- Planner interprets policy only—planner code is intent-agnostic.
-- New booking behaviour: extend the fact registry → express sequencing in policy → generic interpreter selects the step.
+- Booking sequencing, slot requirements, and execution-step selection remain **policy-driven** and reusable across intents.
+- Planner infrastructure must stay generic: new booking behaviour extends the fact registry, expresses sequencing in policy, and lets the generic interpreter select the step.
+- Intent classification and some routing concerns (for example handler delegation) may exist **outside** booking sequencing; they must not reinvent booking step selection.
 - `plan.action` is execution-only; `null` when no execution step runs.
 - Conversation phase must never be inferred from `plan.action`.
 - No `presentation_action`.
@@ -152,7 +153,7 @@ Numbered Stage 01–09 modules expose the unchanged runtime order. Macro-phase c
 
 ## Intent policy
 
-`src/core/config/intent_policy.yaml` is the single source of truth for planning rules, slot requirements, execution sequencing, step modes (exploratory/committing), and intent durability. Code reads policy and derives facts—it must not invent behaviour or sequencing outside policy.
+Booking sequencing, required slots, execution steps, step modes (exploratory/committing), and intent durability are **policy-driven**. Code reads that policy and derives facts—it must not invent booking behaviour or execution sequencing outside policy. Other routing concerns (for example handler delegation) may use separate declarative policy; they do not replace booking execution policy.
 
 ---
 
@@ -161,14 +162,47 @@ Numbered Stage 01–09 modules expose the unchanged runtime order. Macro-phase c
 - Policy selects the execution step (`plan.action`); it may be `null` when nothing should run.
 - Execution coordination owns eligibility, preparation, client binding, dispatch, and workflow post-hooks needed before rendering.
 - Execution clients perform the operation and return business outcomes; they do not decide the next user action.
-- Rendering produces the user-facing response from plan and execution artifacts.
+- Rendering produces the user-facing response from plan, execution, and other supplied evidence.
 - HTTP and session infrastructure own persistence of durable state for the following turn—not the turn orchestrator.
 
 ---
 
 ## Capabilities
 
-Core activates capabilities, merges durable outcomes into session. Capabilities do not own session state, planner logic, or conversation flow.
+- Planning decides whether a capability must activate before booking can proceed.
+- Execution and API boundaries coordinate capability execution once planning has selected it.
+- Capabilities return structured results; Core merges durable continuation facts into session.
+- Capabilities do not own session state, planner logic, or conversation flow.
+- Rendering remains responsible for conversational output from capability outcomes and other supplied evidence.
+
+---
+
+## Handler delegation
+
+- Some intents are delegated rather than booked through the durable Planning → Execution path.
+- Delegated handlers may coordinate supporting capabilities to produce **structured evidence** for the turn.
+- Handlers own coordination of that supporting work; they do **not** own final user-facing wording.
+- Rendering remains responsible for producing the final conversational response from handler evidence and instructions.
+- Delegated conversational requests may generate evidence independently of booking execution.
+- Durable booking state remains preserved across delegated conversational handling unless an explicit invalidation rule applies.
+
+---
+
+## Rendering
+
+- Rendering owns conversational wording, conversational composition, and presentation of supplied evidence.
+- Rendering does **not** own business facts, world knowledge, planning, or orchestration.
+- Rendering consumes evidence produced elsewhere (planning artifacts, execution outcomes, handlers, capabilities).
+- Rendering must not invent facts outside the evidence it is given.
+
+---
+
+## Evidence → Rendering
+
+- Producing components (planning, execution, handlers, capabilities, and related evidence adapters) generate structured evidence.
+- Rendering consumes that evidence and turns it into the user-facing reply.
+- Rendering must not invent business facts, world knowledge, or other claims absent from supplied evidence.
+- Evidence producers must not emit final conversational wording as a substitute for Rendering.
 
 ---
 

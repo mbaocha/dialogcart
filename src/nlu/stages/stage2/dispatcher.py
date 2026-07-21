@@ -5,6 +5,7 @@ Each group extractor:
 - Receives the candidate intent from Stage 1
 - Extracts slots using a focused, group-specific prompt
 - Is the final authority on intent (can re-route via validated_intent)
+- Owns temporal understanding via Temporal; projects legacy fields for compatibility
 
 Routing rules:
 - UNKNOWN → create group (create validates intent from full conversation context)
@@ -16,6 +17,7 @@ import logging
 from typing import Any, Dict, Optional
 
 from ...registry.intent_groups import get_stage2_group
+from ...temporal.stage2_output import empty_temporal_dict
 from .groups.availability import AvailabilityGroupExtractor
 from .groups.cancel import CancelGroupExtractor
 from .groups.create import CreateGroupExtractor
@@ -45,13 +47,28 @@ def _get_extractor(group: str):
     return _instances[group]
 
 
+def _ensure_temporal(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Groups that own Temporal already set it; others get an empty Temporal."""
+    if isinstance(result.get("temporal"), dict):
+        return result
+    return {**result, "temporal": empty_temporal_dict(float(result.get("confidence") or 0.0))}
+
+
 def _empty_result(intent: str) -> Dict[str, Any]:
     return {
         "intent": intent,
         "confidence": 0.0,
-        "facts": {"dates": [], "times": [], "date_time_pairs": [], "service_id": None, "booking_id": None},
+        "facts": {
+            "dates": [],
+            "times": [],
+            "date_time_pairs": [],
+            "service_id": None,
+            "booking_id": None,
+        },
         "time_constraint": None,
         "search_query": None,
+        "temporal": empty_temporal_dict(0.0),
+        "off_topic_query": None,
     }
 
 
@@ -90,7 +107,7 @@ def extract_slots(
     """Route intent to Stage 2, optionally Stage 3 when validated intent changes group.
 
     The returned dict is compatible with the existing normalization pipeline:
-    {intent, confidence, facts, time_constraint, search_query, service_term, ...}
+    {intent, confidence, facts, time_constraint, search_query, service_term, temporal, ...}
     """
     routed_group = _resolve_routing_group(intent)
 
@@ -121,4 +138,4 @@ def extract_slots(
             final_group, final_intent, text, now, tenant_context, conversation_context,
         )
 
-    return result
+    return _ensure_temporal(result)

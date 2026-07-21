@@ -6,6 +6,7 @@ Maps intent names to handler names using intent_handlers.yaml.
 Usage:
     from core.planning.policy.handler_router import resolve_handler
     handler = resolve_handler("GENERAL_INQUIRY")  # -> "rag"
+    handler = resolve_handler("OFF_TOPIC")  # -> "off_topic"
     handler = resolve_handler("CREATE_APPOINTMENT")  # -> None
 """
 import logging
@@ -41,3 +42,11 @@ def _load() -> Dict[str, str]:
 def resolve_handler(intent: str) -> Optional[str]:
     """Return the handler name for intent, or None if no handler is configured."""
     return _load().get(intent)
+
+
+def reload_handlers() -> None:
+    """Clear cache and reload intent_handlers.yaml (tests / hot reload)."""
+    global _intent_to_handler, _loaded
+    _intent_to_handler = {}
+    _loaded = False
+    _load()

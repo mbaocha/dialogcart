@@ -61,6 +61,7 @@ _EMPTY_SESSION_V2: Dict[str, Any] = {
             "date": None,
             "time": None,
         },
+        "temporal": None,
         "service_candidates": None,
         "modification_context": None,
         "context": {
@@ -242,16 +243,16 @@ def normalize_session_to_v2(session: Optional[Mapping[str, Any]]) -> Dict[str, A
         if isinstance(nested_planning.get("constraints"), dict)
         else {}
     )
+    _ = nested_constraints
     planning["constraints"] = {
-        "date": _pick_scalar(
-            working.get("date_constraint"),
-            nested_constraints.get("date"),
-        ),
-        "time": _pick_scalar(
-            working.get("time_constraint"),
-            nested_constraints.get("time"),
-        ),
+        "date": None,
+        "time": None,
     }
+
+    planning["temporal"] = _pick_scalar(
+        working.get("temporal"),
+        nested_planning.get("temporal"),
+    )
 
     planning["service_candidates"] = _pick_scalar(
         working.get("service_candidates"),
@@ -427,11 +428,12 @@ def hydrate_v1_compat_shims(v2_session: Mapping[str, Any]) -> Dict[str, Any]:
         working["time_proposal"] = proposals.get("time")
 
     constraints = planning.get("constraints") or {}
-    if constraints.get("date") is not None:
-        working["date_constraint"] = constraints.get("date")
-    if constraints.get("time") is not None:
-        working["time_constraint"] = constraints.get("time")
+    _ = constraints  # legacy nested key retained empty; Temporal is canonical
 
+    if planning.get("temporal") is not None:
+        working["temporal"] = copy.deepcopy(planning.get("temporal"))
+    working.pop("date_constraint", None)
+    working.pop("time_constraint", None)
     if planning.get("service_candidates") is not None:
         working["service_candidates"] = planning.get("service_candidates")
     if planning.get("modification_context") is not None:

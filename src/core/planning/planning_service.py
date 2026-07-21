@@ -32,7 +32,7 @@ def plan_message(
 
     Returns:
         Dict with: intent_name, stage, action, slots, missing_slots,
-        time_constraint, status, and plan structure.
+        planning result containing slots, Temporal, status, and plan structure.
     """
     from core.planning.planner.turn_planner import plan_turn
 
@@ -105,6 +105,10 @@ def plan_message(
     if turn_operation:
         planning_result["turn_operation"] = turn_operation
         plan_structure.setdefault("turn_operation", turn_operation)
+    turn_meta = outcome.get("turn") or outcome_plan.get("turn")
+    if isinstance(turn_meta, dict) and turn_meta:
+        planning_result["turn"] = dict(turn_meta)
+        plan_structure.setdefault("turn", dict(turn_meta))
     if outcome_plan.get("availability_reshow"):
         planning_result["availability_reshow"] = True
         plan_structure.setdefault("availability_reshow", True)
@@ -122,44 +126,28 @@ def plan_message(
 
     # Carry HANDLER_DELEGATED routing fields — stripped by standard planning_result construction
     if outcome.get("status") == "HANDLER_DELEGATED":
-        for _k in ("active_handler", "search_query"):
+        for _k in ("active_handler", "search_query", "off_topic_query", "turn"):
             if outcome.get(_k) is not None:
                 planning_result[_k] = outcome[_k]
+                if _k == "turn" and isinstance(outcome[_k], dict):
+                    plan_structure["turn"] = dict(outcome[_k])
 
-    # Extract time_constraint from multiple possible sources
-    # Priority: 1) effective_response (merged_luma_response), 2) raw_luma_response, 3) outcome.facts.context
-    time_constraint = None
     merged_luma_response = result.get("_merged_luma_response", {})
-    if isinstance(merged_luma_response, dict):
-        # Check effective_response first (time_constraint is stored here during processing)
-        time_constraint = merged_luma_response.get("time_constraint")
+    if not isinstance(merged_luma_response, dict):
+        merged_luma_response = {}
 
-        # If not found, check raw_luma_response within effective_response
-        if time_constraint is None:
-            raw_luma_response = merged_luma_response.get(
-                "_raw_luma_response", {})
-            if isinstance(raw_luma_response, dict):
-                time_constraint = raw_luma_response.get("time_constraint")
+    from core.planning.temporal_contract import get_temporal
 
-    # Fallback: Check outcome.facts.context
-    if time_constraint is None:
-        facts = outcome.get("facts", {})
-        if isinstance(facts, dict):
-            context = facts.get("context", {})
-            if isinstance(context, dict):
-                time_constraint = context.get("time_constraint")
+    planning_result["temporal"] = get_temporal(
+        merged_luma_response
+        if merged_luma_response
+        else {"temporal": result.get("temporal")}
+    )
 
-    # Add time_constraint if present
-    if time_constraint is not None:
-        planning_result["time_constraint"] = time_constraint
-
-    # Propagate proposals from merged response so execution call sites can read them
-    # from plan without relying on session_state being mutated by plan_message.
-    if isinstance(merged_luma_response, dict):
-        for _prop_key in ("date_proposal", "time_proposal"):
-            _prop_val = merged_luma_response.get(_prop_key)
-            if _prop_val is not None:
-                planning_result[_prop_key] = _prop_val
+    for _prop_key in ("date_proposal", "time_proposal"):
+        _prop_val = merged_luma_response.get(_prop_key)
+        if _prop_val is not None:
+            planning_result[_prop_key] = _prop_val
 
     # Carry merged_luma_response so ConversationEngine can persist conversation memory.
     planning_result["_merged_luma_response"] = result.get(

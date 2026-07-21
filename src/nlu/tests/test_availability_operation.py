@@ -17,17 +17,32 @@ def _tool_input(
     validated_intent="AVAILABILITY",
     dates=None,
     times=None,
-    service_id=None,
+    service_term=None,
 ):
+    dates = list(dates or [])
+    times = list(times or [])
+    start_date = dates[0] if dates else None
+    end_date = dates[1] if len(dates) > 1 else None
+    start_time = times[0] if times else None
     return {
         "validated_intent": validated_intent,
         "confidence": 0.92,
         "operation": operation,
+        "temporal": {
+            "expression": None,
+            "start_date_expression": None,
+            "start_time_expression": None,
+            "end_date_expression": None,
+            "end_time_expression": None,
+            "start_date": start_date,
+            "start_time": start_time,
+            "end_date": end_date,
+            "end_time": None,
+            "mode": None,
+            "confidence": 0.92,
+        },
         "facts": {
-            "dates": dates or [],
-            "times": times or [],
-            "date_time_pairs": [],
-            "service_id": service_id,
+            "service_term": service_term,
         },
         "time_constraint": None,
         "service_candidates": [],
@@ -127,7 +142,9 @@ class TestAvailabilityExtractorOperation:
 
     def test_extractor_search_leaves_operation_unset(self):
         extractor = availability_group.AvailabilityGroupExtractor()
-        tool_input = _tool_input(operation=None, dates=["2026-07-08"], service_id="haircut")
+        tool_input = _tool_input(
+            operation=None, dates=["2026-07-08"], service_term="haircut"
+        )
         mock_response = _mock_llm_response(tool_input)
 
         with patch.object(
@@ -144,6 +161,8 @@ class TestAvailabilityExtractorOperation:
 
         assert "operation" not in result
         assert result["facts"]["dates"] == ["2026-07-08"]
+        assert result["facts"]["service_id"] is None
+        assert result["service_term"] == "haircut"
 
 
 class TestPipelineOperationPropagation:

@@ -17,14 +17,17 @@ def apply_create_appointment_extensions(
     if final_intent_name != "CREATE_APPOINTMENT":
         return
 
+    from core.planning.temporal_contract import get_temporal
+
     if merged_luma_response and isinstance(merged_luma_response, dict):
-        time_constraint = merged_luma_response.get("time_constraint")
-        if time_constraint is not None:
-            session_state["time_constraint"] = time_constraint
-            logger.debug(
-                "[TIME_CONSTRAINT] Persisting time_constraint to session_state: %s",
-                time_constraint,
-            )
+        temporal = get_temporal(merged_luma_response)
+        session_state["temporal"] = temporal
+        session_state.pop("time_constraint", None)
+        logger.debug(
+            "[TEMPORAL] Persisting temporal mode=%s start_time=%s",
+            temporal.get("mode"),
+            temporal.get("start_time"),
+        )
 
     plan_obj = outcome.get("plan", {})
     if isinstance(plan_obj, dict) and plan_obj.get("_availability_planned"):

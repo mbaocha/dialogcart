@@ -24,6 +24,7 @@ class IntentDecision:
     handler_name: Optional[str] = None
     non_durable_status: Optional[str] = None
     delegated_search_query: Optional[str] = None
+    delegated_off_topic_query: Optional[str] = None
     delegated_slots: Dict[str, Any] = field(default_factory=dict)
 
 

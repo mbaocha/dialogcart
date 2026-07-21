@@ -274,10 +274,17 @@ def test_availability_preserves_current_turn_time_clears_old_selection():
     mock_luma.resolve.return_value = {
         "success": True,
         "intent": {"name": "AVAILABILITY"},
-        "facts": {"service_id": FLEXI, "times": ["10:00"]},
+        "facts": {"service_id": FLEXI},
         "slots": {"service_id": FLEXI},
         "date_proposal": {"mode": "single_day", "start": JULY_21},
-        "time_constraint": {"mode": "exact", "start": "10:00", "end": "10:00"},
+        "temporal": {
+            "start_date": JULY_21,
+            "start_time": "10:00",
+            "end_time": "10:00",
+            "mode": "single_day",
+            "confidence": 1.0,
+        },
+        "time_proposal": {"mode": "exact", "value": "10:00"},
         "missing_slots": [],
         "needs_clarification": False,
     }
@@ -317,11 +324,11 @@ def test_availability_preserves_current_turn_time_clears_old_selection():
 
     merged = fields["merged"]
     time_proposal = fields["time_proposal"] or merged.get("time_proposal")
-    time_constraint = merged.get("time_constraint")
+    temporal = merged.get("temporal") or fields.get("temporal")
     preserved = False
     if isinstance(time_proposal, dict) and "10" in str(time_proposal.get("value") or ""):
         preserved = True
-    if isinstance(time_constraint, dict) and "10" in str(time_constraint.get("start") or ""):
+    if isinstance(temporal, dict) and "10" in str(temporal.get("start_time") or ""):
         preserved = True
     if slots.get("time") and "10" in str(slots.get("time")):
         preserved = True
@@ -353,8 +360,14 @@ def test_correction_exact_time_still_reenters_confirmation():
     mock_luma.resolve.return_value = {
         "success": True,
         "intent": {"name": "CORRECTION"},
-        "facts": {"times": ["10:00"]},
-        "time_constraint": {"mode": "exact", "start": "10:00", "end": "10:00"},
+        "facts": {},
+        "temporal": {
+            "start_time": "10:00",
+            "end_time": "10:00",
+            "mode": "none",
+            "confidence": 1.0,
+        },
+        "time_proposal": {"mode": "exact", "value": "10:00"},
         "missing_slots": [],
         "needs_clarification": False,
     }

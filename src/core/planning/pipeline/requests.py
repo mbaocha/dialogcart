@@ -39,6 +39,7 @@ _INFORMATIONAL_RAW = frozenset(
         "QUOTE",
         "RECOMMENDATION",
         "DISCOVERY",
+        "OFF_TOPIC",
     }
 )
 
@@ -57,8 +58,7 @@ class CurrentRequest:
     raw_luma_intent: str
     facts: Mapping[str, Any]
     raw_slots: Mapping[str, Any]
-    date_constraint: Optional[Mapping[str, Any]]
-    time_constraint: Optional[Mapping[str, Any]]
+    temporal: Mapping[str, Any]
     date_proposal: Any
     time_proposal: Any
     operation: Optional[str]
@@ -77,7 +77,11 @@ def build_current_request(
     source_text: str = "",
 ) -> CurrentRequest:
     """Build CurrentRequest from the raw NLU response only."""
+    from core.planning.temporal_contract import ensure_temporal, get_temporal
+
     raw = dict(luma_response) if isinstance(luma_response, dict) else {}
+    raw = ensure_temporal(raw)
+    temporal = get_temporal(raw)
 
     intent_obj = raw.get("intent", {})
     if isinstance(intent_obj, dict):
@@ -89,17 +93,6 @@ def build_current_request(
 
     facts = raw.get("facts") if isinstance(raw.get("facts"), dict) else {}
     slots = raw.get("slots") if isinstance(raw.get("slots"), dict) else {}
-
-    date_constraint = (
-        raw.get("date_constraint")
-        if isinstance(raw.get("date_constraint"), dict)
-        else None
-    )
-    time_constraint = (
-        raw.get("time_constraint")
-        if isinstance(raw.get("time_constraint"), dict)
-        else None
-    )
 
     operation = raw.get("operation")
     if not isinstance(operation, str) or not operation:
@@ -126,12 +119,7 @@ def build_current_request(
         raw_luma_intent=raw_intent,
         facts=_freeze_mapping(facts),
         raw_slots=_freeze_mapping(slots),
-        date_constraint=(
-            MappingProxyType(dict(date_constraint)) if date_constraint else None
-        ),
-        time_constraint=(
-            MappingProxyType(dict(time_constraint)) if time_constraint else None
-        ),
+        temporal=_freeze_mapping(temporal),
         date_proposal=date_proposal,
         time_proposal=time_proposal,
         operation=operation,
@@ -148,9 +136,20 @@ def is_availability_turn_operation(turn_operation: Optional[str] = None) -> bool
 def _has_slot_evidence(luma_response: Dict[str, Any]) -> bool:
     slots = luma_response.get("slots") or {}
     facts = luma_response.get("facts") or {}
+    temporal = luma_response.get("temporal") or {}
     if isinstance(slots, dict) and any(value is not None for value in slots.values()):
         return True
     if isinstance(facts, dict) and facts:
+        return True
+    if isinstance(temporal, dict) and any(
+        temporal.get(k)
+        for k in (
+            "start_date",
+            "start_time",
+            "start_date_expression",
+            "start_time_expression",
+        )
+    ):
         return True
     return False
 
@@ -206,7 +205,7 @@ LEGACY_INTENT_DECISION_READ_SITES: Tuple[str, ...] = (
 REMAINING_PAYLOAD_ATTACHMENT_PROJECTIONS: Tuple[str, ...] = ()
 
 REMAINING_DUPLICATED_ATTACHMENT_FIELDS: Tuple[str, ...] = (
-    "IntentDecision attachment fields — Stage 01 reconciliation; projected once "
+    "IntentDecision attachment fields — Stage 01 reinterpretation; projected once "
     "into AttachedRequest",
 )
 

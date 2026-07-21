@@ -41,8 +41,12 @@ Response contract (mirrors luma /resolve):
             "booking_id": str | null
         },
         "time_constraint": {...} | null,    # only when a time window is present
+        "date_constraint": {...} | null,    # only when date mode is flexible
         "search_query": str | null,         # only for RAG intents
-        "operation": str | null             # structured interaction subtype (e.g. browse_next)
+        "off_topic_query": str | null,      # only for OFF_TOPIC (canonical question)
+        "operation": str | null,            # structured interaction subtype (e.g. browse_next)
+        "temporal": {...} | null,           # additive Stage2 canonical temporal (unused by Core yet)
+        "turn": {"understanding": "UNDERSTOOD" | "UNRECOGNIZED_INPUT"}
     }
 
 Fields that must NOT appear (luma contract):
@@ -92,10 +96,16 @@ def resolve():
         response["date_constraint"] = result.date_constraint
     if result.search_query is not None:
         response["search_query"] = result.search_query
+    if result.off_topic_query is not None:
+        response["off_topic_query"] = result.off_topic_query
     if result.service_candidates:
         response["service_candidates"] = result.service_candidates
     if result.operation is not None:
         response["operation"] = result.operation
+    if result.temporal is not None:
+        response["temporal"] = result.temporal
+    if result.understanding:
+        response["turn"] = {"understanding": result.understanding}
 
     return jsonify(response)
 

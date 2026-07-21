@@ -112,8 +112,7 @@ def _needs_clarification_session_outcome(
             planning_context={
                 "date_proposal": session_state.get("date_proposal"),
                 "time_proposal": session_state.get("time_proposal"),
-                "date_constraint": session_state.get("date_constraint"),
-                "time_constraint": session_state.get("time_constraint"),
+                "temporal": session_state.get("temporal"),
                 "awaiting_slot": session_state.get("awaiting_slot"),
             },
         )

@@ -65,9 +65,18 @@ _MONTH_PATTERN = (
     r"jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|"
     r"nov(?:ember)?|dec(?:ember)?)"
 )
+# Month-first ("July 24", "July 24th") or day-first ("24 July", "24th July").
 _DATE_SINGLE_RE = re.compile(
-    rf"\b{_MONTH_PATTERN}\s+\d{{1,2}}(?:st|nd|rd|th)?\b",
-    re.IGNORECASE,
+    rf"""
+    \b
+    (?:
+        {_MONTH_PATTERN}\s+\d{{1,2}}(?:st|nd|rd|th)?
+      |
+        \d{{1,2}}(?:st|nd|rd|th)?\s+{_MONTH_PATTERN}
+    )
+    \b
+    """,
+    re.IGNORECASE | re.VERBOSE,
 )
 _NUMERIC_DATE_RE = re.compile(r"\b\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?\b")
 _BOOKING_VERB_RE = re.compile(r"\b(?:book|reserve|schedule)\b", re.IGNORECASE)
@@ -78,7 +87,10 @@ _RESERVATION_NOUN_RE = re.compile(
 
 def _text_mentions_date(text: str) -> bool:
     """True when the utterance explicitly mentions a calendar date (not bare clock time)."""
-    lowered = text.lower()
+    from .extraction.entity_loading import normalize_utterance_aliases
+
+    # Share global vocabulary typos/aliases (tomorow→tomorrow) with Stage2 config.
+    lowered = normalize_utterance_aliases(text).lower()
     for phrase in _RELATIVE_DATE_PHRASES:
         if phrase in lowered:
             return True
@@ -104,8 +116,7 @@ _EXPLICIT_CLOCK_RE = re.compile(
 
 
 def _normalize_fuzzy_time(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
-    """Ensure fuzzy time-window tokens (morning/afternoon/evening/night) produce a
-    fuzzy time_constraint and NOT a concrete clock time in facts.times.
+    """Ensure fuzzy time-window tokens produce fuzzy Temporal (and legacy projection).
 
     Haiku sometimes emits a concrete time like "20:00" when the user says "evening".
     That concrete time gets promoted to slots.time and satisfies the time slot too
@@ -114,6 +125,8 @@ def _normalize_fuzzy_time(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
     When an explicit clock time is also present ("evening at 7pm"), leave the SLM
     output unchanged — the clock time takes precedence.
     """
+    from .temporal.pipeline_sync import apply_temporal, get_temporal
+
     text_lower = text.lower()
 
     found_token = None
@@ -129,39 +142,25 @@ def _normalize_fuzzy_time(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
     if _EXPLICIT_CLOCK_RE.search(text_lower):
         return slm
 
-    facts = slm.get("facts") or {}
-    times = list(facts.get("times") or [])
-    tc = slm.get("time_constraint") or {}
-
+    temporal = get_temporal(slm)
     # Already correct: fuzzy with right label and no spurious clock times
     if (
-        isinstance(tc, dict)
-        and tc.get("mode") == "fuzzy"
-        and tc.get("label") == found_token
-        and not times
+        (temporal.start_time_expression or "").lower() == found_token
+        and not temporal.start_time
+        and not temporal.end_time
     ):
         return slm
 
-    try:
-        from .config.temporal import FUZZY_TIME_WINDOWS
-        start, end = FUZZY_TIME_WINDOWS[found_token]
-    except Exception:
-        return slm
-
-    new_tc = {"mode": "fuzzy", "label": found_token, "start": start, "end": end}
+    temporal.start_time = None
+    temporal.end_time = None
+    temporal.start_time_expression = found_token
+    temporal.end_time_expression = None
     logger.debug(
-        "_normalize_fuzzy_time: text=%r token=%r cleared_times=%r tc=%r→%r",
+        "_normalize_fuzzy_time: text=%r token=%r (temporal-primary)",
         text,
         found_token,
-        times,
-        tc,
-        new_tc,
     )
-    return {
-        **slm,
-        "time_constraint": new_tc,
-        "facts": {**facts, "times": []},
-    }
+    return apply_temporal(slm, temporal)
 
 
 _CANCEL_VERB_RE = re.compile(r"\bcancel\b", re.IGNORECASE)
@@ -300,29 +299,26 @@ def _strip_unmentioned_service(text: str, slm: Dict[str, Any]) -> Dict[str, Any]
 
 def _strip_unmentioned_dates(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
     """Remove dates Haiku invented when the user only mentioned a clock time."""
+    from .temporal.pipeline_sync import (
+        apply_temporal,
+        clear_temporal_dates,
+        get_temporal,
+        temporal_has_date_material,
+    )
+
     if _text_mentions_date(text):
         return slm
+    temporal = get_temporal(slm)
     facts = slm.get("facts", {})
-    if not facts.get("dates") and not facts.get("date_time_pairs"):
+    if not temporal_has_date_material(temporal) and not facts.get("date_time_pairs"):
         return slm
-    # date_time_pairs requires BOTH date AND time — if populated, the LLM found a real
-    # date+time pair (not an invented date). Trust extraction even for misspelled words.
-    if facts.get("date_time_pairs"):
-        return slm
+    # Time-only utterance: never keep invented dates (even if date_time_pairs set).
     logger.debug(
-        "Stripping unmentioned dates from SLM output for text=%r dates=%r pairs=%r",
+        "Stripping unmentioned dates from SLM output for text=%r temporal=%r",
         text,
-        facts.get("dates"),
-        facts.get("date_time_pairs"),
+        temporal.to_dict(),
     )
-    return {
-        **slm,
-        "facts": {
-            **facts,
-            "dates": [],
-            "date_time_pairs": [],
-        },
-    }
+    return apply_temporal(slm, clear_temporal_dates(temporal))
 
 
 def _apply_booking_mode_intent(
@@ -461,6 +457,16 @@ class PipelineResult:
     date_constraint: Optional[Dict[str, Any]] = None
     service_candidates: List[str] = field(default_factory=list)
     operation: Optional[str] = None
+    # Canonical OFF_TOPIC question (Stage2); never used as business FAQ search_query.
+    off_topic_query: Optional[str] = None
+    # Additive Stage2 canonical temporal (not consumed by binder/planning yet).
+    temporal: Optional[Dict[str, Any]] = None
+    # Utterance understanding outcome for this turn (not planner status).
+    understanding: str = "UNDERSTOOD"
+
+    @property
+    def turn(self) -> Dict[str, str]:
+        return {"understanding": self.understanding}
 
 
 class _SemanticResultAdapter:
@@ -495,17 +501,13 @@ def _fix_iso_weekday_mismatch(
     the wrong ISO day. Uses last_date_proposal from conversation_context as an
     anchor when present; otherwise resets to bare weekday for calendar binding.
     """
-    facts = slm.get("facts", {})
-    if not isinstance(facts, dict):
-        return slm
-    dates = facts.get("dates")
-    if not isinstance(dates, list) or len(dates) != 1:
-        return slm
+    from .temporal.pipeline_sync import apply_temporal, get_temporal
 
-    raw = str(dates[0])
-    if not re.match(r"^\d{4}-\d{2}-\d{2}", raw):
+    temporal = get_temporal(slm)
+    raw = temporal.start_date
+    if not raw or not re.match(r"^\d{4}-\d{2}-\d{2}", str(raw)):
         return slm
-    iso = raw.split("T")[0].split(" ")[0]
+    iso = str(raw).split("T")[0].split(" ")[0]
 
     text_lower = (text or "").lower()
     mentioned = next((name for name in _WEEKDAY_TO_DOW if name in text_lower), None)
@@ -545,7 +547,9 @@ def _fix_iso_weekday_mismatch(
             anchor_date,
             fixed,
         )
-        return {**slm, "facts": {**facts, "dates": [fixed]}}
+        temporal.start_date = fixed
+        temporal.start_date_expression = None
+        return apply_temporal(slm, temporal)
 
     logger.info(
         "[DATE_WEEKDAY_FIX] text=%r mentioned=%s bad_iso=%s → bare weekday for binder",
@@ -553,7 +557,9 @@ def _fix_iso_weekday_mismatch(
         mentioned,
         iso,
     )
-    return {**slm, "facts": {**facts, "dates": [mentioned]}}
+    temporal.start_date = None
+    temporal.start_date_expression = mentioned
+    return apply_temporal(slm, temporal)
 
 
 def _infer_date_mode(dates: List[str]) -> str:
@@ -586,38 +592,12 @@ def _enrich_time_constraint(tc: Optional[Dict[str, Any]]) -> Optional[Dict[str, 
     return tc
 
 
-# Intents that may continue via bare slot-fill follow-ups (not FAQ/RAG intents).
-_SLOT_FILL_BOOKING_INTENTS = frozenset(
-    {"CREATE_APPOINTMENT", "CREATE_RESERVATION", "MODIFY_BOOKING"}
-)
-
-# Utterances with these verbs should be classified by SLM, not coerced post-hoc.
-_SLOT_FILL_BLOCKING_VERBS = re.compile(
-    r"\b(book|schedule|reserve|cancel|modify|reschedule|change\s+booking)\b",
-    re.IGNORECASE,
-)
-
-_CORRECTION_SIGNAL = re.compile(
-    r"\b(instead|actually)\b|"
-    r"\bwait,?\s*i\s+meant\b|"
-    r"\bno,?\s*make\s+it\b|"
-    r"\bchange\s+it\s+to\b",
-    re.IGNORECASE,
-)
-
-
 def _active_booking_intent_from_context(
     conversation_context: Optional[Dict[str, Any]],
 ) -> Optional[str]:
-    if not isinstance(conversation_context, dict):
-        return None
-    last_intent = conversation_context.get("last_intent")
-    if last_intent in _SLOT_FILL_BOOKING_INTENTS:
-        return last_intent
-    active = conversation_context.get("active_booking_intent")
-    if active in _SLOT_FILL_BOOKING_INTENTS:
-        return active
-    return None
+    from .stages.shared.in_flow_act import active_booking_intent_from_context
+
+    return active_booking_intent_from_context(conversation_context)
 
 
 def _has_slot_material(facts: Dict[str, Any]) -> bool:
@@ -638,43 +618,55 @@ def _has_slot_material(facts: Dict[str, Any]) -> bool:
     return False
 
 
+def _slm_has_slot_material(slm: Dict[str, Any]) -> bool:
+    """Slot-fill detection prefers Temporal, falls back to legacy facts."""
+    from .temporal.pipeline_sync import (
+        get_temporal,
+        temporal_has_date_material,
+        temporal_has_time_material,
+    )
+
+    temporal = get_temporal(slm)
+    if temporal_has_date_material(temporal) or temporal_has_time_material(temporal):
+        return True
+    facts = slm.get("facts", {})
+    if _has_slot_material(facts if isinstance(facts, dict) else {}):
+        return True
+    tc = slm.get("time_constraint")
+    return isinstance(tc, dict) and tc.get("mode") not in (None, "none")
+
+
 def _resolve_slot_fill_intent(
     slm: Dict[str, Any],
     text: str,
     conversation_context: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Promote UNKNOWN → active booking intent on slot-fill continuation turns.
+    """Deterministic fallback: promote UNKNOWN → active booking intent in-flow.
 
-    Guardrail when Haiku returns UNKNOWN despite booking conversation context.
-    Does not run without context, on correction phrases, or when a booking verb is present.
+    Primary resolution lives in Stage 2 create validation; this runs only when
+    Stage 2 still emitted UNKNOWN despite active booking conversation context.
     """
+    from .stages.shared.in_flow_act import promote_in_flow_booking_intent
+
     slm_intent = slm.get("intent", "UNKNOWN")
-    if slm_intent != "UNKNOWN":
-        return slm
-    if not isinstance(conversation_context, dict):
-        return slm
-    booking_intent = _active_booking_intent_from_context(conversation_context)
-    if not booking_intent:
-        return slm
-    facts = slm.get("facts", {})
-    if not isinstance(facts, dict) or not _has_slot_material(facts):
-        return slm
-    if _SLOT_FILL_BLOCKING_VERBS.search(text or ""):
-        return slm
-    if _CORRECTION_SIGNAL.search(text or ""):
+    promoted = promote_in_flow_booking_intent(
+        slm_intent, text, conversation_context
+    )
+    if promoted == slm_intent:
         return slm
 
     logger.info(
-        "[SLOT_FILL_INTENT] slm_intent=UNKNOWN promoted_to=%s (booking continuation)",
-        booking_intent,
+        "[SLOT_FILL_INTENT] slm_intent=UNKNOWN promoted_to=%s (pipeline fallback)",
+        promoted,
     )
-    return {**slm, "intent": booking_intent}
+    return {**slm, "intent": promoted}
 
 
 def _resolve_calendar_binding_intent(
     slm_intent: str,
     facts: Dict[str, Any],
     conversation_context: Optional[Dict[str, Any]] = None,
+    temporal: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Pick intent passed to calendar binder (may differ from SLM intent on slot-fill turns.
 
@@ -683,9 +675,17 @@ def _resolve_calendar_binding_intent(
     session intent so named-month / range dates resolve to ISO.
     """
     from .calendar.calendar_binder import BINDING_INTENTS
+    from .temporal.pipeline_sync import (
+        parse_temporal_dict,
+        temporal_has_date_material,
+    )
 
-    dates = facts.get("dates") if isinstance(facts, dict) else []
-    has_dates = isinstance(dates, list) and len(dates) > 0
+    has_dates = False
+    if isinstance(temporal, dict):
+        has_dates = temporal_has_date_material(parse_temporal_dict(temporal))
+    if not has_dates:
+        dates = facts.get("dates") if isinstance(facts, dict) else []
+        has_dates = isinstance(dates, list) and len(dates) > 0
     if slm_intent in BINDING_INTENTS or not has_dates:
         return slm_intent
     if not isinstance(conversation_context, dict):
@@ -719,7 +719,16 @@ class NLUPipeline:
         conversation_context: Optional[Dict[str, Any]] = None,
     ) -> PipelineResult:
         now = _resolve_now(now)
-        slm = self._slm_extract(text, tenant_context, now, conversation_context=conversation_context)
+        from .temporal.resolver import anchor_now, format_prompt_now
+
+        local_now = anchor_now(now, timezone)
+        prompt_now = format_prompt_now(local_now, timezone)
+        slm = self._slm_extract(
+            text,
+            tenant_context,
+            prompt_now,
+            conversation_context=conversation_context,
+        )
         slm = _strip_unmentioned_dates(text, slm)
         slm = _strip_unmentioned_service(text, slm)
         slm = _normalize_fuzzy_time(text, slm)
@@ -730,15 +739,28 @@ class NLUPipeline:
         slm = _fix_iso_weekday_mismatch(text, slm, conversation_context)
         slm = self._resolve_service_ambiguity(slm, tenant_context, conversation_context)
         slm = _resolve_slot_fill_intent(slm, text, conversation_context)
+        from .temporal.bare_ordinal import inject_bare_ordinal_expression
+
+        slm = inject_bare_ordinal_expression(text, slm)
+        from .stages.shared.turn_understanding import derive_turn_understanding
+
+        understanding = derive_turn_understanding(slm, conversation_context)
         result = self._bind_calendar(
-            slm, tenant_context, now, timezone, conversation_context
+            slm,
+            tenant_context,
+            now,
+            timezone,
+            conversation_context,
+            local_now=local_now,
         )
+        result.understanding = understanding
         logger.info(
-            "[NLU_FINAL] text=%r intent=%r operation=%r resolved_dates=%r "
+            "[NLU_FINAL] text=%r intent=%r understanding=%r operation=%r resolved_dates=%r "
             "date_time_pairs=%r times=%r service_id=%r service_candidates=%r "
             "time_constraint=%r",
             text,
             result.intent.get("name"),
+            result.understanding,
             result.operation,
             result.facts.get("dates"),
             result.facts.get("date_time_pairs"),
@@ -750,27 +772,33 @@ class NLUPipeline:
         return result
 
     def _correct_bare_weekday_dates(self, text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
-        """Normalise Haiku's date output for bare weekday / weekend inputs.
+        """Normalise Haiku's Temporal output for bare weekday / weekend inputs.
 
         Two cases:
         - Single bare weekday ("wednesday"): Haiku may resolve to wrong ISO week.
-          Reset to raw name so _normalize_dates prepends "this" and the binder
-          picks the nearest future occurrence.
-        - Weekend phrase ("this weekend", "next weekend", …): Haiku often expands
-          to ["saturday", "sunday"], making date_mode="range" and bypassing the
-          binder's flexible weekend path. Reset to the original phrase so
-          date_mode becomes "flexible" and the binder handles it correctly.
+          Reset to expression so the binder picks the nearest future occurrence.
+        - Weekend phrase ("this weekend", …): reset to flexible expression so the
+          binder's week/weekend path runs instead of a saturday/sunday range.
         """
+        from .temporal.pipeline_sync import apply_temporal, get_temporal
+
         words = text.lower().strip().split()
+        temporal = get_temporal(slm)
 
         if len(words) == 1 and words[0] in _WEEKDAYS:
-            facts = slm.get("facts", {})
-            return {**slm, "facts": {**facts, "dates": [words[0]]}}
+            temporal.start_date = None
+            temporal.end_date = None
+            temporal.start_date_expression = words[0]
+            temporal.end_date_expression = None
+            return apply_temporal(slm, temporal)
 
         _WEEKEND_PHRASES = {"this weekend", "next weekend", "the weekend", "weekend"}
         if " ".join(words) in _WEEKEND_PHRASES:
-            facts = slm.get("facts", {})
-            return {**slm, "facts": {**facts, "dates": [" ".join(words)]}}
+            temporal.start_date = None
+            temporal.end_date = None
+            temporal.start_date_expression = " ".join(words)
+            temporal.end_date_expression = None
+            return apply_temporal(slm, temporal)
 
         return slm
 
@@ -885,24 +913,51 @@ class NLUPipeline:
         now: str,
         timezone: str = "UTC",
         conversation_context: Optional[Dict[str, Any]] = None,
+        local_now: Optional[datetime] = None,
     ) -> PipelineResult:
         from .calendar.calendar_binder import bind_calendar
+        from .temporal.pipeline_sync import (
+            apply_temporal,
+            get_temporal,
+            infer_date_mode_from_temporal,
+        )
+        from .temporal.project_legacy import project_legacy_from_temporal
+        from .temporal.resolver import (
+            anchor_now,
+            apply_bare_ordinal_revision,
+            resolve_temporal,
+        )
 
         intent = decision.get("intent", "UNKNOWN")
         confidence = decision.get("confidence", 0.0)
         facts = decision.get("facts", {})
-        tc = decision.get("time_constraint")
         search_query = decision.get("search_query")
+        off_topic_query = decision.get("off_topic_query")
         service_candidates = decision.get("service_candidates") or []
         operation = decision.get("operation")
 
+        if local_now is None:
+            local_now = anchor_now(now, timezone)
+
+        temporal = resolve_temporal(get_temporal(decision), local_now, timezone)
+        temporal = apply_bare_ordinal_revision(
+            temporal,
+            conversation_context=conversation_context,
+            now=local_now,
+        )
+        # Keep legacy projection in sync (Core compat); ISO preferred in dates[].
+        decision = apply_temporal(decision, temporal)
+        facts = decision.get("facts", {})
+        tc = decision.get("time_constraint")
+
         binding_intent = _resolve_calendar_binding_intent(
-            intent, facts, conversation_context
+            intent, facts, conversation_context, temporal=temporal.to_dict()
         )
 
-        raw_dates = facts.get("dates", [])
-        normalized_dates = _normalize_dates(raw_dates)
-        date_mode = _infer_date_mode(normalized_dates)
+        date_mode = infer_date_mode_from_temporal(temporal)
+        legacy_dates = project_legacy_from_temporal(temporal)["dates"]
+        # date_refs are ISO (or unresolved expression only if open vocab left unbound)
+        normalized_dates = list(legacy_dates)
 
         tc_mode = (tc or {}).get("mode", "none")
         if tc_mode == "exact":
@@ -925,29 +980,26 @@ class NLUPipeline:
         }
 
         semantic = _SemanticResultAdapter(resolved_booking)
-        # fallback: Haiku's raw dates if binder skips
-        bound_dates = list(raw_dates)
-        binder_resolved = False
 
         try:
-            now_dt = datetime.fromisoformat(now.replace("Z", "+00:00"))
             binder_result, _ = bind_calendar(
                 semantic_result=semantic,
-                now=now_dt,
+                now=local_now,
                 timezone=timezone,
                 intent=binding_intent,
+                temporal=temporal.to_dict(),
             )
             date_range = binder_result.calendar_booking.get("date_range")
             if date_range:
-                binder_resolved = True
                 start = date_range.get("start_date")
                 end = date_range.get("end_date")
                 if start and end and start == end:
-                    bound_dates = [start]
+                    temporal.start_date, temporal.end_date = start, None
                 elif start and end:
-                    bound_dates = [start, end]
+                    temporal.start_date, temporal.end_date = start, end
                 elif start:
-                    bound_dates = [start]
+                    temporal.start_date, temporal.end_date = start, None
+                # Preserve expressions for audit; projection prefers ISO.
         except Exception:
             logger.exception(
                 "Calendar binding failed for intent=%r (binding_intent=%r)",
@@ -955,32 +1007,20 @@ class NLUPipeline:
                 binding_intent,
             )
 
-        # Compact enumerated date sequences (e.g. Haiku outputs every date in a range).
-        # When the binder skipped, collapse 3+ dates to [first, last].
-        if not binder_resolved and len(bound_dates) > 2 and date_mode == "range":
-            bound_dates = [bound_dates[0], bound_dates[-1]]
+        synced = apply_temporal(decision, temporal)
+        facts = synced.get("facts", {})
+        tc = synced.get("time_constraint")
 
-        # Fix 2: propagate the binder-resolved ISO date back into date_time_pairs so
-        # facts_to_slots sees the canonical date rather than the raw phrase ("tomorrow",
-        # "friday") which would overwrite the ISO date already set from facts.dates[0].
-        updated_dt_pairs = facts.get("date_time_pairs", [])
-        if binder_resolved and bound_dates and isinstance(updated_dt_pairs, list) and updated_dt_pairs:
-            iso_date = bound_dates[0]
-            updated_dt_pairs = [
-                {**pair, "date": iso_date} if isinstance(pair, dict) and "date" in pair else pair
-                for pair in updated_dt_pairs
-            ]
-
-        # Fix 4: signal flexible/ambiguous date ranges so Core can withhold date slot
-        # satisfaction for combined first-turn utterances like "book facial next week".
         date_constraint = {"mode": date_mode} if date_mode == "flexible" else None
 
         return PipelineResult(
             intent={"name": intent, "confidence": confidence},
-            facts={**facts, "dates": bound_dates, "date_time_pairs": updated_dt_pairs},
+            facts=facts,
             time_constraint=_enrich_time_constraint(tc),
             search_query=search_query,
             date_constraint=date_constraint,
             service_candidates=service_candidates,
             operation=operation if isinstance(operation, str) else None,
+            off_topic_query=off_topic_query if isinstance(off_topic_query, str) else None,
+            temporal=temporal.to_dict(),
         )

@@ -175,7 +175,7 @@ def resolve_via_discovery(
     slots: Optional[Dict[str, Any]] = None,
     date_proposal: Optional[Dict[str, Any]] = None,
     time_proposal: Optional[Dict[str, Any]] = None,
-    time_constraint: Optional[Dict[str, Any]] = None,
+    temporal: Optional[Dict[str, Any]] = None,
     session_state: Optional[Dict[str, Any]] = None,
 ) -> SelectionResolution:
     """Resolve selection via Discovery Selector + AvailabilitySelectionPolicy.
@@ -193,7 +193,7 @@ def resolve_via_discovery(
     criteria: Dict[str, Any] = {
         "user_facts": user_facts,
         "time_proposal": time_proposal,
-        "time_constraint": time_constraint,
+        "temporal": temporal,
         "session_state": session_state,
     }
     request = SelectionRequest(criteria=criteria)
@@ -218,7 +218,7 @@ def resolve_via_discovery(
 
     user_time_raw = _extract_user_time(
         time_proposal=time_proposal,
-        time_constraint=time_constraint,
+        temporal=temporal,
         user_facts=user_facts if isinstance(user_facts, dict) else None,
     )
     if not user_time_raw:

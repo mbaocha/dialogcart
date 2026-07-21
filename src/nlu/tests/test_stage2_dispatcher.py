@@ -97,6 +97,8 @@ class TestUnknownRoutesToCreate:
         get_ext.assert_not_called()
         assert result["intent"] == "CONFIRM_ACTION"
         assert result["confidence"] == 0.0
+        assert "temporal" in result
+        assert result["temporal"]["start_date"] is None
 
 
 class TestStage3Redispatch:

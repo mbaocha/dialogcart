@@ -9,6 +9,7 @@ from core.adapters.nlu.conversation_memory import update_conversation
 from core.planning.luma_facts_adapter import facts_to_slots, merge_promoted_luma_slots
 from core.planning.pipeline.requests import AttachedRequest
 from core.planning.pipeline.types import WorkingTurn
+from core.planning.temporal_contract import attach_temporal, get_temporal
 from core.planning.temporal_proposal import extract_nlu_proposals, merge_session_proposals
 from core.session.effective_slots import _compute_effective_collected_slots
 from core.session.merge import merge_luma_with_session, should_merge_session_context
@@ -29,7 +30,8 @@ def build_working_turn(
     apply_domain_filter: bool,
 ) -> WorkingTurn:
     planning_intent = attached_request.planning_intent
-    payload = dict(luma_response)
+    payload = attach_temporal(dict(luma_response))
+    temporal = get_temporal(payload)
 
     # Public intent name is planning intent (workflow attachment). Attachment
     # metadata lives on AttachedRequest — not projected onto this payload.
@@ -65,17 +67,13 @@ def build_working_turn(
     payload["slots"] = merge_promoted_luma_slots(
         nested_slots,
         promoted_slots,
-        luma_response.get("date_constraint"),
         facts_obj if isinstance(facts_obj, dict) else None,
+        temporal=temporal,
     )
     payload["_source_text"] = source_text
 
-    for key in ("time_constraint", "date_constraint"):
-        if luma_response.get(key):
-            payload[key] = luma_response[key]
-
     proposal_session = original_session_state if original_session_state else {}
-    nlu_proposals = extract_nlu_proposals(luma_response)
+    nlu_proposals = extract_nlu_proposals(payload)
     current_turn_has_time = bool(nlu_proposals.get("time_proposal"))
     nlu_date_proposal = nlu_proposals.get("date_proposal")
     current_turn_has_date = bool(
@@ -97,16 +95,10 @@ def build_working_turn(
         tp = nlu_proposals.get("time_proposal")
         if isinstance(tp, dict) and tp.get("mode") == "exact" and tp.get("value"):
             payload["_current_turn_time"] = tp.get("value")
+        elif temporal.get("start_time"):
+            payload["_current_turn_time"] = temporal.get("start_time")
         else:
-            tc = luma_response.get("time_constraint")
-            if (
-                isinstance(tc, dict)
-                and tc.get("mode") == "exact"
-                and tc.get("start")
-            ):
-                payload["_current_turn_time"] = tc.get("start")
-            else:
-                payload.pop("_current_turn_time", None)
+            payload.pop("_current_turn_time", None)
     else:
         payload.pop("_current_turn_time", None)
 

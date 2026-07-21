@@ -34,13 +34,142 @@ from nlu.pipeline import (  # noqa: E402
         ("book massage at 3pm", False),
         ("at 3pm", False),
         ("book haircut tomorrow at 3pm", True),
+        ("check availability for tomorow", True),
+        ("check availability for tommorow", True),
+        ("check availability for tmrw", True),
+        ("check availability for tomorrow", True),
         ("book haircut friday", True),
         ("book room", False),
         ("march 5 to 10", True),
+        # Named-month: month-first and day-first (with/without ordinal).
+        ("July 24", True),
+        ("July 24th", True),
+        ("24 July", True),
+        ("24th July", True),
+        ("book me haircut on 24th july", True),
+        ("book me haircut on july 24th", True),
+        ("check availability for July 21", True),
+        # Non-date numerics must not look like named-month dates.
+        ("haircut for 2 people", False),
+        ("service 24 premium", False),
+        ("room 12", False),
+        ("call me at extension 24", False),
     ],
 )
 def test_text_mentions_date(text, expected):
     assert _text_mentions_date(text) is expected
+
+
+def test_normalize_utterance_aliases_maps_tomorow():
+    from nlu.extraction.entity_loading import normalize_utterance_aliases
+
+    assert "tomorrow" in normalize_utterance_aliases(
+        "check availability for tomorow"
+    ).lower()
+    assert normalize_utterance_aliases("check availability for tomorrow").lower() == (
+        "check availability for tomorrow"
+    )
+
+
+def _availability_slm_with_iso(iso: str, expression: str) -> dict:
+    return {
+        "intent": "AVAILABILITY",
+        "confidence": 0.9,
+        "facts": {
+            "dates": [iso],
+            "times": [],
+            "date_time_pairs": [],
+            "service_id": None,
+            "booking_id": None,
+        },
+        "service_term": None,
+        "service_candidates": [],
+        "temporal": {
+            "expression": expression,
+            "start_date_expression": expression,
+            "start_time_expression": None,
+            "end_date_expression": None,
+            "end_time_expression": None,
+            "start_date": iso,
+            "start_time": None,
+            "end_date": None,
+            "end_time": None,
+            "mode": "single_day",
+            "confidence": 0.9,
+        },
+        "time_constraint": None,
+    }
+
+
+def test_strip_unmentioned_dates_preserves_misspelled_tomorrow():
+    """Stage2 ISO for 'tomorow' must not be cleared by mention detection."""
+    slm = _availability_slm_with_iso("2026-01-14", "tomorrow")
+    result = _strip_unmentioned_dates("check availability for tomorow", slm)
+    assert result["facts"]["dates"] == ["2026-01-14"]
+    assert result["temporal"]["start_date"] == "2026-01-14"
+
+
+def test_strip_unmentioned_dates_preserves_correct_tomorrow():
+    slm = _availability_slm_with_iso("2026-01-14", "tomorrow")
+    result = _strip_unmentioned_dates("check availability for tomorrow", slm)
+    assert result["facts"]["dates"] == ["2026-01-14"]
+    assert result["temporal"]["start_date"] == "2026-01-14"
+
+
+def test_strip_unmentioned_dates_preserves_named_july_21():
+    slm = _availability_slm_with_iso("2026-07-21", "July 21")
+    result = _strip_unmentioned_dates("check availability for July 21", slm)
+    assert result["facts"]["dates"] == ["2026-07-21"]
+    assert result["temporal"]["start_date"] == "2026-07-21"
+
+
+def test_pipeline_preserves_tomorow_through_final():
+    """Misspelled relative date survives Stage2 → strip → resolver → binder → Final."""
+    from nlu.pipeline import NLUPipeline
+
+    slm = _availability_slm_with_iso("2026-01-14", "tomorrow")
+    pipeline = NLUPipeline()
+    pipeline._slm_extract = lambda *a, **k: slm
+    result = pipeline.run(
+        "check availability for tomorow",
+        {"booking_mode": "service", "aliases": {}},
+        now="2026-01-13T10:00:00Z",
+        timezone="UTC",
+    )
+    assert result.facts.get("dates") == ["2026-01-14"]
+    assert result.temporal is not None
+    assert result.temporal.get("start_date") == "2026-01-14"
+    assert result.intent["name"] == "AVAILABILITY"
+
+
+def test_pipeline_preserves_tomorrow_spelling_through_final():
+    from nlu.pipeline import NLUPipeline
+
+    slm = _availability_slm_with_iso("2026-01-14", "tomorrow")
+    pipeline = NLUPipeline()
+    pipeline._slm_extract = lambda *a, **k: slm
+    result = pipeline.run(
+        "check availability for tomorrow",
+        {"booking_mode": "service", "aliases": {}},
+        now="2026-01-13T10:00:00Z",
+        timezone="UTC",
+    )
+    assert result.facts.get("dates") == ["2026-01-14"]
+
+
+def test_pipeline_preserves_july_21_through_final():
+    from nlu.pipeline import NLUPipeline
+
+    slm = _availability_slm_with_iso("2026-07-21", "July 21")
+    pipeline = NLUPipeline()
+    pipeline._slm_extract = lambda *a, **k: slm
+    result = pipeline.run(
+        "check availability for July 21",
+        {"booking_mode": "service", "aliases": {}},
+        now="2026-01-13T10:00:00Z",
+        timezone="UTC",
+    )
+    assert result.facts.get("dates") == ["2026-07-21"]
 
 
 def test_strip_unmentioned_dates_removes_hallucinated_date():
@@ -53,11 +182,26 @@ def test_strip_unmentioned_dates_removes_hallucinated_date():
             "service_id": "haircut",
             "booking_id": None,
         },
+        "temporal": {
+            "expression": "2026-01-13 at 10:00",
+            "start_date_expression": None,
+            "start_time_expression": None,
+            "end_date_expression": None,
+            "end_time_expression": None,
+            "start_date": "2026-01-13",
+            "start_time": "10:00",
+            "end_date": None,
+            "end_time": None,
+            "mode": "single_day",
+            "confidence": 0.9,
+        },
     }
     result = _strip_unmentioned_dates("book haircut at 10am", slm)
     assert result["facts"]["dates"] == []
     assert result["facts"]["date_time_pairs"] == []
     assert result["facts"]["times"] == ["10:00"]
+    assert result["temporal"]["start_date"] is None
+    assert result["temporal"]["start_time"] == "10:00"
 
 
 def test_strip_unmentioned_dates_preserves_explicit_date():
@@ -73,6 +217,38 @@ def test_strip_unmentioned_dates_preserves_explicit_date():
     }
     result = _strip_unmentioned_dates("book massage tomorrow at 3pm", slm)
     assert result["facts"]["dates"] == ["tomorrow"]
+
+
+def test_strip_unmentioned_dates_preserves_day_first_named_month():
+    """Stage2 ISO must survive when the user said '24th july' (day-first)."""
+    slm = {
+        "intent": "CREATE_APPOINTMENT",
+        "confidence": 0.9,
+        "facts": {
+            "dates": ["2026-07-24"],
+            "times": [],
+            "date_time_pairs": [],
+            "service_id": None,
+            "booking_id": None,
+        },
+        "temporal": {
+            "expression": "2026-07-24",
+            "start_date_expression": None,
+            "start_time_expression": None,
+            "end_date_expression": None,
+            "end_time_expression": None,
+            "start_date": "2026-07-24",
+            "start_time": None,
+            "end_date": None,
+            "end_time": None,
+            "mode": "single_day",
+            "confidence": 0.9,
+        },
+    }
+    result = _strip_unmentioned_dates("book me haircut on 24th july", slm)
+    assert result["facts"]["dates"] == ["2026-07-24"]
+    assert result["temporal"]["start_date"] == "2026-07-24"
+    assert result["temporal"]["mode"] == "single_day"
 
 
 @pytest.mark.parametrize(
@@ -383,3 +559,18 @@ class TestResolveSlotFillIntent:
         ctx = {"last_intent": "CREATE_APPOINTMENT"}
         result = _resolve_slot_fill_intent(slm, "wait I meant friday", ctx)
         assert result["intent"] == "UNKNOWN"
+
+    def test_promotes_unknown_in_flow_gibberish_without_slot_material(self):
+        slm = {
+            "intent": "UNKNOWN",
+            "facts": {
+                "dates": [],
+                "times": [],
+                "date_time_pairs": [],
+                "service_id": None,
+                "booking_id": None,
+            },
+        }
+        ctx = {"last_intent": "CREATE_APPOINTMENT"}
+        result = _resolve_slot_fill_intent(slm, "aaaa", ctx)
+        assert result["intent"] == "CREATE_APPOINTMENT"

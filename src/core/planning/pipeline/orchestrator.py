@@ -199,6 +199,7 @@ def run_planning_pipeline(
         )
         return assemble_handler_delegated_outcome(
             decision_plan=decision_plan,
+            luma_response=luma_response,
         ).to_turn_result()
 
     working_turn = build_working_turn(

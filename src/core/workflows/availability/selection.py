@@ -54,7 +54,7 @@ def _current_turn_time(user_facts: Optional[Dict[str, Any]]) -> Optional[str]:
 def _extract_user_time(
     *,
     time_proposal: Optional[Dict[str, Any]],
-    time_constraint: Optional[Dict[str, Any]],
+    temporal: Optional[Dict[str, Any]] = None,
     user_facts: Optional[Dict[str, Any]],
 ) -> Optional[str]:
     current = _current_turn_time(user_facts)
@@ -68,9 +68,8 @@ def _extract_user_time(
         value = time_proposal.get("value")
         if value:
             return str(value)
-    if isinstance(time_constraint, dict):
-        if time_constraint.get("mode") == "exact" and time_constraint.get("start"):
-            return str(time_constraint.get("start"))
+    if isinstance(temporal, dict) and temporal.get("start_time"):
+        return str(temporal.get("start_time"))
     return None
 
 
@@ -186,7 +185,7 @@ def classify_selection_mode(
     *,
     user_facts: Optional[Dict[str, Any]] = None,
     time_proposal: Optional[Dict[str, Any]] = None,
-    time_constraint: Optional[Dict[str, Any]] = None,
+    temporal: Optional[Dict[str, Any]] = None,
     session_state: Optional[Dict[str, Any]] = None,
 ) -> str:
     """Classify selection mode without performing matching.
@@ -194,7 +193,7 @@ def classify_selection_mode(
     Returns one of:
     ``ambiguous``, ``explicit_complete``, ``explicit_incomplete``, ``criteria_changed``.
     """
-    _ = time_proposal, time_constraint
+    _ = time_proposal, temporal
     if _search_criteria_changed(user_facts=user_facts, session_state=session_state):
         return "criteria_changed"
 

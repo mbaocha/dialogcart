@@ -43,9 +43,6 @@
     "timezone": "UTC"
   },
   "response": {
-    "date_constraint": {
-      "mode": "flexible"
-    },
     "facts": {
       "booking_id": null,
       "date_time_pairs": [],
@@ -56,8 +53,21 @@
       ]
     },
     "intent": {
-      "confidence": 0.95,
+      "confidence": 0.9,
       "name": "CREATE_APPOINTMENT"
+    },
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": "10am",
+      "mode": "none",
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": "10:00",
+      "start_time_expression": null
     },
     "time_constraint": {
       "end": "10:00",

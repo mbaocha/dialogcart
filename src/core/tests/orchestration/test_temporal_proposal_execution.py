@@ -114,10 +114,11 @@ class TestSlotsForAvailabilitySearch:
         assert result["date"] == "2026-01-19"
         assert result["date_range"] == {"start": "2026-01-19", "end": "2026-01-25"}
 
-    def test_confirmed_date_not_overwritten_by_proposal(self):
-        slots = {"service_id": "haircut", "date": "2026-01-14"}
-        result = slots_for_availability_search(slots, self._date_p("2026-01-20"))
-        assert result["date"] == "2026-01-14"  # confirmed wins
+    def test_date_proposal_overrides_stale_slots_date(self):
+        """Current-turn proposal must supersede durable slots.date (e.g. interruption)."""
+        slots = {"service_id": "haircut", "date": "2026-07-23"}
+        result = slots_for_availability_search(slots, self._date_p("2026-07-24"))
+        assert result["date"] == "2026-07-24"
 
     def test_exact_time_proposal_fills_missing_time(self):
         slots = {"service_id": "haircut", "date": "2026-01-14"}
@@ -487,7 +488,7 @@ class TestResolveExecutionProposals:
     def test_typed_invalidation_suppresses_only_session_time_proposal(self):
         context = {
             "current_turn_time_proposal": None,
-            "current_turn_time_constraint": None,
+            "current_turn_temporal": None,
             "current_turn_has_explicit_time": False,
             "session_time_proposal_reuse_allowed": False,
             "confirmation_continuation": False,
@@ -507,7 +508,7 @@ class TestResolveExecutionProposals:
     def test_current_turn_time_wins_when_session_reuse_is_suppressed(self):
         context = {
             "current_turn_time_proposal": {"mode": "exact", "value": "10:00"},
-            "current_turn_time_constraint": None,
+            "current_turn_temporal": None,
             "current_turn_has_explicit_time": True,
             "session_time_proposal_reuse_allowed": False,
             "confirmation_continuation": False,
@@ -520,13 +521,12 @@ class TestResolveExecutionProposals:
 
         assert result["time_proposal"]["value"] == "10:00"
 
-    def test_current_turn_constraint_precedes_reusable_session_time(self):
+    def test_current_turn_temporal_precedes_reusable_session_time(self):
         context = {
             "current_turn_time_proposal": None,
-            "current_turn_time_constraint": {
-                "mode": "exact",
-                "start": "10:00",
-                "end": "10:00",
+            "current_turn_temporal": {
+                "start_time": "10:00",
+                "mode": "single_day",
             },
             "current_turn_has_explicit_time": True,
             "session_time_proposal_reuse_allowed": True,
@@ -589,7 +589,7 @@ class TestApplyTimeConstraintToMissingSlots:
         result = apply_time_constraint_to_missing_slots(
             "CREATE_APPOINTMENT",
             ["date", "time"],
-            {"mode": "exact", "start": "15:00"},
+            temporal={"start_time": "15:00"},
         )
         assert result == ["date"]
 
@@ -597,19 +597,21 @@ class TestApplyTimeConstraintToMissingSlots:
         result = apply_time_constraint_to_missing_slots(
             "CREATE_APPOINTMENT",
             ["date", "time"],
-            {"mode": "fuzzy", "label": "afternoon"},
+            temporal={"start_time_expression": "afternoon"},
         )
         assert "time" in result
 
     def test_none_constraint_passthrough(self):
         missing = ["date", "time"]
-        result = apply_time_constraint_to_missing_slots("CREATE_APPOINTMENT", missing, None)
+        result = apply_time_constraint_to_missing_slots("CREATE_APPOINTMENT", missing)
         assert result == missing
 
     def test_non_appointment_intent_passthrough(self):
         missing = ["date", "time"]
         result = apply_time_constraint_to_missing_slots(
-            "CREATE_RESERVATION", missing, {"mode": "exact", "start": "15:00"}
+            "CREATE_RESERVATION",
+            missing,
+            temporal={"start_time": "15:00"},
         )
         assert result == missing
 
@@ -617,7 +619,7 @@ class TestApplyTimeConstraintToMissingSlots:
         result = apply_time_constraint_to_missing_slots(
             "CREATE_APPOINTMENT",
             ["date"],
-            {"mode": "exact", "start": "15:00"},
+            temporal={"start_time": "15:00"},
         )
         assert result == ["date"]
 

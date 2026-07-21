@@ -245,20 +245,27 @@ def _merge_facts(
     merged["facts"] = {**session_facts, **luma_facts}
 
 
-def _carry_forward_time_constraint(
+def _carry_forward_temporal(
     merged: Dict[str, Any],
     session_state: Dict[str, Any],
 ) -> None:
-    """Preserve time_constraint from session if the current turn doesn't have one."""
-    if session_state:
-        session_time_constraint = session_state.get("time_constraint")
-        current_time_constraint = merged.get("time_constraint")
-        if session_time_constraint is not None and current_time_constraint is None:
-            # Preserve time_constraint from session if current turn doesn't override it
-            merged["time_constraint"] = session_time_constraint
-            logger.debug(
-                f"merge_luma_with_session: Preserved time_constraint from session: {session_time_constraint}"
-            )
+    """Fieldwise merge current-turn Temporal with session Temporal."""
+    from core.planning.temporal_contract import get_temporal, merge_temporals
+
+    if not session_state:
+        return
+    current = get_temporal(merged)
+    session_t = get_temporal(session_state)
+    merged["temporal"] = merge_temporals(session_t, current)
+
+    merged.pop("time_constraint", None)
+    merged.pop("date_constraint", None)
+    logger.debug(
+        "merge_luma_with_session: carried temporal mode=%s start_date=%s start_time=%s",
+        merged["temporal"].get("mode"),
+        merged["temporal"].get("start_date"),
+        merged["temporal"].get("start_time"),
+    )
 
 
 def _detect_modification_context(
@@ -510,15 +517,14 @@ def _promote_and_bind(
             if revision.service or revision.date:
                 # Genuine mid-flow replacements only (detect_booking_revision
                 # excludes first acquisition / same-value restatement). Carried
-                # time_constraint / session proposals would rebind against stale
-                # presented offers and undo criteria invalidation.
+                # time proposals would rebind against stale presented offers.
                 if not merged.get("_current_turn_has_time"):
                     merged.pop("time_constraint", None)
                     merged.pop("time_proposal", None)
-                # Keep current-turn date when service+date both revise; only drop
-                # a prior-day proposal that belonged to the old service alone.
-                if revision.service and not revision.date:
-                    merged.pop("date_proposal", None)
+                # Service-only revision keeps the active search date_proposal so
+                # the new service is searched on the same day (e.g. Flexi on
+                # July 22 after Premium booked that day). Date revisions replace
+                # the proposal via current-turn merge — do not pop here.
                 merged["_revision_invalidated_availability"] = True
                 skip_bind_after_criteria_revision = True
             logger.info(
@@ -553,7 +559,7 @@ def _promote_and_bind(
                 session_state,
                 date_proposal=merged.get("date_proposal"),
                 time_proposal=merged.get("time_proposal"),
-                time_constraint=merged.get("time_constraint"),
+                temporal=merged.get("temporal"),
                 turn_payload=merged,
             )
         if bind_result:
@@ -741,6 +747,16 @@ def _handle_informational_turn_and_effective_intent(
         and session_intent_name in core_intents
     )
 
+    turn_meta = merged.get("turn") if isinstance(merged.get("turn"), dict) else {}
+    understanding = turn_meta.get("understanding") or merged.get("understanding")
+    is_unrecognized_input = understanding == "UNRECOGNIZED_INPUT"
+    has_durable_booking = bool(
+        session_state
+        and isinstance(session_state, dict)
+        and session_intent_name
+        and session_intent_name in core_intents
+    )
+
     session_slots_dict = (
         session_state.get("slots", {})
         if (session_state and isinstance(session_state, dict))
@@ -757,11 +773,18 @@ def _handle_informational_turn_and_effective_intent(
     )
 
     is_modify_intent = merged_intent_name in ("MODIFY_BOOKING", "MODIFY_RESERVATION")
-    if has_active_planning and not has_actionable_this_turn and not is_modify_intent:
+    # Unrecognized utterances contribute no booking facts and must not drop
+    # previously resolved proposals/slots. Preserve session booking state.
+    preserve_booking_state = (
+        has_durable_booking
+        and not is_modify_intent
+        and (is_unrecognized_input or (has_active_planning and not has_actionable_this_turn))
+    )
+    if preserve_booking_state:
         logger.info(
             f"[INFORMATIONAL_TURN] Detected informational turn: "
             f"luma_intent={merged_intent_name}, session_intent={session_intent_name}, "
-            f"has_new_slots=False"
+            f"has_new_slots=False understanding={understanding!r}"
         )
 
         if session_state and isinstance(session_state, dict):
@@ -1464,8 +1487,8 @@ def _extract_raw_luma_slots(ctx: _MergeContext) -> Dict[str, Any]:
     raw_luma_slots = merge_promoted_luma_slots(
         nested_slots,
         promoted_slots_from_facts,
-        merged.get("date_constraint"),
         facts_obj if isinstance(facts_obj, dict) else None,
+        temporal=merged.get("temporal") if isinstance(merged.get("temporal"), dict) else None,
     )
 
     # CRITICAL: Preserve raw service_id from raw Luma facts if present
@@ -1681,8 +1704,8 @@ def merge_luma_with_session(
     # STEP 3: Extract slots from Luma response (facts promotion + service_id reconciliation)
     raw_luma_slots = _extract_raw_luma_slots(ctx)
 
-    # STEP 2.5: Preserve time_constraint from session state if current turn doesn't have one
-    _carry_forward_time_constraint(merged, session_state)
+    # STEP 2.5: Carry Temporal from session when current turn has no temporal material
+    _carry_forward_temporal(merged, session_state)
 
     # Keep luma_slots alias for backward compatibility with existing code
     luma_slots = raw_luma_slots

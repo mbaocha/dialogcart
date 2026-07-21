@@ -23,7 +23,7 @@ class AvailabilitySelectionPolicy:
         {
             "user_facts": dict,
             "time_proposal": dict | None,
-            "time_constraint": dict | None,
+            "temporal": dict | None,
             "session_state": dict | None,   # for mode classification only
             "expected_date": str | None,    # optional match date override
             "staff": str | None,
@@ -36,7 +36,7 @@ class AvailabilitySelectionPolicy:
         mode = classify_selection_mode(
             user_facts=criteria.get("user_facts"),
             time_proposal=criteria.get("time_proposal"),
-            time_constraint=criteria.get("time_constraint"),
+            temporal=criteria.get("temporal"),
             session_state=criteria.get("session_state"),
         )
         return mode == "explicit_complete"
@@ -52,7 +52,7 @@ class AvailabilitySelectionPolicy:
 
         user_time_raw = _extract_user_time(
             time_proposal=criteria.get("time_proposal"),
-            time_constraint=criteria.get("time_constraint"),
+            temporal=criteria.get("temporal"),
             user_facts=user_facts,
         )
         user_time_norm = _normalize_user_time(user_time_raw) if user_time_raw else None
@@ -93,6 +93,6 @@ def selection_mode_for_request(request: SelectionRequest) -> str:
     return classify_selection_mode(
         user_facts=criteria.get("user_facts"),
         time_proposal=criteria.get("time_proposal"),
-        time_constraint=criteria.get("time_constraint"),
+        temporal=criteria.get("temporal"),
         session_state=criteria.get("session_state"),
     )

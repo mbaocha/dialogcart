@@ -387,3 +387,25 @@ class ResponseRenderer:
     ) -> None:
         """Inject text from the canonical execution result (best-effort)."""
         _inject_execution_text(result, decision, execution_result, session_state)
+
+    def render_recovery(
+        self,
+        result: Dict[str, Any],
+        *,
+        plan: Optional[Dict[str, Any]] = None,
+        session_state: Optional[Dict[str, Any]] = None,
+        user_input: Optional[str] = None,
+        availability_client_present: bool = True,
+        decision: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Inject LLM recovery text when planning left no reply (best-effort)."""
+        from core.rendering.recovery_renderer import inject_recovery_text
+
+        inject_recovery_text(
+            result,
+            plan=plan,
+            session_state=session_state,
+            user_input=user_input,
+            availability_client_present=availability_client_present,
+            decision=decision,
+        )

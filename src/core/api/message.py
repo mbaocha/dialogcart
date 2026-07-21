@@ -316,6 +316,7 @@ async def post_message(request: MessageRequest, http_request: Request):
                 "user_text": request.text,
                 "intent_name": outcome.get("intent_name"),
                 "search_query": outcome.get("search_query"),
+                "off_topic_query": outcome.get("off_topic_query"),
                 "slots": outcome.get("slots", {}),
                 "session_slots": (_raw_session.get("slots", {}) if _raw_session else {}),
                 "session": _raw_session or {},
@@ -325,11 +326,20 @@ async def post_message(request: MessageRequest, http_request: Request):
             # Render via LLM — extension owns the instruction, core executes it.
             if handler_result.render_instruction:
                 conversation_history = (_raw_session or {}).get("messages", [])
+                render_facts = dict(handler_result.facts or {})
+                # Workflow owns resume step; handlers must not invent booking questions.
+                if handler_name == "off_topic":
+                    from core.rendering.workflow_resume import build_resume_instruction
+
+                    resume = build_resume_instruction(_raw_session)
+                    if resume and resume.text:
+                        render_facts["resume_instruction"] = resume.text
                 rendered_text = render_llm(
                     LlmRenderRequest(
                         render_instruction=handler_result.render_instruction,
-                        facts=handler_result.facts,
+                        facts=render_facts,
                         conversation_history=conversation_history,
+                        user_request=request.text,
                     )
                 )
             else:

@@ -435,6 +435,15 @@ class ExecutionCoordinator:
                 nested["turn_operation"] = plan.get("turn_operation")
                 outcome["plan"] = nested
 
+            # Preserve NLU turn understanding metadata (not planner status).
+            turn_meta = plan.get("turn") or outcome.get("turn")
+            if isinstance(turn_meta, dict) and turn_meta:
+                outcome["turn"] = dict(turn_meta)
+                nested_plan = outcome.get("plan")
+                nested = dict(nested_plan) if isinstance(nested_plan, dict) else {}
+                nested.setdefault("turn", dict(turn_meta))
+                outcome["plan"] = nested
+
             result = {
                 "success": execution_result.get("status") != "failed",
                 "outcome": outcome,

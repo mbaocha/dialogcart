@@ -35,7 +35,14 @@ INTENT_GROUPS: Dict[str, dict] = {
             "DETAILS":         "asking for service details or info",
             "QUOTE":           "asking for price/cost",
             "RECOMMENDATION":  "asking for a recommendation",
-            "GENERAL_INQUIRY": "general question not covered by above (policies, hours, location, FAQs)",
+            "GENERAL_INQUIRY": "business FAQ not covered above (policies, hours, location, payments, store info — not world knowledge)",
+        },
+    },
+    "out_of_scope": {
+        "requires_booking_verb": False,
+        "search_query": False,
+        "intents": {
+            "OFF_TOPIC": "coherent, understood request outside this business's domain (world knowledge, jokes, unrelated topics — not business FAQs)",
         },
     },
     "dialog": {
@@ -51,7 +58,7 @@ INTENT_GROUPS: Dict[str, dict] = {
         "requires_booking_verb": False,
         "search_query": False,
         "intents": {
-            "UNKNOWN": "no explicit booking verb present, or truly indeterminate",
+            "UNKNOWN": "utterance not understood — gibberish, fragments, or truly indeterminate (not a coherent off-topic request)",
         },
     },
 }
@@ -76,6 +83,8 @@ _STAGE2_GROUP: Dict[str, Optional[str]] = {
     "QUOTE":               "faq",
     "RECOMMENDATION":      "faq",
     "GENERAL_INQUIRY":     "faq",
+    # out_of_scope — validated by FAQ Stage 2 (GENERAL_INQUIRY vs OFF_TOPIC)
+    "OFF_TOPIC":           "faq",
     # dialog — pipeline handles these, no Stage 2 slot extraction
     "CONFIRM_ACTION":      None,
     "REJECT_ACTION":       None,
@@ -109,6 +118,6 @@ def format_intent_registry() -> str:
         "",
         "Intents that do NOT require a booking verb:",
         *verb_groups[False],
-        "- UNKNOWN                  — ambiguous, fragmentary, or matches none of the above",
+        "- UNKNOWN                  — utterance not understood (gibberish/fragments; not a coherent off-topic request)",
     ]
     return "\n".join(lines)

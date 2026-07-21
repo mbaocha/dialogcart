@@ -24,6 +24,26 @@ from nlu.clarification.reasons import ClarificationReason
 logger = logging.getLogger(__name__)
 
 
+def _nlu_turn_understanding(working_turn: WorkingTurn) -> Optional[str]:
+    """Preserve NLU turn.understanding — never infer from planner state."""
+    for source in (
+        working_turn.payload,
+        working_turn.raw_luma_response_deep_copy,
+    ):
+        if not isinstance(source, dict):
+            continue
+        turn = source.get("turn")
+        if isinstance(turn, dict):
+            value = turn.get("understanding")
+            if isinstance(value, str) and value:
+                return value
+        # Legacy flat field (in-process / older fixtures).
+        value = source.get("understanding")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
 def extract_clarification_data(
     clarification_reason: Optional[str],
     issues: Dict[str, Any],
@@ -321,6 +341,10 @@ def assemble_planning_outcome(
             "slots": outcome_slots,
             "plan": populated_plan,
         }
+        understanding = _nlu_turn_understanding(working_turn)
+        if isinstance(understanding, str) and understanding:
+            outcome["turn"] = {"understanding": understanding}
+            populated_plan["turn"] = {"understanding": understanding}
         result = PlanningOutcome(
             success=True,
             outcome=outcome,
@@ -351,6 +375,12 @@ def assemble_planning_outcome(
     }
     if plan.get("active_capability"):
         outcome["active_capability"] = plan.get("active_capability")
+
+    # Preserve NLU utterance-understanding outcome (not planner status).
+    understanding = _nlu_turn_understanding(working_turn)
+    if isinstance(understanding, str) and understanding:
+        outcome["turn"] = {"understanding": understanding}
+        populated_plan["turn"] = {"understanding": understanding}
 
     result = PlanningOutcome(
         success=True,
@@ -454,9 +484,10 @@ def assemble_handler_delegated_outcome(
     *,
     decision_plan: DecisionPlan,
     working_turn: Optional[WorkingTurn] = None,
+    luma_response: Optional[Dict[str, Any]] = None,
 ) -> PlanningOutcome:
     """Render envelope for handler-delegation Decision (no new decisions)."""
-    plan = decision_plan.plan if isinstance(decision_plan.plan, dict) else {}
+    plan = dict(decision_plan.plan) if isinstance(decision_plan.plan, dict) else {}
     facts = decision_plan.facts if isinstance(decision_plan.facts, dict) else {}
     slots = dict(facts.get("slots") or {})
     base_outcome = {
@@ -475,14 +506,34 @@ def assemble_handler_delegated_outcome(
             "status": "HANDLER_DELEGATED",
             "active_handler": plan.get("active_handler"),
             "search_query": plan.get("search_query"),
+            "off_topic_query": plan.get("off_topic_query"),
         }
     else:
         outcome = {**base_outcome, "status": status}
-    merged = working_turn.payload if working_turn else None
+
+    understanding = None
+    if working_turn is not None:
+        understanding = _nlu_turn_understanding(working_turn)
+    if not understanding and isinstance(luma_response, dict):
+        turn = luma_response.get("turn")
+        if isinstance(turn, dict):
+            value = turn.get("understanding")
+            if isinstance(value, str) and value:
+                understanding = value
+        if not understanding:
+            value = luma_response.get("understanding")
+            if isinstance(value, str) and value:
+                understanding = value
+    if isinstance(understanding, str) and understanding:
+        turn_meta = {"understanding": understanding}
+        outcome["turn"] = turn_meta
+        plan["turn"] = turn_meta
+
+    merged = working_turn.payload if working_turn else luma_response
     return PlanningOutcome(
         success=True,
         outcome=outcome,
-        merged_luma_response=merged,
+        merged_luma_response=merged if isinstance(merged, dict) else None,
         decision={
             "intent_name": decision_plan.intent_name,
             "plan": plan,

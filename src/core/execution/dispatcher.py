@@ -52,7 +52,7 @@ def execute(
             - action: Action to execute ("SEARCH_AVAILABILITY", "CONFIRM_APPOINTMENT", or "CONFIRM_CANCELLATION")
             - slots: Collected slots dictionary
             - intent_name: Intent name (e.g., "CREATE_APPOINTMENT", "CANCEL_BOOKING")
-            - time_constraint: Optional time constraint (if present)
+            - temporal: Optional Temporal object (if present)
         availability_client: Injected availability client instance (required for SEARCH_AVAILABILITY)
         booking_client: Injected booking client instance (required for CONFIRM_APPOINTMENT and CONFIRM_CANCELLATION)
 
@@ -123,7 +123,7 @@ def _execute_search_availability(
     Execute SEARCH_AVAILABILITY action.
 
     Args:
-        plan: Planning result containing slots, intent_name, time_constraint
+        plan: Planning result containing slots, intent_name, temporal
         availability_client: Availability client instance
         booking_client: Optional booking client instance (needed for MODIFY_BOOKING to fetch service_id)
 
@@ -191,7 +191,7 @@ def _execute_confirm_appointment(
     Execute CONFIRM_APPOINTMENT action.
 
     Args:
-        plan: Planning result containing slots, intent_name, time_constraint
+        plan: Planning result containing slots, intent_name, temporal
         booking_client: Booking client instance
 
     Returns:
@@ -204,7 +204,7 @@ def _execute_confirm_appointment(
     """
     slots = plan.get("slots", {})
     intent_name = plan.get("intent_name", "")
-    time_constraint = plan.get("time_constraint")
+    temporal = plan.get("temporal") if isinstance(plan.get("temporal"), dict) else None
 
     # Extract required fields
     organization_id = slots.get("organization_id")
@@ -228,12 +228,12 @@ def _execute_confirm_appointment(
         except (ValueError, TypeError):
             customer_id = 1
 
-    # Extract start_time and end_time from slots or time_constraint
-    start_time, end_time = _extract_datetime_from_slots(slots, time_constraint)
+    # Extract start_time and end_time from slots or temporal
+    start_time, end_time = _extract_datetime_from_slots(slots, temporal)
     if not start_time or not end_time:
         raise ValueError(
             "start_time and end_time are required for appointment confirmation. "
-            "Provide datetime_range in slots or time_constraint with start/end."
+            "Provide datetime_range in slots or Temporal with start/end."
         )
 
     # IDEMPOTENCY CHECK: If booking_id already exists in slots, return existing booking
@@ -255,8 +255,8 @@ def _execute_confirm_appointment(
             "end_time": end_time,
         }
         facts = {"slots": slots, "intent_name": intent_name}
-        if time_constraint:
-            facts["time_constraint"] = time_constraint
+        if temporal:
+            facts["temporal"] = temporal
         return {
             "status": "EXECUTED",
             "booking": booking,
@@ -332,8 +332,8 @@ def _execute_confirm_appointment(
     # Build execution result
     # Include original facts (slots) in the result
     facts = {"slots": slots, "intent_name": intent_name}
-    if time_constraint:
-        facts["time_constraint"] = time_constraint
+    if temporal:
+        facts["temporal"] = temporal
 
     result = {"status": "EXECUTED", "booking": booking, "facts": facts}
 
@@ -353,7 +353,7 @@ def _execute_confirm_cancellation(
     Execute CONFIRM_CANCELLATION action.
 
     Args:
-        plan: Planning result containing slots, intent_name, time_constraint
+        plan: Planning result containing slots, intent_name, temporal
         booking_client: Booking client instance
 
     Returns:
@@ -587,7 +587,7 @@ def _execute_apply_modification(
     Execute APPLY_MODIFICATION action.
 
     Args:
-        plan: Planning result containing slots, intent_name, time_constraint
+        plan: Planning result containing slots, intent_name, temporal
         booking_client: Booking client instance
 
     Returns:
@@ -731,7 +731,7 @@ def _execute_create_booking_hold(
     This allows payment capability to evaluate before confirmation.
 
     Args:
-        plan: Planning result containing slots, intent_name, time_constraint
+        plan: Planning result containing slots, intent_name, temporal
         booking_client: Booking client instance
 
     Returns:
@@ -748,7 +748,7 @@ def _execute_create_booking_hold(
     """
     slots = plan.get("slots", {})
     intent_name = plan.get("intent_name", "")
-    time_constraint = plan.get("time_constraint")
+    temporal = plan.get("temporal") if isinstance(plan.get("temporal"), dict) else None
 
     # Extract required fields
     organization_id = slots.get("organization_id")
@@ -780,8 +780,8 @@ def _execute_create_booking_hold(
             "status": "pending",  # Assume pending if already exists
         }
         facts = {"slots": slots, "intent_name": intent_name}
-        if time_constraint:
-            facts["time_constraint"] = time_constraint
+        if temporal:
+            facts["temporal"] = temporal
         return {
             "status": "EXECUTED",
             "booking": booking,
@@ -849,12 +849,12 @@ def _execute_create_booking_hold(
         if not service_id:
             raise ValueError("service_id is required in slots for service booking hold")
 
-        # Extract start_time and end_time from slots or time_constraint
-        start_time, end_time = _extract_datetime_from_slots(slots, time_constraint)
+        # Extract start_time and end_time from slots or temporal
+        start_time, end_time = _extract_datetime_from_slots(slots, temporal)
         if not start_time or not end_time:
             raise ValueError(
                 "start_time and end_time are required for service booking hold. "
-                "Provide datetime_range in slots or time_constraint with start/end."
+                "Provide datetime_range in slots or Temporal with start/end."
             )
 
         staff_id = slots.get("staff_id")
@@ -924,8 +924,8 @@ def _execute_create_booking_hold(
 
     # Build execution result
     facts = {"slots": slots, "intent_name": intent_name}
-    if time_constraint:
-        facts["time_constraint"] = time_constraint
+    if temporal:
+        facts["temporal"] = temporal
 
     result = {"status": "EXECUTED", "booking": booking, "facts": facts}
 
@@ -1104,47 +1104,56 @@ def _execute_finalize_reservation(
 
 
 def _extract_datetime_from_slots(
-    slots: Dict[str, Any], time_constraint: Optional[Dict[str, Any]] = None
+    slots: Dict[str, Any],
+    temporal: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[str], Optional[str]]:
     """
-    Extract start_time and end_time from slots or time_constraint.
+    Extract start_time and end_time from slots or Temporal.
 
-    Checks multiple possible locations:
-    1. slots.datetime_range.start and slots.datetime_range.end
-    2. time_constraint.start and time_constraint.end
-    3. slots.start_time and slots.end_time
-
-    Returns:
-        Tuple of (start_time, end_time) as ISO-8601 datetime strings, or (None, None) if not found
+    Checks:
+    1. slots.datetime_range.start / end
+    2. Temporal start_time / end_time (combined with slots.date when needed)
+    3. slots.start_time / end_time
     """
     start_time = None
     end_time = None
 
-    # Check datetime_range in slots
     datetime_range = slots.get("datetime_range")
     if isinstance(datetime_range, dict):
         start_time = datetime_range.get("start")
         end_time = datetime_range.get("end")
 
-    # Fallback to time_constraint if datetime_range not found
-    if not start_time or not end_time:
-        if isinstance(time_constraint, dict):
-            start_time = start_time or time_constraint.get("start")
-            end_time = end_time or time_constraint.get("end")
+    if (not start_time or not end_time) and isinstance(temporal, dict):
+        t_start = temporal.get("start_time")
+        t_end = temporal.get("end_time") or t_start
+        date = slots.get("date") or temporal.get("start_date")
+        if t_start and date and not start_time:
+            # Appointment confirm expects full ISO datetimes when only HH:MM known.
+            if "T" not in str(t_start):
+                start_time = f"{date}T{t_start}:00" if len(str(t_start)) == 5 else f"{date}T{t_start}"
+            else:
+                start_time = t_start
+        if t_end and date and not end_time:
+            if "T" not in str(t_end):
+                end_time = f"{date}T{t_end}:00" if len(str(t_end)) == 5 else f"{date}T{t_end}"
+            else:
+                end_time = t_end
+        elif t_start and not start_time:
+            start_time = t_start
+        if t_end and not end_time:
+            end_time = t_end
 
-    # Fallback to direct start_time/end_time in slots
     if not start_time:
         start_time = slots.get("start_time")
     if not end_time:
         end_time = slots.get("end_time")
 
-    # Convert to strings if needed
     if start_time:
         start_time = str(start_time)
     if end_time:
         end_time = str(end_time)
 
-    return (start_time, end_time)
+    return start_time, end_time
 
 
 def _execute_service_availability(

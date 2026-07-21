@@ -14,9 +14,16 @@ from core.tests.e2e.framework.runner import run_bundle
 from core.tests.e2e.scenarios.date_survives_service_clarification import (
     JULY_20,
     JULY_21,
+    JULY_23,
     SCENARIOS,
     date_survives_service_clarification_scripts,
 )
+
+_DATE_PHRASES = {
+    JULY_20: "July 20",
+    JULY_21: "July 21",
+    JULY_23: "July 23",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -31,12 +38,7 @@ def _deterministic_availability_llm(monkeypatch):
         if not isinstance(availability, dict):
             availability = {}
         date_label = str(availability.get("date") or "").strip()
-        if date_label == JULY_21:
-            date_phrase = "July 21"
-        elif date_label == JULY_20:
-            date_phrase = "July 20"
-        else:
-            date_phrase = date_label
+        date_phrase = _DATE_PHRASES.get(date_label, date_label)
         times = availability.get("times") or []
         if times:
             lines = "\n".join(f"- {t}" for t in times[:5])

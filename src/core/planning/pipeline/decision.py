@@ -172,6 +172,7 @@ def decide_handler_delegation(intent_decision: IntentDecision) -> DecisionPlan:
     if intent_decision.handler_delegated:
         plan["active_handler"] = intent_decision.handler_name
         plan["search_query"] = intent_decision.delegated_search_query
+        plan["off_topic_query"] = intent_decision.delegated_off_topic_query
     return DecisionPlan(
         plan=plan,
         facts={"slots": slots, "missing_slots": []},

@@ -274,9 +274,9 @@ def _clear_bound_time_selection(
 
     kept_proposal = payload.get("time_proposal") if preserve_current_turn_time else None
 
-    kept_constraint = (
+    kept_temporal = (
 
-        payload.get("time_constraint") if preserve_current_turn_time else None
+        payload.get("temporal") if preserve_current_turn_time else None
 
     )
 
@@ -308,9 +308,9 @@ def _clear_bound_time_selection(
 
             payload["time_proposal"] = kept_proposal
 
-        if kept_constraint is not None:
+        if kept_temporal is not None:
 
-            payload["time_constraint"] = kept_constraint
+            payload["temporal"] = kept_temporal
 
     else:
 
@@ -534,7 +534,13 @@ def resolve_confirmation(
 
             _preserve_session_availability_cache(payload, session_state)
 
-            if availability.availability_ready:
+            # Date/service criteria revisions invalidate availability trust in
+            # Stage 03. Do not reshow / browse the prior cache when this turn
+            # introduced a different explicit search date (or equivalent).
+            if (
+                availability.availability_ready
+                and not payload.get("_revision_invalidated_availability")
+            ):
 
                 availability_reshow = True
 

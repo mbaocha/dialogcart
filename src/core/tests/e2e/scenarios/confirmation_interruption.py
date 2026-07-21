@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List
 
 from core.planning.time_resolution import TIME_MATCH_EXACT
@@ -27,17 +27,30 @@ from core.tests.e2e.framework.confirmation_interruption import (
 from core.tests.e2e.framework.conversation import (
     Expect,
     FLEXI_SERVICE,
+    FROZEN_TIME,
     PREMIUM_SERVICE,
     Scenario,
     Turn,
     _resolve_search_date,
+    _response_text,
     assert_no_booking_execution,
+    extract_presented_times,
 )
 from core.tests.e2e.framework.fixtures import TARGET_DATE
+from core.tests.e2e.framework.scripted_temporal import (
+    exact_time_temporal,
+    single_day_temporal,
+)
 
 SCENARIOS: List[Scenario] = []
 _INTERRUPTION_STATE: Dict[str, Any] = {}
+_JULY_20 = "2026-07-20"
 _JULY_21 = "2026-07-21"
+_JULY_22 = "2026-07-22"
+_JULY_23 = "2026-07-23"
+_JULY_24 = "2026-07-24"
+# Relative "tomorrow" against the e2e frozen clock (not TARGET_DATE = frozen+2).
+_TOMORROW = (FROZEN_TIME + timedelta(days=1)).strftime("%Y-%m-%d")
 _CONFIRMATION_FORBIDDEN_PHRASES = (
     "Would you like me to go ahead",
     "You're about to book",
@@ -166,10 +179,104 @@ def confirmation_interruption_scripts() -> Dict[str, Any]:
     return {
         "book me a premium haircut": premium_booking_start_script(),
         "book me premium haircut": premium_booking_start_script(),
+        "book me a haircut": {
+            "success": True,
+            "intent": {"name": "CREATE_APPOINTMENT"},
+            "needs_clarification": True,
+            "missing_slots": ["service_id"],
+            "service_candidates": [
+                {"text": PREMIUM_SERVICE},
+                {"text": "flexi haircut + prunning"},
+            ],
+        },
+        "book haircut": {
+            "success": True,
+            "intent": {"name": "CREATE_APPOINTMENT"},
+            "needs_clarification": True,
+            "missing_slots": ["service_id"],
+            "service_candidates": [
+                {"text": PREMIUM_SERVICE},
+                {"text": "flexi haircut + prunning"},
+            ],
+        },
+        "book me premium haircut on 23rd july": {
+            "success": True,
+            "intent": {"name": "CREATE_APPOINTMENT"},
+            "facts": {
+                "service_id": PREMIUM_SERVICE,
+            },
+            "slots": {"service_id": PREMIUM_SERVICE},
+            "temporal": single_day_temporal(_JULY_23),
+            "missing_slots": ["time"],
+        },
+        # Live regression: Premium turn established July 20 (observed out.out flow).
+        # Service-only — date must come from the booking turn's Temporal (e.g. July 20).
+        "premium": {
+            "success": True,
+            "intent": {"name": "CREATE_APPOINTMENT"},
+            "facts": {
+                "service_id": PREMIUM_SERVICE,
+                "slots": {"service_id": PREMIUM_SERVICE},
+            },
+            "slots": {"service_id": PREMIUM_SERVICE},
+            "missing_slots": ["time"],
+        },
+        "book me a haircut on july 20": {
+            "success": True,
+            "intent": {"name": "CREATE_APPOINTMENT"},
+            "needs_clarification": True,
+            "missing_slots": ["service_id"],
+            "service_candidates": [
+                {"text": PREMIUM_SERVICE},
+                {"text": "flexi haircut + prunning"},
+            ],
+            "facts": {},
+            "temporal": single_day_temporal(_JULY_20),
+        },
+        "book me haircut on 21st july": {
+            "success": True,
+            "intent": {"name": "CREATE_APPOINTMENT"},
+            "needs_clarification": True,
+            "missing_slots": ["service_id"],
+            "service_candidates": [
+                {"text": PREMIUM_SERVICE},
+                {"text": "flexi haircut + prunning"},
+            ],
+            "facts": {},
+            "temporal": single_day_temporal(_JULY_21),
+        },
+        "show availability for 22nd july": availability_date_change_script(_JULY_22),
+        "check availability for tomorrow": availability_date_change_script(_TOMORROW),
+        "switch to flexi haircut": {
+            "success": True,
+            "intent": {"name": "CREATE_APPOINTMENT"},
+            "facts": {
+                "service_id": FLEXI_SERVICE,
+                "slots": {"service_id": FLEXI_SERVICE},
+            },
+            "slots": {"service_id": FLEXI_SERVICE},
+            "missing_slots": [],
+            "needs_clarification": False,
+        },
+        "are there more times for july 20?": {
+            "success": True,
+            "intent": {"name": "AVAILABILITY"},
+            "operation": "browse_next",
+            "facts": {
+                "service_id": PREMIUM_SERVICE,
+                "slots": {"service_id": PREMIUM_SERVICE},
+            },
+            "slots": {"service_id": PREMIUM_SERVICE},
+            "missing_slots": ["time"],
+        },
+        "show dates for july 21": availability_date_change_script(_JULY_21),
         "show me availability": availability_reshow_script(),
         "show availability": availability_reshow_script(),
         "show availability for 21st july": availability_date_change_script(_JULY_21),
         "show availability for July 21": availability_date_change_script(_JULY_21),
+        "no. search availability for 24th july": availability_date_change_script(
+            _JULY_24
+        ),
         "show me availability for flexi haircut": availability_service_change_script(
             FLEXI_SERVICE
         ),
@@ -180,42 +287,32 @@ def confirmation_interruption_scripts() -> Dict[str, Any]:
         "9am": {
             "success": True,
             "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {"times": ["09:00"]},
-            "time_constraint": {
-                "mode": "exact",
-                "start": "09:00",
-                "end": "09:00",
-            },
+            "facts": {},
+            "temporal": exact_time_temporal("09:00"),
         },
         "9:30": {
             "success": True,
             "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {"times": ["09:30"]},
-            "time_constraint": {
-                "mode": "exact",
-                "start": "09:30",
-                "end": "09:30",
-            },
+            "facts": {},
+            "temporal": exact_time_temporal("09:30"),
+        },
+        "9:30am": {
+            "success": True,
+            "intent": {"name": "CREATE_APPOINTMENT"},
+            "facts": {},
+            "temporal": exact_time_temporal("09:30"),
         },
         "10am": {
             "success": True,
             "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {"times": ["10:00"]},
-            "time_constraint": {
-                "mode": "exact",
-                "start": "10:00",
-                "end": "10:00",
-            },
+            "facts": {},
+            "temporal": exact_time_temporal("10:00"),
         },
         "11am": {
             "success": True,
             "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {"times": ["11:00"]},
-            "time_constraint": {
-                "mode": "exact",
-                "start": "11:00",
-                "end": "11:00",
-            },
+            "facts": {},
+            "temporal": exact_time_temporal("11:00"),
         },
         "yes": {
             "success": True,
@@ -225,12 +322,8 @@ def confirmation_interruption_scripts() -> Dict[str, Any]:
         "switch to 10am": {
             "success": True,
             "intent": {"name": "CORRECTION"},
-            "facts": {"times": ["10:00"]},
-            "time_constraint": {
-                "mode": "exact",
-                "start": "10:00",
-                "end": "10:00",
-            },
+            "facts": {},
+            "temporal": exact_time_temporal("10:00"),
         },
     }
 
@@ -1018,3 +1111,835 @@ _register(
         id="interruption-new-availability-new-booking",
     )
 )
+
+
+def _session_temporal_start_date(session: Dict[str, Any]) -> Any:
+    temporal = session.get("temporal")
+    if not isinstance(temporal, dict):
+        planning = session.get("planning")
+        if isinstance(planning, dict):
+            temporal = planning.get("temporal")
+    if isinstance(temporal, dict):
+        return _resolve_search_date(str(temporal.get("start_date") or ""))
+    return None
+
+
+def _assert_july_23_availability_shown(conv, booking, availability) -> None:
+    """Day-1 dated booking: SEARCH_AVAILABILITY for July 23, Temporal persisted."""
+    assert_no_booking_execution(conv, booking)
+    _assert_last_search_date(conv, availability, _JULY_23)
+    conv.assert_date_proposal(_JULY_23)
+    sess = conv.session() or {}
+    start_date = _session_temporal_start_date(sess)
+    conv._assert(
+        start_date == _JULY_23,
+        f"turn {conv.turn}: Temporal.start_date must be {_JULY_23}, got {start_date!r}",
+    )
+    presented_payload = sess.get("presented_availability") or {}
+    if isinstance(presented_payload, dict) and presented_payload.get("search_date"):
+        conv._assert(
+            _resolve_search_date(str(presented_payload.get("search_date"))) == _JULY_23,
+            (
+                f"turn {conv.turn}: presented search_date must be {_JULY_23}, "
+                f"got {presented_payload.get('search_date')!r}"
+            ),
+        )
+    _INTERRUPTION_STATE["july23_search_count"] = (
+        availability.get_service_availability.call_count
+    )
+
+
+def _assert_july_23_confirmation_pending(conv, booking, availability) -> None:
+    """9:30am binds against July 23 offers and enters confirmation."""
+    assert not booking.create_booking.called, (
+        f"turn {conv.turn}: booking must not create before confirmation"
+    )
+    conv.assert_date_proposal(_JULY_23)
+    sess = conv.session() or {}
+    slots = sess.get("slots") if isinstance(sess.get("slots"), dict) else {}
+    planning = sess.get("planning") if isinstance(sess.get("planning"), dict) else {}
+    planning_slots = (
+        planning.get("slots") if isinstance(planning.get("slots"), dict) else {}
+    )
+    date_value = planning_slots.get("date") or slots.get("date")
+    conv._assert(
+        _resolve_search_date(str(date_value or "")) == _JULY_23,
+        (
+            f"turn {conv.turn}: confirmation date slot must remain {_JULY_23}, "
+            f"got {date_value!r}"
+        ),
+    )
+    # Fieldwise merge: time-only turn must not erase Temporal.start_date.
+    start_date = _session_temporal_start_date(sess)
+    conv._assert(
+        start_date == _JULY_23,
+        (
+            f"turn {conv.turn}: Temporal.start_date must survive time bind "
+            f"({_JULY_23}), got {start_date!r}"
+        ),
+    )
+    state = capture_pre_interruption_state(conv)
+    attach_search_count(state, availability)
+    _INTERRUPTION_STATE["pre"] = state
+    _INTERRUPTION_STATE["search_baseline"] = (
+        availability.get_service_availability.call_count
+    )
+
+
+def _assert_july_24_interrupts_confirmation(conv, booking, availability) -> None:
+    """Reject+dated AVAILABILITY leaves confirmation and searches July 24 only."""
+    baseline = _INTERRUPTION_STATE.get("search_baseline", 0)
+    assert_gate_action(conv, "ANOTHER_REQUEST")
+    assert_turn_operation(conv, "AVAILABILITY")
+    assert_planning_intent_preserved(conv)
+    assert_cleared_confirmation_binding(conv)
+    assert_service_preserved(conv, PREMIUM_SERVICE)
+    assert_exactly_one_search_since(conv, availability, baseline)
+    _assert_last_search_date(conv, availability, _JULY_24)
+    conv._assert(
+        _resolve_search_date(
+            (availability.get_service_availability.call_args.kwargs or {}).get("date")
+        )
+        != _JULY_23,
+        (
+            f"turn {conv.turn}: must not reuse prior July 23 search after "
+            f"July 24 interruption"
+        ),
+    )
+    conv.assert_date_proposal(_JULY_24)
+    conv.assert_slot_absent("time")
+
+    sess = conv.session() or {}
+    start_date = _session_temporal_start_date(sess)
+    conv._assert(
+        start_date == _JULY_24,
+        f"turn {conv.turn}: Temporal.start_date must be {_JULY_24}, got {start_date!r}",
+    )
+
+    presented_payload = sess.get("presented_availability") or {}
+    if not isinstance(presented_payload, dict):
+        presented_payload = {}
+    search_date = presented_payload.get("search_date")
+    conv._assert(
+        bool(search_date),
+        f"turn {conv.turn}: expected presented_availability.search_date",
+    )
+    conv._assert(
+        _resolve_search_date(str(search_date)) == _JULY_24,
+        (
+            f"turn {conv.turn}: presented search_date must be {_JULY_24}, "
+            f"got {search_date!r}"
+        ),
+    )
+
+    presented = extract_presented_times(conv.last_body, sess)
+    conv._assert(bool(presented), f"turn {conv.turn}: expected July 24 offers")
+    for start in presented:
+        if isinstance(start, str) and len(start) >= 10:
+            conv._assert(
+                start.startswith(_JULY_24),
+                f"turn {conv.turn}: presented offer must be July 24, got {start!r}",
+            )
+            conv._assert(
+                not start.startswith(_JULY_23),
+                f"turn {conv.turn}: must not present July 23 cache, got {start!r}",
+            )
+
+    assert_not_confirmation_rendered(conv)
+    assert_availability_rendered(conv)
+    _assert_no_confirmation_prompt_phrases(conv)
+    assert_no_booking_execution(conv, booking)
+
+
+_register(
+    Scenario(
+        "Availability for July 24 interrupts confirmation",
+        Turn(
+            "book me premium haircut on 23rd july",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                date_proposal=_JULY_23,
+                confirmation=None,
+            ),
+            after=_assert_july_23_availability_shown,
+        ),
+        Turn(
+            "9:30am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                planner="AWAITING_CONFIRMATION",
+                stage="CONFIRM",
+                awaiting="USER_CONFIRMATION",
+                action=None,
+                intent="CREATE_APPOINTMENT",
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "09:30"},
+                date_proposal=_JULY_23,
+                missing_slots=[],
+            ),
+            after=_assert_july_23_confirmation_pending,
+        ),
+        Turn(
+            "no. search availability for 24th july",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                date_proposal=_JULY_24,
+                slot_absent=["time"],
+                availability_invalidated=True,
+                response_text_present=True,
+            ),
+            trace="1",
+            after=_assert_july_24_interrupts_confirmation,
+        ),
+        fixture="scripted_july_confirm_date_shift",
+        tags=[
+            "booking",
+            "confirmation",
+            "interruption",
+            "date-supersession",
+            "temporal",
+            "regression",
+        ],
+        id="availability-july-24-interrupts-confirmation",
+    )
+)
+
+
+def _assert_date_surfaces(
+    conv,
+    availability,
+    expected_date: str,
+    *,
+    wrong_dates: List[str],
+    require_search: bool,
+    check_render: bool = True,
+) -> None:
+    """Assert Temporal, date_proposal, slots.date, search, and render agree."""
+    conv.assert_date_proposal(expected_date)
+
+    sess = conv.session() or {}
+    start_date = _session_temporal_start_date(sess)
+    conv._assert(
+        start_date == expected_date,
+        (
+            f"turn {conv.turn}: Temporal.start_date must be {expected_date!r}, "
+            f"got {start_date!r}"
+        ),
+    )
+
+    slots = sess.get("slots") if isinstance(sess.get("slots"), dict) else {}
+    planning = sess.get("planning") if isinstance(sess.get("planning"), dict) else {}
+    planning_slots = (
+        planning.get("slots") if isinstance(planning.get("slots"), dict) else {}
+    )
+    durable_date = planning_slots.get("date") or slots.get("date")
+    if durable_date:
+        conv._assert(
+            _resolve_search_date(str(durable_date)) == expected_date,
+            (
+                f"turn {conv.turn}: durable slots.date must be {expected_date!r}, "
+                f"got {durable_date!r}"
+            ),
+        )
+    for wrong in wrong_dates:
+        if durable_date:
+            conv._assert(
+                _resolve_search_date(str(durable_date)) != wrong,
+                (
+                    f"turn {conv.turn}: durable slots.date must not revert to "
+                    f"{wrong!r}, got {durable_date!r}"
+                ),
+            )
+
+    if require_search:
+        _assert_last_search_date(conv, availability, expected_date)
+        for wrong in wrong_dates:
+            searched = _resolve_search_date(
+                (availability.get_service_availability.call_args.kwargs or {}).get(
+                    "date"
+                )
+            )
+            conv._assert(
+                searched != wrong,
+                (
+                    f"turn {conv.turn}: availability search must not use "
+                    f"{wrong!r}, got {searched!r}"
+                ),
+            )
+
+        presented_payload = sess.get("presented_availability") or {}
+        if not isinstance(presented_payload, dict):
+            presented_payload = {}
+        search_date = presented_payload.get("search_date")
+        conv._assert(
+            bool(search_date),
+            f"turn {conv.turn}: expected presented_availability.search_date",
+        )
+        conv._assert(
+            _resolve_search_date(str(search_date)) == expected_date,
+            (
+                f"turn {conv.turn}: presented search_date must be {expected_date!r}, "
+                f"got {search_date!r}"
+            ),
+        )
+
+        presented = extract_presented_times(conv.last_body, sess)
+        conv._assert(
+            bool(presented),
+            f"turn {conv.turn}: expected presented offers for {expected_date}",
+        )
+        for start in presented:
+            if isinstance(start, str) and len(start) >= 10:
+                conv._assert(
+                    start.startswith(expected_date),
+                    (
+                        f"turn {conv.turn}: presented offer must be {expected_date}, "
+                        f"got {start!r}"
+                    ),
+                )
+                for wrong in wrong_dates:
+                    conv._assert(
+                        not start.startswith(wrong),
+                        (
+                            f"turn {conv.turn}: presented offer must not be "
+                            f"{wrong}, got {start!r}"
+                        ),
+                    )
+
+    if not check_render:
+        return
+
+    text = _response_text(conv.last_body or {})
+    lowered = text.lower()
+    expected_phrase = {
+        _JULY_20: "july 20",
+        _JULY_21: "july 21",
+        _JULY_22: "july 22",
+        _TOMORROW: "july 2",
+    }.get(expected_date, expected_date)
+    conv._assert(
+        expected_date in text or expected_phrase in lowered,
+        (
+            f"turn {conv.turn}: rendered response must show {expected_date}, "
+            f"got {text!r}"
+        ),
+    )
+    for wrong in wrong_dates:
+        wrong_phrase = {
+            _JULY_20: "july 20",
+            _JULY_21: "july 21",
+            _JULY_22: "july 22",
+            TARGET_DATE: "july 3",
+            _TOMORROW: "july 2",
+        }.get(wrong, wrong)
+        conv._assert(
+            wrong not in text and wrong_phrase not in lowered,
+            (
+                f"turn {conv.turn}: rendered response must not show {wrong}, "
+                f"got {text!r}"
+            ),
+        )
+
+
+def _assert_july20_established_after_premium(conv, booking, availability) -> None:
+    """Live turn 2: Premium establishes July 20 Temporal and search."""
+    assert_no_booking_execution(conv, booking)
+    conv._assert(
+        availability.get_service_availability.call_count >= 1,
+        (
+            f"turn {conv.turn}: expected SEARCH_AVAILABILITY for July 20, "
+            f"got call_count={availability.get_service_availability.call_count}"
+        ),
+    )
+    _assert_date_surfaces(
+        conv,
+        availability,
+        _JULY_20,
+        wrong_dates=[_JULY_21],
+        require_search=True,
+    )
+    _INTERRUPTION_STATE["july20_search_count"] = (
+        availability.get_service_availability.call_count
+    )
+
+
+def _assert_july20_survives_browse_exhaustion(conv, booking, availability) -> None:
+    """Live turn 3: browse next keeps July 20; no date fallback."""
+    assert_no_booking_execution(conv, booking)
+    baseline = _INTERRUPTION_STATE.get("july20_search_count", 0)
+    call_count = availability.get_service_availability.call_count
+    conv._assert(
+        call_count == baseline,
+        (
+            f"turn {conv.turn}: browse exhaustion must not search again "
+            f"(baseline={baseline}, got={call_count})"
+        ),
+    )
+    _assert_date_surfaces(
+        conv,
+        availability,
+        _JULY_20,
+        wrong_dates=[_JULY_21],
+        require_search=False,
+        check_render=False,
+    )
+    text = _response_text(conv.last_body or {})
+    lowered = text.lower()
+    # Exhaustion / business-closed text is allowed; must not introduce July 21.
+    conv._assert(
+        _JULY_21 not in text and "july 21" not in lowered,
+        (
+            f"turn {conv.turn}: browse exhaustion must not introduce July 21, "
+            f"got {text!r}"
+        ),
+    )
+
+
+def _assert_july21_not_poisoned_by_july20(conv, booking, availability) -> None:
+    """Live turn 4: July 21 request must not revert to / render July 20."""
+    assert_no_booking_execution(conv, booking)
+    baseline = _INTERRUPTION_STATE.get("july20_search_count", 0)
+    call_count = availability.get_service_availability.call_count
+    conv._assert(
+        call_count == baseline + 1,
+        (
+            f"turn {conv.turn}: expected exactly one new SEARCH_AVAILABILITY "
+            f"(baseline={baseline}, got={call_count})"
+        ),
+    )
+    _assert_date_surfaces(
+        conv,
+        availability,
+        _JULY_21,
+        wrong_dates=[_JULY_20],
+        require_search=True,
+    )
+
+
+_register(
+    Scenario(
+        "July 21 search must keep July 21 after July 20 browse exhaustion",
+        Turn(
+            "Book me a haircut on july 20",
+            Expect(
+                response_status="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+            ),
+        ),
+        Turn(
+            "Premium",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                date_proposal=_JULY_20,
+                confirmation=None,
+            ),
+            after=_assert_july20_established_after_premium,
+        ),
+        Turn(
+            "Are there more times for July 20?",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                action=None,
+                date_proposal=_JULY_20,
+            ),
+            after=_assert_july20_survives_browse_exhaustion,
+        ),
+        Turn(
+            "Show dates for July 21",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                date_proposal=_JULY_21,
+                availability_invalidated=True,
+                response_text_present=True,
+            ),
+            trace="1",
+            after=_assert_july21_not_poisoned_by_july20,
+        ),
+        fixture="scripted_browse_exhaustion_search",
+        tags=[
+            "booking",
+            "availability",
+            "browse",
+            "date-persistence",
+            "temporal",
+            "regression",
+        ],
+        id="july21-must-not-revert-after-july20-browse-exhaustion",
+    )
+)
+
+
+def _merged_temporal_start_date(conv) -> Any:
+    """Resolve Temporal.start_date from merged planning payload or session."""
+    body = conv.last_body or {}
+    for source in (
+        body.get("_merged_luma_response"),
+        (body.get("outcome") or {}).get("facts"),
+        body.get("outcome"),
+        conv.session(),
+    ):
+        if not isinstance(source, dict):
+            continue
+        temporal = source.get("temporal")
+        if not isinstance(temporal, dict):
+            planning = source.get("planning")
+            if isinstance(planning, dict):
+                temporal = planning.get("temporal")
+        if isinstance(temporal, dict) and temporal.get("start_date"):
+            return _resolve_search_date(str(temporal.get("start_date")))
+    return _session_temporal_start_date(conv.session() or {})
+
+
+def _assert_flexi_service_switch_preserves_july22(conv, booking, availability) -> None:
+    """Service revision must SEARCH Flexi for the current July 22 search date."""
+    baseline = _INTERRUPTION_STATE.get("search_baseline", 0)
+    assert_gate_action(conv, "ANOTHER_REQUEST")
+    assert_planning_intent_preserved(conv)
+    assert_cleared_confirmation_binding(conv)
+    assert_service_preserved(conv, FLEXI_SERVICE)
+    assert_exactly_one_search_since(conv, availability, baseline)
+    _assert_last_search_service(conv, availability, FLEXI_SERVICE)
+    _assert_last_search_date(conv, availability, _JULY_22)
+
+    # Carried / merged Temporal and date_proposal stay on the active July 22 search.
+    merged_start = _merged_temporal_start_date(conv)
+    conv._assert(
+        merged_start == _JULY_22,
+        (
+            f"turn {conv.turn}: merged/session Temporal.start_date must be "
+            f"{_JULY_22!r}, got {merged_start!r}"
+        ),
+    )
+    conv.assert_date_proposal(_JULY_22)
+
+    plan = conv.plan or {}
+    action = plan.get("action")
+    if action is None:
+        action = (conv.outcome or {}).get("action")
+    conv._assert(
+        action == "SEARCH_AVAILABILITY",
+        f"turn {conv.turn}: expected SEARCH_AVAILABILITY, got {action!r}",
+    )
+
+    _assert_date_surfaces(
+        conv,
+        availability,
+        _JULY_22,
+        wrong_dates=[_JULY_21],
+        require_search=True,
+        check_render=True,
+    )
+    text = _response_text(conv.last_body or {})
+    lowered = text.lower()
+    conv._assert(
+        _JULY_21 not in text and "july 21" not in lowered,
+        (
+            f"turn {conv.turn}: Flexi service switch must not revert to July 21, "
+            f"got {text!r}"
+        ),
+    )
+    assert_not_confirmation_rendered(conv)
+    assert_availability_rendered(conv)
+    assert_no_booking_execution(conv, booking)
+
+
+_register(
+    Scenario(
+        "Service change must preserve current July 22 search date",
+        Turn(
+            "book me haircut on 21st july",
+            Expect(
+                response_status="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+            ),
+        ),
+        Turn(
+            "premium",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                date_proposal=_JULY_21,
+                confirmation=None,
+            ),
+        ),
+        Turn(
+            "11am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                planner="AWAITING_CONFIRMATION",
+                stage="CONFIRM",
+                awaiting="USER_CONFIRMATION",
+                action=None,
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "11"},
+            ),
+        ),
+        Turn(
+            "show availability for 22nd july",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                date_proposal=_JULY_22,
+                slot_absent=["time"],
+                availability_invalidated=True,
+                response_text_present=True,
+            ),
+            after=_capture_pre_revision_search,
+        ),
+        Turn(
+            "9am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                planner="AWAITING_CONFIRMATION",
+                stage="CONFIRM",
+                awaiting="USER_CONFIRMATION",
+                action=None,
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "09"},
+                date_proposal=_JULY_22,
+            ),
+            after=_capture_pre_revision_search,
+        ),
+        Turn(
+            "switch to flexi haircut",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": FLEXI_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                date_proposal=_JULY_22,
+                slot_absent=["time"],
+                availability_invalidated=True,
+                response_text_present=True,
+            ),
+            trace="1",
+            after=_assert_flexi_service_switch_preserves_july22,
+        ),
+        fixture="scripted_availability_supersession",
+        tags=[
+            "booking",
+            "confirmation",
+            "interruption",
+            "service-supersession",
+            "date-persistence",
+            "temporal",
+            "regression",
+        ],
+        id="service-change-must-preserve-current-search-date",
+    )
+)
+
+
+def _assert_nlu_exposes_resolved_date(conv, expected_date: str) -> None:
+    """Scripted / Core-visible NLU Temporal must carry the resolved calendar day."""
+    body = conv.last_body or {}
+    merged = body.get("_merged_luma_response")
+    if not isinstance(merged, dict):
+        merged = {}
+    raw = merged.get("_raw_luma_response")
+    if not isinstance(raw, dict):
+        raw = {}
+    sources = (raw, merged, body.get("outcome") or {}, conv.session() or {})
+    start_date = None
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        temporal = source.get("temporal")
+        if not isinstance(temporal, dict):
+            planning = source.get("planning")
+            if isinstance(planning, dict):
+                temporal = planning.get("temporal")
+        if isinstance(temporal, dict) and temporal.get("start_date"):
+            start_date = _resolve_search_date(str(temporal.get("start_date")))
+            break
+    conv._assert(
+        start_date == expected_date,
+        (
+            f"turn {conv.turn}: NLU/Core Temporal.start_date must be "
+            f"{expected_date!r} (resolved relative date), got {start_date!r}"
+        ),
+    )
+
+
+def _assert_tomorrow_availability_supersedes_confirmation(
+    conv, booking, availability
+) -> None:
+    """Relative 'tomorrow' must survive into SEARCH_AVAILABILITY after pending confirm."""
+    baseline = _INTERRUPTION_STATE.get("search_baseline", 0)
+    assert_gate_action(conv, "ANOTHER_REQUEST")
+    assert_turn_operation(conv, "AVAILABILITY")
+    assert_planning_intent_preserved(conv)
+    assert_cleared_confirmation_binding(conv)
+    assert_service_preserved(conv, PREMIUM_SERVICE)
+    assert_exactly_one_search_since(conv, availability, baseline)
+
+    _assert_nlu_exposes_resolved_date(conv, _TOMORROW)
+    conv.assert_date_proposal(_TOMORROW)
+    _assert_last_search_date(conv, availability, _TOMORROW)
+
+    missing = (conv.outcome or {}).get("missing_slots") or []
+    if not isinstance(missing, list):
+        missing = []
+    conv._assert(
+        "date" not in missing,
+        (
+            f"turn {conv.turn}: must not take a missing-date clarification path, "
+            f"got missing_slots={missing!r}"
+        ),
+    )
+    status = (conv.outcome or {}).get("status")
+    conv._assert(
+        status != "NEEDS_CLARIFICATION",
+        (
+            f"turn {conv.turn}: tomorrow availability must not clarify for date, "
+            f"got status={status!r}"
+        ),
+    )
+
+    # Must not reuse the prior undated/default search day (TARGET_DATE).
+    call = availability.get_service_availability.call_args
+    searched = _resolve_search_date((call.kwargs if call else {}).get("date"))
+    conv._assert(
+        searched != TARGET_DATE,
+        (
+            f"turn {conv.turn}: must not reuse prior confirmed/default date "
+            f"{TARGET_DATE!r}, got {searched!r}"
+        ),
+    )
+
+    _assert_date_surfaces(
+        conv,
+        availability,
+        _TOMORROW,
+        wrong_dates=[TARGET_DATE],
+        require_search=True,
+        check_render=True,
+    )
+    assert_not_confirmation_rendered(conv)
+    assert_availability_rendered(conv)
+    _assert_no_confirmation_prompt_phrases(conv)
+    assert_no_booking_execution(conv, booking)
+
+
+_register(
+    Scenario(
+        "Relative tomorrow availability must resolve after confirmation",
+        Turn(
+            "book haircut",
+            Expect(
+                response_status="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+            ),
+        ),
+        Turn(
+            "premium",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                confirmation=None,
+            ),
+        ),
+        Turn(
+            "9am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                planner="AWAITING_CONFIRMATION",
+                stage="CONFIRM",
+                awaiting="USER_CONFIRMATION",
+                action=None,
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "09"},
+            ),
+            after=_capture_pre_revision_search,
+        ),
+        Turn(
+            "check availability for tomorrow",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                date_proposal=_TOMORROW,
+                slot_absent=["time"],
+                availability_invalidated=True,
+                response_text_present=True,
+            ),
+            trace="1",
+            after=_assert_tomorrow_availability_supersedes_confirmation,
+        ),
+        fixture="scripted_availability_supersession",
+        tags=[
+            "booking",
+            "confirmation",
+            "interruption",
+            "availability",
+            "relative-date",
+            "temporal",
+            "regression",
+        ],
+        id="relative-tomorrow-availability-must-resolve",
+    )
+)
+

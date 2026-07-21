@@ -303,15 +303,15 @@ def build_decision_plan_from_evidence(
         and isinstance(payload.get("time_proposal"), dict)
         else None
     )
-    current_turn_time_constraint = (
-        payload.get("time_constraint")
+    current_turn_temporal = (
+        payload.get("temporal")
         if current_turn_has_explicit_time
-        and isinstance(payload.get("time_constraint"), dict)
+        and isinstance(payload.get("temporal"), dict)
         else None
     )
     proposal_resolution_context: ExecutionProposalResolutionContext = {
         "current_turn_time_proposal": current_turn_time_proposal,
-        "current_turn_time_constraint": current_turn_time_constraint,
+        "current_turn_temporal": current_turn_temporal,
         "current_turn_has_explicit_time": current_turn_has_explicit_time,
         "session_time_proposal_reuse_allowed": not (
             availability_invalidated or bound_datetime_cleared

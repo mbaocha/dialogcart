@@ -2,8 +2,10 @@
 
 import pytest
 
-from core.planning.policy.handler_router import resolve_handler
+from core.planning.policy.handler_router import reload_handlers, resolve_handler
 
+
+reload_handlers()
 
 RAG_INTENTS = ["DISCOVERY", "DETAILS", "QUOTE", "RECOMMENDATION", "GENERAL_INQUIRY"]
 
@@ -11,6 +13,10 @@ RAG_INTENTS = ["DISCOVERY", "DETAILS", "QUOTE", "RECOMMENDATION", "GENERAL_INQUI
 @pytest.mark.parametrize("intent", RAG_INTENTS)
 def test_rag_intents_resolve_to_rag(intent):
     assert resolve_handler(intent) == "rag"
+
+
+def test_off_topic_resolves_to_off_topic_handler():
+    assert resolve_handler("OFF_TOPIC") == "off_topic"
 
 
 @pytest.mark.parametrize(

@@ -140,11 +140,10 @@ def build_availability_fingerprint_slots(
     organization_id: int,
     date_proposal: Optional[Dict[str, Any]] = None,
     time_proposal: Optional[Dict[str, Any]] = None,
-    date_constraint: Optional[Dict[str, Any]] = None,
-    time_constraint: Optional[Dict[str, Any]] = None,
     nlu_facts: Optional[Dict[str, Any]] = None,
     luma_response: Optional[Dict[str, Any]] = None,
     session_state: Optional[Dict[str, Any]] = None,
+    temporal: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Assemble canonical **search-criteria** slot inputs for fingerprint store/compare.
 
@@ -169,7 +168,7 @@ def build_availability_fingerprint_slots(
     presented = session_state.get("presented_availability") or {}
     logger.debug(
         "[FINGERPRINT_SLOTS_INPUT] raw_slots=%s intent=%s organization_id=%s "
-        "date_proposal=%s time_proposal=%s date_constraint=%s time_constraint=%s "
+        "date_proposal=%s time_proposal=%s temporal=%s "
         "nlu_facts_keys=%s session_page_index=%s presented_slot_count=%s "
         "session_date_proposal=%s session_time_proposal=%s "
         "luma_date_proposal=%s luma_time_proposal=%s luma_operation=%s",
@@ -178,8 +177,7 @@ def build_availability_fingerprint_slots(
         organization_id,
         date_proposal,
         time_proposal,
-        date_constraint,
-        time_constraint,
+        temporal or luma_response.get("temporal"),
         list(nlu_facts.keys()) if isinstance(nlu_facts, dict) else None,
         presentation.get("page_index"),
         len(presented.get("slots") or []) if isinstance(presented, dict) else None,
@@ -198,14 +196,9 @@ def build_availability_fingerprint_slots(
         criteria_slots,
         date_proposal=proposals["date_proposal"],
         time_proposal=None,
-        date_constraint=(
-            date_constraint
-            if date_constraint is not None
-            else luma_response.get("date_constraint")
-        ),
-        time_constraint=None,
         nlu_facts=nlu_facts,
         intent_name=intent_name,
+        temporal=temporal or luma_response.get("temporal"),
     )
     expanded.pop("time", None)
     expanded.pop("datetime_range", None)

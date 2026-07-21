@@ -31,6 +31,7 @@ from core.tests.e2e.framework.conversation import (
     extract_presented_times,
 )
 from core.tests.e2e.framework.fixtures import live_luma
+from core.tests.e2e.framework.scripted_temporal import single_day_temporal
 from core.tests.harness.clients import ScriptedLumaClient, TestCatalogClient
 from core.tests.harness.mock_clients import (
     create_mock_booking_client,
@@ -76,12 +77,11 @@ def _turn3_script() -> Dict[str, Any]:
         "success": True,
         "intent": {"name": "AVAILABILITY"},
         "facts": {
-            "dates": [JULY_9],
             "service_id": PREMIUM_SERVICE,
             "slots": {"service_id": PREMIUM_SERVICE},
         },
         "slots": {},
-        "date_proposal": {"mode": "single_day", "start": JULY_9},
+        "temporal": single_day_temporal(JULY_9),
         "missing_slots": ["time"],
     }
 

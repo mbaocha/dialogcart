@@ -1,7 +1,8 @@
 """
-Stage 2 group: FAQ — handles DISCOVERY, DETAILS, QUOTE, RECOMMENDATION, GENERAL_INQUIRY.
+Stage 2 group: FAQ — DISCOVERY, DETAILS, QUOTE, RECOMMENDATION, GENERAL_INQUIRY, OFF_TOPIC.
 
-Slot focus: search_query only (RAG lookup string).
+Slot focus: search_query for business FAQ intents; OFF_TOPIC uses off_topic_query
+(canonical question) with search_query null — never business RAG.
 """
 import logging
 import os
@@ -19,10 +20,15 @@ _MODEL = "claude-haiku-4-5-20251001"
 
 _TOOL = build_tool(
     name="extract_faq_slots",
-    description="Extract search_query for informational intents (DISCOVERY, DETAILS, QUOTE, etc.).",
+    description=(
+        "Validate informational / off-topic intent and extract search_query "
+        "for business FAQ intents (DISCOVERY, DETAILS, QUOTE, etc.), or "
+        "off_topic_query for OFF_TOPIC."
+    ),
     facts_fields=[],
     include_time_constraint=False,
     include_search_query=True,
+    include_off_topic_query=True,
     include_validated_intent=True,
 )
 
@@ -35,15 +41,31 @@ def _system_prompt(
     ctx_block = format_conversation_context(conversation_context or {})
     ctx_section = f"\n{ctx_block}\n" if ctx_block else ""
     return f"""You are a slot extractor for a booking platform.
-Extract the search query from an informational user message.
+Validate whether this message is a business FAQ or outside business scope.
 
 Current date/time: {now}
 {ctx_section}
 {intent_validation_section(candidate_intent)}
 
+GENERAL_INQUIRY vs OFF_TOPIC (authoritative for this group):
+  GENERAL_INQUIRY — about this business (services, pricing, policies, hours, location, FAQs).
+  OFF_TOPIC — coherent request outside this business (world knowledge, jokes, unrelated topics).
+  UNKNOWN — not understood (gibberish); prefer OFF_TOPIC when the request is coherent but out of scope.
+  "what services do you offer?"           → DISCOVERY (or GENERAL_INQUIRY)
+  "where are you located?"                → GENERAL_INQUIRY
+  "who is the president of Nigeria?"      → OFF_TOPIC
+  "tell me a joke"                        → OFF_TOPIC
+  "explain Java virtual threads"          → OFF_TOPIC
+
 The user is asking a question, not making a booking.
-Produce a clean search_query noun phrase for RAG lookup.
-Do NOT extract dates, times, or service slots — only search_query.
+For business FAQ intents, produce a clean search_query noun phrase for RAG lookup.
+For OFF_TOPIC:
+  - set search_query to null (never route off-topic into business FAQ RAG)
+  - set off_topic_query to the user's question as a clear standalone question
+    (preserve meaning; light capitalization/punctuation cleanup only)
+  Example: "who is president of nigeria" → off_topic_query="Who is the president of Nigeria?"
+For all non-OFF_TOPIC intents, off_topic_query must be null.
+Do NOT answer the question. Do NOT extract dates, times, or service slots.
 
 {search_query_rules()}"""
 
@@ -85,10 +107,21 @@ class FAQGroupExtractor:
         return _empty(candidate_intent)
 
 
+def _normalize_off_topic_query(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+
+
 def _merge(raw: Dict[str, Any], candidate_intent: str) -> Dict[str, Any]:
     validated = raw.get("validated_intent") or candidate_intent
     search_query = raw.get("search_query")
     if validated not in RAG_INTENTS:
+        search_query = None
+    off_topic_query = None
+    if validated == "OFF_TOPIC":
+        off_topic_query = _normalize_off_topic_query(raw.get("off_topic_query"))
         search_query = None
     return {
         "intent": validated,
@@ -96,6 +129,7 @@ def _merge(raw: Dict[str, Any], candidate_intent: str) -> Dict[str, Any]:
         "facts": {"dates": [], "times": [], "date_time_pairs": [], "service_id": None, "booking_id": None},
         "time_constraint": None,
         "search_query": search_query,
+        "off_topic_query": off_topic_query,
     }
 
 
@@ -106,4 +140,5 @@ def _empty(candidate_intent: str) -> Dict[str, Any]:
         "facts": {"dates": [], "times": [], "date_time_pairs": [], "service_id": None, "booking_id": None},
         "time_constraint": None,
         "search_query": None,
+        "off_topic_query": None,
     }

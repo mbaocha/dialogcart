@@ -148,6 +148,9 @@ class AvailabilityWorkflow:
             date_proposal=_exec_proposals["date_proposal"],
             time_proposal=_exec_proposals["time_proposal"],
             session_state=session_state,
+            temporal=plan.get("temporal")
+            if isinstance(plan.get("temporal"), dict)
+            else None,
         )
         availability_fingerprint = compute_availability_fingerprint(
             fingerprint_slots, intent_name=plan_intent_name

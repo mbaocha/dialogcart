@@ -1,7 +1,7 @@
 """
 Stage 2 group: MODIFY — handles MODIFY_BOOKING, MODIFY_RESERVATION.
 
-Slot focus: booking_id, date(s), time.
+Slot focus: booking_id + canonical temporal.
 """
 import logging
 import os
@@ -12,11 +12,14 @@ import anthropic
 from ..base_prompt import (
     booking_id_rules,
     build_tool,
-    date_rules,
     intent_validation_section,
-    time_rules,
+    temporal_rules,
 )
 from ...shared.context import format_conversation_context
+from ....temporal.stage2_output import (
+    empty_temporal_dict,
+    materialize_temporal_ownership,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +28,8 @@ _MODEL = "claude-haiku-4-5-20251001"
 _TOOL = build_tool(
     name="extract_modify_slots",
     description="Extract slots for MODIFY_BOOKING or MODIFY_RESERVATION intents.",
-    facts_fields=["dates", "times", "date_time_pairs", "booking_id"],
-    include_time_constraint=True,
+    facts_fields=["booking_id"],
+    include_temporal=True,
     include_validated_intent=True,
 )
 
@@ -42,7 +45,7 @@ def _system_prompt(
     return f"""You are a slot extractor for a booking platform.
 Extract modification slots from the user message.
 
-Current date/time: {now}
+Current date/time (tenant-local): {now}
 {ctx_section}
 {intent_validation_section(candidate_intent)}
 
@@ -51,9 +54,7 @@ If the user has not provided a booking_id yet, extract what date/time changes th
 
 {booking_id_rules(tenant_context)}
 
-{date_rules(now)}
-
-{time_rules()}"""
+{temporal_rules(now)}"""
 
 
 class ModifyGroupExtractor:
@@ -95,19 +96,22 @@ class ModifyGroupExtractor:
 
 def _merge(raw: Dict[str, Any], candidate_intent: str) -> Dict[str, Any]:
     validated = raw.get("validated_intent") or candidate_intent
+    confidence = float(raw.get("confidence", 0.8))
     facts = raw.get("facts") or {}
+    temporal, temporal_facts, time_constraint = materialize_temporal_ownership(
+        raw, confidence=confidence
+    )
     return {
         "intent": validated,
-        "confidence": float(raw.get("confidence", 0.8)),
+        "confidence": confidence,
         "facts": {
-            "dates": facts.get("dates") or [],
-            "times": facts.get("times") or [],
-            "date_time_pairs": facts.get("date_time_pairs") or [],
+            **temporal_facts,
             "service_id": None,
             "booking_id": facts.get("booking_id"),
         },
-        "time_constraint": raw.get("time_constraint"),
+        "time_constraint": time_constraint,
         "search_query": None,
+        "temporal": temporal,
     }
 
 
@@ -115,7 +119,14 @@ def _empty(candidate_intent: str) -> Dict[str, Any]:
     return {
         "intent": candidate_intent,
         "confidence": 0.0,
-        "facts": {"dates": [], "times": [], "date_time_pairs": [], "service_id": None, "booking_id": None},
+        "facts": {
+            "dates": [],
+            "times": [],
+            "date_time_pairs": [],
+            "service_id": None,
+            "booking_id": None,
+        },
         "time_constraint": None,
         "search_query": None,
+        "temporal": empty_temporal_dict(0.0),
     }

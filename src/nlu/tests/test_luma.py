@@ -294,30 +294,30 @@ def test_cases(scenarios_to_run=None):
 
 def test_no_canonical_service_id_in_response():
     """
-    Invariant test: Assert that no API response ever returns a canonical service ID as service_id.
+    Invariant: facts.service_id must be a tenant alias key, never an ontology/canonical value.
 
-    Tests should reflect tenant reality, not global ontology. The service_id must always
-    be a tenant service key from tenant_context.aliases, never a canonical ID like "room",
-    "beard grooming", "hospitality.room", or "beauty_and_wellness.haircut".
+    Uses the same default aliases as call_luma(). Valid alias keys (including keys that
+    happen to look like family names, e.g. "suite") are allowed. Values that are not
+    also keys (e.g. "beard grooming") and dotted ontology IDs must never appear.
     """
-    # Known canonical IDs that should never appear as service_id
-    # These are canonical family names or full canonical IDs
-    canonical_ids = [
-        "room",
-        "haircut",
-        "beard grooming",
-        "massage",
-        "facial",
-        "suite",
-        "hospitality.room",
-        "beauty_and_wellness.haircut",
-        "beauty_and_wellness.beard_grooming",
-        "beauty_and_wellness.massage",
-        "beauty_and_wellness.facial",
-        "hospitality.suite",
-    ]
+    # Keep in sync with call_luma() default_aliases.
+    aliases = {
+        "standard": "room",
+        "room": "room",
+        "delux": "room",
+        "premum suite": "room",
+        "hair cut": "haircut",
+        "haircut": "haircut",
+        "beard": "beard grooming",
+        "beerd": "beard grooming",
+        "suite": "room",
+        "massage": "massage",
+        "presidential room": "room",
+    }
+    alias_keys = set(aliases.keys())
+    # Pure canonical / ontology values: present as map values but not as keys.
+    values_only = set(aliases.values()) - alias_keys
 
-    # Test with a few scenarios to ensure no canonical IDs are returned
     test_cases = [
         ("book hair cut tomorrow at 3pm", "service"),
         ("reserve suite from january 1st to january 5th", "reservation"),
@@ -330,23 +330,23 @@ def test_no_canonical_service_id_in_response():
             resp_status == 200 and resp is not None
         ), f"HTTP {resp_status}, body={resp_raw}"
 
-        # Check facts.service_id if present
         service_id = resp.get("facts", {}).get("service_id")
-        if service_id:
-            # Must not be a canonical ID
-            assert service_id not in canonical_ids, (
-                f"INVARIANT VIOLATION: service_id must be a tenant alias key, not a canonical ID. "
-                f"Got canonical ID '{service_id}' in response for sentence: '{sentence}'. "
-                f"Expected a tenant service key from tenant_context.aliases."
-            )
+        if not service_id:
+            continue
 
-            # If it contains a dot, it's likely a canonical format (category.service_name)
-            if "." in service_id:
-                assert False, (
-                    f"INVARIANT VIOLATION: service_id appears to be a canonical ID format (contains '.'). "
-                    f"Got '{service_id}' in response for sentence: '{sentence}'. "
-                    f"Expected a tenant service key from tenant_context.aliases."
-                )
+        assert service_id in alias_keys, (
+            f"INVARIANT VIOLATION: service_id must be a tenant alias key. "
+            f"Got {service_id!r} for sentence: {sentence!r}."
+        )
+        assert "." not in service_id, (
+            f"INVARIANT VIOLATION: service_id must not be a dotted ontology ID. "
+            f"Got {service_id!r} for sentence: {sentence!r}."
+        )
+        assert service_id not in values_only, (
+            f"INVARIANT VIOLATION: service_id must not be a canonical value "
+            f"(alias map value that is not also a key). "
+            f"Got {service_id!r} for sentence: {sentence!r}."
+        )
 
     print(
         "PASS Invariant test passed: No canonical service IDs returned in API responses"

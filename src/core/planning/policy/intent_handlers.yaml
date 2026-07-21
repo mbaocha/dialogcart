@@ -1,3 +1,5 @@
 handlers:
   rag:
     intents: [DISCOVERY, DETAILS, QUOTE, RECOMMENDATION, GENERAL_INQUIRY]
+  off_topic:
+    intents: [OFF_TOPIC]

@@ -46,7 +46,14 @@ INTENT_GROUPS = {
             "DETAILS":         "asking for service details or info",
             "QUOTE":           "asking for price/cost",
             "RECOMMENDATION":  "asking for a recommendation",
-            "GENERAL_INQUIRY": "general question not covered by above (policies, hours, location, FAQs)",
+            "GENERAL_INQUIRY": "business FAQ not covered above (policies, hours, location, payments, store info — not world knowledge)",
+        },
+    },
+    "out_of_scope": {
+        "requires_booking_verb": False,
+        "search_query": False,
+        "intents": {
+            "OFF_TOPIC": "coherent, understood request outside this business's domain (world knowledge, jokes, unrelated topics — not business FAQs)",
         },
     },
     "dialog": {
@@ -62,7 +69,7 @@ INTENT_GROUPS = {
         "requires_booking_verb": False,
         "search_query": False,
         "intents": {
-            "UNKNOWN": "no explicit booking verb present, or truly indeterminate",
+            "UNKNOWN": "utterance not understood — gibberish, fragments, or truly indeterminate (not a coherent off-topic request)",
         },
     },
 }

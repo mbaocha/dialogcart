@@ -46,7 +46,7 @@ def emit_bind_time_trace(
     bind_result: Optional[Mapping[str, Any]],
     skip_reason: Optional[str] = None,
     time_proposal: Optional[Mapping[str, Any]] = None,
-    time_constraint: Optional[Mapping[str, Any]] = None,
+    temporal: Optional[Mapping[str, Any]] = None,
     offers: Optional[List[Any]] = None,
     user_time_raw: Optional[str] = None,
     user_time_norm: Optional[str] = None,
@@ -58,12 +58,13 @@ def emit_bind_time_trace(
         return
 
     offers = offers or []
+    _ = temporal
     time_evidence = emit_evidence(
         "TIME_PROPOSAL",
         subsystem="orchestration",
         facts={
             "time_proposal": dict(time_proposal) if isinstance(time_proposal, dict) else None,
-            "time_constraint": dict(time_constraint) if isinstance(time_constraint, dict) else None,
+            "temporal": dict(temporal) if isinstance(temporal, dict) else None,
             "user_time_raw": user_time_raw,
             "user_time_norm": user_time_norm,
             "expected_date": expected_date,

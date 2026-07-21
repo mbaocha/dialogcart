@@ -26,6 +26,7 @@ from core.tests.e2e.framework.conversation import (
     extract_presented_times,
 )
 from core.workflows.availability.fingerprint import compute_availability_fingerprint
+from core.tests.e2e.framework.scripted_temporal import single_day_temporal
 
 SCENARIOS: List[Scenario] = []
 _STATE: Dict[str, Any] = {}
@@ -56,11 +57,10 @@ def browse_exhaustion_search_scripts() -> Dict[str, Any]:
             "intent": {"name": "CREATE_APPOINTMENT"},
             "facts": {
                 "service_id": PREMIUM_SERVICE,
-                "dates": [JULY_20],
                 "slots": {"service_id": PREMIUM_SERVICE},
             },
             "slots": {"service_id": PREMIUM_SERVICE},
-            "date_proposal": {"mode": "single_day", "start": JULY_20},
+            "temporal": single_day_temporal(JULY_20),
             "missing_slots": ["time"],
         },
         "are there more times for july 20?": {

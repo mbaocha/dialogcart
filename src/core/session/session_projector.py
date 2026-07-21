@@ -79,6 +79,9 @@ class SessionProjectorV2:
             capability_result=capability_result,
             handler_conversation_update=handler_conversation_update,
             conversation_messages=conversation_messages,
+            # Digressions must not clear booking authorization / bound datetime
+            # from an empty NLU payload (GENERAL_INQUIRY, OFF_TOPIC, …).
+            preserve_booking_authorization=(outcome_status == "HANDLER_DELEGATED"),
         )
         return working
 
@@ -92,6 +95,7 @@ class SessionProjectorV2:
         capability_result: Optional[Dict[str, Any]],
         handler_conversation_update: Optional[Dict[str, Any]],
         conversation_messages: Optional[List[Dict[str, Any]]],
+        preserve_booking_authorization: bool = False,
     ) -> None:
         """Apply explicit same-turn artifacts without consulting storage."""
         availability = working.setdefault("availability", {})
@@ -146,7 +150,7 @@ class SessionProjectorV2:
                 )
                 presentation["page_size"] = legacy_presentation.get("page_size")
 
-        if isinstance(merged_luma_response, dict):
+        if isinstance(merged_luma_response, dict) and not preserve_booking_authorization:
             from core.session.confirmation_gate import (
                 get_confirmation_state,
                 set_confirmation_state,

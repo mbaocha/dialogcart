@@ -8,12 +8,13 @@ Handles:
 - Loading global noise set (not as entities)
 """
 
+import functools
 import json
 import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Set
+from typing import Any, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -1464,6 +1465,132 @@ def init_nlp_with_entities(json_path: Path):
     return nlp, entities
 
 
+def _normalization_payload(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the dict that holds orthography / noise / vocabularies.
+
+    global.v3.json nests these under ``normalization.normalization``; older
+    shapes keep them directly under ``normalization``.
+    """
+    norm = data.get("normalization") or {}
+    if not isinstance(norm, dict):
+        return {}
+    inner = norm.get("normalization")
+    if isinstance(inner, dict) and (
+        "vocabularies" in inner or "orthography" in inner or "noise" in inner
+    ):
+        return inner
+    return norm
+
+
+def compile_vocabulary_variant_map(vocabularies: Dict[str, Any]) -> Dict[str, str]:
+    """Build variant → canonical map from vocabularies.*.{synonyms, typos}.
+
+    Accepts the v3 shape::
+
+        {
+          "date_relative": {
+            "tomorrow": {"synonyms": [], "typos": ["tomorow", "tmrw"]}
+          },
+          "weekdays": {
+            "monday": {"synonyms": ["mon"], "typos": ["moneday"]}
+          }
+        }
+
+    and the legacy list shape ``{"tomorrow": ["tomorow"]}``.
+    """
+    compiled: Dict[str, str] = {}
+    if not isinstance(vocabularies, dict):
+        return compiled
+
+    for category, entries in vocabularies.items():
+        if str(category).startswith("_") or not isinstance(entries, dict):
+            continue
+        for canonical, payload in entries.items():
+            if not isinstance(canonical, str):
+                continue
+            # Skip non-phrase maps (e.g. weekday to_number tables).
+            if canonical in ("to_number",) or canonical.startswith("_"):
+                continue
+            canonical_lower = canonical.lower().strip()
+            if not canonical_lower or "_" in canonical_lower:
+                continue
+
+            variants: List[str] = []
+            if isinstance(payload, dict):
+                for key in ("synonyms", "typos"):
+                    vals = payload.get(key) or []
+                    if isinstance(vals, list):
+                        variants.extend(str(v) for v in vals if v is not None)
+            elif isinstance(payload, list):
+                variants = [str(v) for v in payload if v is not None]
+            else:
+                continue
+
+            for variant in variants:
+                variant_lower = variant.lower().strip()
+                if not variant_lower or "_" in variant_lower:
+                    continue
+                compiled[variant_lower] = canonical_lower
+
+    return compiled
+
+
+def load_utterance_variant_map(global_json_path: Path) -> Dict[str, str]:
+    """Load synonym/typo → canonical map used for utterance normalization."""
+    with open(global_json_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    vocabularies = _normalization_payload(data).get("vocabularies") or {}
+    return compile_vocabulary_variant_map(vocabularies)
+
+
+@functools.lru_cache(maxsize=1)
+def get_utterance_variant_map() -> Dict[str, str]:
+    """Cached variant → canonical map from the configured global JSON."""
+    return load_utterance_variant_map(get_global_json_path())
+
+
+_UTTERANCE_WORD_RE = re.compile(r"[A-Za-z]+(?:'[A-Za-z]+)?")
+
+
+def normalize_utterance_aliases(
+    text: str,
+    variant_map: Optional[Dict[str, str]] = None,
+) -> str:
+    """Rewrite recoverable misspellings / aliases to canonical vocabulary forms.
+
+    Shared by mention-detection and any other caller that must share Stage2's
+    relative-date / weekday vocabulary (``tomorow`` → ``tomorrow``, etc.).
+    Multi-word variants (e.g. ``nxt week``) are applied longest-first.
+    """
+    if not text:
+        return text
+    mapping = (
+        variant_map if variant_map is not None else get_utterance_variant_map()
+    )
+    if not mapping:
+        return text
+
+    result = text
+    multi = sorted(
+        ((variant, canonical) for variant, canonical in mapping.items() if " " in variant),
+        key=lambda item: len(item[0]),
+        reverse=True,
+    )
+    for variant, canonical in multi:
+        pattern = re.compile(
+            rf"(?<!\w){re.escape(variant)}(?!\w)",
+            re.IGNORECASE,
+        )
+        result = pattern.sub(canonical, result)
+
+    def _replace_token(match: re.Match) -> str:
+        token = match.group(0)
+        canonical = mapping.get(token.lower())
+        return canonical if canonical else token
+
+    return _UTTERANCE_WORD_RE.sub(_replace_token, result)
+
+
 def load_global_vocabularies(global_json_path: Path) -> Dict[str, Any]:
     """
     Load global vocabularies from global JSON.
@@ -1473,7 +1600,7 @@ def load_global_vocabularies(global_json_path: Path) -> Dict[str, Any]:
     with open(global_json_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    vocabularies = data.get("normalization", {}).get("vocabularies", {})
+    vocabularies = _normalization_payload(data).get("vocabularies") or {}
     return vocabularies
 
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, Optional, TypedDict
 
-from core.planning.luma_facts_adapter import is_flexible_combined_utterance
+from core.planning.temporal_contract import is_flexible_combined_utterance
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,7 @@ class ExecutionProposalResolutionContext(TypedDict):
     """Typed planning evidence consumed by execution proposal resolution."""
 
     current_turn_time_proposal: Optional[Dict[str, Any]]
-    current_turn_time_constraint: Optional[Dict[str, Any]]
+    current_turn_temporal: Optional[Dict[str, Any]]
     current_turn_has_explicit_time: bool
     session_time_proposal_reuse_allowed: bool
     confirmation_continuation: bool
@@ -328,7 +328,7 @@ def try_bind_offered_time_selection(
     *,
     date_proposal: Optional[Dict[str, Any]] = None,
     time_proposal: Optional[Dict[str, Any]] = None,
-    time_constraint: Optional[Dict[str, Any]] = None,
+    temporal: Optional[Dict[str, Any]] = None,
     user_facts: Optional[Dict[str, Any]] = None,
     turn_payload: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
@@ -356,11 +356,10 @@ def try_bind_offered_time_selection(
                 resolved_facts.setdefault("time", time_proposal.get("value"))
                 if turn_payload is None or turn_payload.get("_current_turn_has_time"):
                     resolved_facts["time_from_current_turn"] = True
-        elif isinstance(time_constraint, dict):
-            if time_constraint.get("mode") == "exact" and time_constraint.get("start"):
-                resolved_facts.setdefault("time", time_constraint.get("start"))
-                if turn_payload is None or turn_payload.get("_current_turn_has_time"):
-                    resolved_facts["time_from_current_turn"] = True
+        elif isinstance(temporal, dict) and temporal.get("start_time"):
+            resolved_facts.setdefault("time", temporal.get("start_time"))
+            if turn_payload is None or turn_payload.get("_current_turn_has_time"):
+                resolved_facts["time_from_current_turn"] = True
 
     user_time_raw = resolved_facts.get("time")
     if (
@@ -369,21 +368,20 @@ def try_bind_offered_time_selection(
         and time_proposal.get("mode") == "exact"
     ):
         user_time_raw = time_proposal.get("value")
-    if not user_time_raw and isinstance(time_constraint, dict):
-        if time_constraint.get("mode") == "exact" and time_constraint.get("start"):
-            user_time_raw = time_constraint.get("start")
+    if not user_time_raw and isinstance(temporal, dict) and temporal.get("start_time"):
+        user_time_raw = temporal.get("start_time")
 
     presented = presented_availability_from_session(session_state)
     cache = availability_cache_from_session(session_state)
     offers = get_presented_availability_offers(session_state)
     logger.debug(
         "[TIME_SELECTION_BIND] attempt user_time_raw=%r time_proposal=%s "
-        "time_constraint=%s date_proposal=%s slots.date=%s "
+        "temporal=%s date_proposal=%s slots.date=%s "
         "presented_search_date=%s presented_slots=%s "
         "cache_search_date=%s user_facts=%s",
         user_time_raw,
         time_proposal,
-        time_constraint,
+        temporal,
         date_proposal,
         (slots or {}).get("date") if isinstance(slots, dict) else None,
         presented.get("search_date") if isinstance(presented, dict) else None,
@@ -407,7 +405,7 @@ def try_bind_offered_time_selection(
         user_facts=resolved_facts,
         date_proposal=date_proposal,
         time_proposal=time_proposal,
-        time_constraint=time_constraint,
+        temporal=temporal,
         session_state=session_state,
     )
     if isinstance(turn_payload, dict):
@@ -439,7 +437,7 @@ def try_bind_offered_time_selection(
             slots_before=slots_before,
             bind_result=bind_result,
             time_proposal=time_proposal,
-            time_constraint=time_constraint,
+            temporal=temporal,
             offers=offers,
             user_time_raw=user_time_raw,
             user_time_norm=(bound_slots or {}).get("time"),
@@ -478,7 +476,7 @@ def try_bind_offered_time_selection(
         bind_result=None,
         skip_reason=skip_reason,
         time_proposal=time_proposal,
-        time_constraint=time_constraint,
+        temporal=temporal,
         offers=offers,
         user_time_raw=user_time_raw,
     )
@@ -516,94 +514,43 @@ def strip_unconfirmed_temporal_slots(
 
 
 def build_date_proposal(
-    facts: Optional[Dict[str, Any]],
-    date_constraint: Optional[Dict[str, Any]] = None,
+    facts: Optional[Dict[str, Any]] = None,
+    *,
+    temporal: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Build date_proposal from NLU facts + date_constraint."""
-    facts = facts or {}
-    dates = facts.get("dates")
-    if not isinstance(dates, list):
-        dates = []
-    if not dates:
-        single_date = facts.get("date")
-        if isinstance(single_date, str) and single_date:
-            dates = [single_date]
-        elif isinstance(single_date, list):
-            dates = single_date
+    """Build date_proposal from Temporal only."""
+    del facts
+    from core.planning.temporal_contract import date_proposal_from_temporal
 
-    mode = None
-    if isinstance(date_constraint, dict):
-        mode = date_constraint.get("mode")
-
-    if not mode:
-        if len(dates) >= 2:
-            mode = "range"
-        elif len(dates) == 1:
-            mode = "single_day"
-        else:
-            raw_dr = facts.get("date_range")
-            if isinstance(raw_dr, dict) and raw_dr.get("start"):
-                mode = "range"
-            else:
-                return None
-
-    proposal: Dict[str, Any] = {"mode": mode}
-
-    raw_dr = facts.get("date_range")
-    if isinstance(raw_dr, dict):
-        start = raw_dr.get("start") or raw_dr.get("start_date")
-        end = raw_dr.get("end") or raw_dr.get("end_date")
-        if start:
-            proposal["start"] = start
-        if end:
-            proposal["end"] = end
-    elif len(dates) == 1:
-        proposal["start"] = dates[0]
-    elif len(dates) >= 2:
-        proposal["start"] = dates[0]
-        proposal["end"] = dates[-1]
-
-    if not proposal.get("start"):
-        return None
-    return proposal
+    return date_proposal_from_temporal(temporal)
 
 
 def build_time_proposal(
-    facts: Optional[Dict[str, Any]],
-    time_constraint: Optional[Dict[str, Any]] = None,
+    facts: Optional[Dict[str, Any]] = None,
+    *,
+    temporal: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Build time_proposal from NLU facts + time_constraint."""
-    facts = facts or {}
-    times = facts.get("times")
-    if isinstance(times, list) and times:
-        return {"mode": "exact", "value": times[0]}
+    """Build time_proposal from Temporal only."""
+    del facts
+    from core.planning.temporal_contract import time_proposal_from_temporal
 
-    single_time = facts.get("time")
-    if single_time:
-        return {"mode": "exact", "value": single_time}
-
-    if isinstance(time_constraint, dict):
-        mode = time_constraint.get("mode")
-        if mode == "exact" and time_constraint.get("start"):
-            return {"mode": "exact", "value": time_constraint["start"]}
-        if mode == "fuzzy":
-            label = time_constraint.get("label")
-            if label:
-                return {
-                    "mode": "fuzzy",
-                    "label": label,
-                    "start": time_constraint.get("start"),
-                    "end": time_constraint.get("end"),
-                }
-    return None
+    return time_proposal_from_temporal(temporal)
 
 
 def extract_nlu_proposals(
     luma_response: Optional[Dict[str, Any]],
 ) -> Dict[str, Optional[Dict[str, Any]]]:
-    """Extract date/time proposals from a Luma/NLU response."""
+    """Extract date/time proposals from Temporal on a Luma/NLU response."""
+    from core.planning.temporal_contract import get_temporal
+
     if not isinstance(luma_response, dict):
         return {"date_proposal": None, "time_proposal": None}
+
+    # Prefer explicit proposals when already present (tests / upstream).
+    explicit_date_proposal = luma_response.get("date_proposal")
+    explicit_time_proposal = luma_response.get("time_proposal")
+
+    temporal = get_temporal(luma_response)
     facts = luma_response.get("facts", {})
     if not isinstance(facts, dict):
         facts = {}
@@ -611,27 +558,20 @@ def extract_nlu_proposals(
     if not isinstance(slots, dict):
         slots = {}
 
-    # Prefer explicit current-turn date evidence (mirrors time_proposal handling).
-    explicit_date_proposal = luma_response.get("date_proposal")
     if isinstance(explicit_date_proposal, dict) and explicit_date_proposal.get("start"):
         date_proposal = explicit_date_proposal
     else:
-        date_proposal = build_date_proposal(
-            facts, luma_response.get("date_constraint")
-        )
+        date_proposal = build_date_proposal(facts, temporal=temporal)
         if not date_proposal and slots.get("date"):
             date_proposal = {
                 "mode": "single_day",
                 "start": slots["date"],
             }
 
-    explicit_time_proposal = luma_response.get("time_proposal")
     if isinstance(explicit_time_proposal, dict):
         time_proposal = explicit_time_proposal
     else:
-        time_proposal = build_time_proposal(
-            facts, luma_response.get("time_constraint")
-        )
+        time_proposal = build_time_proposal(facts, temporal=temporal)
         if not time_proposal and slots.get("time"):
             time_proposal = {"mode": "exact", "value": slots["time"]}
 
@@ -644,7 +584,9 @@ def extract_nlu_proposals(
 def exact_time_proposal_from_luma(
     luma_response: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
-    """Return an exact time_proposal from a Luma response, if present."""
+    """Return an exact time_proposal from Temporal / Luma response, if present."""
+    from core.planning.temporal_contract import get_temporal, time_proposal_from_temporal
+
     proposals = extract_nlu_proposals(luma_response)
     time_proposal = proposals.get("time_proposal")
     if (
@@ -655,13 +597,13 @@ def exact_time_proposal_from_luma(
         return time_proposal
     if not isinstance(luma_response, dict):
         return None
-    time_constraint = luma_response.get("time_constraint")
+    tp = time_proposal_from_temporal(get_temporal(luma_response))
     if (
-        isinstance(time_constraint, dict)
-        and time_constraint.get("mode") == "exact"
-        and time_constraint.get("start")
+        isinstance(tp, dict)
+        and tp.get("mode") == "exact"
+        and tp.get("value")
     ):
-        return {"mode": "exact", "value": time_constraint["start"]}
+        return tp
     return None
 
 
@@ -672,13 +614,8 @@ def merge_session_proposals(
 ) -> Dict[str, Optional[Dict[str, Any]]]:
     """Merge new NLU proposals with session (new turn overwrites when present)."""
     session_state = session_state or {}
-    facts = session_state.get("facts")
-    if not isinstance(facts, dict):
-        facts = {}
-    merged_date = session_state.get(
-        "date_proposal") or facts.get("date_proposal")
-    merged_time = session_state.get(
-        "time_proposal") or facts.get("time_proposal")
+    merged_date = _session_date_proposal(session_state)
+    merged_time = _session_time_proposal(session_state)
     if date_proposal:
         merged_date = date_proposal
     if time_proposal:
@@ -716,15 +653,14 @@ def expand_slots_for_planning(
     slots: Dict[str, Any],
     date_proposal: Optional[Dict[str, Any]] = None,
     time_proposal: Optional[Dict[str, Any]] = None,
-    date_constraint: Optional[Dict[str, Any]] = None,
     nlu_facts: Optional[Dict[str, Any]] = None,
-    time_constraint: Optional[Dict[str, Any]] = None,
     intent_name: Optional[str] = None,
+    temporal: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Virtual slot view for missing_slots — proposals satisfy planning, not confirmed slots."""
     expanded = dict(slots or {})
 
-    if is_flexible_combined_utterance(date_constraint, nlu_facts):
+    if is_flexible_combined_utterance(temporal, nlu_facts):
         return expanded
 
     if date_proposal:
@@ -732,7 +668,6 @@ def expand_slots_for_planning(
         start = date_proposal.get("start")
         end = date_proposal.get("end")
         if mode == "single_day" and start:
-            # New date_proposal overrides stale session date (e.g. friday → saturday).
             expanded["date"] = start
         elif start and end:
             expanded["date_range"] = {"start": start, "end": end}
@@ -740,29 +675,30 @@ def expand_slots_for_planning(
         elif start and not expanded.get("date") and not expanded.get("date_range"):
             expanded["date"] = start
 
+    # Session-carried Temporal date satisfies planning when proposal mirrors are absent.
+    if (
+        not expanded.get("date")
+        and not expanded.get("date_range")
+        and isinstance(temporal, dict)
+        and temporal.get("start_date")
+    ):
+        expanded["date"] = temporal["start_date"]
+
     if time_proposal:
         if time_proposal.get("mode") == "exact" and time_proposal.get("value"):
-            # Exact time from this turn overrides stale session time (e.g. 2pm → 3pm,
-            # or fuzzy label "afternoon" → 14:00 after clarification).
             expanded["time"] = time_proposal["value"]
         elif not expanded.get("time"):
-            # Fuzzy time (mode=fuzzy, window, etc.) does NOT satisfy the time planning
-            # requirement — consistent with apply_time_constraint_to_missing_slots which
-            # also requires mode=exact before removing "time" from missing_slots.
             pass
 
-    # CREATE_APPOINTMENT exact time_constraint (legacy path)
+    # CREATE_APPOINTMENT exact time from Temporal
     if (
         intent_name == "CREATE_APPOINTMENT"
         and not expanded.get("time")
-        and isinstance(time_constraint, dict)
-        and time_constraint.get("mode") == "exact"
-        and time_constraint.get("start")
+        and isinstance(temporal, dict)
+        and temporal.get("start_time")
     ):
-        expanded["time"] = time_constraint["start"]
+        expanded["time"] = temporal["start_time"]
 
-    # Infer date from date_range.start when date is absent.
-    # Ensures date_range in slots satisfies a "date" planning requirement (e.g. MODIFY_BOOKING).
     if not expanded.get("date") and isinstance(expanded.get("date_range"), dict):
         start = expanded["date_range"].get("start")
         if start:
@@ -823,18 +759,15 @@ def apply_confirmed_datetime(
 def apply_time_constraint_to_missing_slots(
     intent_name: str,
     missing_slots: list,
-    time_constraint: Optional[Dict[str, Any]],
+    *_ignored: Any,
+    temporal: Optional[Dict[str, Any]] = None,
 ) -> list:
-    """Remove 'time' from missing_slots when an exact time_constraint satisfies it.
+    """Remove 'time' from missing_slots when Temporal has an exact start_time."""
+    from core.planning.temporal_contract import exact_time_from_temporal
 
-    Only mode=exact satisfies the time requirement.  Fuzzy/window constraints do
-    NOT — the user stated a preference window, not a committed time.
-    """
     if intent_name != "CREATE_APPOINTMENT":
         return missing_slots
-    if not isinstance(time_constraint, dict):
-        return missing_slots
-    if time_constraint.get("mode") == "exact" and "time" in missing_slots:
+    if exact_time_from_temporal(temporal) and "time" in missing_slots:
         return [s for s in missing_slots if s != "time"]
     return missing_slots
 
@@ -858,12 +791,54 @@ def _session_v2_proposal(
 def _session_date_proposal(session_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Resolve carried date_proposal from legacy mirrors or V2 nested storage."""
     proposal = session_state.get("date_proposal")
-    if proposal is not None:
+    if isinstance(proposal, dict) and proposal.get("start"):
+        return proposal
+    if proposal is not None and not isinstance(proposal, dict):
         return proposal
     facts = session_state.get("facts")
-    if isinstance(facts, dict) and facts.get("date_proposal") is not None:
-        return facts.get("date_proposal")
-    return _session_v2_proposal(session_state, kind="date")
+    if isinstance(facts, dict):
+        fact_proposal = facts.get("date_proposal")
+        if isinstance(fact_proposal, dict) and fact_proposal.get("start"):
+            return fact_proposal
+    nested = _session_v2_proposal(session_state, kind="date")
+    if isinstance(nested, dict) and nested.get("start"):
+        return nested
+    # After availability search the active date may only live on presentation /
+    # cache artifacts when proposal mirrors were not rehydrated.
+    return _date_proposal_from_availability_artifacts(session_state)
+
+
+def _date_proposal_from_availability_artifacts(
+    session_state: Dict[str, Any],
+) -> Optional[Dict[str, Any]]:
+    """Build a single-day date_proposal from presented/cached availability date."""
+    presented = session_state.get("presented_availability")
+    if isinstance(presented, dict):
+        search_date = _normalize_search_date(presented.get("search_date"))
+        if search_date:
+            return {"mode": "single_day", "start": search_date}
+    last = session_state.get("last_execution_result")
+    if isinstance(last, dict):
+        search_date = _normalize_search_date(last.get("search_date"))
+        if search_date:
+            return {"mode": "single_day", "start": search_date}
+    availability = session_state.get("availability")
+    if isinstance(availability, dict):
+        presentation = availability.get("presentation") or {}
+        if isinstance(presentation, dict):
+            presented = presentation.get("presented") or {}
+            if isinstance(presented, dict):
+                search_date = _normalize_search_date(presented.get("search_date"))
+                if search_date:
+                    return {"mode": "single_day", "start": search_date}
+        cache = availability.get("cache") or {}
+        if isinstance(cache, dict):
+            search_result = cache.get("search_result") or {}
+            if isinstance(search_result, dict):
+                search_date = _normalize_search_date(search_result.get("search_date"))
+                if search_date:
+                    return {"mode": "single_day", "start": search_date}
+    return None
 
 
 def _session_time_proposal(session_state: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -954,15 +929,15 @@ def resolve_execution_proposals(
     )
     if context is not None:
         current_turn_time = context.get("current_turn_time_proposal")
-        current_turn_constraint = context.get("current_turn_time_constraint")
+        current_turn_temporal = context.get("current_turn_temporal")
         time_proposal = (
             dict(current_turn_time)
             if isinstance(current_turn_time, dict)
             else build_time_proposal(
                 {},
-                (
-                    dict(current_turn_constraint)
-                    if isinstance(current_turn_constraint, dict)
+                temporal=(
+                    dict(current_turn_temporal)
+                    if isinstance(current_turn_temporal, dict)
                     else None
                 ),
             )
@@ -1081,15 +1056,23 @@ def slots_for_availability_search(
     date_proposal: Optional[Dict[str, Any]] = None,
     time_proposal: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Execution view: proposals constrain search when confirmed slots absent."""
+    """Execution view: current-turn date proposals supersede durable slots.date.
+
+    Temporal/proposal dates from the active turn must drive SEARCH, even when a
+    prior bind left ``slots.date`` populated (confirmation interruption / revision).
+    Time proposals still fill only when a durable time is absent.
+    """
     search_slots = dict(slots or {})
-    if not search_slots.get("date") and date_proposal:
+    if date_proposal:
         start = date_proposal.get("start")
         end = date_proposal.get("end")
         if start:
             search_slots["date"] = start
         if end:
             search_slots["date_range"] = {"start": start, "end": end}
+        elif start and "date_range" in search_slots:
+            # Single-day proposal replaces a stale multi-day range.
+            search_slots.pop("date_range", None)
     if not search_slots.get("time") and time_proposal:
         if time_proposal.get("value"):
             search_slots["time"] = time_proposal["value"]

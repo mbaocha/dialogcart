@@ -105,7 +105,7 @@ def test_planning_service_preserves_fallback_metadata(monkeypatch):
         fallback_plan_turn,
     )
 
-    plan = plan_message(text="yes", user_id="user-1")
+    plan = plan_message(text="yes", user_id="user-1", organization_id=1)
 
     assert plan["recovered"] is True
     assert plan["recovery_reason"] == "empty_response"

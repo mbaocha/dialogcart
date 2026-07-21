@@ -19,6 +19,35 @@ def _copy_fallback_metadata(source: Dict[str, Any], target: Dict[str, Any]) -> N
             target[key] = source[key]
 
 
+def _apply_turn_understanding(
+    outcome: Dict[str, Any],
+    *sources: Any,
+) -> None:
+    """Copy NLU ``turn.understanding`` metadata onto the shaped outcome."""
+    turn = None
+    for source in sources:
+        if not isinstance(source, dict):
+            continue
+        candidate = source.get("turn")
+        if isinstance(candidate, dict) and candidate:
+            turn = candidate
+            break
+        nested = source.get("plan")
+        if isinstance(nested, dict):
+            candidate = nested.get("turn")
+            if isinstance(candidate, dict) and candidate:
+                turn = candidate
+                break
+    if not turn:
+        return
+    outcome["turn"] = dict(turn)
+    nested_plan = outcome.get("plan")
+    if isinstance(nested_plan, dict):
+        updated_plan = dict(nested_plan)
+        updated_plan["turn"] = dict(turn)
+        outcome["plan"] = updated_plan
+
+
 def build_outcome_from_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
     """Build outcome dictionary from decision object.
 
@@ -76,6 +105,8 @@ def build_outcome_from_decision(decision: Dict[str, Any]) -> Dict[str, Any]:
     if plan.get("active_capability"):
         outcome["active_capability"] = plan.get("active_capability")
 
+    _apply_turn_understanding(outcome, plan, decision)
+
     return outcome
 
 
@@ -124,6 +155,9 @@ def build_planning_response_from_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     if plan.get("active_capability"):
         outcome_dict["active_capability"] = plan.get("active_capability")
     _copy_fallback_metadata(plan, outcome_dict)
+    # Top-level plan.turn may outlive _decision.plan (Stage 09 stamps outcome/plan
+    # after the decision snapshot is taken).
+    _apply_turn_understanding(outcome_dict, plan, decision if isinstance(decision, dict) else None)
     response: Dict[str, Any] = {
         "success": True,
         "result": outcome_dict,
@@ -180,6 +214,7 @@ def build_planning_only_response(plan: Dict[str, Any]) -> Dict[str, Any]:
     if plan.get("active_capability"):
         outcome_dict["active_capability"] = plan.get("active_capability")
     _copy_fallback_metadata(plan, outcome_dict)
+    _apply_turn_understanding(outcome_dict, plan, decision if isinstance(decision, dict) else None)
     result: Dict[str, Any] = {
         "success": True,
         "result": outcome_dict,

@@ -430,6 +430,7 @@ def resolve_effective_intent(
                     "QUOTE",
                     "RECOMMENDATION",
                     "DISCOVERY",
+                    "OFF_TOPIC",
                 }
                 is_informational_intent = luma_intent_name in informational_intents
 

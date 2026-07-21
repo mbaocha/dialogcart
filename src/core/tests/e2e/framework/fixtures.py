@@ -29,6 +29,10 @@ from core.tests.e2e.framework.conversation import (
     create_paginated_availability_client,
     create_slot_availability_client,
 )
+from core.tests.e2e.framework.scripted_temporal import (
+    exact_time_temporal,
+    single_day_temporal,
+)
 from core.tests.harness.clients import ScriptedLumaClient, TestCatalogClient, TestLumaClient
 from core.tests.harness.recording_luma_client import RecordingLumaClient
 from core.tests.harness.mock_clients import (
@@ -149,7 +153,7 @@ SCRIPTED_FIXTURE_PARAMS: Dict[str, Dict[str, Any]] = {
     "scripted_availability_supersession": {
         "start_hours": (9, 10, 11),
     },
-    # 09:00 / 09:30 / 10:00 for confirmation time-revision regression.
+    # 09:00 / 09:30 / 10:00 on the requested search date (date-rewritten).
     "scripted_confirmation_time_revision": {
         "fixed_slots": [
             {"start": f"{TARGET_DATE}T09:00:00Z",
@@ -160,6 +164,19 @@ SCRIPTED_FIXTURE_PARAMS: Dict[str, Dict[str, Any]] = {
                 "end": f"{TARGET_DATE}T10:30:00Z"},
         ],
     },
+    # July 23 book → 9:30am confirm → interrupt with July 24 search.
+    "scripted_july_confirm_date_shift": {
+        "fixed_slots": [
+            {"start": f"{TARGET_DATE}T09:00:00Z",
+                "end": f"{TARGET_DATE}T09:30:00Z"},
+            {"start": f"{TARGET_DATE}T09:30:00Z",
+                "end": f"{TARGET_DATE}T10:00:00Z"},
+            {"start": f"{TARGET_DATE}T10:00:00Z",
+                "end": f"{TARGET_DATE}T10:30:00Z"},
+            {"start": f"{TARGET_DATE}T11:00:00Z",
+                "end": f"{TARGET_DATE}T11:30:00Z"},
+        ],
+    },
     # Premium then Flexi availability revision (NLU service post-process path).
     "scripted_availability_service_revision": {
         "start_hours": (10, 11),
@@ -168,6 +185,13 @@ SCRIPTED_FIXTURE_PARAMS: Dict[str, Dict[str, Any]] = {
     # ≤6 slots so first browse_next exhausts immediately (no second page).
     "scripted_browse_exhaustion_search": {
         "start_hours": (10, 11),
+    },
+    # Dense hours for browse + 14:00 bind in turn.understanding regressions.
+    "scripted_turn_understanding": {
+        "start_hours": (9, 10, 11, 12, 13, 14, 15, 16),
+    },
+    "scripted_off_topic": {
+        "start_hours": (9, 10, 11, 12, 13, 14, 15, 16),
     },
 }
 
@@ -187,12 +211,8 @@ def _service_disambiguation_script() -> Dict[str, Any]:
 
 def _temporal_turn_script(*, times: List[str]) -> Dict[str, Any]:
     script = _service_disambiguation_script()
-    script["facts"] = {"dates": [TARGET_DATE], "times": times}
-    script["time_constraint"] = {
-        "mode": "exact",
-        "start": times[0],
-        "end": times[0],
-    }
+    script["facts"] = {}
+    script["temporal"] = single_day_temporal(TARGET_DATE, start_time=times[0])
     return script
 
 
@@ -220,12 +240,8 @@ def _time_selection_script(time_value: str) -> Dict[str, Any]:
     return {
         "success": True,
         "intent": {"name": "CREATE_APPOINTMENT"},
-        "facts": {"times": [time_value]},
-        "time_constraint": {
-            "mode": "exact",
-            "start": time_value,
-            "end": time_value,
-        },
+        "facts": {},
+        "temporal": exact_time_temporal(time_value),
     }
 
 
@@ -250,10 +266,9 @@ def _date_revision_script(date_value: str) -> Dict[str, Any]:
         "success": True,
         "intent": {"name": "CREATE_APPOINTMENT"},
         "facts": {
-            "dates": [date_value],
             "service_id": PREMIUM_SERVICE,
         },
-        "date_proposal": {"mode": "single_day", "start": date_value},
+        "temporal": single_day_temporal(date_value),
         "slots": {},
         "missing_slots": [],
         "needs_clarification": False,
@@ -261,10 +276,22 @@ def _date_revision_script(date_value: str) -> Dict[str, Any]:
 
 
 def _fixed_slots_availability_client(slots: List[Dict[str, Any]]) -> Mock:
+    """Return template slots rewritten onto the requested search date."""
     mock_client = Mock(spec=AvailabilityClient)
 
     def get_service_availability(**kwargs):
-        return {"slots": list(slots)}
+        date = _resolve_search_date(kwargs.get("date"))
+        rewritten: List[Dict[str, Any]] = []
+        for slot in slots:
+            if not isinstance(slot, dict):
+                continue
+            new_slot = dict(slot)
+            for key in ("start", "end"):
+                val = new_slot.get(key)
+                if isinstance(val, str) and len(val) >= 10 and val[4] == "-" and val[7] == "-":
+                    new_slot[key] = date + val[10:]
+            rewritten.append(new_slot)
+        return {"slots": rewritten}
 
     mock_client.get_service_availability.side_effect = get_service_availability
     return mock_client

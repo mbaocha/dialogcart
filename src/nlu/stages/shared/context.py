@@ -56,7 +56,10 @@ def format_conversation_context(ctx: Dict[str, Any]) -> str:
         "- Resolve follow-up references ('it', 'that', 'how long') using prior turns and last_search_query.",
         "- For RAG intents, merge/refine search_query with the prior topic.",
         "- Do NOT invent booking slots (dates, times, services) on FAQ detours.",
-        "- Slot-fill continuation: bare date/time fragments after a booking intent",
-        "  continue that booking intent — not UNKNOWN, not CORRECTION.",
+        "- Booking continuation: in-flow replies after a booking intent continue that",
+        "  booking intent — including uninterpretable input with no competing act.",
+        "- Bare ordinal day revisions ('23rd', '24th', 'show slots for 15th') continue the",
+        "  Last date proposal / prior availability month-year — resolve ISO for that day;",
+        "  do not drop the date and do not reuse the prior day unchanged.",
     ]
     return "\n".join(lines)

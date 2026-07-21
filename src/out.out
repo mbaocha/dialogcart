@@ -3,15 +3,15 @@ platform linux -- Python 3.10.13, pytest-9.0.2, pluggy-1.6.0
 rootdir: /mnt/c/Users/user/Documents/projects/dialogcart/dialogcart/src
 configfile: pytest.ini
 plugins: anyio-4.12.0
-collected 41 items
+collected 59 items
 
-core/tests/e2e/test_booking.py ................
+core/tests/e2e/test_booking.py ....F...........
 core/tests/e2e/test_browse_exhaustion_search.py .
 core/tests/e2e/test_browsing.py .......
 core/tests/e2e/test_confirmation_interruption.py ...
 
 === Decision Trace Summary ===
-user_id: e2e-scripted-e9bc704192
+user_id: e2e-scripted-282a455adb
 text: 'show availability'
 
 Outcome
@@ -24,14 +24,14 @@ Why
   - Turn completed with an execution artifact
   - Confirmation gate is open for this durable booking flow
   - Another request superseded the pending confirmation
-  - Merged session and Luma slots with additive precedence
   - Bound booking datetime bypasses fingerprint comparison
   - Derived planner business facts for policy execution flags
   - Availability outcome trusted for current search criteria
   - Availability check not required for current state
+  - Booking datetime is bound
 
 Why chain (reason_code)
-  CONFIRMATION_GATE_OPEN → CONFIRMATION_ANOTHER_REQUEST → SLOT_ADDITIVE_MERGE → BOUND_DATETIME_BYPASS → FACTS_DERIVED → AVAILABILITY_READY → INPUT_IGNORED_NOT_APPLICABLE → TIME_SELECTION_READY → CONFIRMATION_REQUIRED → STATUS_READY → STEP_SELECTED → STAGE_DERIVED_FROM_ACTION → EXECUTION_ROUTE_PLAN → RELATIONSHIP_NO_PENDING → ARCH_FINAL_DECISION → PAGINATION_SKIPPED → PLAN_ACTION_PRESENT → PERSIST_SAVE_APPLIED → RELOAD_MATCH → TURN_OUTCOME_EXECUTED
+  CONFIRMATION_GATE_OPEN → CONFIRMATION_ANOTHER_REQUEST → BOUND_DATETIME_BYPASS → FACTS_DERIVED → AVAILABILITY_READY → INPUT_IGNORED_NOT_APPLICABLE → TIME_SELECTION_READY → CONFIRMATION_REQUIRED → STATUS_READY → STEP_SELECTED → STAGE_DERIVED_FROM_ACTION → EXECUTION_ROUTE_PLAN → RELATIONSHIP_NO_PENDING → ARCH_FINAL_DECISION → PAGINATION_SKIPPED → PLAN_ACTION_PRESENT → PERSIST_SAVE_APPLIED → RELOAD_MATCH → TURN_OUTCOME_EXECUTED
 
 Failed invariants
   none
@@ -39,7 +39,6 @@ Failed invariants
 Winning decisions
   decision.confirmation.gate_open [routing] CONFIRMATION_GATE_OPEN: winner='open' (CONFIRMATION_GATE_OPEN)
   decision.confirmation.classify_turn [routing] CONFIRMATION_CLASSIFY: winner='ANOTHER_REQUEST' (CONFIRMATION_ANOTHER_REQUEST)
-  decision.merge.slot_additive [routing] SLOT_ADDITIVE_MERGE: winner={"added": [], "updated": [], "preserved_count": 3} (SLOT_ADDITIVE_MERGE)
   decision.fingerprint.trust [inference] FINGERPRINT_TRUST: winner='bound_datetime' (BOUND_DATETIME_BYPASS)
   decision.facts.derive_all [inference] DERIVE_BUSINESS_FACTS: winner={"availability_check_required": false, "availability_ready": true, "booking_identification_required": false, "booking_identified": false, "booking_hold_required": false, "booking_hold_ready": false, "time_selection_required": false, "time_selection_ready": true, "user_confirmation_required": true, "user_confirmation_satisfied": false, "awaiting_user_confirmation": true} (FACTS_DERIVED)
   decision.facts.availability_ready [inference] AVAILABILITY_READY: winner=True (AVAILABILITY_READY)
@@ -60,14 +59,12 @@ Winning decisions
 Rejected candidates
   decision.confirmation.classify_turn / YES: CONFIRMATION_ACCEPT — Raw CONFIRM_ACTION intent
   decision.confirmation.classify_turn / NO: CONFIRMATION_REJECT — Raw REJECT_ACTION intent
-  decision.merge.slot_additive / additive_luma: SLOT_ADDITIVE_MERGE — New Luma entities merged additively
   decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
   decision.facts.user_confirmation_required / clarification_blocks: CLARIFICATION_REQUIRED — Clarification or missing slots block confirmation requirement
   decision.facts.user_confirmation_required / confirmation_pending: CONFIRMATION_REQUIRED — Confirmation gate already pending
   decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['time']
 
 Mutations
-  slots.time: '09:00' → None (SLOT_ADDITIVE_MERGE)
   plan.action: None → 'SEARCH_AVAILABILITY' (STEP_SELECTED)
   plan.stage: None → 'AVAILABILITY' (STAGE_DERIVED_FROM_ACTION)
   plan.status: None → 'READY' (STATUS_READY)
@@ -82,7 +79,7 @@ Key rejected candidates
 core/tests/e2e/test_confirmation_interruption.py 
 
 === Decision Trace Summary ===
-user_id: e2e-scripted-8c54d5c237
+user_id: e2e-scripted-902cdaaef2
 text: 'show availability for July 21'
 
 Outcome
@@ -158,7 +155,7 @@ Key rejected candidates
 core/tests/e2e/test_confirmation_interruption.py 
 
 === Decision Trace Summary ===
-user_id: e2e-scripted-859c939595
+user_id: e2e-scripted-2c15e1d243
 text: 'show availability for flexi haircut'
 
 Outcome
@@ -235,7 +232,7 @@ Key rejected candidates
 core/tests/e2e/test_confirmation_interruption.py 
 
 === Decision Trace Summary ===
-user_id: e2e-scripted-fe0d9c4a85
+user_id: e2e-scripted-5aaee10ddd
 text: 'switch to 10am'
 
 Outcome
@@ -309,7 +306,305 @@ Key rejected candidates
 
 .
 core/tests/e2e/test_confirmation_interruption.py .
-core/tests/e2e/test_date_survives_service_clarification.py .
+
+=== Decision Trace Summary ===
+user_id: e2e-scripted-b6f7c69161
+text: 'no. search availability for 24th july'
+
+Outcome
+  status: 'succeeded'
+  stage: None
+  action: 'SEARCH_AVAILABILITY'
+  intent: 'CREATE_APPOINTMENT'
+
+Why
+  - Turn completed with an execution artifact
+  - Confirmation gate is open for this durable booking flow
+  - Another request superseded the pending confirmation
+  - Merged session and Luma slots with additive precedence
+  - Stored fingerprint missing or does not match current criteria
+  - Derived planner business facts for policy execution flags
+  - Availability not yet resolved for current search criteria
+  - SEARCH_AVAILABILITY prerequisites met and check still required
+
+Why chain (reason_code)
+  CONFIRMATION_GATE_OPEN → CONFIRMATION_ANOTHER_REQUEST → SLOT_ADDITIVE_MERGE → FINGERPRINT_MISMATCH → FACTS_DERIVED → AVAILABILITY_NOT_READY → AVAILABILITY_CHECK_REQUIRED → TIME_SELECTION_NOT_READY → INPUT_IGNORED_NOT_APPLICABLE → STATUS_READY → STEP_SELECTED → STAGE_DERIVED_FROM_ACTION → EXECUTION_ROUTE_PLAN → RELATIONSHIP_NO_PENDING → ARCH_FINAL_DECISION → PAGINATION_SKIPPED → PLAN_ACTION_PRESENT → PERSIST_SAVE_APPLIED → RELOAD_MATCH → TURN_OUTCOME_EXECUTED
+
+Failed invariants
+  none
+
+Winning decisions
+  decision.confirmation.gate_open [routing] CONFIRMATION_GATE_OPEN: winner='open' (CONFIRMATION_GATE_OPEN)
+  decision.confirmation.classify_turn [routing] CONFIRMATION_CLASSIFY: winner='ANOTHER_REQUEST' (CONFIRMATION_ANOTHER_REQUEST)
+  decision.merge.slot_additive [routing] SLOT_ADDITIVE_MERGE: winner={"added": [], "updated": [], "preserved_count": 2} (SLOT_ADDITIVE_MERGE)
+  decision.fingerprint.trust [inference] FINGERPRINT_TRUST: winner='stale' (FINGERPRINT_MISMATCH)
+  decision.facts.derive_all [inference] DERIVE_BUSINESS_FACTS: winner={"availability_check_required": true, "availability_ready": false, "booking_identification_required": false, "booking_identified": false, "booking_hold_required": false, "booking_hold_ready": false, "time_selection_required": true, "time_selection_ready": false, "user_confirmation_required": false, "user_confirmation_satisfied": false, "awaiting_user_confirmation": false} (FACTS_DERIVED)
+  decision.facts.availability_ready [inference] AVAILABILITY_READY: winner=False (AVAILABILITY_NOT_READY)
+  decision.facts.availability_check_required [inference] AVAILABILITY_CHECK_REQUIRED: winner=True (AVAILABILITY_CHECK_REQUIRED)
+  decision.facts.time_selection_ready [inference] TIME_SELECTION_READY: winner=False (TIME_SELECTION_NOT_READY)
+  decision.facts.user_confirmation_required [inference] USER_CONFIRMATION_REQUIRED: winner=False (INPUT_IGNORED_NOT_APPLICABLE)
+  decision.planner.status [routing] PLAN_STATUS: winner='READY' (STATUS_READY)
+  decision.planner.select_action [routing] PLAN_ACTION: winner='SEARCH_AVAILABILITY' (STEP_SELECTED)
+  decision.planner.select_stage [routing] SELECT_STAGE: winner='AVAILABILITY' (STAGE_DERIVED_FROM_ACTION)
+  decision.planner.execution_route [routing] EXECUTION_ROUTE: winner='plan_execution' (EXECUTION_ROUTE_PLAN)
+  decision.architecture.relationship [routing] RELATIONSHIP_EVALUATION: winner='NO_PENDING_EXPECTATION' (RELATIONSHIP_NO_PENDING)
+  decision.architecture.final_decision [routing] FINAL_DECISION: winner='SEARCH_AVAILABILITY' (ARCH_FINAL_DECISION)
+  decision.execution.eligibility [uncategorized] EXECUTE_PLAN_ACTION: winner='execute' (PLAN_ACTION_PRESENT)
+  decision.persist.save [uncategorized] PERSIST_SAVE: winner='save' (PERSIST_SAVE_APPLIED)
+  decision.persist.reload_verify [uncategorized] RELOAD_VERIFY: winner='match' (RELOAD_MATCH)
+  decision.turn.outcome [uncategorized] TURN_OUTCOME: winner={"status": "succeeded", "stage": null, "action": "SEARCH_AVAILABILITY", "intent": "CREATE_APPOINTMENT"} (TURN_OUTCOME_EXECUTED)
+
+Rejected candidates
+  decision.confirmation.classify_turn / YES: CONFIRMATION_ACCEPT — Raw CONFIRM_ACTION intent
+  decision.confirmation.classify_turn / NO: CONFIRMATION_REJECT — Raw REJECT_ACTION intent
+  decision.merge.slot_additive / additive_luma: SLOT_ADDITIVE_MERGE — New Luma entities merged additively
+  decision.fingerprint.trust / bound_datetime: BOUND_DATETIME_BYPASS — Datetime already bound on slots/session
+  decision.fingerprint.trust / fingerprint_match: FINGERPRINT_MISMATCH — Search-criteria fingerprint comparison
+  decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
+  decision.facts.availability_ready / availability_ready: AVAILABILITY_NOT_READY — Fingerprint match, bound datetime, or continuation bypass
+  decision.facts.user_confirmation_required / confirmation_pending: CONFIRMATION_REQUIRED — Confirmation gate already pending
+  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
+
+Mutations
+  slots.date: '2026-07-23' → None (SLOT_ADDITIVE_MERGE)
+  slots.time: '09:30' → None (SLOT_ADDITIVE_MERGE)
+  plan.action: None → 'SEARCH_AVAILABILITY' (STEP_SELECTED)
+  plan.stage: None → 'AVAILABILITY' (STAGE_DERIVED_FROM_ACTION)
+  plan.status: None → 'READY' (STATUS_READY)
+
+Key rejected candidates
+  decision.confirmation.classify_turn / YES: CONFIRMATION_ACCEPT — Raw CONFIRM_ACTION intent
+  decision.confirmation.classify_turn / NO: CONFIRMATION_REJECT — Raw REJECT_ACTION intent
+  decision.fingerprint.trust / bound_datetime: BOUND_DATETIME_BYPASS — Datetime already bound on slots/session
+  decision.fingerprint.trust / fingerprint_match: FINGERPRINT_MISMATCH — Search-criteria fingerprint comparison
+  decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
+  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
+
+.
+core/tests/e2e/test_confirmation_interruption.py 
+
+=== Decision Trace Summary ===
+user_id: e2e-scripted-d7669daf43
+text: 'Show dates for July 21'
+
+Outcome
+  status: 'succeeded'
+  stage: None
+  action: 'SEARCH_AVAILABILITY'
+  intent: 'CREATE_APPOINTMENT'
+
+Why
+  - Turn completed with an execution artifact
+  - Confirmation gate is closed
+  - Confirmation gate not active for this turn
+  - Merged session and Luma slots with additive precedence
+  - Stored fingerprint missing or does not match current criteria
+  - Derived planner business facts for policy execution flags
+  - Availability not yet resolved for current search criteria
+  - SEARCH_AVAILABILITY prerequisites met and check still required
+
+Why chain (reason_code)
+  CONFIRMATION_GATE_CLOSED → INPUT_IGNORED_NOT_APPLICABLE → SLOT_ADDITIVE_MERGE → FINGERPRINT_MISMATCH → FACTS_DERIVED → AVAILABILITY_NOT_READY → AVAILABILITY_CHECK_REQUIRED → TIME_SELECTION_NOT_READY → STATUS_READY → STEP_SELECTED → STAGE_DERIVED_FROM_ACTION → EXECUTION_ROUTE_PLAN → RELATIONSHIP_SLOT_WAIT_OBSERVATIONAL → ARCH_FINAL_DECISION → PAGINATION_SKIPPED → PLAN_ACTION_PRESENT → PERSIST_SAVE_APPLIED → RELOAD_MATCH → TURN_OUTCOME_EXECUTED
+
+Failed invariants
+  none
+
+Winning decisions
+  decision.confirmation.gate_open [routing] CONFIRMATION_GATE_OPEN: winner='closed' (CONFIRMATION_GATE_CLOSED)
+  decision.merge.slot_additive [routing] SLOT_ADDITIVE_MERGE: winner={"added": [], "updated": [], "preserved_count": 1} (SLOT_ADDITIVE_MERGE)
+  decision.fingerprint.trust [inference] FINGERPRINT_TRUST: winner='stale' (FINGERPRINT_MISMATCH)
+  decision.facts.derive_all [inference] DERIVE_BUSINESS_FACTS: winner={"availability_check_required": true, "availability_ready": false, "booking_identification_required": false, "booking_identified": false, "booking_hold_required": false, "booking_hold_ready": false, "time_selection_required": true, "time_selection_ready": false, "user_confirmation_required": false, "user_confirmation_satisfied": false, "awaiting_user_confirmation": false} (FACTS_DERIVED)
+  decision.facts.availability_ready [inference] AVAILABILITY_READY: winner=False (AVAILABILITY_NOT_READY)
+  decision.facts.availability_check_required [inference] AVAILABILITY_CHECK_REQUIRED: winner=True (AVAILABILITY_CHECK_REQUIRED)
+  decision.facts.time_selection_ready [inference] TIME_SELECTION_READY: winner=False (TIME_SELECTION_NOT_READY)
+  decision.facts.user_confirmation_required [inference] USER_CONFIRMATION_REQUIRED: winner=False (INPUT_IGNORED_NOT_APPLICABLE)
+  decision.planner.status [routing] PLAN_STATUS: winner='READY' (STATUS_READY)
+  decision.planner.select_action [routing] PLAN_ACTION: winner='SEARCH_AVAILABILITY' (STEP_SELECTED)
+  decision.planner.select_stage [routing] SELECT_STAGE: winner='AVAILABILITY' (STAGE_DERIVED_FROM_ACTION)
+  decision.planner.execution_route [routing] EXECUTION_ROUTE: winner='plan_execution' (EXECUTION_ROUTE_PLAN)
+  decision.architecture.relationship [routing] RELATIONSHIP_EVALUATION: winner='NOT_SATISFIED' (RELATIONSHIP_SLOT_WAIT_OBSERVATIONAL)
+  decision.architecture.final_decision [routing] FINAL_DECISION: winner='SEARCH_AVAILABILITY' (ARCH_FINAL_DECISION)
+  decision.execution.eligibility [uncategorized] EXECUTE_PLAN_ACTION: winner='execute' (PLAN_ACTION_PRESENT)
+  decision.persist.save [uncategorized] PERSIST_SAVE: winner='save' (PERSIST_SAVE_APPLIED)
+  decision.persist.reload_verify [uncategorized] RELOAD_VERIFY: winner='match' (RELOAD_MATCH)
+  decision.turn.outcome [uncategorized] TURN_OUTCOME: winner={"status": "succeeded", "stage": null, "action": "SEARCH_AVAILABILITY", "intent": "CREATE_APPOINTMENT"} (TURN_OUTCOME_EXECUTED)
+
+Rejected candidates
+  decision.merge.slot_additive / additive_luma: SLOT_ADDITIVE_MERGE — New Luma entities merged additively
+  decision.fingerprint.trust / bound_datetime: BOUND_DATETIME_BYPASS — Datetime already bound on slots/session
+  decision.fingerprint.trust / fingerprint_match: FINGERPRINT_MISMATCH — Search-criteria fingerprint comparison
+  decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
+  decision.facts.availability_ready / availability_ready: AVAILABILITY_NOT_READY — Fingerprint match, bound datetime, or continuation bypass
+  decision.facts.user_confirmation_required / confirmation_pending: CONFIRMATION_REQUIRED — Confirmation gate already pending
+  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
+
+Mutations
+  plan.action: None → 'SEARCH_AVAILABILITY' (STEP_SELECTED)
+  plan.stage: None → 'AVAILABILITY' (STAGE_DERIVED_FROM_ACTION)
+  plan.status: None → 'READY' (STATUS_READY)
+
+Key rejected candidates
+  decision.fingerprint.trust / bound_datetime: BOUND_DATETIME_BYPASS — Datetime already bound on slots/session
+  decision.fingerprint.trust / fingerprint_match: FINGERPRINT_MISMATCH — Search-criteria fingerprint comparison
+  decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
+  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
+
+.
+core/tests/e2e/test_confirmation_interruption.py 
+
+=== Decision Trace Summary ===
+user_id: e2e-scripted-88d66cb909
+text: 'switch to flexi haircut'
+
+Outcome
+  status: 'succeeded'
+  stage: None
+  action: 'SEARCH_AVAILABILITY'
+  intent: 'CREATE_APPOINTMENT'
+
+Why
+  - Turn completed with an execution artifact
+  - Confirmation gate is open for this durable booking flow
+  - Another request superseded the pending confirmation
+  - Merged session and Luma slots with additive precedence
+  - Stored fingerprint missing or does not match current criteria
+  - Derived planner business facts for policy execution flags
+  - Availability not yet resolved for current search criteria
+  - SEARCH_AVAILABILITY prerequisites met and check still required
+
+Why chain (reason_code)
+  CONFIRMATION_GATE_OPEN → CONFIRMATION_ANOTHER_REQUEST → SLOT_ADDITIVE_MERGE → FINGERPRINT_MISMATCH → FACTS_DERIVED → AVAILABILITY_NOT_READY → AVAILABILITY_CHECK_REQUIRED → TIME_SELECTION_NOT_READY → INPUT_IGNORED_NOT_APPLICABLE → STATUS_READY → STEP_SELECTED → STAGE_DERIVED_FROM_ACTION → EXECUTION_ROUTE_PLAN → RELATIONSHIP_NO_PENDING → ARCH_FINAL_DECISION → PAGINATION_SKIPPED → PLAN_ACTION_PRESENT → PERSIST_SAVE_APPLIED → RELOAD_MATCH → TURN_OUTCOME_EXECUTED
+
+Failed invariants
+  none
+
+Winning decisions
+  decision.confirmation.gate_open [routing] CONFIRMATION_GATE_OPEN: winner='open' (CONFIRMATION_GATE_OPEN)
+  decision.confirmation.classify_turn [routing] CONFIRMATION_CLASSIFY: winner='ANOTHER_REQUEST' (CONFIRMATION_ANOTHER_REQUEST)
+  decision.merge.slot_additive [routing] SLOT_ADDITIVE_MERGE: winner={"added": [], "updated": ["service_id"], "preserved_count": 1} (SLOT_ADDITIVE_MERGE)
+  decision.fingerprint.trust [inference] FINGERPRINT_TRUST: winner='stale' (FINGERPRINT_MISMATCH)
+  decision.facts.derive_all [inference] DERIVE_BUSINESS_FACTS: winner={"availability_check_required": true, "availability_ready": false, "booking_identification_required": false, "booking_identified": false, "booking_hold_required": false, "booking_hold_ready": false, "time_selection_required": true, "time_selection_ready": false, "user_confirmation_required": false, "user_confirmation_satisfied": false, "awaiting_user_confirmation": false} (FACTS_DERIVED)
+  decision.facts.availability_ready [inference] AVAILABILITY_READY: winner=False (AVAILABILITY_NOT_READY)
+  decision.facts.availability_check_required [inference] AVAILABILITY_CHECK_REQUIRED: winner=True (AVAILABILITY_CHECK_REQUIRED)
+  decision.facts.time_selection_ready [inference] TIME_SELECTION_READY: winner=False (TIME_SELECTION_NOT_READY)
+  decision.facts.user_confirmation_required [inference] USER_CONFIRMATION_REQUIRED: winner=False (INPUT_IGNORED_NOT_APPLICABLE)
+  decision.planner.status [routing] PLAN_STATUS: winner='READY' (STATUS_READY)
+  decision.planner.select_action [routing] PLAN_ACTION: winner='SEARCH_AVAILABILITY' (STEP_SELECTED)
+  decision.planner.select_stage [routing] SELECT_STAGE: winner='AVAILABILITY' (STAGE_DERIVED_FROM_ACTION)
+  decision.planner.execution_route [routing] EXECUTION_ROUTE: winner='plan_execution' (EXECUTION_ROUTE_PLAN)
+  decision.architecture.relationship [routing] RELATIONSHIP_EVALUATION: winner='NO_PENDING_EXPECTATION' (RELATIONSHIP_NO_PENDING)
+  decision.architecture.final_decision [routing] FINAL_DECISION: winner='SEARCH_AVAILABILITY' (ARCH_FINAL_DECISION)
+  decision.execution.eligibility [uncategorized] EXECUTE_PLAN_ACTION: winner='execute' (PLAN_ACTION_PRESENT)
+  decision.persist.save [uncategorized] PERSIST_SAVE: winner='save' (PERSIST_SAVE_APPLIED)
+  decision.persist.reload_verify [uncategorized] RELOAD_VERIFY: winner='match' (RELOAD_MATCH)
+  decision.turn.outcome [uncategorized] TURN_OUTCOME: winner={"status": "succeeded", "stage": null, "action": "SEARCH_AVAILABILITY", "intent": "CREATE_APPOINTMENT"} (TURN_OUTCOME_EXECUTED)
+
+Rejected candidates
+  decision.confirmation.classify_turn / YES: CONFIRMATION_ACCEPT — Raw CONFIRM_ACTION intent
+  decision.confirmation.classify_turn / NO: CONFIRMATION_REJECT — Raw REJECT_ACTION intent
+  decision.merge.slot_additive / additive_luma: SLOT_ADDITIVE_MERGE — New Luma entities merged additively
+  decision.fingerprint.trust / bound_datetime: BOUND_DATETIME_BYPASS — Datetime already bound on slots/session
+  decision.fingerprint.trust / fingerprint_match: FINGERPRINT_MISMATCH — Search-criteria fingerprint comparison
+  decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
+  decision.facts.availability_ready / availability_ready: AVAILABILITY_NOT_READY — Fingerprint match, bound datetime, or continuation bypass
+  decision.facts.user_confirmation_required / confirmation_pending: CONFIRMATION_REQUIRED — Confirmation gate already pending
+  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
+
+Mutations
+  slots.service_id: 'premium haircut' → 'flexi haircut + prunning' (SLOT_ADDITIVE_MERGE)
+  slots.date: '2026-07-22' → None (SLOT_ADDITIVE_MERGE)
+  slots.time: '09:00' → None (SLOT_ADDITIVE_MERGE)
+  plan.action: None → 'SEARCH_AVAILABILITY' (STEP_SELECTED)
+  plan.stage: None → 'AVAILABILITY' (STAGE_DERIVED_FROM_ACTION)
+  plan.status: None → 'READY' (STATUS_READY)
+
+Key rejected candidates
+  decision.confirmation.classify_turn / YES: CONFIRMATION_ACCEPT — Raw CONFIRM_ACTION intent
+  decision.confirmation.classify_turn / NO: CONFIRMATION_REJECT — Raw REJECT_ACTION intent
+  decision.fingerprint.trust / bound_datetime: BOUND_DATETIME_BYPASS — Datetime already bound on slots/session
+  decision.fingerprint.trust / fingerprint_match: FINGERPRINT_MISMATCH — Search-criteria fingerprint comparison
+  decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
+  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
+
+.
+core/tests/e2e/test_confirmation_interruption.py 
+
+=== Decision Trace Summary ===
+user_id: e2e-scripted-36a19a02b6
+text: 'check availability for tomorrow'
+
+Outcome
+  status: 'succeeded'
+  stage: None
+  action: 'SEARCH_AVAILABILITY'
+  intent: 'CREATE_APPOINTMENT'
+
+Why
+  - Turn completed with an execution artifact
+  - Confirmation gate is open for this durable booking flow
+  - Another request superseded the pending confirmation
+  - Merged session and Luma slots with additive precedence
+  - Stored fingerprint missing or does not match current criteria
+  - Derived planner business facts for policy execution flags
+  - Availability not yet resolved for current search criteria
+  - SEARCH_AVAILABILITY prerequisites met and check still required
+
+Why chain (reason_code)
+  CONFIRMATION_GATE_OPEN → CONFIRMATION_ANOTHER_REQUEST → SLOT_ADDITIVE_MERGE → FINGERPRINT_MISMATCH → FACTS_DERIVED → AVAILABILITY_NOT_READY → AVAILABILITY_CHECK_REQUIRED → TIME_SELECTION_NOT_READY → INPUT_IGNORED_NOT_APPLICABLE → STATUS_READY → STEP_SELECTED → STAGE_DERIVED_FROM_ACTION → EXECUTION_ROUTE_PLAN → RELATIONSHIP_NO_PENDING → ARCH_FINAL_DECISION → PAGINATION_SKIPPED → PLAN_ACTION_PRESENT → PERSIST_SAVE_APPLIED → RELOAD_MATCH → TURN_OUTCOME_EXECUTED
+
+Failed invariants
+  none
+
+Winning decisions
+  decision.confirmation.gate_open [routing] CONFIRMATION_GATE_OPEN: winner='open' (CONFIRMATION_GATE_OPEN)
+  decision.confirmation.classify_turn [routing] CONFIRMATION_CLASSIFY: winner='ANOTHER_REQUEST' (CONFIRMATION_ANOTHER_REQUEST)
+  decision.merge.slot_additive [routing] SLOT_ADDITIVE_MERGE: winner={"added": [], "updated": [], "preserved_count": 1} (SLOT_ADDITIVE_MERGE)
+  decision.fingerprint.trust [inference] FINGERPRINT_TRUST: winner='stale' (FINGERPRINT_MISMATCH)
+  decision.facts.derive_all [inference] DERIVE_BUSINESS_FACTS: winner={"availability_check_required": true, "availability_ready": false, "booking_identification_required": false, "booking_identified": false, "booking_hold_required": false, "booking_hold_ready": false, "time_selection_required": true, "time_selection_ready": false, "user_confirmation_required": false, "user_confirmation_satisfied": false, "awaiting_user_confirmation": false} (FACTS_DERIVED)
+  decision.facts.availability_ready [inference] AVAILABILITY_READY: winner=False (AVAILABILITY_NOT_READY)
+  decision.facts.availability_check_required [inference] AVAILABILITY_CHECK_REQUIRED: winner=True (AVAILABILITY_CHECK_REQUIRED)
+  decision.facts.time_selection_ready [inference] TIME_SELECTION_READY: winner=False (TIME_SELECTION_NOT_READY)
+  decision.facts.user_confirmation_required [inference] USER_CONFIRMATION_REQUIRED: winner=False (INPUT_IGNORED_NOT_APPLICABLE)
+  decision.planner.status [routing] PLAN_STATUS: winner='READY' (STATUS_READY)
+  decision.planner.select_action [routing] PLAN_ACTION: winner='SEARCH_AVAILABILITY' (STEP_SELECTED)
+  decision.planner.select_stage [routing] SELECT_STAGE: winner='AVAILABILITY' (STAGE_DERIVED_FROM_ACTION)
+  decision.planner.execution_route [routing] EXECUTION_ROUTE: winner='plan_execution' (EXECUTION_ROUTE_PLAN)
+  decision.architecture.relationship [routing] RELATIONSHIP_EVALUATION: winner='NO_PENDING_EXPECTATION' (RELATIONSHIP_NO_PENDING)
+  decision.architecture.final_decision [routing] FINAL_DECISION: winner='SEARCH_AVAILABILITY' (ARCH_FINAL_DECISION)
+  decision.execution.eligibility [uncategorized] EXECUTE_PLAN_ACTION: winner='execute' (PLAN_ACTION_PRESENT)
+  decision.persist.save [uncategorized] PERSIST_SAVE: winner='save' (PERSIST_SAVE_APPLIED)
+  decision.persist.reload_verify [uncategorized] RELOAD_VERIFY: winner='match' (RELOAD_MATCH)
+  decision.turn.outcome [uncategorized] TURN_OUTCOME: winner={"status": "succeeded", "stage": null, "action": "SEARCH_AVAILABILITY", "intent": "CREATE_APPOINTMENT"} (TURN_OUTCOME_EXECUTED)
+
+Rejected candidates
+  decision.confirmation.classify_turn / YES: CONFIRMATION_ACCEPT — Raw CONFIRM_ACTION intent
+  decision.confirmation.classify_turn / NO: CONFIRMATION_REJECT — Raw REJECT_ACTION intent
+  decision.merge.slot_additive / additive_luma: SLOT_ADDITIVE_MERGE — New Luma entities merged additively
+  decision.fingerprint.trust / bound_datetime: BOUND_DATETIME_BYPASS — Datetime already bound on slots/session
+  decision.fingerprint.trust / fingerprint_match: FINGERPRINT_MISMATCH — Search-criteria fingerprint comparison
+  decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
+  decision.facts.availability_ready / availability_ready: AVAILABILITY_NOT_READY — Fingerprint match, bound datetime, or continuation bypass
+  decision.facts.user_confirmation_required / confirmation_pending: CONFIRMATION_REQUIRED — Confirmation gate already pending
+  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
+
+Mutations
+  slots.date: '2026-07-03' → None (SLOT_ADDITIVE_MERGE)
+  slots.time: '09:00' → None (SLOT_ADDITIVE_MERGE)
+  plan.action: None → 'SEARCH_AVAILABILITY' (STEP_SELECTED)
+  plan.stage: None → 'AVAILABILITY' (STAGE_DERIVED_FROM_ACTION)
+  plan.status: None → 'READY' (STATUS_READY)
+
+Key rejected candidates
+  decision.confirmation.classify_turn / YES: CONFIRMATION_ACCEPT — Raw CONFIRM_ACTION intent
+  decision.confirmation.classify_turn / NO: CONFIRMATION_REJECT — Raw REJECT_ACTION intent
+  decision.fingerprint.trust / bound_datetime: BOUND_DATETIME_BYPASS — Datetime already bound on slots/session
+  decision.fingerprint.trust / fingerprint_match: FINGERPRINT_MISMATCH — Search-criteria fingerprint comparison
+  decision.fingerprint.trust / confirm_continuation: CONFIRM_CONTINUATION_BYPASS — User confirmed after availability search
+  decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
+
+.
+core/tests/e2e/test_date_survives_service_clarification.py ..
+core/tests/e2e/test_off_topic.py .F
 core/tests/e2e/test_rag.py .
 core/tests/e2e/test_session.py ...
 core/tests/e2e/test_tracing.py 
@@ -382,7 +677,7 @@ Key rejected candidates
 core/tests/e2e/test_tracing.py ..
 
 === Decision Trace Summary ===
-user_id: e2e-scripted-7da4756462
+user_id: e2e-scripted-f128332d65
 text: 'premium'
 
 Outcome
@@ -457,13 +752,559 @@ Key rejected candidates
   decision.planner.select_action / CONFIRM_APPOINTMENT: REQUIREMENT_UNSATISFIED — Step 'CONFIRM_APPOINTMENT' blocked by unsatisfied requirement 'user_confirmation_satisfied' missing=['date', 'time']
 
 .
+core/tests/e2e/test_turn_understanding.py .........
+core/tests/e2e/test_turn_understanding_import_isolation.py ..
+
+=================================== FAILURES ===================================
+__________ test_booking_scenario[unavailable-time-keeps-booking-flow] __________
+core/tests/e2e/test_booking.py:125: in test_booking_scenario
+    run_bundle(scenario, (conv, booking, availability))
+core/tests/e2e/framework/runner.py:79: in run_bundle
+    return run_scenario(
+core/tests/e2e/framework/runner.py:38: in run_scenario
+    apply_expect(conv, turn.expect)
+core/tests/e2e/framework/runner.py:52: in apply_expect
+    conv.assert_turn(**checks)
+core/tests/e2e/framework/conversation.py:918: in assert_turn
+    self.assert_response_text_present()
+core/tests/e2e/framework/conversation.py:781: in assert_response_text_present
+    self._assert(
+core/tests/e2e/framework/conversation.py:635: in _assert
+    raise AssertionError(
+E   AssertionError: turn 3: expected non-empty response text, got None
+E   
+E   User:
+E   12pm
+E   
+E   Intent:
+E   CREATE_APPOINTMENT
+E   
+E   Session:
+E   No merge trace
+E   
+E   Planner:
+E   NEEDS_CLARIFICATION
+E   
+E   Stage:
+E   AVAILABILITY
+E   
+E   Action:
+E   None
+E   
+E   Reason:
+E   Plan status is READY
+E   
+E   Outcome:
+E   Turn requires clarification before proceeding
+E   
+E   Timing
+E   
+E   Total:
+E   21 ms
+----------------------------- Captured stdout call -----------------------------
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=[]
+  effective_slots_for_filtering.keys()=[]
+  promoted_slots={}
+  effective_collected_slots (after filter)={}
+  effective_collected_slots.keys()=[]
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {}, "effective_collected_slots": {}}
+2026-07-21 11:16:56,016  core.api.message                               INFO  [decision_trace:summary]
+User:
+book me a haircut
+
+Intent:
+CREATE_APPOINTMENT
+
+Session:
+No merge trace
+
+Planner:
+NEEDS_CLARIFICATION
+
+Missing:
+date
+service_id
+time
+
+Stage:
+AVAILABILITY
+
+Action:
+None
+
+Reason:
+Missing slots ['date', 'service_id', 'time'] require clarification
+
+Outcome:
+Turn requires clarification before proceeding
+
+Timing
+
+Total:
+1054 ms
+
+User:
+book me a haircut
+
+Intent:
+CREATE_APPOINTMENT
+
+Session:
+No merge trace
+
+Planner:
+NEEDS_CLARIFICATION
+
+Missing:
+date
+service_id
+time
+
+Stage:
+AVAILABILITY
+
+Action:
+None
+
+Reason:
+Missing slots ['date', 'service_id', 'time'] require clarification
+
+Outcome:
+Turn requires clarification before proceeding
+
+Timing
+
+Total:
+1054 ms
+
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'premium haircut'}
+  effective_collected_slots (after filter)={'service_id': 'premium haircut'}
+  effective_collected_slots.keys()=['service_id']
+2026-07-21 11:16:57,355  core.api.message                               INFO  [decision_trace:summary]
+User:
+premium
+
+Intent:
+CREATE_APPOINTMENT
+
+Session:
+No merge trace
+
+Planner:
+READY
+
+Missing:
+date
+time
+
+Stage:
+AVAILABILITY
+
+Action:
+SEARCH_AVAILABILITY
+
+Reason:
+Executable subset satisfied; exploratory action allowed
+
+Outcome:
+Turn completed with an execution artifact
+
+Session Changes
+
+service_id
+
+null
+
+→
+
+premium haircut
+
+Timing
+
+Total:
+1317 ms
+
+User:
+premium
+
+Intent:
+CREATE_APPOINTMENT
+
+Session:
+No merge trace
+
+Planner:
+READY
+
+Missing:
+date
+time
+
+Stage:
+AVAILABILITY
+
+Action:
+SEARCH_AVAILABILITY
+
+Reason:
+Executable subset satisfied; exploratory action allowed
+
+Outcome:
+Turn completed with an execution artifact
+
+Session Changes
+
+service_id
+
+null
+
+→
+
+premium haircut
+
+Timing
+
+Total:
+1317 ms
+
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'premium haircut'}
+  effective_collected_slots (after filter)={'service_id': 'premium haircut'}
+  effective_collected_slots.keys()=['service_id']
+2026-07-21 11:16:57,398  core.api.message                               INFO  [decision_trace:summary]
+User:
+12pm
+
+Intent:
+CREATE_APPOINTMENT
+
+Session:
+No merge trace
+
+Planner:
+NEEDS_CLARIFICATION
+
+Stage:
+AVAILABILITY
+
+Action:
+None
+
+Reason:
+Plan status is READY
+
+Outcome:
+Turn requires clarification before proceeding
+
+Timing
+
+Total:
+21 ms
+
+User:
+12pm
+
+Intent:
+CREATE_APPOINTMENT
+
+Session:
+No merge trace
+
+Planner:
+NEEDS_CLARIFICATION
+
+Stage:
+AVAILABILITY
+
+Action:
+None
+
+Reason:
+Plan status is READY
+
+Outcome:
+Turn requires clarification before proceeding
+
+Timing
+
+Total:
+21 ms
+
+___________ test_off_topic_scenario[off-topic-mid-booking-preserves] ___________
+core/tests/e2e/test_off_topic.py:139: in test_off_topic_scenario
+    run_bundle(scenario, (conv, booking, availability))
+core/tests/e2e/framework/runner.py:79: in run_bundle
+    return run_scenario(
+core/tests/e2e/framework/runner.py:41: in run_scenario
+    _call_hook(turn.after, ctx)
+core/tests/e2e/framework/runner.py:60: in _call_hook
+    return hook(
+core/tests/e2e/scenarios/off_topic.py:155: in _assert_mid_booking_off_topic_preserves
+    _assert_off_topic_delegated(conv, booking, availability)
+core/tests/e2e/scenarios/off_topic.py:119: in _assert_off_topic_delegated
+    conv._assert(
+core/tests/e2e/framework/conversation.py:635: in _assert
+    raise AssertionError(
+E   AssertionError: turn 3: expected brief business redirect, got 'Bola Ahmed Tinubu is the president of Nigeria, having taken office in May 2023.\n\nWhich time would you like?'
+E   
+E   User:
+E   Who is the president of Nigeria?
+E   
+E   Intent:
+E   OFF_TOPIC
+E   
+E   Session:
+E   No merge trace
+E   
+E   Planner:
+E   (unknown)
+E   
+E   Action:
+E   None
+E   
+E   Reason:
+E   Intent handler delegated; execution path bypassed
+E   
+E   Outcome:
+E   Turn delegated to an external intent handler
+E   
+E   Timing
+E   
+E   Total:
+E   1935 ms
+----------------------------- Captured stdout call -----------------------------
+{"trace_point": "AFTER_INTENT", "intent": "CREATE_APPOINTMENT", "is_first_turn": true, "raw_luma_slots": {}, "raw_luma_context": null}
+[_compute_effective_collected_slots] raw_slots keys=[]
+  effective_slots_for_filtering.keys()=[]
+  promoted_slots={}
+  effective_collected_slots (after filter)={}
+  effective_collected_slots.keys()=[]
+{"trace_point": "AFTER_MOD_CONTEXT", "intent": "CREATE_APPOINTMENT", "modification_context": null, "promoted_slots": {}, "effective_collected_slots": {}}
+2026-07-21 11:19:43,385  core.api.message                               INFO  [decision_trace:summary]
+User:
+Book haircut
+
+Intent:
+CREATE_APPOINTMENT
+
+Session:
+No merge trace
+
+Planner:
+NEEDS_CLARIFICATION
+
+Missing:
+date
+service_id
+time
+
+Stage:
+AVAILABILITY
+
+Action:
+None
+
+Reason:
+Missing slots ['date', 'service_id', 'time'] require clarification
+
+Outcome:
+Turn requires clarification before proceeding
+
+Timing
+
+Total:
+9 ms
+
+User:
+Book haircut
+
+Intent:
+CREATE_APPOINTMENT
+
+Session:
+No merge trace
+
+Planner:
+NEEDS_CLARIFICATION
+
+Missing:
+date
+service_id
+time
+
+Stage:
+AVAILABILITY
+
+Action:
+None
+
+Reason:
+Missing slots ['date', 'service_id', 'time'] require clarification
+
+Outcome:
+Turn requires clarification before proceeding
+
+Timing
+
+Total:
+9 ms
+
+  effective_slots_for_filtering.keys()=['service_id']
+  promoted_slots={'service_id': 'premium haircut'}
+  effective_collected_slots (after filter)={'service_id': 'premium haircut'}
+  effective_collected_slots.keys()=['service_id']
+2026-07-21 11:19:43,440  core.api.message                               INFO  [decision_trace:summary]
+User:
+Premium
+
+Intent:
+CREATE_APPOINTMENT
+
+Session:
+No merge trace
+
+Planner:
+READY
+
+Missing:
+date
+time
+
+Stage:
+AVAILABILITY
+
+Action:
+SEARCH_AVAILABILITY
+
+Reason:
+Executable subset satisfied; exploratory action allowed
+
+Outcome:
+Turn completed with an execution artifact
+
+Session Changes
+
+service_id
+
+null
+
+→
+
+premium haircut
+
+Timing
+
+Total:
+35 ms
+
+User:
+Premium
+
+Intent:
+CREATE_APPOINTMENT
+
+Session:
+No merge trace
+
+Planner:
+READY
+
+Missing:
+date
+time
+
+Stage:
+AVAILABILITY
+
+Action:
+SEARCH_AVAILABILITY
+
+Reason:
+Executable subset satisfied; exploratory action allowed
+
+Outcome:
+Turn completed with an execution artifact
+
+Session Changes
+
+service_id
+
+null
+
+→
+
+premium haircut
+
+Timing
+
+Total:
+35 ms
+
+2026-07-21 11:19:45,391  core.api.message                               INFO  [decision_trace:summary]
+User:
+Who is the president of Nigeria?
+
+Intent:
+OFF_TOPIC
+
+Session:
+No merge trace
+
+Planner:
+(unknown)
+
+Action:
+None
+
+Reason:
+Intent handler delegated; execution path bypassed
+
+Outcome:
+Turn delegated to an external intent handler
+
+Timing
+
+Total:
+1935 ms
+
+User:
+Who is the president of Nigeria?
+
+Intent:
+OFF_TOPIC
+
+Session:
+No merge trace
+
+Planner:
+(unknown)
+
+Action:
+None
+
+Reason:
+Intent handler delegated; execution path bypassed
+
+Outcome:
+Turn delegated to an external intent handler
+
+Timing
+
+Total:
+1935 ms
+
 =============================== warnings summary ===============================
 ../../../../../../../../../home/mbaocha/.pyenv/versions/3.10.13/lib/python3.10/site-packages/pydantic/fields.py:799: 10 warnings
   /home/mbaocha/.pyenv/versions/3.10.13/lib/python3.10/site-packages/pydantic/fields.py:799: PydanticDeprecatedSince20: Using extra keyword arguments on `Field` is deprecated and will be removed. Use `json_schema_extra` instead. (Extra keys: 'deprecated'). Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.5/migration/
     warn(
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-================= 41 passed, 10 warnings in 214.85s (0:03:34) ==================
+=========================== short test summary info ============================
+FAILED core/tests/e2e/test_booking.py::test_booking_scenario[unavailable-time-keeps-booking-flow]
+FAILED core/tests/e2e/test_off_topic.py::test_off_topic_scenario[off-topic-mid-booking-preserves]
+============ 2 failed, 57 passed, 10 warnings in 197.59s (0:03:17) =============
 ================================================================================
 Running tests: e2e
 Path: core/tests/e2e

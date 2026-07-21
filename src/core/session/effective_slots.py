@@ -172,9 +172,11 @@ def _compute_effective_collected_slots(
     raw_slots = merge_promoted_luma_slots(
         nested_slots,
         promoted_slots_from_facts,
-        luma_response.get("date_constraint"),
         facts_obj if isinstance(facts_obj, dict) else None,
         prefer_nested_service_id=True,
+        temporal=luma_response.get("temporal")
+        if isinstance(luma_response.get("temporal"), dict)
+        else None,
     )
     if not isinstance(raw_slots, dict):
         raw_slots = {}

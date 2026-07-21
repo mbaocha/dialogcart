@@ -47,8 +47,7 @@ def resolve_slot_turn_state(
         planning_context={
             "date_proposal": payload.get("date_proposal"),
             "time_proposal": payload.get("time_proposal"),
-            "date_constraint": payload.get("date_constraint"),
-            "time_constraint": payload.get("time_constraint"),
+            "temporal": payload.get("temporal"),
             "nlu_facts": facts_obj if isinstance(facts_obj, dict) else None,
             "issues": payload.get("issues"),
             "raw_luma_slots": payload.get("_raw_luma_slots"),
