@@ -155,7 +155,7 @@ class ConversationEngine:
         user_text: Optional[str] = None,
     ) -> Dict[str, Any]:
         assert gate.response is not None and gate.plan is not None
-        if gate.path == "skipped":
+        if gate.path in ("skipped", "blocked"):
             stages.tool_execution_skipped(plan_action=gate.plan_action)
             from core.rendering.response_renderer import ResponseRenderer
 
@@ -410,6 +410,35 @@ class ConversationEngine:
                     plan_action=plan.get("action"),
                 )
 
+            from core.execution.command import ExecutionCommandError
+            from core.execution.command_builder import build_execution_command
+
+            execution_command = None
+            try:
+                decision_meta = plan.get("_decision")
+                policy_client = None
+                if isinstance(decision_meta, dict):
+                    policy_client = decision_meta.get("policy_client")
+                    nested = decision_meta.get("plan")
+                    if policy_client is None and isinstance(nested, dict):
+                        policy_client = nested.get("policy_client")
+                execution_command = build_execution_command(
+                    plan=plan,
+                    organization_id=organization_id,
+                    policy_client=policy_client,
+                )
+            except ExecutionCommandError as exc:
+                logger.warning("ExecutionCommand build failed closed: %s", exc)
+                from core.engine.outcome_builder import build_planning_only_response
+
+                return stages.finish_without_invariant_attach(
+                    build_planning_only_response(plan),
+                    plan=plan,
+                    plan_status=plan.get("status"),
+                    plan_action=plan.get("action"),
+                    can_execute=False,
+                )
+
             gate = self._execution_coordinator.resolve(
                 plan=plan,
                 session_state=session_state,
@@ -419,6 +448,8 @@ class ConversationEngine:
                 organization_client=organization_client,
                 organization_id=organization_id,
                 kwargs=kwargs,
+                command=execution_command,
+                use_execution_command=True,
             )
             if gate.path != "ready":
                 return self._finish_gate(

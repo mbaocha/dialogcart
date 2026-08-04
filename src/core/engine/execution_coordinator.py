@@ -1,14 +1,18 @@
-"""ExecutionCoordinator — eligibility, prep, dispatch, and post-processing.
+"""ExecutionCoordinator — operational prep, dispatch, and post-processing.
 
-Extracted from ConversationEngine so the engine can orchestrate planning →
-execution → rendering without owning booking execution details.
+Decision owns whether an action should execute (via ``ExecutionCommand``).
+This coordinator validates operational prerequisites and prepares dispatch input.
+The legacy resolve path remains temporarily as a parity oracle.
 """
 
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
+
+from core.execution.command import ExecutionBlocked, ExecutionCommand
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +22,7 @@ class ExecutionGateResult:
     """Outcome of eligibility + preparation (before tool dispatch)."""
 
     path: str
-    # skipped | missing_client | no_step | ready
+    # skipped | blocked | missing_client | no_step | ready
     response: Optional[Dict[str, Any]] = None
     plan: Optional[Dict[str, Any]] = None
     plan_status: Any = None
@@ -31,6 +35,7 @@ class ExecutionGateResult:
     intent_name: Any = None
     slots: Dict[str, Any] = field(default_factory=dict)
     session_state: Optional[Dict[str, Any]] = None
+    blocked: Optional[ExecutionBlocked] = None
 
 
 @dataclass
@@ -51,7 +56,7 @@ class ExecutionRunResult:
 
 
 class ExecutionCoordinator:
-    """Coordinates policy eligibility, dispatch, and workflow hooks."""
+    """Coordinates operational prep, dispatch, and workflow hooks."""
 
     def resolve(
         self,
@@ -64,9 +69,216 @@ class ExecutionCoordinator:
         organization_client: Optional[Any],
         organization_id: int,
         kwargs: Dict[str, Any],
+        command: Optional[ExecutionCommand] = None,
+        use_execution_command: bool = False,
     ) -> ExecutionGateResult:
-        """Eligibility gate + execution preparation (no tool I/O)."""
+        """Operational gate + execution preparation (no tool I/O).
+
+        When ``use_execution_command`` is True, Decision has already authorized
+        (or withheld) execution via ``command``. Do not re-evaluate policy.
+        """
         _ = session_store, user_id  # Compatibility-only; session is already loaded.
+        if use_execution_command:
+            return self._resolve_from_command(
+                command=command,
+                plan=plan,
+                session_state=session_state,
+                availability_client=availability_client,
+                organization_client=organization_client,
+                organization_id=organization_id,
+                kwargs=kwargs,
+            )
+        return self._resolve_legacy(
+            plan=plan,
+            session_state=session_state,
+            availability_client=availability_client,
+            organization_client=organization_client,
+            organization_id=organization_id,
+            kwargs=kwargs,
+        )
+
+    def _resolve_from_command(
+        self,
+        *,
+        command: Optional[ExecutionCommand],
+        plan: Dict[str, Any],
+        session_state: Optional[Dict[str, Any]],
+        availability_client: Optional[Any],
+        organization_client: Optional[Any],
+        organization_id: int,
+        kwargs: Dict[str, Any],
+    ) -> ExecutionGateResult:
+        from core.engine.outcome_builder import (
+            apply_execution_blocked_text,
+            build_planning_only_response,
+            build_planning_response_from_plan,
+        )
+
+        plan_status = plan.get("status")
+        if command is None:
+            logger.debug(
+                "Skipping execution: Decision emitted no ExecutionCommand "
+                "(planning-only / no-action turn)."
+            )
+            return ExecutionGateResult(
+                path="skipped",
+                response=build_planning_response_from_plan(plan),
+                plan=plan,
+                plan_status=plan_status,
+                plan_action=plan.get("action"),
+                can_execute=False,
+            )
+
+        action = command.action
+        client_name = command.client_name
+        intent_name = command.intent_name
+        plan_action = action
+
+        # Execution-input copy — never mutate the finalized Decision plan.
+        execution_plan = deepcopy(plan)
+        slots = dict(command.slots)
+
+        if command.execution_proposal_context is not None:
+            execution_plan["execution_proposal_context"] = dict(
+                command.execution_proposal_context
+            )
+        if command.entity_schema is not None:
+            execution_plan["_entity_schema"] = dict(command.entity_schema)
+        if command.turn_operation:
+            execution_plan["turn_operation"] = command.turn_operation
+        if command.stage is not None:
+            execution_plan["stage"] = command.stage
+
+        # Stage labels for dispatch adapters (execution overlay only).
+        if action == "SEARCH_AVAILABILITY":
+            execution_plan["stage"] = "AVAILABILITY"
+        elif action == "CONFIRM_APPOINTMENT":
+            execution_plan["stage"] = "CONFIRM"
+        execution_plan["action"] = action
+
+        execution_client, client_block = self._resolve_execution_client(
+            action=action,
+            client_name=client_name,
+            availability_client=availability_client,
+            kwargs=kwargs,
+        )
+        if client_block == "missing_client":
+            return ExecutionGateResult(
+                path="missing_client",
+                response=build_planning_response_from_plan(plan),
+                plan=plan,
+                plan_status=plan_status,
+                plan_action=plan_action,
+                can_execute=False,
+                blocked=ExecutionBlocked(
+                    reason="MISSING_EXECUTION_CLIENT",
+                    action=action,
+                ),
+            )
+        if client_block == "unknown_client" or execution_client is None:
+            return ExecutionGateResult(
+                path="no_step",
+                response=build_planning_only_response(plan),
+                plan=plan,
+                plan_status=plan.get("status"),
+                plan_action=plan.get("action"),
+                can_execute=False,
+                blocked=ExecutionBlocked(
+                    reason="UNKNOWN_CLIENT_OR_ROUTE",
+                    action=action,
+                ),
+            )
+
+        slots = self._apply_organization_id(
+            slots, organization_id=organization_id
+        )
+        slots = self._inject_customer_id(
+            slots, session_state=session_state, kwargs=kwargs
+        )
+
+        if action == "SEARCH_AVAILABILITY":
+            slots = self._prepare_availability_slots(
+                slots,
+                execution_plan=execution_plan,
+                session_state=session_state,
+            )
+
+        self._attach_catalog_mapping(
+            execution_plan,
+            organization_id=organization_id,
+            organization_client=organization_client,
+        )
+
+        if action == "FINALIZE_RESERVATION":
+            self._attach_finalize_facts(
+                execution_plan,
+                session_state=session_state,
+                organization_client=organization_client,
+                organization_id=organization_id,
+            )
+
+        if action == "CONFIRM_APPOINTMENT":
+            slots = self._inject_bound_datetime(
+                slots, session_state=session_state
+            )
+
+        execution_plan["slots"] = slots
+
+        if action in ("CONFIRM_APPOINTMENT", "CREATE_BOOKING_HOLD"):
+            from core.adapters.customer_resolver import coerce_positive_customer_id
+
+            if coerce_positive_customer_id(slots.get("customer_id")) is None:
+                logger.info(
+                    "Blocking %s: tenant customer_id is unresolved",
+                    action,
+                )
+                blocked = ExecutionBlocked(
+                    reason="CUSTOMER_ID_REQUIRED",
+                    required_input="phone_or_email",
+                    action=action,
+                )
+                blocked_plan = deepcopy(execution_plan)
+                blocked_plan["status"] = "NEEDS_CLARIFICATION"
+                blocked_plan["slots"] = slots
+                response = build_planning_response_from_plan(blocked_plan)
+                apply_execution_blocked_text(
+                    response, reason=blocked.reason
+                )
+                return ExecutionGateResult(
+                    path="blocked",
+                    response=response,
+                    plan=blocked_plan,
+                    plan_status=blocked_plan.get("status"),
+                    plan_action=plan_action,
+                    can_execute=False,
+                    blocked=blocked,
+                )
+
+        return ExecutionGateResult(
+            path="ready",
+            plan=execution_plan,
+            plan_status=plan_status,
+            plan_action=plan_action,
+            can_execute=True,
+            action=action,
+            client_name=client_name,
+            execution_client=execution_client,
+            intent_name=intent_name,
+            slots=slots,
+            session_state=session_state,
+        )
+
+    def _resolve_legacy(
+        self,
+        *,
+        plan: Dict[str, Any],
+        session_state: Optional[Dict[str, Any]],
+        availability_client: Optional[Any],
+        organization_client: Optional[Any],
+        organization_id: int,
+        kwargs: Dict[str, Any],
+    ) -> ExecutionGateResult:
+        """Parity oracle: historical policy re-evaluation path."""
         from core.engine.outcome_builder import (
             build_planning_only_response,
             build_planning_response_from_plan,
@@ -152,22 +364,16 @@ class ExecutionCoordinator:
         action = execution_step.get("action")
         client_name = execution_step.get("client", "")
 
-        execution_client = None
-        if client_name == "availability_client":
-            execution_client = availability_client
-        elif client_name == "booking_client":
-            execution_client = kwargs.get("booking_client")
-            if not execution_client:
-                logger.warning(
-                    f"Execution step {action} requires {client_name}, "
-                    f"but it was not provided"
-                )
-                execution_step = None
-        else:
-            logger.warning(
-                f"Unknown client name '{client_name}' for execution step {action}"
-            )
+        execution_client, client_block = self._resolve_execution_client(
+            action=action,
+            client_name=client_name,
+            availability_client=availability_client,
+            kwargs=kwargs,
+        )
+        if client_block == "unknown_client":
             execution_step = None
+        elif client_block == "missing_client":
+            execution_client = None
 
         if execution_step and execution_client is None:
             logger.debug(
@@ -193,120 +399,48 @@ class ExecutionCoordinator:
                 can_execute=False,
             )
 
-        slot_org = slots.get("organization_id")
-        if slot_org is not None and int(slot_org) != int(organization_id):
-            logger.warning(
-                "Ignoring conflicting slots.organization_id=%s (request=%s)",
-                slot_org,
-                organization_id,
-            )
-        slots["organization_id"] = organization_id
-
-        from core.adapters.customer_resolver import coerce_positive_customer_id
-
-        customer_id = coerce_positive_customer_id(kwargs.get("customer_id"))
-        if customer_id is None and isinstance(session_state, dict):
-            customer_id = coerce_positive_customer_id(session_state.get("customer_id"))
-        if customer_id is None:
-            customer_id = coerce_positive_customer_id(slots.get("customer_id"))
-        if customer_id is not None:
-            slots["customer_id"] = customer_id
+        slots = self._apply_organization_id(
+            dict(slots) if isinstance(slots, dict) else {},
+            organization_id=organization_id,
+        )
+        slots = self._inject_customer_id(
+            slots, session_state=session_state, kwargs=kwargs
+        )
 
         if action == "SEARCH_AVAILABILITY":
-            from core.planning.temporal_proposal import (
-                resolve_execution_proposals,
-                slots_for_availability_search,
-            )
-
-            _exec_proposals = resolve_execution_proposals(
-                plan,
-                session_state,
-                context=plan.get("execution_proposal_context"),
-            )
-            slots = slots_for_availability_search(
+            slots = self._prepare_availability_slots(
                 slots,
-                _exec_proposals["date_proposal"],
-                _exec_proposals["time_proposal"],
+                execution_plan=plan,
+                session_state=session_state,
             )
 
         plan["slots"] = slots
 
-        try:
-            from core.execution.catalog_resolver import (
-                load_sku_to_catalog_id_for_org,
-            )
-
-            plan["sku_to_catalog_id"] = load_sku_to_catalog_id_for_org(
-                organization_id, organization_client
-            )
-        except Exception as e:
-            logger.debug("Could not load sku_to_catalog_id for execution: %s", e)
-            plan.setdefault("sku_to_catalog_id", {})
+        self._attach_catalog_mapping(
+            plan,
+            organization_id=organization_id,
+            organization_client=organization_client,
+        )
 
         plan["action"] = action
 
         if action == "FINALIZE_RESERVATION":
-            plan_facts: Dict[str, Any] = {}
-            if session_state and isinstance(session_state, dict):
-                plan_facts = session_state.get("facts", {})
-                if not isinstance(plan_facts, dict):
-                    plan_facts = {}
-
-            if organization_client:
-                if not plan_facts.get("org"):
-                    try:
-                        org_details = organization_client.get_details(organization_id)
-                        if isinstance(org_details, dict):
-                            org_data = (
-                                org_details.get("organization") or org_details
-                            )
-                            if org_data and isinstance(org_data, dict):
-                                if not plan_facts:
-                                    plan_facts = {}
-                                plan_facts["org"] = org_data
-                    except Exception as e:
-                        logger.debug(
-                            "Failed to fetch org data for FINALIZE_RESERVATION "
-                            f"payment verification: {e}"
-                        )
-
-            if plan_facts:
-                plan["facts"] = plan_facts
-                logger.debug(
-                    "Added facts to plan for FINALIZE_RESERVATION execution "
-                    "(payment verification)"
-                )
+            self._attach_finalize_facts(
+                plan,
+                session_state=session_state,
+                organization_client=organization_client,
+                organization_id=organization_id,
+            )
 
         if action == "CONFIRM_APPOINTMENT":
-            if "datetime_range" not in slots or not isinstance(
-                slots.get("datetime_range"), dict
-            ):
-                resolved_datetime_range = None
-
-                if isinstance(session_state, dict):
-                    resolved_datetime_range = session_state.get(
-                        "resolved_datetime_range"
-                    )
-                    if not resolved_datetime_range:
-                        planning = session_state.get("planning")
-                        if isinstance(planning, dict):
-                            resolved_datetime_range = planning.get(
-                                "bound_datetime"
-                            )
-
-                if resolved_datetime_range and isinstance(
-                    resolved_datetime_range, dict
-                ):
-                    slots["datetime_range"] = resolved_datetime_range
-                    plan["slots"] = slots
-                    logger.debug(
-                        "[DATETIME_RANGE] Injected resolved_datetime_range into "
-                        f"slots for CONFIRM_APPOINTMENT: "
-                        f"start={resolved_datetime_range.get('start')}, "
-                        f"end={resolved_datetime_range.get('end')}"
-                    )
+            slots = self._inject_bound_datetime(
+                slots, session_state=session_state
+            )
+            plan["slots"] = slots
 
         if action in ("CONFIRM_APPOINTMENT", "CREATE_BOOKING_HOLD"):
+            from core.adapters.customer_resolver import coerce_positive_customer_id
+
             if coerce_positive_customer_id(slots.get("customer_id")) is None:
                 logger.info(
                     "Blocking %s: tenant customer_id is unresolved",
@@ -315,15 +449,12 @@ class ExecutionCoordinator:
                 blocked_plan = dict(plan)
                 blocked_plan["status"] = "NEEDS_CLARIFICATION"
                 blocked_plan["slots"] = slots
-                # Durable confirmation stays pending (Stage 06 never writes
-                # confirmed). Identity block does not mutate confirmation_state.
                 response = build_planning_response_from_plan(blocked_plan)
-                response["text"] = (
-                    "Before I can confirm that, I need a phone number or email "
-                    "so we can attach the booking to your account."
+                from core.engine.outcome_builder import apply_execution_blocked_text
+
+                apply_execution_blocked_text(
+                    response, reason="CUSTOMER_ID_REQUIRED"
                 )
-                if isinstance(response.get("outcome"), dict):
-                    response["outcome"]["text"] = response["text"]
                 return ExecutionGateResult(
                     path="skipped",
                     response=response,
@@ -331,6 +462,11 @@ class ExecutionCoordinator:
                     plan_status=blocked_plan.get("status"),
                     plan_action=plan_action,
                     can_execute=False,
+                    blocked=ExecutionBlocked(
+                        reason="CUSTOMER_ID_REQUIRED",
+                        required_input="phone_or_email",
+                        action=str(action) if action else None,
+                    ),
                 )
 
         return ExecutionGateResult(
@@ -346,6 +482,173 @@ class ExecutionCoordinator:
             slots=slots,
             session_state=session_state,
         )
+
+    @staticmethod
+    def _resolve_execution_client(
+        *,
+        action: Any,
+        client_name: str,
+        availability_client: Optional[Any],
+        kwargs: Dict[str, Any],
+    ) -> tuple[Any, Optional[str]]:
+        """Return (client, block_reason) where block_reason is None when ok."""
+        if client_name == "availability_client":
+            return availability_client, (
+                "missing_client" if availability_client is None else None
+            )
+        if client_name == "booking_client":
+            execution_client = kwargs.get("booking_client")
+            if not execution_client:
+                logger.warning(
+                    f"Execution step {action} requires {client_name}, "
+                    f"but it was not provided"
+                )
+                return None, "missing_client"
+            return execution_client, None
+        logger.warning(
+            f"Unknown client name '{client_name}' for execution step {action}"
+        )
+        return None, "unknown_client"
+
+    @staticmethod
+    def _apply_organization_id(
+        slots: Dict[str, Any], *, organization_id: int
+    ) -> Dict[str, Any]:
+        slot_org = slots.get("organization_id")
+        if slot_org is not None and int(slot_org) != int(organization_id):
+            logger.warning(
+                "Ignoring conflicting slots.organization_id=%s (request=%s)",
+                slot_org,
+                organization_id,
+            )
+        slots["organization_id"] = organization_id
+        return slots
+
+    @staticmethod
+    def _inject_customer_id(
+        slots: Dict[str, Any],
+        *,
+        session_state: Optional[Dict[str, Any]],
+        kwargs: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        from core.adapters.customer_resolver import coerce_positive_customer_id
+
+        customer_id = coerce_positive_customer_id(kwargs.get("customer_id"))
+        if customer_id is None and isinstance(session_state, dict):
+            customer_id = coerce_positive_customer_id(session_state.get("customer_id"))
+        if customer_id is None:
+            customer_id = coerce_positive_customer_id(slots.get("customer_id"))
+        if customer_id is not None:
+            slots["customer_id"] = customer_id
+        return slots
+
+    @staticmethod
+    def _prepare_availability_slots(
+        slots: Dict[str, Any],
+        *,
+        execution_plan: Dict[str, Any],
+        session_state: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        from core.planning.temporal_proposal import (
+            resolve_execution_proposals,
+            slots_for_availability_search,
+        )
+
+        _exec_proposals = resolve_execution_proposals(
+            execution_plan,
+            session_state,
+            context=execution_plan.get("execution_proposal_context"),
+        )
+        return slots_for_availability_search(
+            slots,
+            _exec_proposals["date_proposal"],
+            _exec_proposals["time_proposal"],
+        )
+
+    @staticmethod
+    def _attach_catalog_mapping(
+        execution_plan: Dict[str, Any],
+        *,
+        organization_id: int,
+        organization_client: Optional[Any],
+    ) -> None:
+        try:
+            from core.execution.catalog_resolver import (
+                load_sku_to_catalog_id_for_org,
+            )
+
+            execution_plan["sku_to_catalog_id"] = load_sku_to_catalog_id_for_org(
+                organization_id, organization_client
+            )
+        except Exception as e:
+            logger.debug("Could not load sku_to_catalog_id for execution: %s", e)
+            execution_plan.setdefault("sku_to_catalog_id", {})
+
+    @staticmethod
+    def _attach_finalize_facts(
+        execution_plan: Dict[str, Any],
+        *,
+        session_state: Optional[Dict[str, Any]],
+        organization_client: Optional[Any],
+        organization_id: int,
+    ) -> None:
+        plan_facts: Dict[str, Any] = {}
+        if session_state and isinstance(session_state, dict):
+            plan_facts = session_state.get("facts", {})
+            if not isinstance(plan_facts, dict):
+                plan_facts = {}
+
+        if organization_client:
+            if not plan_facts.get("org"):
+                try:
+                    org_details = organization_client.get_details(organization_id)
+                    if isinstance(org_details, dict):
+                        org_data = org_details.get("organization") or org_details
+                        if org_data and isinstance(org_data, dict):
+                            if not plan_facts:
+                                plan_facts = {}
+                            plan_facts["org"] = org_data
+                except Exception as e:
+                    logger.debug(
+                        "Failed to fetch org data for FINALIZE_RESERVATION "
+                        f"payment verification: {e}"
+                    )
+
+        if plan_facts:
+            execution_plan["facts"] = plan_facts
+            logger.debug(
+                "Added facts to plan for FINALIZE_RESERVATION execution "
+                "(payment verification)"
+            )
+
+    @staticmethod
+    def _inject_bound_datetime(
+        slots: Dict[str, Any],
+        *,
+        session_state: Optional[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if "datetime_range" in slots and isinstance(
+            slots.get("datetime_range"), dict
+        ):
+            return slots
+
+        resolved_datetime_range = None
+        if isinstance(session_state, dict):
+            resolved_datetime_range = session_state.get("resolved_datetime_range")
+            if not resolved_datetime_range:
+                planning = session_state.get("planning")
+                if isinstance(planning, dict):
+                    resolved_datetime_range = planning.get("bound_datetime")
+
+        if resolved_datetime_range and isinstance(resolved_datetime_range, dict):
+            slots["datetime_range"] = resolved_datetime_range
+            logger.debug(
+                "[DATETIME_RANGE] Injected resolved_datetime_range into "
+                f"slots for CONFIRM_APPOINTMENT: "
+                f"start={resolved_datetime_range.get('start')}, "
+                f"end={resolved_datetime_range.get('end')}"
+            )
+        return slots
 
     def run(
         self,

@@ -11,6 +11,33 @@ from typing import Any, Dict
 
 logger = logging.getLogger(__name__)
 
+# Exact user-facing copy for operational blocks (owned here, not Execution).
+_EXECUTION_BLOCKED_TEXT: Dict[str, str] = {
+    "CUSTOMER_ID_REQUIRED": (
+        "Before I can confirm that, I need a phone number or email "
+        "so we can attach the booking to your account."
+    ),
+}
+
+
+def apply_execution_blocked_text(
+    response: Dict[str, Any],
+    *,
+    reason: str,
+) -> Dict[str, Any]:
+    """Attach stable blocked wording owned outside ExecutionCoordinator."""
+    text = _EXECUTION_BLOCKED_TEXT.get(reason)
+    if not text:
+        return response
+    response["text"] = text
+    outcome = response.get("outcome")
+    if isinstance(outcome, dict):
+        outcome["text"] = text
+    result = response.get("result")
+    if isinstance(result, dict) and result is not outcome:
+        result["text"] = text
+    return response
+
 
 def _copy_fallback_metadata(source: Dict[str, Any], target: Dict[str, Any]) -> None:
     """Preserve explicit NLU-fallback markers through response shaping."""
