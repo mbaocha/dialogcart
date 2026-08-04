@@ -94,7 +94,7 @@ def test_has_committed_create_appointment():
 
 def test_booking_workflow_consumes_confirmation_after_successful_commit():
     session_state = {"confirmation_state": "pending"}
-    merged = {"confirmation_state": "confirmed"}
+    merged = {"confirmation_state": "pending"}
     plan = {
         "action": "CONFIRM_APPOINTMENT",
         "slots": {},
@@ -116,6 +116,92 @@ def test_booking_workflow_consumes_confirmation_after_successful_commit():
     assert slots["booking_id"] == "bk-99"
     assert get_confirmation_state(session_state) is None
     assert get_confirmation_state(merged) is None
+
+
+def test_stage_confirmation_yes_keeps_pending_and_satisfies():
+    """Gate YES must not write durable confirmed; turn evidence satisfies policy."""
+    payload = _commit_ready_payload()
+    payload["confirmation_state"] = "pending"
+    decision = _resolve_confirmation(
+        payload=payload,
+        intent_decision_gate_action=ConfirmationGateTurn.YES,
+        confirm_booking_continuation=True,
+    )
+
+    assert decision.confirmation_state == "pending"
+    assert get_confirmation_state(payload) == "pending"
+    assert decision.user_confirmation_satisfied is True
+    assert decision.awaiting_user_confirmation is False
+    assert get_confirmation_state(payload) != "confirmed"
+
+
+def test_stage_confirmation_yes_without_continuation_flag_still_satisfies():
+    """Gate YES alone is acceptance evidence even if continuation flag is unset."""
+    payload = _commit_ready_payload()
+    payload["confirmation_state"] = "pending"
+    decision = _resolve_confirmation(
+        payload=payload,
+        intent_decision_gate_action=ConfirmationGateTurn.YES,
+        confirm_booking_continuation=False,
+    )
+
+    assert decision.confirmation_state == "pending"
+    assert decision.user_confirmation_satisfied is True
+    assert decision.awaiting_user_confirmation is False
+    assert get_confirmation_state(payload) == "pending"
+
+
+def test_stage08_selects_confirm_appointment_after_yes_without_durable_confirmed():
+    """YES evidence + pending durable state must still select CONFIRM_APPOINTMENT."""
+    from core.planning.pipeline.decision import DecisionInput, decide
+    from core.planning.pipeline.types import CapabilityDecision
+
+    payload = _commit_ready_payload()
+    payload["confirmation_state"] = "pending"
+    payload["time_match_outcome"] = "TIME_MATCH_EXACT"
+    working_turn = WorkingTurn(
+        payload=payload,
+        effective_collected_slots=dict(payload["_effective_collected_slots"]),
+    )
+    confirmation = _resolve_confirmation(
+        payload=payload,
+        working_turn=working_turn,
+        intent_decision_gate_action=ConfirmationGateTurn.YES,
+        confirm_booking_continuation=True,
+    )
+    assert confirmation.confirmation_state == "pending"
+    assert confirmation.user_confirmation_satisfied is True
+
+    slots = dict(payload["_effective_collected_slots"])
+    decision_plan = decide(
+        DecisionInput(
+            attached_request=AttachedRequest(
+                planning_intent="CREATE_APPOINTMENT",
+                turn_operation="NONE",
+                session_reset_occurred=False,
+                confirm_booking_continuation=True,
+                gate_action=ConfirmationGateTurn.YES,
+            ),
+            working_turn=working_turn,
+            slot_state=SlotTurnState(
+                intent_name="CREATE_APPOINTMENT",
+                missing_slots=[],
+                effective_collected_slots=slots,
+                base_status="READY",
+                needs_clarification=False,
+            ),
+            availability=AvailabilityDecision(availability_ready=True),
+            confirmation=confirmation,
+            capability=CapabilityDecision(),
+            session_state={"confirmation_state": "pending", "slots": slots},
+            organization_id=1,
+        )
+    )
+    plan = decision_plan.plan
+    assert plan.get("action") == "CONFIRM_APPOINTMENT"
+    assert plan.get("status") == "READY"
+    assert get_confirmation_state(payload) == "pending"
+    assert get_confirmation_state(payload) != "confirmed"
 
 
 def test_stage_confirmation_enters_pending_when_commit_ready():

@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from core.engine.execution_coordinator import ExecutionCoordinator
+from core.session.confirmation_gate import get_confirmation_state
 
 
 def _confirm_plan(**slot_overrides):
@@ -42,34 +43,35 @@ def _resolve(coordinator, *, plan, session_state=None, kwargs=None):
     )
 
 
-def test_confirm_blocked_without_customer_id():
+def test_confirm_blocked_without_customer_id_leaves_pending():
+    """Identity block must not mutate confirmation — durable stays pending."""
     coordinator = ExecutionCoordinator()
-    session = {"confirmation_state": "confirmed", "slots": {"service_id": "premium haircut"}}
+    session = {
+        "confirmation_state": "pending",
+        "slots": {"service_id": "premium haircut"},
+    }
     gate = _resolve(coordinator, plan=_confirm_plan(), session_state=session)
     assert gate.path == "skipped"
     assert gate.can_execute is False
     assert gate.response is not None
     assert "phone" in (gate.response.get("text") or "").lower()
-    from core.session.confirmation_gate import get_confirmation_state
-
     assert get_confirmation_state(session) == "pending"
-    assert get_confirmation_state(gate.plan) == "pending"
+    assert get_confirmation_state(gate.plan) != "confirmed"
 
 
 def test_confirm_ready_with_session_customer_id():
     coordinator = ExecutionCoordinator()
+    session = {"customer_id": 55, "confirmation_state": "pending"}
     gate = _resolve(
         coordinator,
         plan=_confirm_plan(),
-        session_state={"customer_id": 55, "confirmation_state": "confirmed"},
+        session_state=session,
     )
     assert gate.path == "ready"
     assert gate.can_execute is True
     assert gate.slots.get("customer_id") == 55
-    from core.session.confirmation_gate import get_confirmation_state
-
-    # Successful eligibility must not roll confirmed back.
-    assert get_confirmation_state({"confirmation_state": "confirmed"}) == "confirmed"
+    # Eligibility does not consume or rewrite confirmation_state.
+    assert get_confirmation_state(session) == "pending"
 
 
 def test_confirm_ready_with_kwargs_customer_id():
@@ -83,19 +85,18 @@ def test_confirm_ready_with_kwargs_customer_id():
     assert gate.slots.get("customer_id") == 77
 
 
-def test_identity_block_rolls_merged_luma_confirmed_to_pending():
+def test_identity_block_preserves_pending_on_merged_and_session():
+    """Coordinator must not repair confirmation; pending remains pending."""
     coordinator = ExecutionCoordinator()
-    merged = {"confirmation_state": "confirmed", "slots": {"service_id": "x"}}
+    merged = {"confirmation_state": "pending", "slots": {"service_id": "x"}}
     plan = _confirm_plan()
     plan["_merged_luma_response"] = merged
-    session = {"confirmation_state": "confirmed"}
+    session = {"confirmation_state": "pending"}
     gate = _resolve(coordinator, plan=plan, session_state=session)
     assert gate.path == "skipped"
-    from core.session.confirmation_gate import get_confirmation_state
-
     assert get_confirmation_state(session) == "pending"
     assert get_confirmation_state(merged) == "pending"
-    assert get_confirmation_state(gate.plan) == "pending"
+    assert get_confirmation_state(gate.plan) != "confirmed"
     assert gate.response.get("_merged_luma_response") is merged
     assert get_confirmation_state(gate.response["_merged_luma_response"]) == "pending"
 
@@ -104,13 +105,15 @@ def test_identity_block_then_resolved_customer_allows_fresh_confirm():
     """After identity block leaves pending, a later turn with customer_id can execute."""
     coordinator = ExecutionCoordinator()
     session = {
-        "confirmation_state": "confirmed",
-        "slots": {"service_id": "premium haircut", "date": "2026-08-04", "time": "09:00"},
+        "confirmation_state": "pending",
+        "slots": {
+            "service_id": "premium haircut",
+            "date": "2026-08-04",
+            "time": "09:00",
+        },
     }
     blocked = _resolve(coordinator, plan=_confirm_plan(), session_state=session)
     assert blocked.path == "skipped"
-    from core.session.confirmation_gate import get_confirmation_state
-
     assert get_confirmation_state(session) == "pending"
 
     session["customer_id"] = 91001
@@ -122,4 +125,23 @@ def test_identity_block_then_resolved_customer_allows_fresh_confirm():
     assert ready.path == "ready"
     assert ready.slots.get("customer_id") == 91001
     # Gate does not consume pending — successful YES still required via Stage 06.
+    assert get_confirmation_state(session) == "pending"
+
+
+def test_coordinator_never_writes_confirmed():
+    """ExecutionCoordinator must remain confirmation-lifecycle agnostic."""
+    coordinator = ExecutionCoordinator()
+    session = {"confirmation_state": "pending"}
+    merged = {"confirmation_state": "pending"}
+    plan = _confirm_plan()
+    plan["_merged_luma_response"] = merged
+
+    blocked = _resolve(coordinator, plan=plan, session_state=session)
+    assert blocked.path == "skipped"
+    assert get_confirmation_state(session) == "pending"
+    assert get_confirmation_state(merged) == "pending"
+
+    session["customer_id"] = 1
+    ready = _resolve(coordinator, plan=_confirm_plan(), session_state=session)
+    assert ready.path == "ready"
     assert get_confirmation_state(session) == "pending"

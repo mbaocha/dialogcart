@@ -401,18 +401,10 @@ def resolve_confirmation(
 
 
 
-    if (
-
-        gate_action == ConfirmationGateTurn.YES
-
-        or confirm_booking_continuation
-    ):
-
-        set_confirmation_state(payload, "confirmed")
-
-        confirmation_state = "confirmed"
-
-
+    # Gate YES / continuation: user acceptance is turn evidence only
+    # (user_confirmation_satisfied via confirm_booking_continuation). Durable
+    # confirmation_state stays pending until commit consume or invalidation —
+    # never write confirmation_state="confirmed" onto working/session state.
 
     if gate_action == ConfirmationGateTurn.NO and gate_booking_intent:
 
@@ -673,9 +665,15 @@ def resolve_confirmation(
 
 
 
+    # Stage 01 sets confirm_booking_continuation on gate YES; treat YES itself
+    # as acceptance so unit callers that pass gate_action alone stay correct.
+    acceptance = bool(
+        confirm_booking_continuation
+        or gate_action == ConfirmationGateTurn.YES
+    )
     user_confirmation_satisfied = derive_user_confirmation_satisfied(
         confirmation_state,
-        confirm_booking_continuation=confirm_booking_continuation,
+        confirm_booking_continuation=acceptance,
     )
 
     awaiting = bool(

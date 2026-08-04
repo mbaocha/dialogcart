@@ -30,7 +30,7 @@ def test_confirm_continuation_with_awaiting_confirmation_status():
     Case A: Session status = AWAITING_CONFIRMATION
     User says "confirmed"
     → Should continue durable intent
-    → Should set confirmation_state="confirmed" (tested in orchestrator)
+    → Turn acceptance via confirm_booking_continuation (durable stays pending)
     """
     # Mock Luma response with CONFIRM_* intent
     luma_response = {

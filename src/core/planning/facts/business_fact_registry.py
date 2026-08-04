@@ -65,8 +65,9 @@ def derive_user_confirmation_satisfied(
 ) -> bool:
     """True when the user has accepted an outstanding booking confirmation.
 
-    Encapsulates persisted ``confirmation_state`` and the turn-level gate ACCEPT
-    signal from ``AttachedRequest.confirm_booking_continuation``.
+    Encapsulates legacy durable ``confirmation_state==\"confirmed\"`` (should not
+    be written by Stage 06) and the turn-level gate ACCEPT signal from
+    ``AttachedRequest.confirm_booking_continuation`` / gate YES.
     """
     _ = luma_response
     if confirmation_state == "confirmed":

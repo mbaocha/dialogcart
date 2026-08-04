@@ -13,25 +13,6 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
-def _rollback_confirmed_on_identity_block(
-    *,
-    session_state: Optional[Dict[str, Any]],
-    plan: Dict[str, Any],
-) -> None:
-    """Force confirmation back to pending when commit is blocked before side effects."""
-    from core.session.confirmation_gate import set_confirmation_state
-
-    set_confirmation_state(plan, "pending")
-    if isinstance(session_state, dict):
-        set_confirmation_state(session_state, "pending")
-    merged = plan.get("_merged_luma_response")
-    if isinstance(merged, dict):
-        set_confirmation_state(merged, "pending")
-    decision = plan.get("_decision")
-    if isinstance(decision, dict):
-        set_confirmation_state(decision, "pending")
-
-
 @dataclass
 class ExecutionGateResult:
     """Outcome of eligibility + preparation (before tool dispatch)."""
@@ -334,14 +315,8 @@ class ExecutionCoordinator:
                 blocked_plan = dict(plan)
                 blocked_plan["status"] = "NEEDS_CLARIFICATION"
                 blocked_plan["slots"] = slots
-                # YES may have written confirmation_state=confirmed before this
-                # pre-commit gate. Do not persist a false confirmed durable state
-                # when identity blocks side effects — roll back to pending so the
-                # booking remains resumable and requires a fresh YES after identity.
-                _rollback_confirmed_on_identity_block(
-                    session_state=session_state,
-                    plan=blocked_plan,
-                )
+                # Durable confirmation stays pending (Stage 06 never writes
+                # confirmed). Identity block does not mutate confirmation_state.
                 response = build_planning_response_from_plan(blocked_plan)
                 response["text"] = (
                     "Before I can confirm that, I need a phone number or email "
