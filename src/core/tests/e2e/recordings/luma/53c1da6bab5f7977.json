@@ -70,10 +70,10 @@
       "end_date_expression": null,
       "end_time": null,
       "end_time_expression": null,
-      "expression": "July 21",
+      "expression": "july 21",
       "mode": "single_day",
       "start_date": "2026-07-21",
-      "start_date_expression": "21st",
+      "start_date_expression": "july 21",
       "start_time": null,
       "start_time_expression": null
     },

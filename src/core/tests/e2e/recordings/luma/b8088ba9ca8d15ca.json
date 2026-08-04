@@ -58,7 +58,7 @@
     },
     "intent": {
       "confidence": 0.95,
-      "name": "CREATE_APPOINTMENT"
+      "name": "CORRECTION"
     },
     "temporal": {
       "confidence": 0.95,

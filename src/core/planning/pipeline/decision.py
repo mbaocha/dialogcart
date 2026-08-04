@@ -62,10 +62,15 @@ class AvailabilityInvalidationEvidence:
 
 @dataclass(frozen=True)
 class BoundDatetimeClearEvidence:
-    """Evaluate evidence: prior bound datetime must be ignored this turn."""
+    """Evaluate evidence: prior bound datetime must be ignored this turn.
+
+    Stage 06 emits this; planning invalidation applies it before Stage 04/05 rerun.
+    ``preserve_current_turn_time`` keeps current-turn ``time_proposal`` when set.
+    """
 
     cleared: bool = False
     reason_code: str = "BOUND_DATETIME_CLEARED"
+    preserve_current_turn_time: bool = False
 
 
 @dataclass(frozen=True)

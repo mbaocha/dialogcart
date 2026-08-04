@@ -39,7 +39,7 @@
       "flexi haircut + prunning"
     ],
     "temporal": {
-      "confidence": 0.95,
+      "confidence": 0.98,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,

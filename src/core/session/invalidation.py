@@ -26,6 +26,68 @@ _AVAILABILITY_STATE_KEYS = frozenset(
 )
 
 
+def sync_working_slot_projections(
+    state: Dict[str, Any],
+    slots: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Keep payload.slots, _effective_collected_slots, and returned map aligned."""
+    if slots is None:
+        slots = dict(state.get("slots") or {})
+    else:
+        slots = dict(slots)
+    state["slots"] = slots
+    state["_effective_collected_slots"] = slots
+    return slots
+
+
+def apply_bound_datetime_clear(
+    state: Optional[Dict[str, Any]],
+    *,
+    preserve_current_turn_time: bool = False,
+    reason: str = "bound_datetime_cleared",
+) -> Dict[str, Any]:
+    """Clear prior bound datetime from a working/planning state.
+
+    Does not consume confirmation authorization — Stage 06 owns that separately.
+    Synchronizes all three working slot projections via ``sync_working_slot_projections``.
+    """
+    if not isinstance(state, dict):
+        return {}
+
+    extra_state: Set[str] = {"time_match_outcome", "time_resolution"}
+    if not preserve_current_turn_time:
+        extra_state.add("time_proposal")
+
+    clear_booking_state(
+        state,
+        clear_time=True,
+        clear_confirmation=False,
+        clear_extra_state=extra_state,
+        reason=reason,
+    )
+    return sync_working_slot_projections(state)
+
+
+def apply_confirmation_bound_clear_evidence(
+    working_turn: Any,
+    confirmation: Any,
+) -> None:
+    """Apply Stage 06 BoundDatetimeClearEvidence onto the working turn only."""
+    evidence = getattr(confirmation, "bound_datetime_clear", None)
+    if evidence is None or not getattr(evidence, "cleared", False):
+        return
+    slots = apply_bound_datetime_clear(
+        working_turn.payload,
+        preserve_current_turn_time=bool(
+            getattr(evidence, "preserve_current_turn_time", False)
+        ),
+        reason=str(
+            getattr(evidence, "reason_code", None) or "bound_datetime_cleared"
+        ),
+    )
+    working_turn.effective_collected_slots = slots
+
+
 def clear_booking_state(
     state: Optional[Dict[str, Any]],
     *,
@@ -35,13 +97,15 @@ def clear_booking_state(
     clear_service: bool = False,
     clear_extra_slots: Optional[Set[str]] = None,
     clear_extra_state: Optional[Set[str]] = None,
+    clear_confirmation: bool = True,
     reason: str = "",
 ) -> Dict[str, Any]:
     """Apply planner-selected booking invalidation to a processing state."""
     if not isinstance(state, dict):
         return {}
 
-    set_confirmation_state(state, None)
+    if clear_confirmation:
+        set_confirmation_state(state, None)
 
     if clear_time or clear_date or clear_service or clear_extra_slots:
         slots = dict(state.get("slots") or {})
@@ -211,6 +275,7 @@ def apply_invalidation(
             clear_slots=clear_slots,
             clear_state=clear_state,
             reason=effective_reason,
+            clear_confirmation=bool(rule.get("clear_confirmation", True)),
         )
     return state
 
@@ -269,9 +334,15 @@ def _apply_confirmation_rule(
     clear_slots: Set[str],
     clear_state: Set[str],
     reason: str,
+    clear_confirmation: bool = True,
 ) -> Dict[str, Any]:
     flags = _confirmation_flags_from_sets(clear_slots, clear_state)
-    return clear_booking_state(state, reason=reason, **flags)
+    return clear_booking_state(
+        state,
+        reason=reason,
+        clear_confirmation=clear_confirmation,
+        **flags,
+    )
 
 
 def _invalidate_ambiguous_service(

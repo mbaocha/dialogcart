@@ -31,7 +31,7 @@
       ]
     },
     "intent": {
-      "confidence": 0.99,
+      "confidence": 0.95,
       "name": "CREATE_APPOINTMENT"
     },
     "service_candidates": [

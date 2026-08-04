@@ -401,6 +401,8 @@ def test_stage09_renders_reject_wording_from_evidence():
 
 def test_stage_confirmation_clears_on_another_request():
     """AVAILABILITY + ANOTHER_REQUEST supersedes pending confirmation and invalidates trust."""
+    from core.session.invalidation import apply_confirmation_bound_clear_evidence
+
     payload = _commit_ready_payload()
     session = {
         "intent_name": "CREATE_APPOINTMENT",
@@ -417,14 +419,30 @@ def test_stage_confirmation_clears_on_another_request():
         "presented_availability": {"search_date": "2026-07-10", "slots": []},
         "availability_fingerprint": "fp-test",
     }
-    decision = _resolve_confirmation(
+    working_turn = WorkingTurn(
         payload=payload,
-        session_state=session,
-        intent_decision_gate_action=ConfirmationGateTurn.ANOTHER_REQUEST,
-        turn_operation="AVAILABILITY",
+        effective_collected_slots=dict(payload["_effective_collected_slots"]),
     )
-
-    effective_slots = payload.get("_effective_collected_slots") or payload.get("slots") or {}
+    decision = resolve_confirmation(
+        attached_request=AttachedRequest(
+            planning_intent="CREATE_APPOINTMENT",
+            turn_operation="AVAILABILITY",
+            session_reset_occurred=False,
+            confirm_booking_continuation=False,
+            gate_action=ConfirmationGateTurn.ANOTHER_REQUEST,
+        ),
+        slot_state=SlotTurnState(
+            intent_name="CREATE_APPOINTMENT",
+            missing_slots=[],
+            effective_collected_slots=dict(payload["_effective_collected_slots"]),
+            base_status="AWAITING_CONFIRMATION",
+        ),
+        working_turn=working_turn,
+        availability=AvailabilityDecision(availability_ready=True),
+        session_state=session,
+        gate_booking_intent="CREATE_APPOINTMENT",
+        user_id="test",
+    )
 
     assert decision.confirmation_state is None
     assert get_confirmation_state(payload) is None
@@ -440,11 +458,22 @@ def test_stage_confirmation_clears_on_another_request():
     )
     assert decision.bound_datetime_clear is not None
     assert decision.bound_datetime_clear.cleared is True
+    assert decision.bound_datetime_clear.preserve_current_turn_time is False
     assert decision.slots_adjusted is True
+    # Stage 06 emits evidence only — booking fields stay until invalidation apply.
+    assert payload.get("slots", {}).get("time") == "10:00"
+    assert payload.get("resolved_datetime_range") is not None
+
+    apply_confirmation_bound_clear_evidence(working_turn, decision)
+
+    effective_slots = payload.get("_effective_collected_slots") or payload.get("slots") or {}
     assert payload.get("resolved_datetime_range") is None
     assert effective_slots.get("time") in (None, "")
     assert effective_slots.get("service_id") == "premium"
     assert effective_slots.get("date") == "2026-07-10"
+    assert working_turn.effective_collected_slots.get("time") in (None, "")
+    assert working_turn.effective_collected_slots is payload["_effective_collected_slots"]
+    assert payload["slots"] is payload["_effective_collected_slots"]
 
     # Stage 08 omits superseded session binding when deriving facts
     # (BoundDatetimeClearEvidence). Do not resurrect session.resolved_datetime_range.
@@ -460,6 +489,50 @@ def test_stage_confirmation_clears_on_another_request():
     )
     assert facts.user_confirmation_required is False
     assert facts.time_selection_ready is False
+
+
+def test_stage06_availability_preserves_current_turn_time_flag():
+    """Availability with current-turn time emits preserve_current_turn_time=True."""
+    from core.session.invalidation import apply_confirmation_bound_clear_evidence
+
+    payload = _commit_ready_payload()
+    payload["_current_turn_has_time"] = True
+    payload["time_proposal"] = {"mode": "exact", "value": "11:00"}
+    session = {
+        "intent_name": "CREATE_APPOINTMENT",
+        "confirmation_state": "pending",
+        "slots": dict(payload["slots"]),
+        "resolved_datetime_range": dict(payload["resolved_datetime_range"]),
+    }
+    working_turn = WorkingTurn(
+        payload=payload,
+        effective_collected_slots=dict(payload["_effective_collected_slots"]),
+    )
+    decision = resolve_confirmation(
+        attached_request=AttachedRequest(
+            planning_intent="CREATE_APPOINTMENT",
+            turn_operation="AVAILABILITY",
+            session_reset_occurred=False,
+            gate_action=ConfirmationGateTurn.ANOTHER_REQUEST,
+        ),
+        slot_state=SlotTurnState(
+            intent_name="CREATE_APPOINTMENT",
+            missing_slots=[],
+            effective_collected_slots=dict(payload["_effective_collected_slots"]),
+            base_status="AWAITING_CONFIRMATION",
+        ),
+        working_turn=working_turn,
+        availability=AvailabilityDecision(availability_ready=True),
+        session_state=session,
+        gate_booking_intent="CREATE_APPOINTMENT",
+        user_id="test",
+    )
+    assert decision.bound_datetime_clear is not None
+    assert decision.bound_datetime_clear.preserve_current_turn_time is True
+    apply_confirmation_bound_clear_evidence(working_turn, decision)
+    assert payload.get("time_proposal") == {"mode": "exact", "value": "11:00"}
+    assert payload.get("slots", {}).get("time") in (None, "")
+    assert payload.get("resolved_datetime_range") is None
 
 
 def test_business_facts_skip_confirmation_when_booking_id_exists():

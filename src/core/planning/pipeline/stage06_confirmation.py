@@ -258,99 +258,16 @@ def _preserve_session_availability_cache(
 
 
 
-def _emit_bound_datetime_for_projection(
-
-    payload: Dict[str, Any],
-
+def _bound_datetime_clear_evidence(
     *,
-
-    slots_adjusted: bool,
-
-) -> None:
-
-    """Emit bound-datetime projection state on the current working payload only.
-
-
-
-    May propagate a binding already present on the payload, or explicitly clear it.
-
-    Must not reconstruct binding from prior session state.
-
-    """
-
-    if slots_adjusted:
-
-        payload.pop("resolved_datetime_range", None)
-
-
-
-
-
-def _clear_bound_time_selection(
-
-    working_turn: WorkingTurn,
-
-    *,
-
     preserve_current_turn_time: bool,
-
 ) -> BoundDatetimeClearEvidence:
-
-    """Remove prior bound time selection; optionally keep current-turn time evidence."""
-
-    payload = working_turn.payload
-
-    kept_proposal = payload.get("time_proposal") if preserve_current_turn_time else None
-
-    kept_temporal = (
-
-        payload.get("temporal") if preserve_current_turn_time else None
-
-    )
-
-
-
-    slots = dict(working_turn.effective_collected_slots or payload.get("slots") or {})
-
-    for key in ("time", "has_datetime", "datetime_range"):
-
-        slots.pop(key, None)
-
-    payload["slots"] = slots
-
-    payload["_effective_collected_slots"] = slots
-
-    working_turn.effective_collected_slots = slots
-
-    payload.pop("resolved_datetime_range", None)
-
-    payload.pop("time_match_outcome", None)
-
-    payload.pop("time_resolution", None)
-
-
-
-    if preserve_current_turn_time:
-
-        if kept_proposal is not None:
-
-            payload["time_proposal"] = kept_proposal
-
-        if kept_temporal is not None:
-
-            payload["temporal"] = kept_temporal
-
-    else:
-
-        payload.pop("time_proposal", None)
-
+    """Semantic evidence that prior bound datetime is no longer authorized."""
     return BoundDatetimeClearEvidence(
         cleared=True,
         reason_code="BOUND_DATETIME_CLEARED",
+        preserve_current_turn_time=preserve_current_turn_time,
     )
-
-
-
 
 
 def _hydrate_working_slots_from_session(
@@ -509,12 +426,8 @@ def resolve_confirmation(
 
             confirmation_state = None
 
-        bound_datetime_clear = _clear_bound_time_selection(
-
-            working_turn,
-
+        bound_datetime_clear = _bound_datetime_clear_evidence(
             preserve_current_turn_time=preserve_current_turn_time,
-
         )
 
         slots_adjusted = True
@@ -575,12 +488,8 @@ def resolve_confirmation(
 
             else:
 
-                bound_datetime_clear = _clear_bound_time_selection(
-
-                    working_turn,
-
+                bound_datetime_clear = _bound_datetime_clear_evidence(
                     preserve_current_turn_time=False,
-
                 )
 
                 slots_adjusted = True
@@ -630,16 +539,6 @@ def resolve_confirmation(
             session_state=session_state,
 
         )
-
-
-
-    _emit_bound_datetime_for_projection(
-
-        payload,
-
-        slots_adjusted=slots_adjusted,
-
-    )
 
 
 

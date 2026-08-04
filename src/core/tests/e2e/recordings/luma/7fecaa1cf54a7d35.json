@@ -49,7 +49,7 @@
       "dates": [
         "2026-07-09"
       ],
-      "service": "premium",
+      "service": null,
       "service_id": "premium haircut",
       "times": []
     },

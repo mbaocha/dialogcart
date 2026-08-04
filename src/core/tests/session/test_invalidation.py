@@ -37,6 +37,68 @@ def test_reject_confirmation_trigger_clears_time():
     assert "resolved_datetime_range" not in session
 
 
+def test_apply_bound_datetime_clear_syncs_slot_projections():
+    from core.session.invalidation import (
+        apply_bound_datetime_clear,
+        sync_working_slot_projections,
+    )
+
+    state = {
+        "confirmation_state": "pending",
+        "slots": {
+            "service_id": "haircut",
+            "date": "2026-07-06",
+            "time": "09:00",
+            "has_datetime": True,
+        },
+        "_effective_collected_slots": {
+            "service_id": "haircut",
+            "date": "2026-07-06",
+            "time": "09:00",
+        },
+        "resolved_datetime_range": {
+            "start": "2026-07-06T09:00:00Z",
+            "end": "2026-07-06T09:30:00Z",
+        },
+        "time_proposal": {"mode": "exact", "value": "09:00"},
+        "time_match_outcome": "TIME_MATCH_EXACT",
+        "time_resolution": {"status": "bound"},
+    }
+    slots = apply_bound_datetime_clear(state, preserve_current_turn_time=False)
+    assert get_confirmation_state(state) == "pending"  # confirmation not consumed here
+    assert "time" not in slots
+    assert "has_datetime" not in slots
+    assert state["slots"] is state["_effective_collected_slots"]
+    assert state["slots"] is slots
+    assert "resolved_datetime_range" not in state
+    assert "time_proposal" not in state
+    assert "time_match_outcome" not in state
+    assert "time_resolution" not in state
+    assert slots.get("service_id") == "haircut"
+    assert slots.get("date") == "2026-07-06"
+
+    # Sync helper is the single projection writer.
+    synced = sync_working_slot_projections(state, {"service_id": "x", "date": "y"})
+    assert state["slots"] is synced
+    assert state["_effective_collected_slots"] is synced
+
+
+def test_apply_bound_datetime_clear_preserves_current_turn_proposal():
+    from core.session.invalidation import apply_bound_datetime_clear
+
+    state = {
+        "slots": {"service_id": "haircut", "date": "2026-07-06", "time": "09:00"},
+        "resolved_datetime_range": {"start": "2026-07-06T09:00:00Z"},
+        "time_proposal": {"mode": "exact", "value": "10:00"},
+        "time_match_outcome": "stale",
+    }
+    apply_bound_datetime_clear(state, preserve_current_turn_time=True)
+    assert state.get("time_proposal") == {"mode": "exact", "value": "10:00"}
+    assert "time" not in state["slots"]
+    assert "resolved_datetime_range" not in state
+    assert "time_match_outcome" not in state
+
+
 def test_booking_revision_time_trigger_keeps_availability():
     session = _pending_session()
     apply_invalidation(

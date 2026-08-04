@@ -48,16 +48,16 @@
       "times": []
     },
     "intent": {
-      "confidence": 0.85,
+      "confidence": 0.95,
       "name": "AVAILABILITY"
     },
     "temporal": {
-      "confidence": 0.9,
+      "confidence": 0.95,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,
       "end_time_expression": null,
-      "expression": "july 25",
+      "expression": "July 25",
       "mode": "single_day",
       "start_date": "2026-07-25",
       "start_date_expression": "july 25",

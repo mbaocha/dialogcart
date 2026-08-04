@@ -45,18 +45,18 @@
       "booking_id": null,
       "date_time_pairs": [],
       "dates": [],
-      "service": null,
+      "service": "premium haircut",
       "service_id": "premium haircut",
       "times": [
         "09:00"
       ]
     },
     "intent": {
-      "confidence": 0.6,
+      "confidence": 0.85,
       "name": "CREATE_APPOINTMENT"
     },
     "temporal": {
-      "confidence": 0.7,
+      "confidence": 0.9,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,

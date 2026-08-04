@@ -64,12 +64,12 @@
       "times": []
     },
     "intent": {
-      "confidence": 0.98,
+      "confidence": 0.95,
       "name": "AVAILABILITY"
     },
     "operation": "browse_previous",
     "temporal": {
-      "confidence": 0.98,
+      "confidence": 0.95,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,
