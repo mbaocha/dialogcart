@@ -21,6 +21,9 @@ from core.planning.pipeline.presentation_readiness import (
     build_presentation_readiness_evidence,
     has_planner_presentation,
 )
+from core.planning.pipeline.progress_clarification_readiness import (
+    build_progress_clarification_evidence,
+)
 from core.planning.pipeline.types import (
     AvailabilityDecision,
     CapabilityDecision,
@@ -63,22 +66,6 @@ def _exact_time_match_presenting_confirmation(
     return (
         time_match_outcome == TIME_MATCH_EXACT and not user_confirmation_satisfied
     )
-
-
-def _stage_for_execution_action(action: Optional[str], selected_step: Dict[str, Any]) -> Optional[str]:
-    if action == "FETCH_BOOKING":
-        return "IDENTIFY"
-    if action == "SEARCH_AVAILABILITY":
-        return "AVAILABILITY"
-    if action in (
-        "CONFIRM_APPOINTMENT",
-        "FINALIZE_RESERVATION",
-        "APPLY_MODIFICATION",
-        "CONFIRM_CANCELLATION",
-    ):
-        return "CONFIRM"
-    mode = selected_step.get("mode", "exploratory")
-    return "AVAILABILITY" if mode == "exploratory" else "CONFIRM"
 
 
 def _derive_stage_from_status(status: str) -> Optional[str]:
@@ -322,10 +309,6 @@ def build_decision_plan_from_evidence(
                 entity_schema=entity_schema,
             )
 
-            from core.planning.planner.progress_clarification import (
-                resolve_progress_ask,
-            )
-
             # Non-slot awaiting owners (confirmation / capability / time mismatch)
             # must not be rewritten into slot asks.
             skip_progress_clarification = status in (
@@ -333,44 +316,35 @@ def build_decision_plan_from_evidence(
                 "AWAITING_CAPABILITY",
             ) or time_match_outcome == TIME_MATCH_MISMATCH
 
-            progress_ask, progress_branch, progress_meta = (default_ask_next, None, None)
-            if not skip_progress_clarification:
-                progress_ask, progress_branch, progress_meta = resolve_progress_ask(
-                    selected_step=selected_step,
-                    candidates=candidate_evidence,
-                    promptable_slots=promptable_slots,
-                    entity_schema=entity_schema,
-                    default_ask_next=default_ask_next,
-                )
-                ask_next = progress_ask
+            progress = build_progress_clarification_evidence(
+                selected_step=selected_step,
+                candidates=candidate_evidence,
+                promptable_slots=promptable_slots,
+                entity_schema=entity_schema,
+                default_ask_next=default_ask_next,
+            )
 
-            if progress_branch == "progress_step_clarification":
+            if not skip_progress_clarification:
+                ask_next = progress.ask_next
+
+            if not skip_progress_clarification and progress.has_progress_clarification:
                 action = None
                 policy_client = None
-                action_branch = progress_branch
+                action_branch = progress.progress_branch
                 status = "NEEDS_CLARIFICATION"
                 awaiting = awaiting_from_ask_next(ask_next)
                 stage = "AVAILABILITY"
-                if isinstance(progress_meta, dict):
+                progress_meta = progress.progress_meta_dict()
+                if progress_meta is not None:
                     payload["_progress_clarification"] = progress_meta
-            elif progress_branch == "promptable_before_step":
-                action = None
-                policy_client = None
-                action_branch = progress_branch
-                if not ask_next and isinstance(progress_meta, dict):
-                    promptables = progress_meta.get("promptables") or []
-                    if promptables:
-                        ask_next = promptables[0]
-                status = "NEEDS_CLARIFICATION"
-                awaiting = awaiting_from_ask_next(ask_next)
-                stage = "AVAILABILITY"
-                if isinstance(progress_meta, dict):
-                    payload["_progress_clarification"] = progress_meta
-            elif selected_step and not skip_progress_clarification:
-                action = selected_step.get("action")
-                policy_client = selected_step.get("client")
+            elif (
+                not skip_progress_clarification
+                and progress.execution_step_selected
+            ):
+                action = progress.selected_execution_action
+                policy_client = progress.selected_policy_client
                 action_branch = "policy"
-                stage = _stage_for_execution_action(action, selected_step)
+                stage = progress.selected_stage
             elif skip_progress_clarification:
                 # Keep confirmation / capability / time-mismatch owners; do not
                 # attach a progress execution action beside non-slot awaiting.
