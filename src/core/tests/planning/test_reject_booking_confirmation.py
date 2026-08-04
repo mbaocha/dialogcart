@@ -98,6 +98,7 @@ def _run_reject_and_persist(user_id: str, session: dict):
     assert outcome.get("slots", {}).get("service_id") == "flexi haircut + pruning"
     assert outcome.get("slots", {}).get("date") == "2026-07-06"
     assert "time" not in (outcome.get("slots") or {})
+    assert outcome.get("missing_slots") == ["time"]
 
     # Persist the way the HTTP layer does.
     previous_session = session_store.get_session(1, user_id)
@@ -115,10 +116,14 @@ def _run_reject_and_persist(user_id: str, session: dict):
 
     session = session_store.get_session(1, user_id)
     assert session.get("confirmation_state") is None
-    assert session.get("booking") == {}
+    # Session V2 empty booking is a null-id shell, not {}.
+    booking = session.get("booking") or {}
+    assert booking.get("booking_id") is None
+    assert booking.get("booking_code") is None
     assert session.get("slots", {}).get("service_id") == "flexi haircut + pruning"
     assert session.get("slots", {}).get("date") == "2026-07-06"
     assert "time" not in (session.get("slots") or {})
+    assert session.get("missing_slots") == ["time"]
     assert session.get("presented_availability")
     assert session.get("status") == "NEEDS_CLARIFICATION"
     return result
@@ -132,10 +137,14 @@ def test_reject_action_clears_confirmation_and_asks_what_to_change():
 
 
 def test_reject_action_when_resolution_rewrites_to_create_appointment():
-    """Production path: REJECT_ACTION is rewritten to CREATE_APPOINTMENT, session may be NEEDS_CLARIFICATION."""
+    """Production path: REJECT_ACTION is rewritten to CREATE_APPOINTMENT while gate is open.
+
+    Session status may be NEEDS_CLARIFICATION, but confirmation must still be pending
+    for the gate to classify REJECT_ACTION as NO.
+    """
     _run_reject_and_persist(
         "test_reject_rewritten",
-        _reject_session(status="NEEDS_CLARIFICATION", pending=False),
+        _reject_session(status="NEEDS_CLARIFICATION", pending=True),
     )
 
 

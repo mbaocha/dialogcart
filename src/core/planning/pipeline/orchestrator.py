@@ -250,7 +250,23 @@ def run_planning_pipeline(
         user_id=user_id,
     )
 
+    if confirmation.slots_adjusted:
+        slot_state = resolve_slot_turn_state(
+            working_turn=working_turn,
+            intent_name=planning_intent,
+            session_state=persisted_session,
+            attached_request=attached_request,
+        )
+        availability = resolve_availability(
+            slot_state=slot_state,
+            working_turn=working_turn,
+            session_state=persisted_session,
+            organization_id=organization_id,
+            attached_request=attached_request,
+        )
+
     # Confirmation reject: Evaluate emits evidence; Decision selects outcome.
+    # Slot/availability evidence above must reflect REJECT_CONFIRMATION first.
     if confirmation.reject_evidence is not None and confirmation.reject_evidence.rejected:
         decision_input = DecisionInput(
             attached_request=attached_request,
@@ -284,21 +300,6 @@ def run_planning_pipeline(
             organization_id=organization_id,
             planning_only=planning_only,
         ).to_turn_result()
-
-    if confirmation.slots_adjusted:
-        slot_state = resolve_slot_turn_state(
-            working_turn=working_turn,
-            intent_name=planning_intent,
-            session_state=persisted_session,
-            attached_request=attached_request,
-        )
-        availability = resolve_availability(
-            slot_state=slot_state,
-            working_turn=working_turn,
-            session_state=persisted_session,
-            organization_id=organization_id,
-            attached_request=attached_request,
-        )
 
     from core.planning.pipeline.decision import (
         apply_confirmation_evidence_to_availability,

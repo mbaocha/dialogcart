@@ -88,7 +88,6 @@ class ConfirmationDecision:
     awaiting_user_confirmation: bool = False
     reject_evidence: Optional[Any] = None
     """ConfirmationRejectEvidence when gate NO; Decision maps to outcome."""
-    reject_text: Optional[str] = None
     availability_reshow: bool = False
     slots_adjusted: bool = False
     availability_invalidation: Optional[Any] = None

@@ -237,9 +237,19 @@ def test_stage_confirmation_clears_on_no():
         },
         "presented_availability": {"search_date": "2026-07-10", "slots": []},
     }
-    payload = {"slots": {}, "_effective_collected_slots": {}}
+    # Production Stage 02 already merged session slots onto the working turn.
+    payload = {
+        "slots": dict(session["slots"]),
+        "_effective_collected_slots": dict(session["slots"]),
+        "resolved_datetime_range": dict(session["resolved_datetime_range"]),
+        "presented_availability": session["presented_availability"],
+        "confirmation_state": "pending",
+        "time_proposal": {"mode": "exact", "value": "10:00"},
+        "date_proposal": {"mode": "single_day", "start": "2026-07-10"},
+    }
     working_turn = WorkingTurn(
         payload=payload,
+        effective_collected_slots=dict(session["slots"]),
     )
     decision = resolve_confirmation(
         attached_request=AttachedRequest(
@@ -251,7 +261,7 @@ def test_stage_confirmation_clears_on_no():
         slot_state=SlotTurnState(
             intent_name="CREATE_APPOINTMENT",
             missing_slots=[],
-            effective_collected_slots={},
+            effective_collected_slots=dict(session["slots"]),
             base_status="AWAITING_CONFIRMATION",
         ),
         working_turn=working_turn,
@@ -264,8 +274,130 @@ def test_stage_confirmation_clears_on_no():
     assert decision.confirmation_state is None
     assert decision.reject_evidence is not None
     assert decision.reject_evidence.rejected is True
+    assert decision.reject_evidence.reason_code == "REJECT_CONFIRMATION"
+    assert decision.slots_adjusted is True
+    assert not hasattr(decision, "reject_text") or getattr(decision, "reject_text", None) is None
     assert get_confirmation_state(working_turn.payload) is None
+    assert working_turn.payload.get("_booking_confirmation_rejected") is True
+    slots = working_turn.payload.get("slots") or {}
+    assert slots.get("service_id") == "premium"
+    assert slots.get("date") == "2026-07-10"
+    assert slots.get("time") in (None, "")
+    assert working_turn.payload.get("resolved_datetime_range") is None
+    assert "time_proposal" not in working_turn.payload
+    # Availability presentation preserved (REJECT does not clear availability).
+    assert working_turn.payload.get("presented_availability")
 
+    # Stage 04 after reject invalidation must derive missing time.
+    from core.planning.pipeline.stage04_slots import resolve_slot_turn_state
+
+    slot_state = resolve_slot_turn_state(
+        working_turn=working_turn,
+        intent_name="CREATE_APPOINTMENT",
+        session_state=session,
+    )
+    assert "time" in (slot_state.missing_slots or [])
+    assert slot_state.effective_collected_slots.get("service_id") == "premium"
+    assert slot_state.effective_collected_slots.get("date") == "2026-07-10"
+    assert "time" not in (slot_state.effective_collected_slots or {})
+
+
+def test_stage06_reject_does_not_import_renderer():
+    """Stage 06 rejection must not pull booking confirmation rendering."""
+    import core.planning.pipeline.stage06_confirmation as stage06
+
+    assert not hasattr(stage06, "render_booking_confirmation_rejected")
+    source = open(stage06.__file__, encoding="utf-8").read()
+    assert "render_booking_confirmation_rejected" not in source
+    assert "booking_confirmation_renderer" not in source
+
+
+def test_decide_confirmation_reject_uses_slot_state_missing():
+    from core.planning.pipeline.decision import (
+        ConfirmationRejectEvidence,
+        _decide_confirmation_reject,
+    )
+
+    slot_state = SlotTurnState(
+        intent_name="CREATE_APPOINTMENT",
+        missing_slots=["time"],
+        effective_collected_slots={
+            "service_id": "premium",
+            "date": "2026-07-10",
+        },
+        base_status="NEEDS_CLARIFICATION",
+    )
+    plan = _decide_confirmation_reject(
+        ConfirmationRejectEvidence(
+            rejected=True,
+            intent_name="CREATE_APPOINTMENT",
+            reason_code="REJECT_CONFIRMATION",
+        ),
+        slot_state=slot_state,
+    )
+    assert plan.plan.get("status") == "NEEDS_CLARIFICATION"
+    assert plan.plan.get("stage") == "AVAILABILITY"
+    assert plan.plan.get("action") is None
+    assert plan.plan.get("missing_slots") == ["time"]
+    assert plan.facts.get("slots", {}).get("service_id") == "premium"
+    assert plan.facts.get("slots", {}).get("time") in (None, "")
+
+
+def test_stage09_renders_reject_wording_from_evidence():
+    from core.planning.pipeline.decision import ConfirmationRejectEvidence
+    from core.planning.pipeline.stage09_outcome import assemble_planning_outcome
+    from core.planning.pipeline.types import (
+        ConfirmationDecision,
+        DecisionPlan,
+        WorkflowRoute,
+    )
+    from core.rendering.booking_confirmation_renderer import (
+        render_booking_confirmation_rejected,
+    )
+
+    slots = {"service_id": "premium", "date": "2026-07-10"}
+    outcome = assemble_planning_outcome(
+        decision_plan=DecisionPlan(
+            plan={
+                "status": "NEEDS_CLARIFICATION",
+                "stage": "AVAILABILITY",
+                "action": None,
+                "awaiting": None,
+                "missing_slots": ["time"],
+            },
+            facts={"slots": slots, "missing_slots": ["time"]},
+            intent_name="CREATE_APPOINTMENT",
+        ),
+        workflow_route=WorkflowRoute(route=None, client_name=None),
+        working_turn=WorkingTurn(
+            payload={
+                "slots": slots,
+                "_booking_confirmation_rejected": True,
+            },
+            effective_collected_slots=slots,
+        ),
+        slot_state=SlotTurnState(
+            intent_name="CREATE_APPOINTMENT",
+            missing_slots=["time"],
+            effective_collected_slots=slots,
+            base_status="NEEDS_CLARIFICATION",
+        ),
+        confirmation=ConfirmationDecision(
+            confirmation_state=None,
+            reject_evidence=ConfirmationRejectEvidence(
+                rejected=True,
+                intent_name="CREATE_APPOINTMENT",
+            ),
+        ),
+        session_state=None,
+        domain="service",
+        user_id="test",
+        organization_id=1,
+    )
+    assert outcome.text == render_booking_confirmation_rejected()
+    assert "won't book" in (outcome.text or "").lower()
+    assert outcome.outcome.get("missing_slots") == ["time"]
+    assert outcome.outcome.get("slots", {}).get("service_id") == "premium"
 
 def test_stage_confirmation_clears_on_another_request():
     """AVAILABILITY + ANOTHER_REQUEST supersedes pending confirmation and invalidates trust."""

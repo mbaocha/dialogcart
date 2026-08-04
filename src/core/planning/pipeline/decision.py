@@ -10,7 +10,7 @@ Post-execution / time-resolution completion uses
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from core.planning.pipeline.relationship_evaluator import RelationshipEvaluation
 from core.planning.pipeline.requests import AttachedRequest, CurrentRequest
@@ -45,9 +45,7 @@ class ConfirmationRejectEvidence:
 
     rejected: bool = False
     intent_name: str = ""
-    slots: Mapping[str, Any] = field(default_factory=dict)
-    missing_slots: Tuple[str, ...] = ()
-    reject_text: Optional[str] = None
+    reason_code: str = "REJECT_CONFIRMATION"
 
 
 @dataclass(frozen=True)
@@ -133,7 +131,10 @@ def decide(decision_input: DecisionInput) -> DecisionPlan:
     """Select the final planner Decision for this turn."""
     reject = decision_input.confirmation_reject
     if reject is not None and reject.rejected:
-        return _decide_confirmation_reject(reject)
+        return _decide_confirmation_reject(
+            reject,
+            slot_state=decision_input.slot_state,
+        )
 
     availability = apply_confirmation_evidence_to_availability(
         decision_input.availability,
@@ -190,10 +191,14 @@ def decide_handler_delegation(intent_decision: IntentDecision) -> DecisionPlan:
     )
 
 
-def _decide_confirmation_reject(reject: ConfirmationRejectEvidence) -> DecisionPlan:
-    """Map confirmation-reject evidence to the sole Decision outcome."""
-    slots = dict(reject.slots) if isinstance(reject.slots, dict) else {}
-    missing = list(reject.missing_slots)
+def _decide_confirmation_reject(
+    reject: ConfirmationRejectEvidence,
+    *,
+    slot_state: SlotTurnState,
+) -> DecisionPlan:
+    """Map confirmation-reject evidence + recomputed slots to the Decision outcome."""
+    slots = dict(slot_state.effective_collected_slots or {})
+    missing = list(slot_state.missing_slots or [])
     plan: Dict[str, Any] = {
         "status": "NEEDS_CLARIFICATION",
         "stage": "AVAILABILITY",
@@ -207,7 +212,7 @@ def _decide_confirmation_reject(reject: ConfirmationRejectEvidence) -> DecisionP
     return DecisionPlan(
         plan=plan,
         facts={"slots": slots, "missing_slots": missing},
-        intent_name=reject.intent_name,
+        intent_name=reject.intent_name or slot_state.intent_name,
         booking={},
     )
 

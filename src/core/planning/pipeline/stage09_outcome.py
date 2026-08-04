@@ -235,6 +235,10 @@ def assemble_planning_outcome(
     # Render projects the historical reject envelope shape (no new decisions).
     reject = confirmation.reject_evidence
     if reject is not None and getattr(reject, "rejected", False):
+        from core.rendering.booking_confirmation_renderer import (
+            render_booking_confirmation_rejected,
+        )
+
         plan = decision_plan.plan if isinstance(decision_plan.plan, dict) else {}
         facts = decision_plan.facts if isinstance(decision_plan.facts, dict) else {}
         slots = dict(facts.get("slots") or {})
@@ -250,7 +254,7 @@ def assemble_planning_outcome(
                 "facts": {"slots": slots, "missing_slots": missing},
             },
             merged_luma_response=working_turn.payload,
-            text=confirmation.reject_text or getattr(reject, "reject_text", None),
+            text=render_booking_confirmation_rejected(),
             decision=_build_decision_dict(decision_plan, workflow_route),
         )
 

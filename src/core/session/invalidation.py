@@ -34,6 +34,7 @@ def clear_booking_state(
     clear_availability: bool = False,
     clear_service: bool = False,
     clear_extra_slots: Optional[Set[str]] = None,
+    clear_extra_state: Optional[Set[str]] = None,
     reason: str = "",
 ) -> Dict[str, Any]:
     """Apply planner-selected booking invalidation to a processing state."""
@@ -85,16 +86,22 @@ def clear_booking_state(
         for key in _AVAILABILITY_STATE_KEYS:
             state.pop(key, None)
 
+    # Non-availability processing keys (e.g. time_proposal) declared via clear_state.
+    for key in clear_extra_state or ():
+        state.pop(key, None)
+
     if reason:
         logger.debug(
             "[BOOKING_INVALIDATION] reason=%s clear_time=%s clear_date=%s "
-            "clear_availability=%s clear_service=%s clear_extra_slots=%s",
+            "clear_availability=%s clear_service=%s clear_extra_slots=%s "
+            "clear_extra_state=%s",
             reason,
             clear_time,
             clear_date,
             clear_availability,
             clear_service,
             sorted(clear_extra_slots or ()),
+            sorted(clear_extra_state or ()),
         )
     return state
 
@@ -117,7 +124,9 @@ INVALIDATION_RULES: Dict[InvalidationTrigger, Dict[str, Any]] = {
     InvalidationTrigger.REJECT_CONFIRMATION: {
         "clear_confirmation": True,
         "clear_slots": frozenset({"time"}),
-        "clear_state": frozenset(),
+        # Drop Stage 02 proposal mirrors of the rejected bound time so Stage 04
+        # recomputes missing_slots from durable slots only.
+        "clear_state": frozenset({"time_proposal"}),
         "default_reason": "reject",
     },
     InvalidationTrigger.TIME_REBOUND: {
@@ -250,6 +259,7 @@ def _confirmation_flags_from_sets(
         "clear_service": "service_id" in clear_slots,
         "clear_availability": bool(clear_state & _AVAILABILITY_STATE_KEYS),
         "clear_extra_slots": frozenset(clear_slots - known),
+        "clear_extra_state": frozenset(clear_state - _AVAILABILITY_STATE_KEYS),
     }
 
 

@@ -353,6 +353,52 @@ def _clear_bound_time_selection(
 
 
 
+def _hydrate_working_slots_from_session(
+    working_turn: WorkingTurn,
+    session_state: Optional[Dict[str, Any]],
+) -> None:
+    """Ensure working-turn slots include durable session booking facts before reject.
+
+    Stage 02 merge normally already did this. When the working payload lacks
+    slots (e.g. unit callers), copy session slots onto the working turn only —
+    do not rebuild the payload envelope.
+    """
+    payload = working_turn.payload
+    current = dict(
+        working_turn.effective_collected_slots
+        or payload.get("_effective_collected_slots")
+        or payload.get("slots")
+        or {}
+    )
+    if current:
+        payload.setdefault("slots", current)
+        payload.setdefault("_effective_collected_slots", current)
+        if not working_turn.effective_collected_slots:
+            working_turn.effective_collected_slots = current
+        return
+    if not isinstance(session_state, dict):
+        return
+    session_slots = session_state.get("slots")
+    if not isinstance(session_slots, dict) or not session_slots:
+        return
+    slots = dict(session_slots)
+    payload["slots"] = slots
+    payload["_effective_collected_slots"] = slots
+    working_turn.effective_collected_slots = slots
+    # Carry availability presentation artifacts already on session so reject
+    # does not drop them (REJECT_CONFIRMATION does not clear availability).
+    for key in _SESSION_AVAILABILITY_KEYS:
+        if session_state.get(key) is not None and payload.get(key) is None:
+            payload[key] = session_state[key]
+    if (
+        session_state.get("resolved_datetime_range") is not None
+        and payload.get("resolved_datetime_range") is None
+    ):
+        payload["resolved_datetime_range"] = session_state.get(
+            "resolved_datetime_range"
+        )
+
+
 def resolve_confirmation(
 
     *,
@@ -407,98 +453,30 @@ def resolve_confirmation(
     # never write confirmation_state="confirmed" onto working/session state.
 
     if gate_action == ConfirmationGateTurn.NO and gate_booking_intent:
-
-        try:
-
-            from core.rendering.booking_confirmation_renderer import (
-
-                render_booking_confirmation_rejected,
-
-            )
-
-
-
-            cleared = apply_invalidation(
-
-                dict(session_state or {}),
-
-                InvalidationTrigger.REJECT_CONFIRMATION,
-
-                reason="reject",
-
-            )
-
-            session_slots = dict(cleared.get("slots") or {})
-
-            missing_slots = (
-
-                ["time"]
-
-                if session_slots.get("service_id") and session_slots.get("date")
-
-                else [
-
-                    s
-
-                    for s in ("service_id", "date", "time")
-
-                    if not session_slots.get(s)
-
-                ]
-
-            )
-
-            reject_text = render_booking_confirmation_rejected()
-
-            merged = {
-
-                "intent": {"name": gate_booking_intent},
-
-                "slots": session_slots,
-
-                "missing_slots": missing_slots,
-
-                "booking": {},
-
-                "_booking_confirmation_rejected": True,
-
-            }
-
-            for key in _SESSION_AVAILABILITY_KEYS:
-
-                if cleared.get(key) is not None:
-
-                    merged[key] = cleared.get(key)
-
-            working_turn.payload = merged
-
-            return ConfirmationDecision(
-
-                confirmation_state=None,
-
-                reject_evidence=ConfirmationRejectEvidence(
-
-                    rejected=True,
-
-                    intent_name=gate_booking_intent,
-
-                    slots=session_slots,
-
-                    missing_slots=tuple(missing_slots),
-
-                    reject_text=reject_text,
-
-                ),
-
-                reject_text=reject_text,
-
-            )
-
-        except Exception as reject_exc:
-
-            logger.warning("[CONFIRMATION_GATE] REJECT handling failed: %s", reject_exc)
-
-
+        # Semantic rejection only: invalidate the working turn, emit evidence.
+        # Stage 04 recomputes missing slots; Decision selects outcome; Stage 09
+        # renders wording. Do not rebuild payload or call renderers here.
+        _hydrate_working_slots_from_session(working_turn, session_state)
+        apply_invalidation(
+            payload,
+            InvalidationTrigger.REJECT_CONFIRMATION,
+            reason="reject",
+        )
+        slots = dict(payload.get("slots") or {})
+        payload["slots"] = slots
+        payload["_effective_collected_slots"] = slots
+        working_turn.effective_collected_slots = slots
+        # Persist marker: keep post-reject temporal retention under planning ownership.
+        payload["_booking_confirmation_rejected"] = True
+        return ConfirmationDecision(
+            confirmation_state=None,
+            reject_evidence=ConfirmationRejectEvidence(
+                rejected=True,
+                intent_name=gate_booking_intent,
+                reason_code="REJECT_CONFIRMATION",
+            ),
+            slots_adjusted=True,
+        )
 
     availability_op = is_availability_turn_operation(turn_operation)
 

@@ -20,6 +20,11 @@ def _pending_session():
 
 def test_reject_confirmation_trigger_clears_time():
     session = _pending_session()
+    session["time_proposal"] = {"mode": "exact", "value": "09:00"}
+    session["resolved_datetime_range"] = {
+        "start": "2026-07-06T09:00:00Z",
+        "end": "2026-07-06T09:30:00Z",
+    }
     apply_invalidation(
         session,
         InvalidationTrigger.REJECT_CONFIRMATION,
@@ -28,6 +33,8 @@ def test_reject_confirmation_trigger_clears_time():
     assert get_confirmation_state(session) is None
     assert "time" not in session["slots"]
     assert session["slots"]["date"] == "2026-07-06"
+    assert "time_proposal" not in session
+    assert "resolved_datetime_range" not in session
 
 
 def test_booking_revision_time_trigger_keeps_availability():
