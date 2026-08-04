@@ -138,7 +138,11 @@ def emit_pagination_handle_trace(
     from core.workflows.availability.presentation import availability_cache_from_session
 
     cache = availability_cache_from_session(session_state)
-    presentation = session_state.get("availability_presentation") or {}
+    from core.workflows.availability.presentation import (
+        availability_pagination_from_session,
+    )
+
+    presentation = availability_pagination_from_session(session_state) or {}
 
     cache_id = emit_evidence(
         "SESSION_CACHE",

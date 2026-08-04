@@ -77,10 +77,11 @@ def _capture_availability_baseline(conv, _booking, availability) -> None:
 
 
 def _presented_search_date(session: Dict[str, Any]) -> Any:
-    presented = session.get("presented_availability")
+    from core.workflows.availability.presentation import presented_availability_from_session, availability_cache_from_session
+    presented = presented_availability_from_session(session)
     if isinstance(presented, dict) and presented.get("search_date"):
         return str(presented.get("search_date")).split("T")[0].split(" ")[0]
-    last = session.get("last_execution_result")
+    last = availability_cache_from_session(session)
     if isinstance(last, dict) and last.get("search_date"):
         return str(last.get("search_date")).split("T")[0].split(" ")[0]
     return None

@@ -7,8 +7,9 @@ projection. Internal cursor/index math stays in this module.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from copy import deepcopy
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from core.workflows.availability.contracts import (
     AvailabilityCache,
@@ -917,12 +918,57 @@ def classify_selection_mismatch_location(
 
 
 # ---------------------------------------------------------------------------
-# Session adapters
+# Session adapters (canonical nested Session V2 availability.*)
 # ---------------------------------------------------------------------------
 
-# Persistence field names — private to this adapter. Domain code must not use them.
-_SESSION_CACHE_KEY = "last_execution_result"
-_SESSION_PRESENTED_KEY = "presented_availability"
+# Historical flat keys — read fallback only during migration; never written by helpers.
+_LEGACY_CACHE_KEY = "last_execution_result"
+_LEGACY_PRESENTED_KEY = "presented_availability"
+_LEGACY_FINGERPRINT_KEY = "availability_fingerprint"
+_LEGACY_PRESENTATION_KEY = "availability_presentation"
+
+
+def _availability_section(session_state: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not isinstance(session_state, dict):
+        return None
+    availability = session_state.get("availability")
+    return availability if isinstance(availability, dict) else None
+
+
+def _ensure_availability_section(session_state: Dict[str, Any]) -> Dict[str, Any]:
+    availability = session_state.get("availability")
+    if not isinstance(availability, dict):
+        availability = {}
+        session_state["availability"] = availability
+    cache = availability.get("cache")
+    if not isinstance(cache, dict):
+        cache = {}
+        availability["cache"] = cache
+    presentation = availability.get("presentation")
+    if not isinstance(presentation, dict):
+        presentation = {}
+        availability["presentation"] = presentation
+    return availability
+
+
+def _defensive_dict(value: Any) -> Optional[Dict[str, Any]]:
+    if not isinstance(value, dict):
+        return None
+    return deepcopy(value)
+
+
+def availability_fingerprint_from_session(
+    session_state: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    """Read canonical availability.fingerprint (legacy flat fallback)."""
+    availability = _availability_section(session_state)
+    if availability is not None and availability.get("fingerprint") is not None:
+        return availability.get("fingerprint")
+    if isinstance(session_state, dict):
+        legacy = session_state.get(_LEGACY_FINGERPRINT_KEY)
+        if legacy is not None:
+            return legacy
+    return None
 
 
 def availability_cache_from_session(
@@ -931,7 +977,16 @@ def availability_cache_from_session(
     """Sole domain-level reader of the persisted availability cache field."""
     if not isinstance(session_state, dict):
         return None
-    last_result = session_state.get(_SESSION_CACHE_KEY)
+
+    last_result = None
+    availability = _availability_section(session_state)
+    if availability is not None:
+        cache = availability.get("cache")
+        if isinstance(cache, dict) and cache.get("search_result") is not None:
+            last_result = cache.get("search_result")
+    if last_result is None:
+        last_result = session_state.get(_LEGACY_CACHE_KEY)
+
     if not isinstance(last_result, dict):
         return None
     if last_result.get("type") != "availability" or last_result.get("status") != "success":
@@ -939,16 +994,27 @@ def availability_cache_from_session(
     slots = last_result.get("slots")
     if not isinstance(slots, list):
         return None
-    cache: AvailabilityCache = {
+    cache_out: AvailabilityCache = {
         "type": "availability",
         "status": "success",
         "slots": list(slots),
-        "fingerprint": last_result.get("availability_fingerprint"),
+        "fingerprint": last_result.get("availability_fingerprint")
+        or availability_fingerprint_from_session(session_state),
         "search_date": normalize_search_date(last_result.get("search_date")),
     }
     if isinstance(last_result.get("time_resolution"), dict):
-        cache["time_resolution"] = last_result["time_resolution"]
-    return cache
+        cache_out["time_resolution"] = deepcopy(last_result["time_resolution"])
+    return cache_out
+
+
+def _is_presented_window(value: Any) -> bool:
+    """True for a presentation window (slots list and/or non-empty display times)."""
+    if not isinstance(value, dict):
+        return False
+    if isinstance(value.get("slots"), list):
+        return True
+    times = value.get("times")
+    return isinstance(times, list) and any(times)
 
 
 def presented_availability_from_session(
@@ -957,14 +1023,49 @@ def presented_availability_from_session(
     """Sole domain-level reader of the persisted presentation window."""
     if not isinstance(session_state, dict):
         return None
-    presented = session_state.get(_SESSION_PRESENTED_KEY)
-    if isinstance(presented, dict) and isinstance(presented.get("slots"), list):
-        return presented  # type: ignore[return-value]
+    availability = _availability_section(session_state)
+    if availability is not None:
+        presentation = availability.get("presentation")
+        if isinstance(presentation, dict):
+            presented = presentation.get("presented")
+            if _is_presented_window(presented):
+                return _defensive_dict(presented)  # type: ignore[return-value]
+    presented = session_state.get(_LEGACY_PRESENTED_KEY)
+    if _is_presented_window(presented):
+        return _defensive_dict(presented)  # type: ignore[return-value]
     return None
 
 
 # Backward-compatible alias used within this package.
 presented_from_session = presented_availability_from_session
+
+
+def availability_pagination_from_session(
+    session_state: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Return page_index/page_size from canonical presentation (flat fallback)."""
+    if not isinstance(session_state, dict):
+        return None
+    availability = _availability_section(session_state)
+    if availability is not None:
+        presentation = availability.get("presentation")
+        if isinstance(presentation, dict) and (
+            presentation.get("page_index") is not None
+            or presentation.get("page_size") is not None
+        ):
+            return {
+                "page_index": presentation.get("page_index") or 0,
+                "page_size": presentation.get("page_size"),
+            }
+    legacy = session_state.get(_LEGACY_PRESENTATION_KEY)
+    if isinstance(legacy, dict) and (
+        legacy.get("page_index") is not None or legacy.get("page_size") is not None
+    ):
+        return {
+            "page_index": legacy.get("page_index") or 0,
+            "page_size": legacy.get("page_size"),
+        }
+    return None
 
 
 def has_trusted_availability_cache(
@@ -975,10 +1076,135 @@ def has_trusted_availability_cache(
     return cache is not None and bool(cache.get("slots"))
 
 
+def set_availability_fingerprint(
+    session_state: Dict[str, Any],
+    fingerprint: Optional[str],
+) -> None:
+    """Write canonical availability.fingerprint only (no flat dual-write)."""
+    availability = _ensure_availability_section(session_state)
+    if fingerprint is None:
+        availability.pop("fingerprint", None)
+    else:
+        availability["fingerprint"] = fingerprint
+
+
+def set_availability_search_result(
+    session_state: Dict[str, Any],
+    search_result: Optional[Mapping[str, Any]],
+) -> None:
+    """Write canonical availability.cache.search_result only."""
+    availability = _ensure_availability_section(session_state)
+    cache = availability["cache"]
+    if search_result is None:
+        cache.pop("search_result", None)
+    else:
+        cache["search_result"] = deepcopy(dict(search_result))
+
+
+def set_presented_availability(
+    session_state: Dict[str, Any],
+    presented: Optional[Mapping[str, Any]],
+) -> None:
+    """Write canonical availability.presentation.presented only."""
+    availability = _ensure_availability_section(session_state)
+    presentation = availability["presentation"]
+    if presented is None:
+        presentation.pop("presented", None)
+    else:
+        presentation["presented"] = deepcopy(dict(presented))
+
+
+def set_availability_pagination(
+    session_state: Dict[str, Any],
+    *,
+    page_index: Optional[int] = None,
+    page_size: Optional[int] = None,
+    presentation: Optional[Mapping[str, Any]] = None,
+) -> None:
+    """Write canonical page_index/page_size (and optional metadata keys)."""
+    availability = _ensure_availability_section(session_state)
+    target = availability["presentation"]
+    if isinstance(presentation, Mapping):
+        if presentation.get("page_index") is not None:
+            target["page_index"] = presentation.get("page_index")
+        if "page_size" in presentation:
+            target["page_size"] = presentation.get("page_size")
+        return
+    if page_index is not None:
+        target["page_index"] = page_index
+    if page_size is not None:
+        target["page_size"] = page_size
+
+
+def apply_availability_artifacts(
+    session_state: Dict[str, Any],
+    *,
+    fingerprint: Any = None,
+    search_result: Any = None,
+    presented: Any = None,
+    presentation: Any = None,
+) -> None:
+    """Apply one or more availability artifacts to nested Session V2 only."""
+    if fingerprint is not None:
+        set_availability_fingerprint(session_state, fingerprint)
+    if search_result is not None:
+        set_availability_search_result(session_state, search_result)
+    if presented is not None:
+        set_presented_availability(session_state, presented)
+    if isinstance(presentation, Mapping):
+        set_availability_pagination(session_state, presentation=presentation)
+
+
+def clear_availability_artifacts(session_state: Optional[Dict[str, Any]]) -> None:
+    """Clear nested availability artifacts and any lingering flat mirrors."""
+    if not isinstance(session_state, dict):
+        return
+    availability = session_state.get("availability")
+    if isinstance(availability, dict):
+        availability["fingerprint"] = None
+        cache = availability.get("cache")
+        if not isinstance(cache, dict):
+            cache = {}
+            availability["cache"] = cache
+        cache["search_result"] = None
+        presentation = availability.get("presentation")
+        if not isinstance(presentation, dict):
+            presentation = {}
+            availability["presentation"] = presentation
+        presentation["presented"] = None
+        presentation["page_index"] = 0
+        presentation["page_size"] = None
+    for key in (
+        _LEGACY_FINGERPRINT_KEY,
+        _LEGACY_CACHE_KEY,
+        _LEGACY_PRESENTED_KEY,
+        _LEGACY_PRESENTATION_KEY,
+    ):
+        session_state.pop(key, None)
+
+
+def clear_availability_presentation(session_state: Optional[Dict[str, Any]]) -> None:
+    """Clear presented window and pagination; keep fingerprint/cache."""
+    if not isinstance(session_state, dict):
+        return
+    availability = _ensure_availability_section(session_state)
+    presentation = availability["presentation"]
+    presentation["presented"] = None
+    presentation["page_index"] = 0
+    presentation["page_size"] = None
+    session_state.pop(_LEGACY_PRESENTED_KEY, None)
+    session_state.pop(_LEGACY_PRESENTATION_KEY, None)
+
+
 def project_availability_cache_to_session(
     cache: AvailabilityCache,
 ) -> Dict[str, Any]:
-    """Map AvailabilityCache to persistence fields (session projector only)."""
+    """Map AvailabilityCache onto a nested availability patch (no flat keys).
+
+    Returns a minimal session fragment with ``availability.*`` only. Callers that
+    previously expected ``{last_execution_result: ...}`` should apply the patch
+    via ``apply_availability_artifacts`` / ``set_availability_search_result``.
+    """
     payload: Dict[str, Any] = {
         "type": cache.get("type") or "availability",
         "status": cache.get("status") or "success",
@@ -988,7 +1214,13 @@ def project_availability_cache_to_session(
         payload["availability_fingerprint"] = cache["fingerprint"]
     if cache.get("search_date"):
         payload["search_date"] = cache["search_date"]
-    return {_SESSION_CACHE_KEY: payload}
+    fragment: Dict[str, Any] = {"availability": {}}
+    apply_availability_artifacts(
+        fragment,
+        fingerprint=cache.get("fingerprint"),
+        search_result=payload,
+    )
+    return fragment
 
 
 def ensure_presented_availability(

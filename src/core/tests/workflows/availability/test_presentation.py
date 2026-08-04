@@ -1,3 +1,8 @@
+from core.workflows.availability.presentation import (
+    availability_cache_from_session,
+    availability_fingerprint_from_session,
+    presented_availability_from_session,
+)
 """Tests for availability presentation window construction and paging."""
 
 from core.planning.temporal_proposal import try_bind_offered_time_selection
@@ -183,4 +188,4 @@ def test_time_only_bind_uses_single_day_presented_availability():
     assert result is not None
     assert result["slots"]["date"] == "2026-07-08"
     assert result["slots"]["time"] == "16:30"
-    assert len(session["last_execution_result"]["slots"]) == 4
+    assert len((availability_cache_from_session(session) or {}).get("slots") or []) == 4

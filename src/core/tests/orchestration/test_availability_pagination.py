@@ -3,9 +3,12 @@
 from core.workflows.availability.pagination import try_handle_availability_browse_turn
 from core.session.turn_persistence import project_and_persist_turn_result
 from core.workflows.availability.presentation import (
+    availability_fingerprint_from_session,
+    availability_pagination_from_session,
     build_availability_presentation,
     build_presented_availability_page,
     compute_target_page_index,
+    presented_availability_from_session,
 )
 
 
@@ -135,9 +138,14 @@ class TestTryHandleAvailabilityBrowseTurn:
         assert response["outcome"]["plan"]["action"] is None
         self._project(response, previous_session, store)
         persisted = store.get_session(1, "u1")
-        assert persisted["availability_presentation"]["page_index"] == 1
-        assert len(persisted["presented_availability"]["slots"]) == 3
-        assert persisted["availability_fingerprint"] == "fp-unchanged"
+        from core.workflows.availability.presentation import (
+            availability_fingerprint_from_session,
+            availability_pagination_from_session,
+            presented_availability_from_session,
+        )
+        assert (availability_pagination_from_session(persisted) or {}).get("page_index") == 1
+        assert len((presented_availability_from_session(persisted) or {}).get("slots") or []) == 3
+        assert availability_fingerprint_from_session(persisted) == "fp-unchanged"
 
     def test_previous_page_returns_earlier_page(self):
         store = self._Store(self._session())
@@ -154,7 +162,9 @@ class TestTryHandleAvailabilityBrowseTurn:
         store.save_session(1, "u1", session)
         page1_starts = [
             s["starts_at"]
-            for s in store.get_session(1, "u1")["presented_availability"]["slots"]
+            for s in (presented_availability_from_session(store.get_session(1, "u1")) or {})[
+                "slots"
+            ]
         ]
 
         response = try_handle_availability_browse_turn(
@@ -170,7 +180,9 @@ class TestTryHandleAvailabilityBrowseTurn:
         self._project(response, session, store)
         page0_starts = [
             s["starts_at"]
-            for s in store.get_session(1, "u1")["presented_availability"]["slots"]
+            for s in (presented_availability_from_session(store.get_session(1, "u1")) or {})[
+                "slots"
+            ]
         ]
         assert page0_starts != page1_starts
         assert page0_starts[0].endswith("T09:00:00Z")
@@ -201,7 +213,9 @@ class TestTryHandleAvailabilityBrowseTurn:
         )
         store.save_session(1, "u1", session)
         before_slots = list(
-            store.get_session(1, "u1")["presented_availability"]["slots"]
+            (presented_availability_from_session(store.get_session(1, "u1")) or {})[
+                "slots"
+            ]
         )
 
         response = try_handle_availability_browse_turn(
@@ -213,7 +227,9 @@ class TestTryHandleAvailabilityBrowseTurn:
         )
         assert response is not None
         assert response["availability_pagination"]["exhausted"] is True
-        after_slots = store.get_session(1, "u1")["presented_availability"]["slots"]
+        after_slots = (
+            presented_availability_from_session(store.get_session(1, "u1")) or {}
+        )["slots"]
         assert after_slots == before_slots
 
     def test_returns_none_without_browse(self):

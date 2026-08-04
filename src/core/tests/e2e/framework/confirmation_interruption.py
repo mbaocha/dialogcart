@@ -49,19 +49,27 @@ def _availability_section(session: Optional[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def _fingerprint(session: Optional[Dict[str, Any]]) -> Any:
-    availability = _availability_section(session)
-    if availability.get("fingerprint") is not None:
-        return availability.get("fingerprint")
-    if isinstance(session, dict):
-        return session.get("availability_fingerprint")
-    return None
+    from core.workflows.availability.presentation import (
+        availability_fingerprint_from_session,
+    )
+
+    return availability_fingerprint_from_session(session)
 
 
 def _cached_search_result(session: Optional[Dict[str, Any]]) -> Any:
+    from core.workflows.availability.presentation import availability_cache_from_session
+
+    cache = availability_cache_from_session(session)
+    if isinstance(cache, dict):
+        return cache
     availability = _availability_section(session)
-    cache = availability.get("cache") if isinstance(availability.get("cache"), dict) else {}
-    if cache.get("search_result") is not None:
-        return cache.get("search_result")
+    nested_cache = (
+        availability.get("cache")
+        if isinstance(availability.get("cache"), dict)
+        else {}
+    )
+    if nested_cache.get("search_result") is not None:
+        return nested_cache.get("search_result")
     if isinstance(session, dict):
         return session.get("last_execution_result")
     return None

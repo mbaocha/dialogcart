@@ -10,8 +10,12 @@ from core.workflows.availability.browse import (
 )
 from core.session.turn_persistence import project_and_persist_turn_result
 from core.workflows.availability.presentation import (
+    availability_cache_from_session,
+    availability_fingerprint_from_session,
+    availability_pagination_from_session,
     build_availability_presentation,
     build_presented_availability_page,
+    presented_availability_from_session,
 )
 from core.session.merge import merge_luma_with_session
 
@@ -168,7 +172,13 @@ class TestMergeAvailabilityBrowse:
 
     def test_merge_does_not_modify_slots_or_presented_availability(self):
         session = self._session()
-        presented_before = dict(session["presented_availability"])
+        from core.workflows.availability.presentation import (
+            presented_availability_from_session,
+            availability_pagination_from_session,
+            availability_cache_from_session,
+            availability_fingerprint_from_session,
+        )
+        presented_before = dict(presented_availability_from_session(session) or {})
         slots_before = dict(session["slots"])
         luma = {
             "intent": {"name": "CREATE_APPOINTMENT"},
@@ -177,7 +187,7 @@ class TestMergeAvailabilityBrowse:
         }
         merged = merge_luma_with_session(luma, session)
         assert merged.get("slots") == slots_before
-        assert session["presented_availability"] == presented_before
+        assert presented_availability_from_session(session) == presented_before
         assert session["slots"] == slots_before
 
     def test_merge_clears_browse_when_absent_this_turn(self):
@@ -297,11 +307,11 @@ class TestBrowsePaginationSessionPersistence:
             save=False,
         )
         assert session is not None
-        assert session["availability_presentation"]["page_index"] == 1
-        assert len(session["presented_availability"]["slots"]) == 3
+        assert (availability_pagination_from_session(session) or {}).get("page_index") == 1
+        assert len((presented_availability_from_session(session) or {}).get("slots") or []) == 3
         assert (
-            session["presented_availability"]["slots"][0]["starts_at"]
+            (presented_availability_from_session(session) or {})["slots"][0]["starts_at"]
             .endswith("T15:00:00Z")
         )
-        assert len(session["last_execution_result"]["slots"]) == len(raw)
+        assert len((availability_cache_from_session(session) or {}).get("slots") or []) == len(raw)
         assert "availability_pagination" not in session

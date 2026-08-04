@@ -8,6 +8,10 @@ from core.rendering.booking_confirmation_renderer import (
     render_booking_confirmation_rejected,
 )
 from core.session.session_projector import SessionProjectorV2
+from core.workflows.availability.presentation import (
+    availability_fingerprint_from_session,
+    presented_availability_from_session,
+)
 
 
 class _StatefulSessionStore:
@@ -124,7 +128,7 @@ def _run_reject_and_persist(user_id: str, session: dict):
     assert session.get("slots", {}).get("date") == "2026-07-06"
     assert "time" not in (session.get("slots") or {})
     assert session.get("missing_slots") == ["time"]
-    assert session.get("presented_availability")
+    assert presented_availability_from_session(session)
     assert session.get("status") == "NEEDS_CLARIFICATION"
     return result
 

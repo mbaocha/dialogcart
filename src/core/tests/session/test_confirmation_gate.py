@@ -1,3 +1,8 @@
+from core.workflows.availability.presentation import (
+    availability_cache_from_session,
+    availability_fingerprint_from_session,
+    presented_availability_from_session,
+)
 """Unit tests for confirmation gate classification and clear-pending (PR1–PR2)."""
 
 from core.planning.booking_revision import (
@@ -344,7 +349,7 @@ def test_apply_time_revision_keeps_presented_availability():
     assert "time" not in session["slots"]
     assert session["slots"].get("date") == "2026-07-06"
     assert session["slots"].get("service_id") == "premium haircut"
-    assert session.get("presented_availability") is not None
+    assert presented_availability_from_session(session) is not None
     assert get_confirmation_state(session) is None
 
 

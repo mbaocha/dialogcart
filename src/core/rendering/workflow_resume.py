@@ -108,18 +108,12 @@ def _catalog_candidate_labels(
 
 
 def _presented_availability(session: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Read already-presented offers from session (legacy or V2 nested shape)."""
-    presented = session.get("presented_availability")
-    if isinstance(presented, dict):
-        return presented
-    availability = session.get("availability")
-    if isinstance(availability, dict):
-        presentation = availability.get("presentation")
-        if isinstance(presentation, dict):
-            nested = presentation.get("presented")
-            if isinstance(nested, dict):
-                return nested
-    return None
+    """Read already-presented offers from canonical availability accessors."""
+    from core.workflows.availability.presentation import (
+        presented_availability_from_session,
+    )
+
+    return presented_availability_from_session(session)
 
 
 def _presented_time_labels(session: Dict[str, Any]) -> List[str]:

@@ -27,11 +27,15 @@ def resolve_availability(
     current_slots = slot_state.effective_collected_slots
     confirm_booking_continuation = attached_request.confirm_booking_continuation
 
+    from core.workflows.availability.presentation import (
+        availability_fingerprint_from_session,
+    )
+
     stored_fingerprint = None
     if isinstance(session_state, dict) and not payload.get(
         "_revision_invalidated_availability"
     ):
-        stored_fingerprint = session_state.get("availability_fingerprint")
+        stored_fingerprint = availability_fingerprint_from_session(session_state)
 
     availability_ready = evaluate_availability_evidence_ready(
         intent_name=intent_name or "",

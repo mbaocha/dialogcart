@@ -109,7 +109,8 @@ def test_booking_revision_time_trigger_keeps_availability():
         reason="test_time_revision",
     )
     assert "time" not in session["slots"]
-    assert session.get("presented_availability") is not None
+    from core.workflows.availability.presentation import presented_availability_from_session
+    assert presented_availability_from_session(session) is not None
 
 
 def test_ambiguous_service_trigger_drops_service_id():
@@ -141,4 +142,6 @@ def test_new_booking_request_trigger_clears_booking_id():
         luma_slots={"date": "2026-07-10"},
     )
     assert "booking_id" not in merged_slots
+    from core.workflows.availability.presentation import availability_fingerprint_from_session
+    assert availability_fingerprint_from_session(session_state) is None
     assert "availability_fingerprint" not in session_state

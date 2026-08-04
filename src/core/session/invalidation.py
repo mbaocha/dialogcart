@@ -98,16 +98,6 @@ def apply_confirmation_bound_clear_evidence(
     working_turn.effective_collected_slots = slots
 
 
-_SESSION_AVAILABILITY_KEYS_FOR_HYDRATE = frozenset(
-    {
-        "presented_availability",
-        "availability_fingerprint",
-        "last_execution_result",
-        "availability_presentation",
-    }
-)
-
-
 def hydrate_working_slots_from_session(
     working_turn: Any,
     session_state: Optional[Dict[str, Any]],
@@ -138,9 +128,31 @@ def hydrate_working_slots_from_session(
     slots = dict(session_slots)
     sync_working_slot_projections(payload, slots)
     working_turn.effective_collected_slots = slots
-    for key in _SESSION_AVAILABILITY_KEYS_FOR_HYDRATE:
-        if session_state.get(key) is not None and payload.get(key) is None:
-            payload[key] = session_state[key]
+    from core.workflows.availability.presentation import (
+        apply_availability_artifacts,
+        availability_fingerprint_from_session,
+        availability_pagination_from_session,
+        presented_availability_from_session,
+    )
+
+    session_availability = session_state.get("availability")
+    src_cache: Dict[str, Any] = {}
+    if isinstance(session_availability, dict):
+        maybe_cache = session_availability.get("cache")
+        if isinstance(maybe_cache, dict):
+            src_cache = maybe_cache
+    search_result = src_cache.get("search_result")
+    if search_result is None:
+        legacy = session_state.get("last_execution_result")
+        if isinstance(legacy, dict):
+            search_result = legacy
+    apply_availability_artifacts(
+        payload,
+        fingerprint=availability_fingerprint_from_session(session_state),
+        search_result=search_result,
+        presented=presented_availability_from_session(session_state),
+        presentation=availability_pagination_from_session(session_state),
+    )
     if (
         session_state.get("resolved_datetime_range") is not None
         and payload.get("resolved_datetime_range") is None
@@ -209,8 +221,11 @@ def clear_booking_state(
             state["facts"] = facts
 
     if clear_availability:
-        for key in _AVAILABILITY_STATE_KEYS:
-            state.pop(key, None)
+        from core.workflows.availability.presentation import (
+            clear_availability_artifacts,
+        )
+
+        clear_availability_artifacts(state)
 
     # Non-availability processing keys (e.g. time_proposal) declared via clear_state.
     for key in clear_extra_state or ():
@@ -470,10 +485,17 @@ def _invalidate_new_booking_request(
         return False
 
     del merged_slots["booking_id"]
-    if session_state and "availability_fingerprint" in session_state:
-        del session_state["availability_fingerprint"]
-        logger.info(
-            "Cleared availability_fingerprint due to new booking request")
+    if session_state is not None:
+        from core.workflows.availability.presentation import (
+            availability_fingerprint_from_session,
+            set_availability_fingerprint,
+        )
+
+        if availability_fingerprint_from_session(session_state) is not None:
+            set_availability_fingerprint(session_state, None)
+            session_state.pop("availability_fingerprint", None)
+            logger.info(
+                "Cleared availability_fingerprint due to new booking request")
     if session_state is not None:
         session_state["declined_slots"] = []
         planning = session_state.get("planning")

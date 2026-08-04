@@ -43,7 +43,8 @@ def _session_fingerprint(session: Dict[str, Any]) -> Any:
     availability = session.get("availability")
     if isinstance(availability, dict) and availability.get("fingerprint") is not None:
         return availability.get("fingerprint")
-    return session.get("availability_fingerprint")
+    from core.workflows.availability.presentation import availability_fingerprint_from_session
+    return availability_fingerprint_from_session(session)
 
 
 def _session_temporal(session: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -190,7 +191,8 @@ def _assert_search_after_premium(
         conv.assert_date_proposal(expected_date)
         _assert_temporal_start_date(conv, expected_date)
 
-        presented_payload = sess.get("presented_availability") or {}
+        from core.workflows.availability.presentation import presented_availability_from_session
+        presented_payload = presented_availability_from_session(sess) or {}
         if not isinstance(presented_payload, dict):
             presented_payload = {}
         search_date = presented_payload.get("search_date")
@@ -225,7 +227,8 @@ def _assert_search_after_premium(
                 ),
             )
 
-        cache = sess.get("last_execution_result") or {}
+        from core.workflows.availability.presentation import availability_cache_from_session
+        cache = availability_cache_from_session(sess) or {}
         if isinstance(cache, dict):
             cache_slots = cache.get("slots") or []
             for slot in cache_slots:

@@ -832,32 +832,21 @@ def _date_proposal_from_availability_artifacts(
     session_state: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
     """Build a single-day date_proposal from presented/cached availability date."""
-    presented = session_state.get("presented_availability")
+    from core.workflows.availability.presentation import (
+        availability_cache_from_session,
+        presented_availability_from_session,
+    )
+
+    presented = presented_availability_from_session(session_state)
     if isinstance(presented, dict):
         search_date = _normalize_search_date(presented.get("search_date"))
         if search_date:
             return {"mode": "single_day", "start": search_date}
-    last = session_state.get("last_execution_result")
-    if isinstance(last, dict):
-        search_date = _normalize_search_date(last.get("search_date"))
+    cache = availability_cache_from_session(session_state)
+    if isinstance(cache, dict):
+        search_date = _normalize_search_date(cache.get("search_date"))
         if search_date:
             return {"mode": "single_day", "start": search_date}
-    availability = session_state.get("availability")
-    if isinstance(availability, dict):
-        presentation = availability.get("presentation") or {}
-        if isinstance(presentation, dict):
-            presented = presentation.get("presented") or {}
-            if isinstance(presented, dict):
-                search_date = _normalize_search_date(presented.get("search_date"))
-                if search_date:
-                    return {"mode": "single_day", "start": search_date}
-        cache = availability.get("cache") or {}
-        if isinstance(cache, dict):
-            search_result = cache.get("search_result") or {}
-            if isinstance(search_result, dict):
-                search_date = _normalize_search_date(search_result.get("search_date"))
-                if search_date:
-                    return {"mode": "single_day", "start": search_date}
     return None
 
 
@@ -874,26 +863,21 @@ def _session_time_proposal(session_state: Dict[str, Any]) -> Optional[Dict[str, 
 
 def _has_established_availability_search(session_state: Dict[str, Any]) -> bool:
     """True when session already holds artifacts from a prior availability search."""
-    if session_state.get("availability_fingerprint"):
+    from core.workflows.availability.presentation import (
+        availability_cache_from_session,
+        availability_fingerprint_from_session,
+        presented_availability_from_session,
+    )
+
+    if availability_fingerprint_from_session(session_state):
         return True
-    last = session_state.get("last_execution_result")
-    if isinstance(last, dict) and last:
+    cache = availability_cache_from_session(session_state)
+    if isinstance(cache, dict) and cache.get("slots"):
         return True
-    presented = session_state.get("presented_availability")
+    presented = presented_availability_from_session(session_state)
     if isinstance(presented, dict) and (
         presented.get("slots") or presented.get("times")
     ):
-        return True
-    availability = session_state.get("availability")
-    if not isinstance(availability, dict):
-        return False
-    if availability.get("fingerprint"):
-        return True
-    cache = availability.get("cache")
-    if isinstance(cache, dict) and cache.get("search_result"):
-        return True
-    presentation = availability.get("presentation")
-    if isinstance(presentation, dict) and presentation.get("presented"):
         return True
     return False
 

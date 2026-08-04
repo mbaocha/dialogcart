@@ -94,7 +94,11 @@ def _presented_availability_summary(
 ) -> Optional[Dict[str, Any]]:
     if not isinstance(session_state, dict):
         return None
-    presented = session_state.get("presented_availability")
+    from core.workflows.availability.presentation import (
+        presented_availability_from_session,
+    )
+
+    presented = presented_availability_from_session(session_state)
     if not isinstance(presented, dict):
         return None
     times = presented.get("times")

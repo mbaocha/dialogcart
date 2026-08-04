@@ -45,14 +45,16 @@ def _session_fingerprint(session: Dict[str, Any]) -> Any:
     availability = session.get("availability")
     if isinstance(availability, dict) and availability.get("fingerprint") is not None:
         return availability.get("fingerprint")
-    return session.get("availability_fingerprint")
+    from core.workflows.availability.presentation import availability_fingerprint_from_session
+    return availability_fingerprint_from_session(session)
 
 
 def _presented_search_date(session: Dict[str, Any]) -> Optional[str]:
-    presented = session.get("presented_availability")
+    from core.workflows.availability.presentation import presented_availability_from_session, availability_cache_from_session
+    presented = presented_availability_from_session(session)
     if isinstance(presented, dict) and presented.get("search_date"):
         return _resolve_search_date(str(presented.get("search_date")))
-    cache = session.get("last_execution_result")
+    cache = availability_cache_from_session(session)
     if isinstance(cache, dict) and cache.get("search_date"):
         return _resolve_search_date(str(cache.get("search_date")))
     return None
@@ -359,7 +361,8 @@ def _assert_july_21_search_not_poisoned(conv, booking, availability) -> None:
         f"turn {conv.turn}: response must not contain July 20 availability, got {text!r}",
     )
 
-    presented_payload = sess.get("presented_availability") or {}
+    from core.workflows.availability.presentation import presented_availability_from_session
+    presented_payload = presented_availability_from_session(sess) or {}
     search_date = presented_payload.get("search_date")
     if search_date:
         conv._assert(
@@ -367,7 +370,8 @@ def _assert_july_21_search_not_poisoned(conv, booking, availability) -> None:
             f"turn {conv.turn}: presented search_date must be {JULY_21}, got {search_date!r}",
         )
 
-    cache = sess.get("last_execution_result") or {}
+    from core.workflows.availability.presentation import availability_cache_from_session
+    cache = availability_cache_from_session(sess) or {}
     cache_slots = cache.get("slots") or []
     for slot in cache_slots:
         if not isinstance(slot, dict):

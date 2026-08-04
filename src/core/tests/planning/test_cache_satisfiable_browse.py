@@ -5,6 +5,12 @@ Date / next-day requests must select SEARCH_AVAILABILITY.
 
 from __future__ import annotations
 
+from core.workflows.availability.presentation import (
+    availability_cache_from_session,
+    availability_fingerprint_from_session,
+    presented_availability_from_session,
+)
+
 from unittest.mock import Mock
 
 from core.adapters.nlu import LumaClient
@@ -191,7 +197,7 @@ def test_absolute_date_selects_search_availability():
     assert _plan_action(result) == "SEARCH_AVAILABILITY"
     mock_availability.get_service_availability.assert_called()
     saved = store.get_session(1, user_id) or {}
-    assert saved.get("availability_fingerprint") != prior_fp
+    assert availability_fingerprint_from_session(saved) != prior_fp
 
 
 def test_structured_browse_next_does_not_select_search():
@@ -262,7 +268,7 @@ def test_structured_browse_next_does_not_select_search():
     assert _plan_action(result) is None
     mock_availability.get_service_availability.assert_not_called()
     saved = store.get_session(1, user_id) or {}
-    assert saved.get("availability_fingerprint") == prior_fp
-    presented_after = saved.get("presented_availability") or {}
+    assert availability_fingerprint_from_session(saved) == prior_fp
+    presented_after = presented_availability_from_session(saved) or {}
     assert presented_after.get("search_date") == JULY_24
     assert (presented_after.get("_cursor") or {}).get("page_index") == 1

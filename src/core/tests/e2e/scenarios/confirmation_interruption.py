@@ -990,7 +990,8 @@ def _assert_july_23_availability_shown(conv, booking, availability) -> None:
         start_date == _JULY_23,
         f"turn {conv.turn}: Temporal.start_date must be {_JULY_23}, got {start_date!r}",
     )
-    presented_payload = sess.get("presented_availability") or {}
+    from core.workflows.availability.presentation import presented_availability_from_session
+    presented_payload = presented_availability_from_session(sess) or {}
     if isinstance(presented_payload, dict) and presented_payload.get("search_date"):
         conv._assert(
             _resolve_search_date(str(presented_payload.get("search_date"))) == _JULY_23,
@@ -1071,7 +1072,8 @@ def _assert_july_24_interrupts_confirmation(conv, booking, availability) -> None
         f"turn {conv.turn}: Temporal.start_date must be {_JULY_24}, got {start_date!r}",
     )
 
-    presented_payload = sess.get("presented_availability") or {}
+    from core.workflows.availability.presentation import presented_availability_from_session
+    presented_payload = presented_availability_from_session(sess) or {}
     if not isinstance(presented_payload, dict):
         presented_payload = {}
     search_date = presented_payload.get("search_date")
@@ -1238,7 +1240,11 @@ def _assert_date_surfaces(
                 ),
             )
 
-        presented_payload = sess.get("presented_availability") or {}
+        from core.workflows.availability.presentation import (
+            presented_availability_from_session,
+        )
+
+        presented_payload = presented_availability_from_session(sess) or {}
         if not isinstance(presented_payload, dict):
             presented_payload = {}
         search_date = presented_payload.get("search_date")

@@ -19,6 +19,42 @@ from core.tests.e2e.framework.conversation import (
     _response_text,
 )
 
+def _sess_fp(sess):
+    from core.workflows.availability.presentation import (
+        availability_fingerprint_from_session,
+    )
+
+    return availability_fingerprint_from_session(sess)
+
+
+def _sess_presented(sess):
+    from core.workflows.availability.presentation import (
+        presented_availability_from_session,
+    )
+
+    return presented_availability_from_session(sess)
+
+
+def _sess_cache(sess):
+    from core.workflows.availability.presentation import availability_cache_from_session
+
+    cache = availability_cache_from_session(sess)
+    if isinstance(cache, dict):
+        return cache
+    if isinstance(sess, dict):
+        availability = sess.get("availability")
+        if isinstance(availability, dict):
+            nested = availability.get("cache")
+            if isinstance(nested, dict) and isinstance(
+                nested.get("search_result"), dict
+            ):
+                return nested["search_result"]
+        legacy = sess.get("last_execution_result")
+        if isinstance(legacy, dict):
+            return legacy
+    return {}
+
+
 TARGET_DATE = _resolve_search_date(None)
 # Relative "tomorrow" against the shared E2E clock (not TARGET_DATE = frozen+2).
 _TOMORROW = (FROZEN_TIME + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -95,7 +131,7 @@ def _assert_no_extra_search(conv, booking, availability) -> None:
     _assert_no_booking(conv, booking)
     assert availability.get_service_availability.call_count == _SEARCH_STATE.get(
         "count")
-    last = (conv.session() or {}).get("last_execution_result") or {}
+    last = _sess_cache(conv.session() or {})
     assert last.get("type") == "availability"
     assert len(last.get("slots") or []) >= 1
     missing = (conv.session() or {}).get("missing_slots") or []
@@ -152,7 +188,7 @@ def _clear_sticky_temporal_facts(conv, _booking=None, _availability=None) -> Non
 
     Scripted bind turns persist ``facts.times`` / ``time_proposal``. Without
     clearing them, a service/date revision rebinds the old exact time from
-    sticky session proposals and re-enters confirmation — masking invalidation.
+    sticky session proposals and re-enters confirmation â€” masking invalidation.
     """
     sess = conv.session()
     if not isinstance(sess, dict):
@@ -353,7 +389,7 @@ _register(
 
 
 # ---------------------------------------------------------------------------
-# Unavailable time → TIME_MATCH_MISMATCH
+# Unavailable time â†’ TIME_MATCH_MISMATCH
 # ---------------------------------------------------------------------------
 
 _register(
@@ -572,7 +608,7 @@ def _assert_exact_search_side_effects(conv, _booking, availability) -> None:
     assert isinstance(sess.get("time_proposal"), dict)
     assert isinstance(sess.get("date_proposal"), dict)
     assert sess.get("resolved_datetime_range")
-    last = sess.get("last_execution_result") or {}
+    last = _sess_cache(sess)
     assert last.get("type") == "availability"
 
 
@@ -589,7 +625,7 @@ def _assert_exact_search_recorded_tomorrow(conv, booking, availability) -> None:
     assert isinstance(sess.get("time_proposal"), dict)
     assert isinstance(sess.get("date_proposal"), dict)
     assert sess.get("resolved_datetime_range")
-    last = sess.get("last_execution_result") or {}
+    last = _sess_cache(sess)
     assert last.get("type") == "availability"
 
 
@@ -606,7 +642,7 @@ def _assert_mismatch_side_effects(conv, booking, availability) -> None:
     assert availability.get_service_availability.call_count == _TIME_STATE.get(
         "searches", 0) + 1
     assert not booking.create_booking.called
-    last = (conv.session() or {}).get("last_execution_result") or {}
+    last = _sess_cache(conv.session() or {})
     assert last.get("type") == "availability"
     assert conv.plan.get("status") != "READY" or conv.plan.get(
         "action") is not None
@@ -614,7 +650,7 @@ def _assert_mismatch_side_effects(conv, booking, availability) -> None:
 
 def _assert_empty_slots(conv, _booking, availability) -> None:
     assert availability.get_service_availability.call_count == 1
-    last = (conv.session() or {}).get("last_execution_result") or {}
+    last = _sess_cache(conv.session() or {})
     assert last.get("slots") == []
 
 
@@ -622,7 +658,7 @@ def _assert_proposals_persisted(conv, _booking, availability) -> None:
     sess = conv.session() or {}
     assert isinstance(sess.get("time_proposal"), dict)
     assert isinstance(sess.get("date_proposal"), dict)
-    assert isinstance(sess.get("last_execution_result"), dict)
+    assert isinstance(_sess_cache(sess), dict) and bool(_sess_cache(sess))
     assert availability.get_service_availability.call_count == 1
 
 
@@ -905,8 +941,8 @@ _register(
 # Post-availability time selection (RecordingLumaClient /resolve replay)
 # ---------------------------------------------------------------------------
 #
-# Shared start: book premium → availability presented (includes 1:30 PM).
-# NLU bodies come from recorded production /resolve — not handwritten scripts.
+# Shared start: book premium â†’ availability presented (includes 1:30 PM).
+# NLU bodies come from recorded production /resolve â€” not handwritten scripts.
 #
 _POST_AVAIL_SEARCH: Dict[str, Any] = {}
 _POST_AVAIL_BASELINE: Dict[str, Any] = {}
@@ -932,7 +968,7 @@ def _capture_post_availability_baseline(conv, _booking, availability) -> None:
             _POST_AVAIL_BASELINE["date"] = proposal.get("start") or proposal.get("value")
         elif proposal:
             _POST_AVAIL_BASELINE["date"] = proposal
-    presented = sess.get("presented_availability")
+    presented = _sess_presented(sess)
     times: List[str] = []
     if isinstance(presented, dict):
         raw_times = presented.get("times") or []
@@ -991,7 +1027,7 @@ def _assert_booking_context_preserved(conv) -> None:
 
 
 def _assert_invalid_time_explains_and_reshows(conv, booking, availability) -> None:
-    """xxxxx after availability — clarify without redundant SEARCH."""
+    """xxxxx after availability â€” clarify without redundant SEARCH."""
     _assert_production_xxxxx_after_availability(conv, booking, availability)
     _assert_no_extra_availability_search(conv, availability)
 
@@ -1017,7 +1053,7 @@ def _turn_understanding(conv) -> Any:
 
 
 def _assert_production_xxxxx_after_availability(conv, booking, availability) -> None:
-    """Unrecognized / unusable time after offers → recovery presentation, no SEARCH."""
+    """Unrecognized / unusable time after offers â†’ recovery presentation, no SEARCH."""
     _assert_no_booking(conv, booking)
     _assert_booking_context_preserved(conv)
 
@@ -1037,7 +1073,7 @@ def _assert_production_xxxxx_after_availability(conv, booking, availability) -> 
     outcome = conv.outcome or {}
     action = plan.get("action") if "action" in plan else outcome.get("action")
     assert action in (None, "", False), (
-        f"turn {conv.turn}: cached offers are authoritative — must not SEARCH, "
+        f"turn {conv.turn}: cached offers are authoritative â€” must not SEARCH, "
         f"got action={action!r}"
     )
     status = plan.get("status") or outcome.get("status")
@@ -1094,7 +1130,7 @@ def _assert_production_xxxxx_after_availability(conv, booking, availability) -> 
     ), (
         f"turn {conv.turn}: availability reshow must not suppress recovery, got {text!r}"
     )
-    sess_presented = sess.get("presented_availability")
+    sess_presented = _sess_presented(sess)
     assert isinstance(sess_presented, dict) and (
         sess_presented.get("times") or sess_presented.get("slots")
     ), (
@@ -1126,7 +1162,7 @@ def _assert_malformed_clock_not_mismatch(conv, booking, availability) -> None:
     """5.xyz after availability: clarify unusable input, not TIME_MATCH_MISMATCH.
 
     Recorded /resolve marks UNRECOGNIZED_INPUT with no clock facts. Cached offers
-    remain authoritative — planner clarifies rather than re-SEARCH or mismatch.
+    remain authoritative â€” planner clarifies rather than re-SEARCH or mismatch.
     """
     _assert_production_xxxxx_after_availability(conv, booking, availability)
     _assert_no_extra_availability_search(conv, availability)
@@ -1567,10 +1603,10 @@ _DATE_AFTER_SEARCH_STATE: Dict[str, Any] = {}
 
 
 def _presented_search_date(session: Dict[str, Any]) -> Any:
-    presented = session.get("presented_availability")
+    presented = _sess_presented(session)
     if isinstance(presented, dict) and presented.get("search_date"):
         return _resolve_search_date(str(presented.get("search_date")))
-    cache = session.get("last_execution_result")
+    cache = _sess_cache(session)
     if isinstance(cache, dict) and cache.get("search_date"):
         return _resolve_search_date(str(cache.get("search_date")))
     return None
@@ -1582,9 +1618,7 @@ def _assert_july23_availability_presented(conv, booking, availability) -> None:
     _DATE_AFTER_SEARCH_STATE["search_count"] = (
         availability.get_service_availability.call_count
     )
-    _DATE_AFTER_SEARCH_STATE["fingerprint"] = (conv.session() or {}).get(
-        "availability_fingerprint"
-    )
+    _DATE_AFTER_SEARCH_STATE["fingerprint"] = _sess_fp(conv.session() or {})
     sess = conv.session() or {}
     presented_date = _presented_search_date(sess)
     assert presented_date == _JULY_23, (
@@ -1604,7 +1638,7 @@ def _assert_july25_searches(conv, booking, availability) -> None:
     plan = conv.plan or {}
     # After execution, plan.action may already be consumed; prefer call evidence.
     sess = conv.session() or {}
-    new_fp = sess.get("availability_fingerprint")
+    new_fp = _sess_fp(sess)
     prior_fp = _DATE_AFTER_SEARCH_STATE.get("fingerprint")
     assert new_fp and new_fp != prior_fp, (
         f"turn {conv.turn}: expected a new fingerprint for July 25, "

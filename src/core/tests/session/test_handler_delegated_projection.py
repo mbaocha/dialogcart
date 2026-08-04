@@ -78,7 +78,12 @@ def test_off_topic_digression_preserves_confirmation_and_bound_datetime():
     assert projected.get("resolved_datetime_range", {}).get("start") == (
         "2026-07-21T14:00:00+00:00"
     )
-    assert projected.get("availability_fingerprint") == "fp-abc"
+    from core.workflows.availability.presentation import (
+        availability_fingerprint_from_session,
+    )
+
+    assert availability_fingerprint_from_session(projected) == "fp-abc"
+    assert "availability_fingerprint" not in projected
     assert projected.get("date_proposal") == previous["date_proposal"]
     assert projected.get("time_proposal") == previous["time_proposal"]
     # Conversation digression memory is still applied.

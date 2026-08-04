@@ -11,6 +11,11 @@ import pytest
 from core.api import message as message_api
 from core.workflows.availability.browse import resolve_availability_browse
 from core.workflows.availability.fingerprint import compute_availability_fingerprint
+from core.workflows.availability.presentation import (
+    availability_cache_from_session,
+    availability_fingerprint_from_session,
+    presented_availability_from_session,
+)
 from core.adapters.cache.catalog_cache import catalog_cache
 from core.api.compat import handle_message as real_handle_message
 from core.session.session_manager import clear_session
@@ -237,12 +242,12 @@ def browse_api_conversation(api_client, monkeypatch):
 
 
 def _cached_slot_count(session: Dict[str, Any]) -> int:
-    last = session.get("last_execution_result") or {}
+    last = availability_cache_from_session(session) or {}
     return len(last.get("slots") or [])
 
 
 def _presented_slot_count(session: Dict[str, Any]) -> int:
-    presented = session.get("presented_availability") or {}
+    presented = presented_availability_from_session(session) or {}
     return len(presented.get("slots") or [])
 
 
@@ -270,7 +275,7 @@ def test_browse_pagination_full_api_path_validation(browse_api_conversation):
     sess3 = conv.session() or {}
     searches_after_turn3 = availability_client.get_service_availability.call_count
     assert searches_after_turn3 == searches_after_turn2 + 1
-    stored_fp = sess3.get("availability_fingerprint")
+    stored_fp = availability_fingerprint_from_session(sess3)
     assert stored_fp
     full_cached = _cached_slot_count(sess3)
     assert full_cached == FULL_SLOT_COUNT

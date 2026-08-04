@@ -272,7 +272,11 @@ class StageRunner:
                     forbidden_mutations=["booking.slots", "availability_fingerprint"],
                 )
                 return
-            fp_before = (session_state or {}).get("availability_fingerprint")
+            from core.workflows.availability.presentation import (
+                availability_fingerprint_from_session,
+            )
+
+            fp_before = availability_fingerprint_from_session(session_state)
             self._emit_invariant(
                 "pagination",
                 lambda: check_pagination(

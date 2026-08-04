@@ -223,6 +223,8 @@ class Scenario:
     id: Optional[str] = None
     # When True, runner attaches tenant customer identity for commit paths.
     requires_customer_identity: bool = False
+    # When True, runner hard-reloads Session V2 via public store APIs after each turn.
+    force_session_reload: bool = False
 
     def __init__(
         self,
@@ -234,6 +236,7 @@ class Scenario:
         after: Optional[ScenarioHook] = None,
         id: Optional[str] = None,
         requires_customer_identity: bool = False,
+        force_session_reload: bool = False,
     ) -> None:
         self.name = name
         self.turns = [coerce_turn(t) for t in turns]
@@ -243,6 +246,7 @@ class Scenario:
         self.after = after
         self.id = id or _slugify(name)
         self.requires_customer_identity = requires_customer_identity
+        self.force_session_reload = force_session_reload
 
     def pytest_id(self) -> str:
         return self.id
@@ -405,8 +409,12 @@ def extract_presented_times(
     session: Optional[Dict[str, Any]],
 ) -> List[str]:
     """Return normalized start-time keys for the availability page shown to the user."""
+    from core.workflows.availability.presentation import (
+        presented_availability_from_session,
+    )
+
     sess = session or {}
-    presented = sess.get("presented_availability")
+    presented = presented_availability_from_session(sess)
     if isinstance(presented, dict):
         slots = presented.get("slots") or []
         starts = [_normalize_slot_start(s) for s in slots]
@@ -654,8 +662,24 @@ def _execution_view(body: Dict[str, Any], session: Optional[Dict[str, Any]]) -> 
     outcome = body.get("outcome") or {}
     if outcome.get("type"):
         return outcome
-    last = (session or {}).get("last_execution_result")
-    return last if isinstance(last, dict) else {}
+    from core.workflows.availability.presentation import availability_cache_from_session
+
+    cache = availability_cache_from_session(session)
+    if isinstance(cache, dict):
+        return cache
+    # Raw nested search_result may exist even when cache adapter rejects shape.
+    if isinstance(session, dict):
+        availability = session.get("availability")
+        if isinstance(availability, dict):
+            nested_cache = availability.get("cache")
+            if isinstance(nested_cache, dict):
+                raw = nested_cache.get("search_result")
+                if isinstance(raw, dict):
+                    return raw
+        legacy = session.get("last_execution_result")
+        if isinstance(legacy, dict):
+            return legacy
+    return {}
 
 
 class BookingConversation:
@@ -1007,7 +1031,11 @@ class BookingConversation:
 
 
 def _presentation_page_index(session: Optional[Dict[str, Any]]) -> int:
-    presentation = (session or {}).get("availability_presentation") or {}
+    from core.workflows.availability.presentation import (
+        availability_pagination_from_session,
+    )
+
+    presentation = availability_pagination_from_session(session) or {}
     return int(presentation.get("page_index") or 0)
 
 

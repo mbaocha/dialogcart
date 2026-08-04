@@ -221,12 +221,19 @@ def _persist_session_for_next_turn(
     elif normalized.get("status") == "AWAITING_CONFIRMATION":
         session_state["confirmation_state"] = "pending"
 
+    from core.workflows.availability.presentation import (
+        apply_availability_artifacts,
+        availability_fingerprint_from_session,
+    )
+
     if isinstance(execution_result, dict):
         availability_fingerprint = execution_plan.get(
             "availability_fingerprint"
         ) or plan_obj.get("availability_fingerprint")
         if availability_fingerprint:
-            session_state["availability_fingerprint"] = availability_fingerprint
+            apply_availability_artifacts(
+                session_state, fingerprint=availability_fingerprint
+            )
         resolved_datetime_range = execution_plan.get(
             "resolved_datetime_range"
         ) or plan_obj.get("resolved_datetime_range")
@@ -235,12 +242,13 @@ def _persist_session_for_next_turn(
 
     if previous_session:
         if (
-            "availability_fingerprint" not in session_state
-            and previous_session.get("availability_fingerprint")
+            availability_fingerprint_from_session(session_state) is None
+            and availability_fingerprint_from_session(previous_session)
         ):
-            session_state["availability_fingerprint"] = previous_session[
-                "availability_fingerprint"
-            ]
+            apply_availability_artifacts(
+                session_state,
+                fingerprint=availability_fingerprint_from_session(previous_session),
+            )
         if (
             "resolved_datetime_range" not in session_state
             and previous_session.get("resolved_datetime_range")

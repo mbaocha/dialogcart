@@ -473,22 +473,8 @@ def hydrate_v1_compat_shims(v2_session: Mapping[str, Any]) -> Dict[str, Any]:
         working.setdefault("slots", {})
         working["slots"].setdefault("booking_code", booking.get("booking_code"))
 
-    if availability.get("fingerprint") is not None:
-        working["availability_fingerprint"] = availability.get("fingerprint")
-    cache = availability.get("cache") or {}
-    if cache.get("search_result") is not None:
-        working["last_execution_result"] = cache.get("search_result")
-    presentation = availability.get("presentation") or {}
-    if presentation.get("presented") is not None:
-        working["presented_availability"] = presentation.get("presented")
-    if (
-        presentation.get("page_index") is not None
-        or presentation.get("page_size") is not None
-    ):
-        working["availability_presentation"] = {
-            "page_index": presentation.get("page_index") or 0,
-            "page_size": presentation.get("page_size"),
-        }
+    # Availability mirrors are no longer hydrated: runtime consumers use
+    # nested availability.* via canonical accessors.
 
     working["confirmation_state"] = v2.get("confirmation_state")
     working["customer_id"] = v2.get("customer_id")

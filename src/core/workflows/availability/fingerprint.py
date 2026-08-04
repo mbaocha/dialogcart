@@ -246,8 +246,12 @@ def build_availability_fingerprint_slots(
         time_proposal=time_proposal,
     )
 
-    presentation = session_state.get("availability_presentation") or {}
-    presented = session_state.get("presented_availability") or {}
+    from core.workflows.availability.presentation import (
+        availability_pagination_from_session,
+        presented_availability_from_session,
+    )
+    presentation = availability_pagination_from_session(session_state) or {}
+    presented = presented_availability_from_session(session_state) or {}
     logger.debug(
         "[FINGERPRINT_SLOTS_INPUT] raw_slots=%s intent=%s organization_id=%s "
         "date_proposal=%s time_proposal=%s temporal=%s "
@@ -420,35 +424,24 @@ def _active_presented_search_date(
     """Concrete day already shown from the trusted availability presentation/cache."""
     if not isinstance(session_state, dict):
         return None
-    from core.workflows.availability.presentation import normalize_search_date
+    from core.workflows.availability.presentation import (
+        availability_cache_from_session,
+        normalize_search_date,
+        presented_availability_from_session,
+    )
 
-    presented = session_state.get("presented_availability")
+    presented = presented_availability_from_session(session_state)
     if isinstance(presented, dict):
         search_date = normalize_search_date(presented.get("search_date"))
         if search_date:
             return search_date
-    last = session_state.get("last_execution_result")
-    if isinstance(last, dict):
-        search_date = normalize_search_date(last.get("search_date"))
+    cache = availability_cache_from_session(session_state)
+    if isinstance(cache, dict):
+        search_date = normalize_search_date(cache.get("search_date"))
         if search_date:
             return search_date
-    availability = session_state.get("availability")
-    if isinstance(availability, dict):
-        presentation = availability.get("presentation") or {}
-        if isinstance(presentation, dict):
-            nested = presentation.get("presented") or {}
-            if isinstance(nested, dict):
-                search_date = normalize_search_date(nested.get("search_date"))
-                if search_date:
-                    return search_date
-        cache = availability.get("cache") or {}
-        if isinstance(cache, dict):
-            search_result = cache.get("search_result") or {}
-            if isinstance(search_result, dict):
-                search_date = normalize_search_date(search_result.get("search_date"))
-                if search_date:
-                    return search_date
     return None
+
 
 
 def slots_match_availability_fingerprint_for_readiness(

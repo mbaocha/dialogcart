@@ -122,16 +122,8 @@ class SessionProjectorV2:
                 if source_availability.get("fingerprint") is not None:
                     availability["fingerprint"] = source_availability["fingerprint"]
 
-            for key in (
-                "availability_fingerprint",
-                "last_execution_result",
-                "presented_availability",
-                "availability_presentation",
-                "customer_id",
-            ):
-                if working_session_state.get(key) is not None:
-                    working[key] = working_session_state[key]
-
+            # Same-turn working may still carry historical flat availability keys;
+            # project them into nested V2 only (no flat dual-write onto working).
             legacy_fingerprint = working_session_state.get(
                 "availability_fingerprint"
             )
@@ -159,6 +151,9 @@ class SessionProjectorV2:
                 )
                 presentation["page_size"] = legacy_presentation.get("page_size")
 
+            if working_session_state.get("customer_id") is not None:
+                working["customer_id"] = working_session_state["customer_id"]
+
         if isinstance(merged_luma_response, dict) and not preserve_booking_authorization:
             from core.session.confirmation_gate import (
                 get_confirmation_state,
@@ -177,26 +172,24 @@ class SessionProjectorV2:
             set_confirmation_state(working, get_confirmation_state(merged_luma_response))
 
         if isinstance(workflow_result, dict):
+            # Workflow envelope still uses flat key names for one-turn transfer;
+            # map into nested availability only.
             fingerprint = workflow_result.get("availability_fingerprint")
             if fingerprint is not None:
                 availability["fingerprint"] = fingerprint
-                working["availability_fingerprint"] = fingerprint
 
             search_result = workflow_result.get("last_execution_result")
             if search_result is not None:
                 cache["search_result"] = search_result
-                working["last_execution_result"] = search_result
 
             presented = workflow_result.get("presented_availability")
             if presented is not None:
                 presentation["presented"] = presented
-                working["presented_availability"] = presented
 
             presentation_payload = workflow_result.get("availability_presentation")
             if isinstance(presentation_payload, dict):
                 presentation["page_index"] = presentation_payload.get("page_index", 0)
                 presentation["page_size"] = presentation_payload.get("page_size")
-                working["availability_presentation"] = presentation_payload
 
             bound_datetime = workflow_result.get("resolved_datetime_range")
             if bound_datetime is not None:

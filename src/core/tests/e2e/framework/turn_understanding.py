@@ -87,12 +87,11 @@ def assert_understanding_everywhere(
 
 
 def session_fingerprint(session: Optional[dict]) -> Any:
-    if not isinstance(session, dict):
-        return None
-    availability = session.get("availability")
-    if isinstance(availability, dict) and availability.get("fingerprint") is not None:
-        return availability.get("fingerprint")
-    return session.get("availability_fingerprint")
+    from core.workflows.availability.presentation import (
+        availability_fingerprint_from_session,
+    )
+
+    return availability_fingerprint_from_session(session)
 
 
 def session_service_id(session: Optional[dict]) -> Optional[str]:

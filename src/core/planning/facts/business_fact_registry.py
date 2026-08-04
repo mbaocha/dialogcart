@@ -309,10 +309,14 @@ def evaluate_availability_evidence_ready(
     if _has_resolved_datetime_selection(session_state, luma_response):
         return True
 
+    from core.workflows.availability.presentation import (
+        availability_fingerprint_from_session,
+    )
+
     stored_fingerprint = None
     readiness_session = None if revision_invalidated else session_state
     if not revision_invalidated and isinstance(session_state, dict):
-        stored_fingerprint = session_state.get("availability_fingerprint")
+        stored_fingerprint = availability_fingerprint_from_session(session_state)
 
     facts_obj = luma_response.get("facts")
     fingerprint_slots = build_availability_fingerprint_slots(

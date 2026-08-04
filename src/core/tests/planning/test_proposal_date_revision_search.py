@@ -7,6 +7,12 @@ An explicit new date must revise and search — not reshow / browse the cache.
 
 from __future__ import annotations
 
+from core.workflows.availability.presentation import (
+    availability_cache_from_session,
+    availability_fingerprint_from_session,
+    presented_availability_from_session,
+)
+
 from unittest.mock import Mock
 
 from core.adapters.nlu import LumaClient
@@ -203,7 +209,7 @@ def test_explicit_new_date_updates_fingerprint_and_skips_browse_reshow():
     assert call_kwargs.get("date") == JULY_30
 
     saved = store.get_session(1, user_id) or {}
-    new_fp = saved.get("availability_fingerprint")
+    new_fp = availability_fingerprint_from_session(saved)
     assert new_fp
     assert new_fp != prior_fp
 
@@ -217,7 +223,7 @@ def test_explicit_new_date_updates_fingerprint_and_skips_browse_reshow():
     )
     assert new_fp == expected_fp
 
-    presented = saved.get("presented_availability") or {}
+    presented = presented_availability_from_session(saved) or {}
     assert presented.get("search_date") == JULY_30 or (
         (fields.get("date_proposal") or {}).get("start") == JULY_30
     )
@@ -262,4 +268,4 @@ def test_browse_next_after_proposal_search_does_not_search():
     mock_availability.get_service_availability.assert_not_called()
 
     saved = store.get_session(1, user_id) or {}
-    assert saved.get("availability_fingerprint") == prior_fp
+    assert availability_fingerprint_from_session(saved) == prior_fp

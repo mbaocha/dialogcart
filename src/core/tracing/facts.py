@@ -58,7 +58,11 @@ def emit_business_facts_trace(
 
     slots = context.slots if isinstance(context.slots, dict) else {}
     session_state = context.session_state if isinstance(context.session_state, dict) else {}
-    stored_fingerprint = session_state.get("availability_fingerprint")
+    from core.workflows.availability.presentation import (
+        availability_fingerprint_from_session,
+    )
+
+    stored_fingerprint = availability_fingerprint_from_session(session_state)
 
     inputs_id = emit_evidence(
         "FACTS_INPUTS",

@@ -1,3 +1,8 @@
+from core.workflows.availability.presentation import (
+    availability_cache_from_session,
+    availability_fingerprint_from_session,
+    presented_availability_from_session,
+)
 """
 Tests for AVAILABILITY / CHECK_AVAILABILITY during active booking sessions.
 
@@ -386,15 +391,17 @@ def test_e2e_july6_search_fingerprint_and_time_selection_confirm():
     assert plan3.get("action") == "SEARCH_AVAILABILITY"
 
     exec_result3 = result3.get("result", {})
-    stored_fp = session_store.get_session(1, user_id).get("availability_fingerprint")
-    current_fp = exec_result3.get("availability_fingerprint")
-    assert stored_fp == current_fp
+        stored_fp = availability_fingerprint_from_session(
+            session_store.get_session(1, user_id)
+        )
+        current_fp = exec_result3.get("availability_fingerprint")
+        assert stored_fp == current_fp
 
     session_state = _persist_session_from_result(
         result3, session_state, user_id, session_store
     )
     assert session_state is not None
-    assert session_state.get("availability_fingerprint") == current_fp
+    assert availability_fingerprint_from_session(session_state) == current_fp
 
     # Turn 4: 9:00 AM → bind + await confirmation (no SEARCH, no booking)
     mock_luma_turn4 = Mock(spec=LumaClient)

@@ -194,11 +194,7 @@ def _execution_payload_for_cached_availability(
         if isinstance(nested, dict) and payload.get("status"):
             return {**payload, "status": payload.get("status") or "succeeded"}
 
-    presented = None
-    if isinstance(payload, dict) and isinstance(
-        payload.get("presented_availability"), dict
-    ):
-        presented = payload["presented_availability"]
+    presented = presented_availability_from_session(payload)
     if presented is None:
         presented = presented_availability_from_session(session_state)
     if presented is None:

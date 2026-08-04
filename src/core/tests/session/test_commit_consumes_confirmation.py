@@ -299,7 +299,8 @@ def test_stage_confirmation_clears_on_no():
     assert working_turn.payload.get("resolved_datetime_range") is None
     assert "time_proposal" not in working_turn.payload
     # Availability presentation preserved (REJECT does not clear availability).
-    assert working_turn.payload.get("presented_availability")
+    from core.workflows.availability.presentation import presented_availability_from_session
+    assert presented_availability_from_session(working_turn.payload)
     # Live request-scoped session mirrors reject invalidation (previous_session
     # deepcopy is not passed here).
     assert get_confirmation_state(session) is None

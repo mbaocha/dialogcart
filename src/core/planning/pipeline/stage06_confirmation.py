@@ -92,17 +92,6 @@ def _non_superseding_unrecognized_pending(
     return True
 
 
-_SESSION_AVAILABILITY_KEYS = (
-
-    "presented_availability",
-
-    "availability_fingerprint",
-
-    "last_execution_result",
-
-    "availability_presentation",
-
-)
 
 
 
@@ -235,22 +224,50 @@ def _maybe_enter_booking_confirmation_pending(
 
 
 def _preserve_session_availability_cache(
-
     payload: Dict[str, Any],
-
     session_state: Optional[Dict[str, Any]],
-
 ) -> None:
-
     if not isinstance(session_state, dict):
+        return
+    from core.workflows.availability.presentation import (
+        apply_availability_artifacts,
+        availability_fingerprint_from_session,
+        availability_pagination_from_session,
+        presented_availability_from_session,
+    )
 
+    payload_availability = payload.get("availability")
+    if isinstance(payload_availability, dict) and (
+        payload_availability.get("fingerprint") is not None
+        or (
+            isinstance(payload_availability.get("cache"), dict)
+            and payload_availability["cache"].get("search_result") is not None
+        )
+        or (
+            isinstance(payload_availability.get("presentation"), dict)
+            and payload_availability["presentation"].get("presented") is not None
+        )
+    ):
         return
 
-    for key in _SESSION_AVAILABILITY_KEYS:
-
-        if session_state.get(key) is not None and payload.get(key) is None:
-
-            payload[key] = session_state[key]
+    session_availability = session_state.get("availability")
+    src_cache: Dict[str, Any] = {}
+    if isinstance(session_availability, dict):
+        maybe_cache = session_availability.get("cache")
+        if isinstance(maybe_cache, dict):
+            src_cache = maybe_cache
+    search_result = src_cache.get("search_result")
+    if search_result is None:
+        legacy = session_state.get("last_execution_result")
+        if isinstance(legacy, dict):
+            search_result = legacy
+    apply_availability_artifacts(
+        payload,
+        fingerprint=availability_fingerprint_from_session(session_state),
+        search_result=search_result,
+        presented=presented_availability_from_session(session_state),
+        presentation=availability_pagination_from_session(session_state),
+    )
 
 
 

@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from core.workflows.availability.presentation import (
+    availability_cache_from_session,
+    availability_fingerprint_from_session,
+    presented_availability_from_session,
+)
+
 from unittest.mock import Mock
 
 from core.adapters.nlu import LumaClient
@@ -212,7 +218,7 @@ def test_service_switch_from_pending_clears_time_keeps_july22():
     assert saved.get("confirmation_state") not in ("pending", "confirmed")
     saved_proposal = saved.get("date_proposal") or {}
     assert saved_proposal.get("start") == JULY_22 or (
-        (saved.get("presented_availability") or {}).get("search_date") == JULY_22
+        (presented_availability_from_session(saved) or {}).get("search_date") == JULY_22
     )
 
 

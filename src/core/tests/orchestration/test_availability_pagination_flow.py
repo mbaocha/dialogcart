@@ -20,8 +20,11 @@ from core.adapters.nlu import LumaClient
 from core.api.compat import handle_message
 from core.planning.temporal_proposal import try_bind_offered_time_selection
 from core.workflows.availability.presentation import (
+    availability_cache_from_session,
+    availability_pagination_from_session,
     build_availability_presentation,
     build_presented_availability_page,
+    presented_availability_from_session,
 )
 
 FROZEN_TIME = datetime(2026, 7, 1, 10, 0, 0, tzinfo=timezone.utc)
@@ -143,7 +146,7 @@ def _run_turn(
 
 
 def _presented_starts(session: Dict[str, Any]) -> List[str]:
-    presented = session.get("presented_availability") or {}
+    presented = presented_availability_from_session(session) or {}
     slots = presented.get("slots") or []
     starts = []
     for slot in slots:
@@ -156,7 +159,7 @@ def _presented_starts(session: Dict[str, Any]) -> List[str]:
 
 
 def _page_index(session: Dict[str, Any]) -> int:
-    presentation = session.get("availability_presentation") or {}
+    presentation = availability_pagination_from_session(session) or {}
     return int(presentation.get("page_index") or 0)
 
 
@@ -338,7 +341,7 @@ def test_browse_persists_page_index_through_message_session_build(pagination_har
     """API-path: handle_message browse + project_session_v2 (like message.py)."""
     user_id, session_store, availability_client, org_client = pagination_harness
     session = _setup_paginated_search(user_id, availability_client, org_client, session_store)
-    full_cached_count = len(session["last_execution_result"]["slots"])
+    full_cached_count = len((availability_cache_from_session(session) or {}).get("slots") or [])
     first_page_starts = set(_presented_starts(session))
     searches_after_setup = availability_client.get_service_availability.call_count
 
@@ -368,9 +371,9 @@ def test_browse_persists_page_index_through_message_session_build(pagination_har
     page1_starts = set(_presented_starts(session))
     assert page1_starts != first_page_starts
     assert not page1_starts & first_page_starts
-    assert len(session["last_execution_result"]["slots"]) == full_cached_count
-    assert len(session["presented_availability"]["slots"]) == 3
-    assert session["presented_availability"]["slots"][0]["starts_at"].endswith(
+    assert len((availability_cache_from_session(session) or {}).get("slots") or []) == full_cached_count
+    assert len((presented_availability_from_session(session) or {}).get("slots") or []) == 3
+    assert (presented_availability_from_session(session) or {})["slots"][0]["starts_at"].endswith(
         "T15:00:00Z"
     )
 
@@ -562,7 +565,7 @@ def test_time_on_page_two_full_turn_no_search(pagination_harness):
         org_client,
     )
     assert _page_index(session) == 1
-    full_cache_count = len(session["last_execution_result"]["slots"])
+    full_cache_count = len((availability_cache_from_session(session) or {}).get("slots") or [])
     searches_before = availability_client.get_service_availability.call_count
 
     result = _run_turn(
@@ -585,7 +588,7 @@ def test_time_on_page_two_full_turn_no_search(pagination_harness):
     plan = outcome.get("plan") or {}
     assert plan.get("action") is None
     session_after = _persist_session_from_result(result, session, user_id, session_store)
-    assert len(session_after["last_execution_result"]["slots"]) == full_cache_count
+    assert len((availability_cache_from_session(session_after) or {}).get("slots") or []) == full_cache_count
     bound = session_after.get("resolved_datetime_range") or {}
     assert bound.get("start") == "2026-07-03T17:00:00Z"
 
