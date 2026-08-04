@@ -49,7 +49,7 @@
       ]
     },
     "intent": {
-      "confidence": 0.85,
+      "confidence": 0.95,
       "name": "CREATE_APPOINTMENT"
     },
     "temporal": {

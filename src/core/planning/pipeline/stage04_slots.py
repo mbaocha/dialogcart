@@ -30,14 +30,21 @@ def resolve_slot_turn_state(
     payload = working_turn.payload
     facts_obj = payload.get("facts", {})
     slots_for_filtering = dict(working_turn.effective_collected_slots)
-    slots_for_filtering = strip_unconfirmed_temporal_slots(
-        slots_for_filtering,
-        intent_name,
-        session_state,
-        confirmed=has_bound_booking_datetime(
-            slots_for_filtering, session_state, payload
-        ),
-    )
+    # After Stage 06 planning mutations, unauthorized time is already cleared.
+    # Do not strip remaining collected date via unconfirmed-temporal rules —
+    # REJECT keeps date; availability supersede clears time only.
+    if not (
+        payload.get("_booking_confirmation_rejected")
+        or payload.get("_bound_datetime_cleared")
+    ):
+        slots_for_filtering = strip_unconfirmed_temporal_slots(
+            slots_for_filtering,
+            intent_name,
+            session_state,
+            confirmed=has_bound_booking_datetime(
+                slots_for_filtering, session_state, payload
+            ),
+        )
 
     awaiting_slot = None
     prior_declined: list = []

@@ -58,7 +58,7 @@
       "name": "CREATE_APPOINTMENT"
     },
     "temporal": {
-      "confidence": 0.95,
+      "confidence": 0.9,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,

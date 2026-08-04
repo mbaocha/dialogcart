@@ -19,6 +19,8 @@ from core.planning.facts import derive_user_confirmation_satisfied
 from core.planning.pipeline.decision import (
     AvailabilityInvalidationEvidence,
     BoundDatetimeClearEvidence,
+    ConfirmationConsumeEvidence,
+    ConfirmationLifecycleEvidence,
     ConfirmationRejectEvidence,
 )
 from core.planning.pipeline.requests import (
@@ -50,15 +52,11 @@ from core.session.confirmation_gate import (
 
     ConfirmationGateTurn,
 
-    consume_confirmation_state,
-
     get_confirmation_state,
 
     set_confirmation_state,
 
 )
-
-from core.session.invalidation import InvalidationTrigger, apply_invalidation
 
 
 
@@ -270,50 +268,20 @@ def _bound_datetime_clear_evidence(
     )
 
 
-def _hydrate_working_slots_from_session(
-    working_turn: WorkingTurn,
-    session_state: Optional[Dict[str, Any]],
-) -> None:
-    """Ensure working-turn slots include durable session booking facts before reject.
-
-    Stage 02 merge normally already did this. When the working payload lacks
-    slots (e.g. unit callers), copy session slots onto the working turn only —
-    do not rebuild the payload envelope.
-    """
-    payload = working_turn.payload
-    current = dict(
-        working_turn.effective_collected_slots
-        or payload.get("_effective_collected_slots")
-        or payload.get("slots")
-        or {}
+def _supersede_lifecycle_evidence(
+    *,
+    reason: str = "confirmation_superseded",
+) -> tuple:
+    """Build paired lifecycle + consume evidence for pending supersession."""
+    lifecycle = ConfirmationLifecycleEvidence(
+        action="supersede",
+        reason=reason,
     )
-    if current:
-        payload.setdefault("slots", current)
-        payload.setdefault("_effective_collected_slots", current)
-        if not working_turn.effective_collected_slots:
-            working_turn.effective_collected_slots = current
-        return
-    if not isinstance(session_state, dict):
-        return
-    session_slots = session_state.get("slots")
-    if not isinstance(session_slots, dict) or not session_slots:
-        return
-    slots = dict(session_slots)
-    payload["slots"] = slots
-    payload["_effective_collected_slots"] = slots
-    working_turn.effective_collected_slots = slots
-    # Carry availability presentation artifacts already on session so reject
-    # does not drop them (REJECT_CONFIRMATION does not clear availability).
-    for key in _SESSION_AVAILABILITY_KEYS:
-        if session_state.get(key) is not None and payload.get(key) is None:
-            payload[key] = session_state[key]
-    if (
-        session_state.get("resolved_datetime_range") is not None
-        and payload.get("resolved_datetime_range") is None
-    ):
-        payload["resolved_datetime_range"] = session_state.get(
-            "resolved_datetime_range"
-        )
+    consume = ConfirmationConsumeEvidence(
+        consume=True,
+        reason=reason,
+    )
+    return lifecycle, consume
 
 
 def resolve_confirmation(
@@ -348,6 +316,10 @@ def resolve_confirmation(
 
     bound_datetime_clear = None
 
+    lifecycle_evidence = None
+
+    consume_evidence = None
+
     gate_action = attached_request.gate_action
 
     turn_operation = attached_request.turn_operation
@@ -370,25 +342,19 @@ def resolve_confirmation(
     # never write confirmation_state="confirmed" onto working/session state.
 
     if gate_action == ConfirmationGateTurn.NO and gate_booking_intent:
-        # Semantic rejection only: invalidate the working turn, emit evidence.
-        # Stage 04 recomputes missing slots; Decision selects outcome; Stage 09
-        # renders wording. Do not rebuild payload or call renderers here.
-        _hydrate_working_slots_from_session(working_turn, session_state)
-        apply_invalidation(
-            payload,
-            InvalidationTrigger.REJECT_CONFIRMATION,
-            reason="reject",
-        )
-        slots = dict(payload.get("slots") or {})
-        payload["slots"] = slots
-        payload["_effective_collected_slots"] = slots
-        working_turn.effective_collected_slots = slots
-        # Persist marker: keep post-reject temporal retention under planning ownership.
-        payload["_booking_confirmation_rejected"] = True
+        # Semantic rejection only — planning mutation boundary applies
+        # REJECT_CONFIRMATION. Stage 04 recomputes missing slots; Decision
+        # selects outcome; Stage 09 renders wording.
         return ConfirmationDecision(
             confirmation_state=None,
             reject_evidence=ConfirmationRejectEvidence(
                 rejected=True,
+                intent_name=gate_booking_intent,
+                reason_code="REJECT_CONFIRMATION",
+            ),
+            lifecycle_evidence=ConfirmationLifecycleEvidence(
+                action="reject",
+                reason="reject",
                 intent_name=gate_booking_intent,
                 reason_code="REJECT_CONFIRMATION",
             ),
@@ -397,7 +363,41 @@ def resolve_confirmation(
 
     availability_op = is_availability_turn_operation(turn_operation)
 
-    preserve_current_turn_time = bool(payload.get("_current_turn_has_time"))
+    # Preserve only an explicit current-turn time value — not a stale flag left
+    # after merge rebound of the prior confirmation selection.
+    preserve_current_turn_time = bool(
+        payload.get("_current_turn_has_time") and payload.get("_current_turn_time")
+    )
+
+    def _normalized_clock(value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        # Accept HH:MM or HH:MM:SS / ISO fragments.
+        if "T" in text:
+            text = text.split("T", 1)[1]
+        text = text.split("+", 1)[0].split("Z", 1)[0]
+        parts = text.split(":")
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+            return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+        return text
+
+    def _prior_bound_clock() -> Optional[str]:
+        slots = payload.get("slots") if isinstance(payload.get("slots"), dict) else {}
+        prior = slots.get("time")
+        if prior is None and isinstance(session_state, dict):
+            session_slots = session_state.get("slots")
+            if isinstance(session_slots, dict):
+                prior = session_slots.get("time")
+        if prior is None:
+            resolved = payload.get("resolved_datetime_range")
+            if not isinstance(resolved, dict) and isinstance(session_state, dict):
+                resolved = session_state.get("resolved_datetime_range")
+            if isinstance(resolved, dict):
+                prior = resolved.get("start")
+        return _normalized_clock(prior)
 
 
 
@@ -412,17 +412,19 @@ def resolve_confirmation(
             and confirmation_state == "pending"
         )
 
+        if (
+            supersede_pending_with_search
+            and preserve_current_turn_time
+            and _normalized_clock(payload.get("_current_turn_time"))
+            == _prior_bound_clock()
+        ):
+            # NLU may echo the prior bound clock into facts/temporal on a bare
+            # availability reshow; that is not a new time selection.
+            preserve_current_turn_time = False
+
         if gate_action == ConfirmationGateTurn.ANOTHER_REQUEST:
 
-            consume_confirmation_state(payload, reason="confirmation_superseded")
-
-            if isinstance(session_state, dict):
-
-                consume_confirmation_state(
-
-                    session_state, reason="confirmation_superseded"
-
-                )
+            lifecycle_evidence, consume_evidence = _supersede_lifecycle_evidence()
 
             confirmation_state = None
 
@@ -468,16 +470,8 @@ def resolve_confirmation(
             same_turn_time_rebind = False
         else:
 
-            consume_confirmation_state(payload, reason="confirmation_superseded")
-
-            if isinstance(session_state, dict):
-
-                consume_confirmation_state(
-
-                    session_state, reason="confirmation_superseded"
-
-                )
-
+            # Interpretive clear; emit consume only if pending is not re-entered
+            # below (re-entry would be wiped if consume applied after enter).
             confirmation_state = None
 
             same_turn_time_rebind = _same_turn_time_rebind(working_turn, turn_operation)
@@ -488,8 +482,17 @@ def resolve_confirmation(
 
             else:
 
+                lifecycle_evidence, consume_evidence = _supersede_lifecycle_evidence()
+
+                if (
+                    preserve_current_turn_time
+                    and _normalized_clock(payload.get("_current_turn_time"))
+                    == _prior_bound_clock()
+                ):
+                    preserve_current_turn_time = False
+
                 bound_datetime_clear = _bound_datetime_clear_evidence(
-                    preserve_current_turn_time=False,
+                    preserve_current_turn_time=preserve_current_turn_time,
                 )
 
                 slots_adjusted = True
@@ -540,6 +543,12 @@ def resolve_confirmation(
 
         )
 
+        # Same-turn rebind re-entered pending: do not request consume (would
+        # clear the newly written pending). If enter failed, request consume so
+        # stale pending is cleared on the working turn.
+        if same_turn_time_rebind and confirmation_state != "pending":
+            lifecycle_evidence, consume_evidence = _supersede_lifecycle_evidence()
+
 
 
     # Stage 01 sets confirm_booking_continuation on gate YES; treat YES itself
@@ -566,6 +575,12 @@ def resolve_confirmation(
         user_confirmation_satisfied=user_confirmation_satisfied,
 
         awaiting_user_confirmation=awaiting,
+
+        reject_evidence=None,
+
+        lifecycle_evidence=lifecycle_evidence,
+
+        consume_evidence=consume_evidence,
 
         availability_reshow=availability_reshow,
 

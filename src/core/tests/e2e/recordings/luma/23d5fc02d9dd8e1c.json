@@ -22,7 +22,7 @@
       "times": []
     },
     "intent": {
-      "confidence": 0.95,
+      "confidence": 0.85,
       "name": "CREATE_APPOINTMENT"
     },
     "service_candidates": [
@@ -30,7 +30,7 @@
       "flexi haircut + prunning"
     ],
     "temporal": {
-      "confidence": 0.95,
+      "confidence": 0.85,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,

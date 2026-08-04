@@ -61,7 +61,7 @@
       "times": []
     },
     "intent": {
-      "confidence": 0.92,
+      "confidence": 0.95,
       "name": "CONFIRM_ACTION"
     },
     "temporal": {

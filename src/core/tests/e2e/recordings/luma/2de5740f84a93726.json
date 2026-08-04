@@ -45,7 +45,7 @@
       "booking_id": null,
       "date_time_pairs": [],
       "dates": [],
-      "service": null,
+      "service": "premium haircut",
       "service_id": "premium haircut",
       "times": [
         "09:30"
@@ -61,7 +61,7 @@
       "end_date_expression": null,
       "end_time": null,
       "end_time_expression": null,
-      "expression": "9:30am",
+      "expression": "09:30",
       "mode": "none",
       "start_date": null,
       "start_date_expression": null,

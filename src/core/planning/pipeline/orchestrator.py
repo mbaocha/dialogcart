@@ -27,7 +27,7 @@ from core.planning.pipeline.requests import (
     build_current_request,
     build_legacy_attachment_read_report,
 )
-from core.session.invalidation import apply_confirmation_bound_clear_evidence
+from core.session.invalidation import apply_confirmation_planning_mutations
 from core.planning.pipeline.stage01_intent import reconcile_intent
 from core.planning.pipeline.stage02_working_turn import build_working_turn
 from core.planning.pipeline.stage03_revision import apply_revision_policy
@@ -251,9 +251,13 @@ def run_planning_pipeline(
         user_id=user_id,
     )
 
-    # Apply Stage 06 bound-datetime-clear evidence before Stage 04/05 rerun.
-    # Working turn only — never mutate the request-start session here.
-    apply_confirmation_bound_clear_evidence(working_turn, confirmation)
+    # Single planning mutation boundary for Stage 06 evidence (reject / consume /
+    # bound-datetime clear). Working turn + live request-scoped session_state.
+    apply_confirmation_planning_mutations(
+        working_turn,
+        confirmation,
+        session_state=persisted_session,
+    )
 
     if confirmation.slots_adjusted:
         slot_state = resolve_slot_turn_state(

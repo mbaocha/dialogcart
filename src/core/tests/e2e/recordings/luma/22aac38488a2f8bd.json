@@ -46,7 +46,7 @@
     "timezone": "UTC"
   },
   "response": {
-    "answer": "No, lions do not lay eggs. Lions are mammals and give birth to live young.",
+    "answer": "No, lions do not lay eggs. Lions are mammals and reproduce by giving birth to live young.",
     "answerable": true,
     "facts": {
       "booking_id": null,

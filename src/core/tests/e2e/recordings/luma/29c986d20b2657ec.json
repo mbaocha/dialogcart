@@ -37,7 +37,7 @@
       "end_date_expression": null,
       "end_time": null,
       "end_time_expression": null,
-      "expression": "July 21",
+      "expression": "on July 21",
       "mode": "single_day",
       "start_date": "2026-07-21",
       "start_date_expression": "July 21",

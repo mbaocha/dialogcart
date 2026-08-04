@@ -47,11 +47,11 @@
       "times": []
     },
     "intent": {
-      "confidence": 0.0,
+      "confidence": 0.3,
       "name": "CREATE_APPOINTMENT"
     },
     "temporal": {
-      "confidence": 0.0,
+      "confidence": 0.3,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,

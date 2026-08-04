@@ -88,6 +88,10 @@ class ConfirmationDecision:
     awaiting_user_confirmation: bool = False
     reject_evidence: Optional[Any] = None
     """ConfirmationRejectEvidence when gate NO; Decision maps to outcome."""
+    lifecycle_evidence: Optional[Any] = None
+    """ConfirmationLifecycleEvidence — consume/reject/supersede mutation request."""
+    consume_evidence: Optional[Any] = None
+    """ConfirmationConsumeEvidence — supersede/consume pending authorization."""
     availability_reshow: bool = False
     slots_adjusted: bool = False
     availability_invalidation: Optional[Any] = None

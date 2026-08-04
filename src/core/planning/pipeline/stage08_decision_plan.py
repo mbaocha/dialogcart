@@ -614,6 +614,15 @@ def build_decision_plan_from_evidence(
         "declined_slots": list(declined_slots),
     }
     current_turn_has_explicit_time = bool(payload.get("_current_turn_has_time"))
+    if (
+        bound_datetime_cleared
+        and bound_datetime_clear is not None
+        and not getattr(bound_datetime_clear, "preserve_current_turn_time", False)
+    ):
+        # Cleared prior selection without a new uttered time (or with a stale
+        # NLU echo of that selection): do not feed temporal/proposal into
+        # execution as current-turn time evidence.
+        current_turn_has_explicit_time = False
     current_turn_time_proposal = (
         payload.get("time_proposal")
         if current_turn_has_explicit_time

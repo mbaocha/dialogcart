@@ -49,7 +49,7 @@
       "booking_id": null,
       "date_time_pairs": [],
       "dates": [],
-      "service": "premium haircut",
+      "service": "Premium",
       "service_id": "premium haircut",
       "times": []
     },
@@ -58,7 +58,7 @@
       "name": "CREATE_APPOINTMENT"
     },
     "temporal": {
-      "confidence": 0.9,
+      "confidence": 0.85,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,

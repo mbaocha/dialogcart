@@ -74,6 +74,7 @@ def test_apply_bound_datetime_clear_syncs_slot_projections():
     assert "time_proposal" not in state
     assert "time_match_outcome" not in state
     assert "time_resolution" not in state
+    assert state.get("_bound_datetime_cleared") is True
     assert slots.get("service_id") == "haircut"
     assert slots.get("date") == "2026-07-06"
 

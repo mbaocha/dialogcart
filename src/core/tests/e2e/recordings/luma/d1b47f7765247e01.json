@@ -13,7 +13,7 @@
     "timezone": "UTC"
   },
   "response": {
-    "answer": "Bola Tinubu has been the president of Nigeria since May 2023, following his election in February 2023.",
+    "answer": "Bola Ahmed Tinubu is the president of Nigeria. He was inaugurated on May 29, 2023.",
     "answerable": true,
     "facts": {
       "booking_id": null,
@@ -23,7 +23,7 @@
       "times": []
     },
     "intent": {
-      "confidence": 0.95,
+      "confidence": 0.98,
       "name": "OFF_TOPIC"
     },
     "off_topic_query": "Who is the president of Nigeria?",
@@ -32,7 +32,7 @@
       "flexi haircut + prunning"
     ],
     "temporal": {
-      "confidence": 0.95,
+      "confidence": 0.98,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,

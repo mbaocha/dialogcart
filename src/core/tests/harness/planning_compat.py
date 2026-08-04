@@ -24,7 +24,7 @@ from core.planning.pipeline.stage07_capability import resolve_capability_gating
 from core.planning.pipeline.stage09_outcome import assemble_planning_outcome
 from core.planning.pipeline.types import WorkingTurn
 from core.session.confirmation_gate import ConfirmationGateTurn
-from core.session.invalidation import apply_confirmation_bound_clear_evidence
+from core.session.invalidation import apply_confirmation_planning_mutations
 
 
 def _attached_request_from_payload(
@@ -129,7 +129,9 @@ def run_planning_from_working_payload(
         gate_booking_intent="",
         user_id=user_id,
     )
-    apply_confirmation_bound_clear_evidence(working_turn, confirmation)
+    apply_confirmation_planning_mutations(
+        working_turn, confirmation, session_state=session_state
+    )
     if confirmation.slots_adjusted:
         slot_state = resolve_slot_turn_state(
             working_turn=working_turn,
@@ -257,7 +259,9 @@ def build_decision_plan(
         gate_booking_intent="",
         user_id="",
     )
-    apply_confirmation_bound_clear_evidence(working_turn, confirmation)
+    apply_confirmation_planning_mutations(
+        working_turn, confirmation, session_state=session_state
+    )
     if confirmation.slots_adjusted:
         slot_state = resolve_slot_turn_state(
             working_turn=working_turn,

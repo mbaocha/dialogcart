@@ -42,14 +42,14 @@
       "booking_id": null,
       "date_time_pairs": [],
       "dates": [],
-      "service": null,
+      "service": "premium haircut",
       "service_id": "premium haircut",
       "times": [
         "10:00"
       ]
     },
     "intent": {
-      "confidence": 0.85,
+      "confidence": 0.92,
       "name": "CREATE_APPOINTMENT"
     },
     "temporal": {

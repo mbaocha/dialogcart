@@ -194,11 +194,15 @@ class AvailabilityWorkflow:
         if not isinstance(_proposal_ctx, dict):
             _proposal_ctx = {}
         _criteria_invalidated = bool(_proposal_ctx.get("availability_invalidated"))
+        _bound_datetime_cleared = bool(_proposal_ctx.get("bound_datetime_cleared"))
         _current_turn_time = bool(
             _proposal_ctx.get("current_turn_has_explicit_time")
         )
         _time_proposal_for_match = _exec_proposals.get("time_proposal")
-        if _criteria_invalidated and not _current_turn_time:
+        if (
+            (_criteria_invalidated or _bound_datetime_cleared)
+            and not _current_turn_time
+        ):
             _time_proposal_for_match = None
 
         _resolution_payload = resolve_time_after_availability(
@@ -239,9 +243,10 @@ class AvailabilityWorkflow:
                 finalize_decision_after_time_resolution,
             )
 
-            # Criteria revision without current-turn time: present offers only.
+            # Criteria revision / bound-clear without current-turn time: present offers only.
             enter_confirmation = not availability_op and not (
-                _criteria_invalidated and not _current_turn_time
+                (_criteria_invalidated or _bound_datetime_cleared)
+                and not _current_turn_time
             )
             finalize_decision_after_time_resolution(
                 plan,

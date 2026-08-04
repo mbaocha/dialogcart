@@ -266,12 +266,19 @@ def assemble_planning_outcome(
     missing_slots = list(slot_state.missing_slots)
 
     slots = dict(decision_plan.facts.get("slots", {}))
-    outcome_slots = strip_unconfirmed_temporal_slots(
-        slots,
-        intent_name,
-        session_state,
-        confirmed=has_bound_booking_datetime(slots, session_state, working_turn.payload),
-    )
+    if working_turn.payload.get("_booking_confirmation_rejected") or working_turn.payload.get(
+        "_bound_datetime_cleared"
+    ):
+        outcome_slots = dict(slots)
+    else:
+        outcome_slots = strip_unconfirmed_temporal_slots(
+            slots,
+            intent_name,
+            session_state,
+            confirmed=has_bound_booking_datetime(
+                slots, session_state, working_turn.payload
+            ),
+        )
 
     intentionally_dropped_slots = set(
         working_turn.payload.get("_intentionally_dropped_slots") or set()

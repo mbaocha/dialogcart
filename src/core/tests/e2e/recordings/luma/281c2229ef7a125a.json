@@ -47,7 +47,7 @@
       "booking_id": null,
       "date_time_pairs": [],
       "dates": [],
-      "service": "premium",
+      "service": null,
       "service_id": "premium haircut",
       "times": [
         "09:00"

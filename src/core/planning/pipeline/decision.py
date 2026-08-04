@@ -49,6 +49,31 @@ class ConfirmationRejectEvidence:
 
 
 @dataclass(frozen=True)
+class ConfirmationConsumeEvidence:
+    """Request confirmation authorization consumption (supersede / clear pending).
+
+    Stage 06 emits; planning mutation boundary applies via consume_confirmation_state.
+    """
+
+    consume: bool = False
+    reason: str = "confirmation_superseded"
+
+
+@dataclass(frozen=True)
+class ConfirmationLifecycleEvidence:
+    """Confirmation lifecycle mutation request (consume / reject / supersede).
+
+    Stage 06 emits semantic intent only. Planning applies the mutation.
+    ``action`` is one of: ``\"supersede\"``, ``\"consume\"``, ``\"reject\"``.
+    """
+
+    action: str = ""
+    reason: str = ""
+    intent_name: str = ""
+    reason_code: str = ""
+
+
+@dataclass(frozen=True)
 class AvailabilityInvalidationEvidence:
     """Evaluate evidence: prior availability trust must not be reused this turn.
 

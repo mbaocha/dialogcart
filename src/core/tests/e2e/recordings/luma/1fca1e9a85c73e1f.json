@@ -73,7 +73,7 @@
       "expression": "July 21",
       "mode": "single_day",
       "start_date": "2026-07-21",
-      "start_date_expression": "july 21",
+      "start_date_expression": "21st",
       "start_time": null,
       "start_time_expression": null
     },

@@ -52,12 +52,13 @@
       "dates": [
         "2026-07-22"
       ],
+      "service": "premium",
       "service_id": "premium haircut",
       "times": []
     },
     "intent": {
       "confidence": 0.95,
-      "name": "AVAILABILITY"
+      "name": "CREATE_APPOINTMENT"
     },
     "temporal": {
       "confidence": 0.95,

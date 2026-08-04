@@ -55,7 +55,7 @@
       "name": "AVAILABILITY"
     },
     "temporal": {
-      "confidence": 0.85,
+      "confidence": 0.95,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,

@@ -51,23 +51,22 @@
       "times": []
     },
     "intent": {
-      "confidence": 0.95,
+      "confidence": 0.85,
       "name": "AVAILABILITY"
     },
     "temporal": {
-      "expression": null,
-      "start_date_expression": null,
-      "start_time_expression": null,
-      "end_date_expression": null,
-      "end_time_expression": null,
-      "start_date": null,
-      "start_time": null,
+      "confidence": 0.85,
       "end_date": null,
+      "end_date_expression": null,
       "end_time": null,
+      "end_time_expression": null,
+      "expression": null,
       "mode": "none",
-      "confidence": 0.75
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": null,
+      "start_time_expression": null
     },
-    "time_constraint": null,
     "turn": {
       "understanding": "UNDERSTOOD"
     }
