@@ -224,7 +224,7 @@ def _materialize_committed_booking_identifiers(
     return merged
 
 
-def build_session_state_from_outcome(
+def assemble_session_projection_fields(
     outcome: Dict[str, Any],
     outcome_status: str,
     organization_id: int,
@@ -234,7 +234,11 @@ def build_session_state_from_outcome(
     session_store: Optional[Any] = None,
 ) -> Optional[Dict[str, Any]]:
     """
-    Build session state from outcome and merged Luma response.
+    Assemble planning/lifecycle projection fields for session persistence.
+
+    Returns a flat planning-artifact bag (legacy V1-shaped intermediate) used by:
+    - ``build_session_state_from_outcome`` (compatibility / parity oracle)
+    - ``project_session_v2`` (maps the bag onto canonical nested Session V2)
 
     CONTRACT: Persist conversation state, not just slots:
     - Slots are treated as unordered, additive map (awaiting_slot removed)
@@ -1133,3 +1137,27 @@ def build_session_state_from_outcome(
     )
 
     return session_state
+
+
+def build_session_state_from_outcome(
+    outcome: Dict[str, Any],
+    outcome_status: str,
+    organization_id: int,
+    merged_luma_response: Optional[Dict[str, Any]] = None,
+    previous_session_state: Optional[Dict[str, Any]] = None,
+    user_id: Optional[str] = None,
+    session_store: Optional[Any] = None,
+) -> Optional[Dict[str, Any]]:
+    """Compatibility / parity-oracle wrapper over lifecycle field assembly.
+
+    Production Session V2 projection must use ``project_session_v2`` instead.
+    """
+    return assemble_session_projection_fields(
+        outcome=outcome,
+        outcome_status=outcome_status,
+        organization_id=organization_id,
+        merged_luma_response=merged_luma_response,
+        previous_session_state=previous_session_state,
+        user_id=user_id,
+        session_store=session_store,
+    )

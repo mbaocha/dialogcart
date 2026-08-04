@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Any, Dict, List, Optional
 
 from core.session.session_schema_v2 import (
-    build_working_session_from_v1_builder,
+    hydrate_v1_compat_shims,
     prepare_session_for_load,
 )
+from core.session.session_v2_projection import project_session_v2
 
 
 class SessionProjectorV2:
@@ -28,6 +29,9 @@ class SessionProjectorV2:
       compatibility mirrors for in-memory consumers. Pure V2 is produced at
       save time via ``prepare_session_for_persist``.
 
+    Production path projects canonical V2 via ``project_session_v2`` then
+    ``hydrate_v1_compat_shims``. It does not call ``build_session_state_from_outcome``.
+
     Does not call Redis or any session store directly.
     """
 
@@ -47,8 +51,6 @@ class SessionProjectorV2:
         handler_conversation_update: Optional[Dict[str, Any]] = None,
         conversation_messages: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Dict[str, Any]]:
-        from core.session.persist import build_session_state_from_outcome
-
         _ = session_store  # Compatibility-only; projection never performs storage I/O.
         projection_outcome = dict(outcome)
         if isinstance(workflow_result, dict):
@@ -58,18 +60,22 @@ class SessionProjectorV2:
             base = working_session_state or previous_session_state or {}
             working = prepare_session_for_load(base)
         else:
-            v1_session = build_session_state_from_outcome(
+            pure_v2 = project_session_v2(
+                previous_session_state=previous_session_state,
+                working_session_state=working_session_state,
                 outcome=projection_outcome,
                 outcome_status=outcome_status,
                 merged_luma_response=merged_luma_response,
-                previous_session_state=previous_session_state,
+                workflow_result=workflow_result,
+                capability_result=capability_result,
+                handler_conversation_update=handler_conversation_update,
+                conversation_messages=conversation_messages,
                 organization_id=organization_id,
                 user_id=user_id,
-                session_store=None,
             )
-            if v1_session is None:
+            if pure_v2 is None:
                 return None
-            working = build_working_session_from_v1_builder(v1_session)
+            working = hydrate_v1_compat_shims(pure_v2)
 
         self._apply_optional_inputs(
             working,
