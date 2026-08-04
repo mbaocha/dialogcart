@@ -211,8 +211,30 @@ def resolve_turn_outcome(
     result: Optional[Mapping[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], str, str]:
     if not success or not isinstance(outcome, dict):
+        # Preserve planning intent when the tool path failed before an outcome
+        # envelope was produced (blocked/failed execution still has result.plan).
+        intent = ""
+        stage = None
+        action = None
+        if isinstance(result, dict):
+            result_plan = (
+                result.get("plan") if isinstance(result.get("plan"), dict) else {}
+            )
+            intent = _normalize_intent(
+                result.get("intent_name")
+                or result.get("intent")
+                or result_plan.get("intent_name")
+                or result_plan.get("intent")
+            )
+            stage = result_plan.get("stage")
+            action = result_plan.get("action")
         return (
-            {"status": "error"},
+            {
+                "status": "error",
+                "intent": intent,
+                "stage": stage,
+                "action": action,
+            },
             TURN_OUTCOME_ERROR,
             "Request failed before a planning outcome was produced",
         )

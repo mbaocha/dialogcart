@@ -108,6 +108,102 @@ def test_booking_adapter_customer_block():
     assert prepared.blocked.required_input == "phone_or_email"
 
 
+def _fetch_command(**slot_overrides):
+    slots = {"organization_id": 2}
+    slots.update(slot_overrides)
+    return ExecutionCommand(
+        action="FETCH_BOOKING",
+        client_name="booking_client",
+        intent_name="CANCEL_BOOKING",
+        mode="exploratory",
+        slots=slots,
+        organization_id=2,
+    )
+
+
+def test_booking_adapter_fetch_blocks_without_identification():
+    prepared = BookingAdapter().prepare(
+        _fetch_command(),
+        {},
+        2,
+        kwargs={},
+    )
+    assert prepared.blocked is not None
+    assert prepared.blocked.reason == "BOOKING_IDENTIFICATION_REQUIRED"
+    assert prepared.blocked.required_input == "booking_id"
+    assert prepared.blocked.action == "FETCH_BOOKING"
+
+
+def test_booking_adapter_fetch_allows_with_booking_id():
+    prepared = BookingAdapter().prepare(
+        _fetch_command(booking_id="12345"),
+        {},
+        2,
+        kwargs={},
+    )
+    assert prepared.blocked is None
+    assert prepared.slots["booking_id"] == "12345"
+
+
+def test_booking_adapter_fetch_allows_with_booking_code():
+    prepared = BookingAdapter().prepare(
+        _fetch_command(booking_code="ABC"),
+        {},
+        2,
+        kwargs={},
+    )
+    assert prepared.blocked is None
+    assert prepared.slots["booking_code"] == "ABC"
+
+
+def test_booking_adapter_fetch_infers_most_recent_booking():
+    booking_client = MagicMock()
+    booking_client.get_most_recent_booking.return_value = {
+        "booking": {"id": 99, "booking_code": "MR99"}
+    }
+    prepared = BookingAdapter().prepare(
+        _fetch_command(),
+        {"customer_id": 7},
+        2,
+        kwargs={"booking_client": booking_client},
+    )
+    assert prepared.blocked is None
+    assert prepared.slots["booking_id"] == 99
+    assert prepared.slots["booking_code"] == "MR99"
+    booking_client.get_most_recent_booking.assert_called_once()
+
+
+def test_coordinator_fetch_block_returns_clarification():
+    plan = {
+        "status": "READY",
+        "intent_name": "CANCEL_BOOKING",
+        "action": "FETCH_BOOKING",
+        "slots": {"organization_id": 2},
+        "missing_slots": ["booking_id"],
+        "required_slots": [],
+    }
+    cmd = build_execution_command(plan=plan, organization_id=2)
+    gate = ExecutionCoordinator().resolve(
+        plan=plan,
+        session_state={},
+        session_store=None,
+        user_id="u",
+        availability_client=None,
+        organization_client=None,
+        organization_id=2,
+        kwargs={"booking_client": MagicMock()},
+        command=cmd,
+    )
+    assert gate.path == "blocked"
+    assert gate.can_execute is False
+    assert gate.blocked is not None
+    assert gate.blocked.reason == "BOOKING_IDENTIFICATION_REQUIRED"
+    assert gate.plan["status"] == "NEEDS_CLARIFICATION"
+    assert gate.response is not None
+    assert "booking ID" in (gate.response.get("text") or "")
+    assert gate.response.get("outcome", {}).get("intent_name") == "CANCEL_BOOKING"
+
+
 def test_booking_adapter_bound_datetime_from_planning():
     cmd = _confirm_command()
     slots = dict(cmd.slots)

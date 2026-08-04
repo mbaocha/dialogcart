@@ -19,6 +19,59 @@ logger = logging.getLogger(__name__)
 _CUSTOMER_GATE_ACTIONS = frozenset({"CONFIRM_APPOINTMENT", "CREATE_BOOKING_HOLD"})
 
 
+def _slot_identifier_present(slots: Mapping[str, Any]) -> bool:
+    booking_id = slots.get("booking_id")
+    booking_code = slots.get("booking_code")
+    if booking_id is not None and str(booking_id).strip() != "":
+        return True
+    if booking_code is not None and str(booking_code).strip() != "":
+        return True
+    return False
+
+
+def _try_infer_most_recent_booking(
+    slots: Dict[str, Any],
+    *,
+    kwargs: Optional[Dict[str, Any]],
+) -> bool:
+    """If booking client can resolve a most-recent booking, inject ids into slots.
+
+    Returns True when identification is now present on ``slots``.
+    """
+    if _slot_identifier_present(slots):
+        return True
+    booking_client = (kwargs or {}).get("booking_client")
+    if booking_client is None or not hasattr(booking_client, "get_most_recent_booking"):
+        return False
+    organization_id = slots.get("organization_id")
+    if not organization_id:
+        return False
+    try:
+        most_recent = booking_client.get_most_recent_booking(
+            organization_id=organization_id,
+            customer_id=slots.get("customer_id"),
+        )
+    except Exception as exc:
+        logger.debug("FETCH_BOOKING most-recent inference failed: %s", exc)
+        return False
+    if not most_recent:
+        return False
+    booking_data = (
+        most_recent.get("booking")
+        if isinstance(most_recent, dict) and "booking" in most_recent
+        else most_recent
+    )
+    if not isinstance(booking_data, dict):
+        return False
+    booking_id = booking_data.get("id") or booking_data.get("booking_id")
+    booking_code = booking_data.get("booking_code")
+    if booking_id is not None and str(booking_id).strip() != "":
+        slots["booking_id"] = booking_id
+    if booking_code is not None and str(booking_code).strip() != "":
+        slots["booking_code"] = booking_code
+    return _slot_identifier_present(slots)
+
+
 class BookingAdapter(ExecutionAdapter):
     """Prepare booking / reservation / fetch / modify / cancel inputs."""
 
@@ -64,6 +117,16 @@ class BookingAdapter(ExecutionAdapter):
                 blocked = ExecutionBlocked(
                     reason="CUSTOMER_ID_REQUIRED",
                     required_input="phone_or_email",
+                    action=command.action,
+                )
+        elif command.action == "FETCH_BOOKING":
+            if not _try_infer_most_recent_booking(slots, kwargs=kwargs):
+                logger.info(
+                    "Blocking FETCH_BOOKING: booking identification unresolved"
+                )
+                blocked = ExecutionBlocked(
+                    reason="BOOKING_IDENTIFICATION_REQUIRED",
+                    required_input="booking_id",
                     action=command.action,
                 )
 

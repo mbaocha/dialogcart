@@ -212,6 +212,31 @@ def test_command_path_customer_block_typed_reason():
     assert plan["status"] == "READY"  # Decision plan unchanged
 
 
+def test_command_path_fetch_booking_identification_block():
+    plan = {
+        "status": "READY",
+        "intent_name": "CANCEL_BOOKING",
+        "action": "FETCH_BOOKING",
+        "slots": {"organization_id": 2},
+        "missing_slots": ["booking_id"],
+        "required_slots": [],
+    }
+    cmd = build_execution_command(plan=plan, organization_id=2)
+    coordinator = ExecutionCoordinator()
+    gate = _resolve_command(
+        coordinator,
+        plan=plan,
+        command=cmd,
+        session_state={},
+    )
+    assert gate.path == "blocked"
+    assert isinstance(gate.blocked, ExecutionBlocked)
+    assert gate.blocked.reason == "BOOKING_IDENTIFICATION_REQUIRED"
+    assert gate.plan["status"] == "NEEDS_CLARIFICATION"
+    assert "booking" in (gate.response.get("text") or "").lower()
+    assert plan["status"] == "READY"  # Decision plan unchanged
+
+
 def test_command_path_missing_client_typed_reason():
     plan = _confirm_plan()
     cmd = build_execution_command(plan=plan, organization_id=2)

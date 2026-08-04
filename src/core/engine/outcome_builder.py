@@ -17,6 +17,10 @@ _EXECUTION_BLOCKED_TEXT: Dict[str, str] = {
         "Before I can confirm that, I need a phone number or email "
         "so we can attach the booking to your account."
     ),
+    "BOOKING_IDENTIFICATION_REQUIRED": (
+        "Which booking would you like me to look up? "
+        "Please share the booking ID or booking code."
+    ),
 }
 
 

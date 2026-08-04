@@ -164,7 +164,10 @@ class ExecutionCoordinator:
         if prepared.blocked is not None:
             blocked = prepared.blocked
             blocked_plan = deepcopy(execution_plan)
-            if blocked.reason == "CUSTOMER_ID_REQUIRED":
+            if blocked.reason in (
+                "CUSTOMER_ID_REQUIRED",
+                "BOOKING_IDENTIFICATION_REQUIRED",
+            ):
                 blocked_plan["status"] = "NEEDS_CLARIFICATION"
             response = build_planning_response_from_plan(blocked_plan)
             apply_execution_blocked_text(response, reason=blocked.reason)
