@@ -119,8 +119,7 @@ The **Core** layer is the orchestration engine that manages conversation flow, s
 #### Key Responsibilities
 
 - **Orchestration** (`orchestration/`): Main message handling, session management, workflow coordination
-- **Planning** (`planning/`): Policy-based planning, slot collection, capability gate evaluation
-- **Routing** (`routing/`): Intent routing, action routing, template selection
+- **Planning** (`planning/`): Policy-based planning, slot collection, capability gate evaluation, handler mapping
 - **Rendering** (`rendering/`): Outcome rendering, clarification templates, capability prompts
 
 #### Main Entry Point
@@ -167,74 +166,50 @@ result = handle_message(
 | Module | Purpose |
 |--------|----------|
 | `orchestration/orchestrator.py` | Main message handler, orchestrates full flow |
-| `planning/orchestration/` | Policy-based planning engine |
-| `routing/` | Intent and action routing logic |
+| `planning/planner/` | Policy-based planning engine |
+| `planning/policy/` | Handler mapping, base intents, legacy intent→action |
 | `rendering/` | Template-based response rendering |
-| `orchestration/nlu/` | Luma client integration |
+| `orchestration/nlu/` | NLU client integration (`LumaClient` HTTP to `src/nlu`) |
 
 ---
 
-### Luma
+### NLU
 
-**Location:** `src/luma/`
+**Location:** `src/nlu/`
 
-**Luma** is the Natural Language Understanding (NLU) pipeline that processes natural language and extracts structured information. It's a **six-stage pipeline** that transforms raw text into structured booking data.
+**NLU** is the production Natural Language Understanding service. It replaces the legacy rule-based `src/luma` pipeline with a two-stage SLM extractor plus calendar binding, and exposes the same `/resolve` HTTP contract Core already uses.
 
 #### Pipeline Stages
 
-1. **Extraction** (`extraction/`): Extracts entities (services, dates, times, durations)
-2. **Intent Resolution** (`grouping/`): Determines user intent (CREATE_BOOKING, QUERY, etc.)
-3. **Structural Interpretation** (`structure/`): Analyzes booking structure (count, scope, type)
-4. **Appointment Grouping** (`grouping/`): Groups services with date/time references
-5. **Semantic Resolution** (`resolution/`): Resolves semantics, detects ambiguity
-6. **Calendar Binding** (`calendar/`): Converts relative dates/times to ISO-8601
+1. **Stage 1** (`stages/stage1/`): Intent classification (lightweight LLM call)
+2. **Stage 2** (`stages/stage2/`): Slot extraction via per-intent-group dispatchers
+3. **Normalisation** (`pipeline.py`): Rule-based post-processing (dates, times, aliases, booking_id)
+4. **Calendar Binding** (`calendar/`): Converts relative dates/times to ISO-8601
 
 #### Usage
 
-```python
-from luma.api import plan_clarification
-
-# Process booking request
-result = plan_clarification(
-    intent_result={"intent": "CREATE_BOOKING"},
-    entities={
-        "business_categories": [{"text": "haircut", "canonical": "haircut"}],
-        "dates": [{"text": "tomorrow"}],
-        "times": [{"text": "2pm"}]
-    },
-    semantic_result=None,
-    decision_result=None
-)
-
-# Result includes:
-# - Extracted entities
-# - Resolved intent
-# - Semantic resolution
-# - Calendar binding
-# - Clarification needs
-```
-
-#### REST API
-
 ```bash
-# Start Luma API server
+# Start NLU API server (default port 9002)
 cd src
-python luma/api.py
+python -m nlu.api
+# or from repo root: python run.py
 
-# Process booking request
-curl -X POST http://localhost:9001/book \
+# Process utterance
+curl -X POST http://localhost:9002/resolve \
   -H "Content-Type: application/json" \
-  -d '{"text": "book haircut tomorrow at 2pm", "domain": "service"}'
+  -d '{"user_id": "user123", "text": "book haircut tomorrow at 2pm", "domain": "service"}'
 ```
+
+Core calls this service via `LumaClient` using `LUMA_BASE_URL` (default `http://localhost:9002`).
 
 #### Key Features
 
-- **Type-Safe**: Full type hints and dataclasses
-- **Modular**: Each stage is independently testable
-- **Clarification System**: Template-driven clarification prompts
-- **Timezone-Aware**: Full timezone support for calendar binding
+- **Same `/resolve` contract** Core already consumes
+- **SLM extraction** via Anthropic Haiku (stage1 + stage2)
+- **Calendar binding** for ISO dates/times
+- **Docker**: `src/nlu/Dockerfile` and `src/nlu/docker-compose.yml`
 
-**See `src/luma/README.md` for detailed documentation.**
+**Legacy:** `src/luma/` remains in the tree for reference but is not the production NLU.
 
 ---
 
@@ -331,7 +306,7 @@ Single-shot handlers answer non-booking intents (RAG) when Core emits `HANDLER_D
 from extensions.handlers.base import IntentHandler, HandlerResponse
 ```
 
-Config: `core/config/intent_handlers.yaml`
+Config: `core/planning/policy/intent_handlers.yaml`
 
 ---
 
@@ -341,7 +316,7 @@ Config: `core/config/intent_handlers.yaml`
 
 - Python 3.10+
 - pip
-- (Optional) spaCy model for Luma: `python -m spacy download en_core_web_sm`
+- Anthropic API key for NLU SLM extraction (`ANTHROPIC_API_KEY`)
 
 ### Installation
 
@@ -352,10 +327,7 @@ cd dialogcart
 
 # Install dependencies
 pip install -r src/requirements.txt
-pip install -r src/luma/requirements.txt
-
-# (Optional) Install spaCy model
-python -m spacy download en_core_web_sm
+pip install -r src/nlu/requirements.txt
 ```
 
 ### Basic Usage
@@ -393,12 +365,12 @@ Tests are organized by component:
 ```
 src/
 ├── core/tests/          # Core layer tests
-│   ├── orchestration/   # Orchestrator tests
-│   ├── planning/        # Planning tests
-│   ├── e2e/            # End-to-end tests
-│   └── integration/    # Integration tests
-├── luma/tests/         # Luma pipeline tests
-└── capabilities/tests/  # Capability adapter tests
+│   ├── planning/        # Plan contract (primary gate)
+│   ├── execution/       # Mock booking flows (primary gate)
+│   ├── harness/         # Shared runners/clients (not a pytest category)
+│   └── …                # orchestration, session, rendering, smoke, …
+├── nlu/tests/           # Production NLU pipeline tests
+└── extensions/…/tests/  # Capability / handler tests
 ```
 
 ### Running Tests
@@ -411,25 +383,26 @@ cd src
 python core/tests/test.py
 
 # Run specific category
-python core/tests/test.py --category orchestration
 python core/tests/test.py --category planning
-python core/tests/test.py --category e2e
+python core/tests/test.py --category execution
+python core/tests/test.py --category orchestration
 
 # Using pytest directly
 pytest src/core/tests/
 pytest src/core/tests/orchestration/
-pytest src/core/tests/e2e/
+python core/tests/test.py --category planning
+RUN_REAL_LUMA_E2E=true python core/tests/test.py --category smoke
 ```
 
-#### Luma Tests
+#### NLU Tests
 
 ```bash
-# Run Luma pipeline tests
-cd src
-pytest luma/tests/
+# Run production NLU tests
+pytest src/nlu/tests/
 
-# Run full pipeline test
-python -m luma.test --examples
+# Or from src/
+cd src
+pytest nlu/tests/
 ```
 
 #### Capability Tests
@@ -457,8 +430,9 @@ python core/tests/test.py --category e2e
 cd src
 python -m core.tests.orchestration.test_interactive
 
-# Luma interactive CLI
-python luma/cli/interactive.py
+# Start production NLU (default http://localhost:9002)
+python -m nlu.api
+# or from repo root: python run.py
 ```
 
 ---
@@ -471,34 +445,32 @@ dialogcart/
 │   ├── core/                    # Core orchestration layer
 │   │   ├── orchestration/       # Main orchestrator, session management
 │   │   ├── planning/            # Policy-based planning
-│   │   ├── routing/            # Intent and action routing
 │   │   ├── rendering/          # Template-based rendering
 │   │   │   └── templates/       # All rendering templates (YAML + JSON)
 │   │   ├── policy/              # Intent policies
 │   │   ├── config/              # Configuration files
 │   │   └── tests/               # Core tests
 │   │
-│   ├── luma/                    # NLU pipeline
-│   │   ├── extraction/         # Entity extraction
-│   │   ├── grouping/            # Intent resolution, appointment grouping
-│   │   ├── structure/           # Structural interpretation
-│   │   ├── resolution/         # Semantic resolution
+│   ├── nlu/                     # Production NLU service
+│   │   ├── stages/              # Stage1 intent + stage2 slot extractors
 │   │   ├── calendar/            # Calendar binding
-│   │   ├── clarification/       # Clarification system
+│   │   ├── clarification/       # Clarification reason enums
 │   │   ├── config/              # Configuration
-│   │   ├── api.py              # REST API
-│   │   └── tests/               # Luma tests
+│   │   ├── pipeline.py          # NLUPipeline
+│   │   ├── api.py               # REST API (port 9002)
+│   │   ├── Dockerfile
+│   │   ├── docker-compose.yml
+│   │   └── tests/               # NLU tests
 │   │
-│   ├── capabilities/            # External capability adapters
-│   │   ├── adapters/            # Adapter implementations
-│   │   ├── base.py             # Adapter interface
-│   │   ├── registry.py         # Adapter registry
-│   │   └── tests/               # Capability tests
+│   ├── luma/                    # Legacy NLU (not production)
+│   │
+│   ├── extensions/              # Capability / handler extensions
 │   │
 │   ├── app.py                   # Legacy Lambda handler
 │   ├── router.py                # Legacy router
 │   └── demo.py                  # Demo script
 │
+├── run.py                       # Start NLU with fixed test date
 ├── tests/                       # Root-level tests
 ├── pytest.ini                    # Pytest configuration
 └── README.md                    # This file
@@ -515,8 +487,8 @@ dialogcart/
 ORGANIZATION_ID=1
 DOMAIN=service
 
-# Luma Configuration
-LUMA_API_URL=http://localhost:9001
+# NLU service (HTTP; env name kept for compatibility)
+LUMA_BASE_URL=http://localhost:9002
 LOG_LEVEL=INFO
 
 # Session Store (optional)
@@ -529,8 +501,7 @@ CAPABILITY_REGISTRY_ENABLED=true
 ### Configuration Files
 
 - **Core Policies**: `src/core/config/intent_policy.yaml`, `dialog_policy.yaml`
-- **Luma Config**: `src/luma/config/config.py`
-- **Luma Clarification Templates**: `src/core/rendering/templates/clarification.json`
+- **NLU Config**: `src/nlu/config/`
 - **Core Rendering Templates**: `src/core/rendering/templates/*.yaml` (outcomes, clarifications, capabilities, system)
 
 ---
@@ -540,8 +511,9 @@ CAPABILITY_REGISTRY_ENABLED=true
 ### Component Documentation
 
 - **Core**: See `src/core/` module docstrings
-- **Luma**: See `src/luma/README.md`
-- **Capabilities**: See `src/capabilities/README.md`
+- **NLU**: See `src/nlu/` (pipeline + `api.py`)
+- **Legacy Luma**: `src/luma/README.md` (reference only)
+- **Capabilities**: See `src/extensions/README.md`
 
 ### Key Concepts
 
@@ -572,7 +544,7 @@ CAPABILITY_REGISTRY_ENABLED=true
 
 1. Define intent in `src/core/config/intent_policy.yaml`
 2. Add planning logic in `src/core/planning/`
-3. Add routing in `src/core/routing/`
+3. Add handler mapping in `src/core/planning/policy/` if needed
 4. Add rendering templates in `src/core/rendering/templates/`
 
 ---

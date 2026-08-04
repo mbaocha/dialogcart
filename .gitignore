@@ -87,3 +87,24 @@ Desktop.ini
 .aws-sam/
 
 src/intents/entity_extraction/spacy_model/
+
+
+# Investigation output
+*.out
+*.log
+
+capture_*.json
+engine_type_*.json
+pe_t*.json
+unknown_*.json
+reference_resolution_capture.json
+controlled_vs_live_prompt_diff.json
+verify_conversational_answer.json
+http_turns_probe.json
+_verify_*.json
+_classify_*.json
+
+_investigate_*/
+_live_http_verify/
+
+*.txt

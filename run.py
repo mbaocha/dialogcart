@@ -1,45 +1,36 @@
 #!/usr/bin/env python3
 """
-Run Luma API server with fixed test date for deterministic testing.
+Run the NLU API server with a fixed test date for deterministic testing.
 
-This script sets LUMA_TEST_NOW environment variable and starts the server,
-ensuring all relative dates (tomorrow, weekday names, etc.) resolve consistently.
+This script sets LUMA_TEST_NOW from the shared E2E test clock and starts
+src/nlu, ensuring relative dates (tomorrow, weekday names, etc.) resolve
+consistently with Core E2E fixtures.
+
+Production NLU startup is ``python -m nlu.api`` (no LUMA_TEST_NOW) — wall clock.
 """
 
 import os
 import sys
 from pathlib import Path
 
-# Set fixed test date for deterministic testing
-# 2026-01-13 (Wednesday) ensures:
-# - "tomorrow" = 2026-01-14
-# - "wednesday" = 2026-01-14 (nearest future Wednesday)
-# - "next week" = 2026-01-19 to 2026-01-25
-TEST_NOW = "2026-01-13T10:00:00Z"
-
-# Set environment variable before importing luma.api
-os.environ["LUMA_TEST_NOW"] = TEST_NOW
-
-# Add src/ to path if needed
+# Add src/ before importing the shared clock / nlu.
 src_path = Path(__file__).parent / "src"
 if str(src_path) not in sys.path:
     sys.path.insert(0, str(src_path))
 
+from core.tests.harness.test_clock import (  # noqa: E402
+    LUMA_TEST_NOW_ENV,
+    TEST_NOW_ISO,
+)
+
+# Set environment variable before importing nlu.api
+os.environ[LUMA_TEST_NOW_ENV] = TEST_NOW_ISO
+
 # Import and run the API
 if __name__ == "__main__":
-    print(f"Starting Luma API with fixed test date: {TEST_NOW}")
+    print(f"Starting NLU API with fixed test date: {TEST_NOW_ISO}")
     print("=" * 60)
-    
-    # Import and run
-    from luma.api import main
+
+    from nlu.api import main
+
     main()
-
-
-
-
-
-
-
-
-
-
