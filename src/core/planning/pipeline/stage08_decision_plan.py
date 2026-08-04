@@ -9,6 +9,9 @@ from core.planning.pipeline.requests import (
     AttachedRequest,
     is_availability_turn_operation,
 )
+from core.planning.pipeline.execution_readiness import (
+    build_execution_readiness_evidence,
+)
 from core.planning.pipeline.types import (
     AvailabilityDecision,
     CapabilityDecision,
@@ -19,12 +22,10 @@ from core.planning.pipeline.types import (
 )
 from core.planning.policy.intent_router import get_action_name
 from core.planning.time_resolution import TIME_MATCH_EXACT, TIME_MATCH_MISMATCH
-from core.planning.temporal_proposal import ExecutionProposalResolutionContext
 from core.policy.intent_policy import (
     evaluate_execution_step_candidates,
     get_commit_action,
 )
-from core.planning.facts import build_policy_execution_flags
 
 logger = logging.getLogger(__name__)
 
@@ -271,25 +272,25 @@ def build_decision_plan_from_evidence(
     turn_operation = attached_request.turn_operation
     confirm_booking_continuation = attached_request.confirm_booking_continuation
     availability_op = _availability_operation_precedes_confirm(turn_operation)
-    availability_invalidation = confirmation.availability_invalidation
-    bound_datetime_clear = confirmation.bound_datetime_clear
-    bound_datetime_cleared = bool(
-        bound_datetime_clear is not None
-        and getattr(bound_datetime_clear, "cleared", False)
+
+    readiness = build_execution_readiness_evidence(
+        intent_name=intent_name,
+        effective_slots=effective_slots,
+        payload=payload,
+        session_state=session_state,
+        missing_slots=missing_slots,
+        needs_clarification=needs_clarification,
+        availability_ready=availability.availability_ready,
+        confirmation_state=confirmation_state,
+        organization_id=organization_id,
+        confirm_booking_continuation=confirm_booking_continuation,
+        availability_invalidation=confirmation.availability_invalidation,
+        bound_datetime_clear=confirmation.bound_datetime_clear,
     )
-    # Stage 06 AVAILABILITY supersession OR Stage 03 criteria revision.
-    # Both must disable session time-proposal reuse for execution.
-    availability_invalidated = bool(
-        (
-            availability_invalidation is not None
-            and getattr(availability_invalidation, "invalidated", False)
-        )
-        or payload.get("_revision_invalidated_availability")
-    )
-    if availability_invalidated:
-        # Typed Stage 06 evidence and Stage 03 revision share the same effect:
-        # prior availability trust must not drive this turn's proposals.
-        availability_resolved = False
+    availability_resolved = readiness.availability_resolved
+    availability_invalidated = readiness.availability_invalidated
+    bound_datetime_cleared = readiness.bound_datetime_cleared
+    executable_actions = list(readiness.executable_actions)
 
     commit_action = get_commit_action(intent_name)
 
@@ -297,14 +298,6 @@ def build_decision_plan_from_evidence(
     time_resolution = payload.get("time_resolution")
     if not time_match_outcome and isinstance(time_resolution, dict):
         time_match_outcome = time_resolution.get("outcome")
-
-    from core.planning.policy.action_policy import load_planning_policy, plan_intent
-
-    executable_actions: List[str] = []
-    if intent_name and intent_name != "UNKNOWN":
-        _ea_policy = load_planning_policy()
-        _ea_result = plan_intent(intent_name, effective_slots, _ea_policy)
-        executable_actions = _ea_result.get("executable_actions", [])
 
     # No current-turn planning evidence with open slots must not auto-reshow
     # availability; reconciliation owns clarify/recovery precedence.
@@ -382,26 +375,7 @@ def build_decision_plan_from_evidence(
         candidate_evidence = []
 
         if intent_name and intent_name != "UNKNOWN":
-            flags = build_policy_execution_flags(
-                intent_name=intent_name,
-                slots=effective_slots,
-                session_state=session_state,
-                luma_response=payload,
-                missing_slots=missing_slots,
-                needs_clarification=needs_clarification,
-                availability_resolved=availability_resolved,
-                confirmation_state=confirmation_state,
-                organization_id=organization_id,
-                confirm_booking_continuation=confirm_booking_continuation,
-            )
-            if availability_invalidated:
-                # Stage 06 supersession or Stage 03 criteria revision.
-                flags["availability_ready"] = False
-                flags["availability_resolved"] = False
-                flags["availability_check_required"] = True
-            if bound_datetime_cleared:
-                flags["time_selection_ready"] = False
-                flags["time_selection_required"] = intent_name == "CREATE_APPOINTMENT"
+            flags = dict(readiness.flags)
             selected_step, candidate_evidence = evaluate_execution_step_candidates(
                 intent_name,
                 effective_slots,
@@ -574,14 +548,9 @@ def build_decision_plan_from_evidence(
     else:
         allowed_actions.extend(executable_actions)
         if commit_action:
-            from core.planning.temporal_proposal import has_bound_booking_datetime
-
-            datetime_bound = has_bound_booking_datetime(
-                effective_slots,
-                None if bound_datetime_cleared else session_state,
-                payload,
+            needs_bound_datetime = (
+                intent_name == "CREATE_APPOINTMENT" and not readiness.datetime_bound
             )
-            needs_bound_datetime = intent_name == "CREATE_APPOINTMENT" and not datetime_bound
             needs_user_confirmation = (
                 intent_name == "CREATE_APPOINTMENT"
                 and not user_confirmation_satisfied
@@ -613,43 +582,10 @@ def build_decision_plan_from_evidence(
         "promptable_slots": list(promptable_slots),
         "declined_slots": list(declined_slots),
     }
-    current_turn_has_explicit_time = bool(payload.get("_current_turn_has_time"))
-    if (
-        bound_datetime_cleared
-        and bound_datetime_clear is not None
-        and not getattr(bound_datetime_clear, "preserve_current_turn_time", False)
-    ):
-        # Cleared prior selection without a new uttered time (or with a stale
-        # NLU echo of that selection): do not feed temporal/proposal into
-        # execution as current-turn time evidence.
-        current_turn_has_explicit_time = False
-    current_turn_time_proposal = (
-        payload.get("time_proposal")
-        if current_turn_has_explicit_time
-        and isinstance(payload.get("time_proposal"), dict)
-        else None
-    )
-    current_turn_temporal = (
-        payload.get("temporal")
-        if current_turn_has_explicit_time
-        and isinstance(payload.get("temporal"), dict)
-        else None
-    )
-    proposal_resolution_context: ExecutionProposalResolutionContext = {
-        "current_turn_time_proposal": current_turn_time_proposal,
-        "current_turn_temporal": current_turn_temporal,
-        "current_turn_has_explicit_time": current_turn_has_explicit_time,
-        "session_time_proposal_reuse_allowed": not (
-            availability_invalidated or bound_datetime_cleared
-        ),
-        "confirmation_continuation": confirm_booking_continuation,
-        "availability_invalidated": availability_invalidated,
-        "bound_datetime_cleared": bound_datetime_cleared,
-    }
-    plan["execution_proposal_context"] = proposal_resolution_context
+    plan["execution_proposal_context"] = dict(readiness.execution_proposal_context)
     # Carry Stage 03 flag onto the Decision plan so execution proposal resolution
     # sees criteria invalidation even if _merged_luma_response is absent.
-    if payload.get("_revision_invalidated_availability"):
+    if readiness.revision_invalidated_availability:
         plan["_revision_invalidated_availability"] = True
     if time_match_outcome:
         plan["time_match_outcome"] = time_match_outcome
