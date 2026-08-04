@@ -1,8 +1,3 @@
-from core.workflows.availability.presentation import (
-    availability_cache_from_session,
-    availability_fingerprint_from_session,
-    presented_availability_from_session,
-)
 """
 Tests for AVAILABILITY / CHECK_AVAILABILITY during active booking sessions.
 
@@ -28,6 +23,10 @@ from core.adapters.nlu import LumaClient
 from core.api.compat import handle_message
 from core.session.turn_persistence import project_and_persist_turn_result
 from core.planning.planner.intent_resolution import resolve_effective_intent
+from core.workflows.availability.presentation import (
+    availability_cache_from_session,
+    availability_fingerprint_from_session,
+)
 
 
 def test_availability_preserves_create_appointment_session():
@@ -363,7 +362,8 @@ def test_e2e_july6_search_fingerprint_and_time_selection_confirm():
         result2, session_state, user_id, session_store
     )
     assert session_state is not None
-    assert session_state.get("last_execution_result", {}).get("slots")
+    cache = availability_cache_from_session(session_state) or {}
+    assert cache.get("slots")
 
     # Turn 3: July 6 availability search
     mock_luma_turn3 = Mock(spec=LumaClient)
@@ -391,11 +391,11 @@ def test_e2e_july6_search_fingerprint_and_time_selection_confirm():
     assert plan3.get("action") == "SEARCH_AVAILABILITY"
 
     exec_result3 = result3.get("result", {})
-        stored_fp = availability_fingerprint_from_session(
-            session_store.get_session(1, user_id)
-        )
-        current_fp = exec_result3.get("availability_fingerprint")
-        assert stored_fp == current_fp
+    stored_fp = availability_fingerprint_from_session(
+        session_store.get_session(1, user_id)
+    )
+    current_fp = exec_result3.get("availability_fingerprint")
+    assert stored_fp == current_fp
 
     session_state = _persist_session_from_result(
         result3, session_state, user_id, session_store

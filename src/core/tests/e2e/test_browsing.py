@@ -499,8 +499,7 @@ def test_show_more_at_last_page_says_no_more(paginated_booking_conversation):
     assert pagination.get("direction") == "next"
     assert pagination.get("page_index") == 1
     assert _presentation_page_index(conv.session()) == 1
-    assert len((conv.session() or {}).get(
-        "last_execution_result", {}).get("slots") or []) >= 9
+    assert _cached_slot_count(conv.session() or {}) >= 9
     assert _response_indicates_no_more_times(_response_text(conv.last_body))
     exhausted = _response_text(conv.last_body)
     assert "another date" in exhausted.lower()
@@ -603,8 +602,7 @@ def test_time_on_page_two_binds_not_page_one_slot(paginated_booking_conversation
     assert not booking_client.create_booking.called
 
     searches_before_5pm = availability_client.get_service_availability.call_count
-    full_cache = len((conv.session() or {}).get(
-        "last_execution_result", {}).get("slots") or [])
+    full_cache = _cached_slot_count(conv.session() or {})
     conv.send("5pm")
     conv.assert_turn(
         response_status="AWAITING_CONFIRMATION",
@@ -617,8 +615,7 @@ def test_time_on_page_two_binds_not_page_one_slot(paginated_booking_conversation
     sess = conv.session() or {}
     bound = sess.get("resolved_datetime_range") or {}
     assert bound.get("start") == "2026-07-09T17:00:00Z"
-    assert len(sess.get("last_execution_result", {}).get(
-        "slots") or []) == full_cache
+    assert _cached_slot_count(sess) == full_cache
     conv.assert_slot_contains("time", "17", in_session=True)
 
 
@@ -627,8 +624,7 @@ def test_off_page_earlier_time_explains_previous(paginated_booking_conversation)
     conv, booking_client, availability_client = paginated_booking_conversation
     first_page = _reach_july_9_availability(conv)
     searches_before = availability_client.get_service_availability.call_count
-    full_cache = len((conv.session() or {}).get(
-        "last_execution_result", {}).get("slots") or [])
+    full_cache = _cached_slot_count(conv.session() or {})
 
     conv.send("next")
     second_page = extract_presented_times(conv.last_body, conv.session())
@@ -640,7 +636,7 @@ def test_off_page_earlier_time_explains_previous(paginated_booking_conversation)
     assert conv.outcome.get("status") != "AWAITING_CONFIRMATION"
     sess = conv.session() or {}
     assert not (sess.get("slots") or {}).get("time")
-    assert len(sess.get("last_execution_result", {}).get("slots") or []) == full_cache
+    assert _cached_slot_count(sess) == full_cache
     resolution = (
         sess.get("time_resolution")
         or conv.outcome.get("time_resolution")
@@ -660,8 +656,7 @@ def test_off_page_later_time_explains_next(paginated_booking_conversation):
     conv, booking_client, availability_client = paginated_booking_conversation
     first_page = _reach_july_9_availability(conv)
     searches_before = availability_client.get_service_availability.call_count
-    full_cache = len((conv.session() or {}).get(
-        "last_execution_result", {}).get("slots") or [])
+    full_cache = _cached_slot_count(conv.session() or {})
 
     conv.send("next")
     assert_different_availability_page(
@@ -679,7 +674,7 @@ def test_off_page_later_time_explains_next(paginated_booking_conversation):
     assert conv.outcome.get("status") != "AWAITING_CONFIRMATION"
     sess = conv.session() or {}
     assert not (sess.get("slots") or {}).get("time")
-    assert len(sess.get("last_execution_result", {}).get("slots") or []) == full_cache
+    assert _cached_slot_count(sess) == full_cache
     resolution = (
         sess.get("time_resolution")
         or conv.outcome.get("time_resolution")
@@ -699,8 +694,7 @@ def test_time_absent_from_cache_explains_unavailable(paginated_booking_conversat
     conv, booking_client, availability_client = paginated_booking_conversation
     _reach_july_9_availability(conv)
     searches_before = availability_client.get_service_availability.call_count
-    full_cache = len((conv.session() or {}).get(
-        "last_execution_result", {}).get("slots") or [])
+    full_cache = _cached_slot_count(conv.session() or {})
 
     conv.send("8pm")
     assert_no_booking_execution(conv, booking_client)
@@ -708,7 +702,7 @@ def test_time_absent_from_cache_explains_unavailable(paginated_booking_conversat
     assert conv.outcome.get("status") != "AWAITING_CONFIRMATION"
     sess = conv.session() or {}
     assert not (sess.get("slots") or {}).get("time")
-    assert len(sess.get("last_execution_result", {}).get("slots") or []) == full_cache
+    assert _cached_slot_count(sess) == full_cache
     resolution = (
         sess.get("time_resolution")
         or conv.outcome.get("time_resolution")
