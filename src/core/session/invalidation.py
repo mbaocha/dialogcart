@@ -130,26 +130,16 @@ def hydrate_working_slots_from_session(
     working_turn.effective_collected_slots = slots
     from core.workflows.availability.presentation import (
         apply_availability_artifacts,
+        availability_cache_from_session,
         availability_fingerprint_from_session,
         availability_pagination_from_session,
         presented_availability_from_session,
     )
 
-    session_availability = session_state.get("availability")
-    src_cache: Dict[str, Any] = {}
-    if isinstance(session_availability, dict):
-        maybe_cache = session_availability.get("cache")
-        if isinstance(maybe_cache, dict):
-            src_cache = maybe_cache
-    search_result = src_cache.get("search_result")
-    if search_result is None:
-        legacy = session_state.get("last_execution_result")
-        if isinstance(legacy, dict):
-            search_result = legacy
     apply_availability_artifacts(
         payload,
         fingerprint=availability_fingerprint_from_session(session_state),
-        search_result=search_result,
+        search_result=availability_cache_from_session(session_state),
         presented=presented_availability_from_session(session_state),
         presentation=availability_pagination_from_session(session_state),
     )
@@ -493,7 +483,6 @@ def _invalidate_new_booking_request(
 
         if availability_fingerprint_from_session(session_state) is not None:
             set_availability_fingerprint(session_state, None)
-            session_state.pop("availability_fingerprint", None)
             logger.info(
                 "Cleared availability_fingerprint due to new booking request")
     if session_state is not None:

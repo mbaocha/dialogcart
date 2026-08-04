@@ -168,3 +168,51 @@ def test_apply_availability_artifacts_batch():
     for key in _FLAT_KEYS:
         assert key not in session
     assert availability_pagination_from_session(session)["page_index"] == 3
+
+
+def test_times_only_presented_window_is_established_for_recovery():
+    """Recovery may persist display times without a slots list."""
+    nested = {
+        "availability": {
+            "presentation": {
+                "presented": {
+                    "search_date": "2026-07-22",
+                    "times": ["09:00", "10:00"],
+                }
+            }
+        }
+    }
+    presented = presented_availability_from_session(nested)
+    assert presented is not None
+    assert presented["times"] == ["09:00", "10:00"]
+
+    flat = {
+        "presented_availability": {
+            "search_date": "2026-07-22",
+            "times": ["09:00"],
+        }
+    }
+    assert presented_availability_from_session(flat)["times"] == ["09:00"]
+
+
+def test_malformed_empty_presented_dict_is_not_established():
+    """Empty / times-empty dicts are not treated as a presentation window."""
+    assert presented_availability_from_session({"presented_availability": {}}) is None
+    assert (
+        presented_availability_from_session(
+            {"availability": {"presentation": {"presented": {}}}}
+        )
+        is None
+    )
+    assert (
+        presented_availability_from_session(
+            {"presented_availability": {"times": []}}
+        )
+        is None
+    )
+    assert (
+        presented_availability_from_session(
+            {"availability": {"presentation": {"presented": {"times": []}}}}
+        )
+        is None
+    )

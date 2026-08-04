@@ -132,7 +132,13 @@ def test_ambiguous_service_trigger_drops_service_id():
 
 def test_new_booking_request_trigger_clears_booking_id():
     merged_slots = {"booking_id": "bk-1", "service_id": "haircut"}
-    session_state = {"availability_fingerprint": "fp"}
+    session_state = {
+        "availability": {
+            "fingerprint": "fp",
+            "cache": {},
+            "presentation": {},
+        }
+    }
     apply_invalidation(
         {},
         InvalidationTrigger.NEW_BOOKING_REQUEST,
@@ -142,6 +148,9 @@ def test_new_booking_request_trigger_clears_booking_id():
         luma_slots={"date": "2026-07-10"},
     )
     assert "booking_id" not in merged_slots
-    from core.workflows.availability.presentation import availability_fingerprint_from_session
+    from core.workflows.availability.presentation import (
+        availability_fingerprint_from_session,
+    )
+
     assert availability_fingerprint_from_session(session_state) is None
     assert "availability_fingerprint" not in session_state

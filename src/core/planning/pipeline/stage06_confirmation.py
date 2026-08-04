@@ -231,6 +231,7 @@ def _preserve_session_availability_cache(
         return
     from core.workflows.availability.presentation import (
         apply_availability_artifacts,
+        availability_cache_from_session,
         availability_fingerprint_from_session,
         availability_pagination_from_session,
         presented_availability_from_session,
@@ -250,21 +251,10 @@ def _preserve_session_availability_cache(
     ):
         return
 
-    session_availability = session_state.get("availability")
-    src_cache: Dict[str, Any] = {}
-    if isinstance(session_availability, dict):
-        maybe_cache = session_availability.get("cache")
-        if isinstance(maybe_cache, dict):
-            src_cache = maybe_cache
-    search_result = src_cache.get("search_result")
-    if search_result is None:
-        legacy = session_state.get("last_execution_result")
-        if isinstance(legacy, dict):
-            search_result = legacy
     apply_availability_artifacts(
         payload,
         fingerprint=availability_fingerprint_from_session(session_state),
-        search_result=search_result,
+        search_result=availability_cache_from_session(session_state),
         presented=presented_availability_from_session(session_state),
         presentation=availability_pagination_from_session(session_state),
     )

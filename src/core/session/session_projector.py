@@ -111,45 +111,30 @@ class SessionProjectorV2:
         presentation = availability.setdefault("presentation", {})
 
         if isinstance(working_session_state, dict):
-            source_availability = working_session_state.get("availability")
-            if isinstance(source_availability, dict):
-                source_cache = source_availability.get("cache")
-                source_presentation = source_availability.get("presentation")
-                if isinstance(source_cache, dict) and source_cache.get("search_result") is not None:
-                    cache["search_result"] = source_cache["search_result"]
-                if isinstance(source_presentation, dict):
-                    presentation.update(source_presentation)
-                if source_availability.get("fingerprint") is not None:
-                    availability["fingerprint"] = source_availability["fingerprint"]
-
-            # Same-turn working may still carry historical flat availability keys;
-            # project them into nested V2 only (no flat dual-write onto working).
-            legacy_fingerprint = working_session_state.get(
-                "availability_fingerprint"
+            from core.workflows.availability.presentation import (
+                apply_availability_artifacts,
+                availability_cache_from_session,
+                availability_fingerprint_from_session,
+                availability_pagination_from_session,
+                presented_availability_from_session,
             )
-            if legacy_fingerprint is not None:
-                availability["fingerprint"] = legacy_fingerprint
 
-            legacy_search_result = working_session_state.get(
-                "last_execution_result"
+            # Canonical accessors own nested-vs-historical-flat resolution.
+            apply_availability_artifacts(
+                working,
+                fingerprint=availability_fingerprint_from_session(
+                    working_session_state
+                ),
+                search_result=availability_cache_from_session(
+                    working_session_state
+                ),
+                presented=presented_availability_from_session(
+                    working_session_state
+                ),
+                presentation=availability_pagination_from_session(
+                    working_session_state
+                ),
             )
-            if legacy_search_result is not None:
-                cache["search_result"] = legacy_search_result
-
-            legacy_presented = working_session_state.get(
-                "presented_availability"
-            )
-            if legacy_presented is not None:
-                presentation["presented"] = legacy_presented
-
-            legacy_presentation = working_session_state.get(
-                "availability_presentation"
-            )
-            if isinstance(legacy_presentation, dict):
-                presentation["page_index"] = legacy_presentation.get(
-                    "page_index", 0
-                )
-                presentation["page_size"] = legacy_presentation.get("page_size")
 
             if working_session_state.get("customer_id") is not None:
                 working["customer_id"] = working_session_state["customer_id"]
