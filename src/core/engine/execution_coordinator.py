@@ -2,7 +2,6 @@
 
 Decision owns whether an action should execute (via ``ExecutionCommand``).
 Adapters own action-specific operational preparation.
-The legacy resolve path remains temporarily as a parity oracle.
 """
 
 from __future__ import annotations
@@ -72,44 +71,12 @@ class ExecutionCoordinator:
         organization_id: int,
         kwargs: Dict[str, Any],
         command: Optional[ExecutionCommand] = None,
-        use_execution_command: bool = False,
     ) -> ExecutionGateResult:
         """Operational gate + execution preparation (no tool I/O).
 
-        When ``use_execution_command`` is True, Decision has already authorized
-        (or withheld) execution via ``command``. Do not re-evaluate policy.
+        Decision authorizes via ``command``. Do not re-evaluate policy.
         """
-        _ = session_store, user_id  # Compatibility-only; session is already loaded.
-        if use_execution_command:
-            return self._resolve_from_command(
-                command=command,
-                plan=plan,
-                session_state=session_state,
-                availability_client=availability_client,
-                organization_client=organization_client,
-                organization_id=organization_id,
-                kwargs=kwargs,
-            )
-        return self._resolve_legacy(
-            plan=plan,
-            session_state=session_state,
-            availability_client=availability_client,
-            organization_client=organization_client,
-            organization_id=organization_id,
-            kwargs=kwargs,
-        )
-
-    def _resolve_from_command(
-        self,
-        *,
-        command: Optional[ExecutionCommand],
-        plan: Dict[str, Any],
-        session_state: Optional[Dict[str, Any]],
-        availability_client: Optional[Any],
-        organization_client: Optional[Any],
-        organization_id: int,
-        kwargs: Dict[str, Any],
-    ) -> ExecutionGateResult:
+        _ = session_store, user_id  # Signature compat; session is already loaded.
         from core.engine.outcome_builder import (
             apply_execution_blocked_text,
             build_planning_only_response,
@@ -214,204 +181,6 @@ class ExecutionCoordinator:
         return ExecutionGateResult(
             path="ready",
             plan=execution_plan,
-            plan_status=plan_status,
-            plan_action=plan_action,
-            can_execute=True,
-            action=action,
-            client_name=client_name,
-            execution_client=execution_client,
-            intent_name=intent_name,
-            slots=dict(prepared.slots),
-            session_state=session_state,
-        )
-
-    def _resolve_legacy(
-        self,
-        *,
-        plan: Dict[str, Any],
-        session_state: Optional[Dict[str, Any]],
-        availability_client: Optional[Any],
-        organization_client: Optional[Any],
-        organization_id: int,
-        kwargs: Dict[str, Any],
-    ) -> ExecutionGateResult:
-        """Parity oracle: historical policy re-evaluation, then adapter prep."""
-        from core.engine.outcome_builder import (
-            apply_execution_blocked_text,
-            build_planning_only_response,
-            build_planning_response_from_plan,
-        )
-        from core.policy.intent_policy import get_execution_steps
-
-        plan_status = plan.get("status")
-        intent_name = plan.get("intent_name") or plan.get("intent")
-        plan_action = plan.get("action")
-        slots = plan.get("slots", {})
-        steps = get_execution_steps(intent_name)
-
-        can_execute = False
-        execution_step = None
-
-        if plan_action:
-            for step in steps:
-                if step.get("action") == plan_action:
-                    execution_step = step
-                    mode = step.get("mode", "exploratory")
-                    required_slots = step.get("required_slots", [])
-
-                    action_slots_satisfied = all(
-                        slot_name in slots and slots[slot_name] is not None
-                        for slot_name in required_slots
-                    )
-
-                    if mode == "exploratory":
-                        if plan_action == "FETCH_BOOKING":
-                            can_execute = bool(
-                                slots.get("booking_id") or slots.get("booking_code")
-                            )
-                        else:
-                            can_execute = action_slots_satisfied
-                    else:
-                        can_execute = plan_status == "READY" and action_slots_satisfied
-                    break
-
-        if not can_execute:
-            logger.debug(
-                f"Skipping execution: No eligible action found. "
-                f"plan_status={plan_status}, plan_action={plan_action}, "
-                f"missing_slots={plan.get('missing_slots', [])}"
-            )
-            return ExecutionGateResult(
-                path="skipped",
-                response=build_planning_response_from_plan(plan),
-                plan=plan,
-                plan_status=plan_status,
-                plan_action=plan_action,
-                can_execute=False,
-            )
-
-        logger.debug(
-            f"Allowing action execution: plan_action={plan_action}, "
-            f"mode={execution_step.get('mode') if execution_step else 'unknown'}, "
-            f"plan_status={plan_status}, required_slots_satisfied=True"
-        )
-
-        if not execution_step and plan_action:
-            for step in steps:
-                if step.get("action") == plan_action:
-                    execution_step = step
-                    break
-
-        if not execution_step:
-            return ExecutionGateResult(
-                path="no_step",
-                response=build_planning_only_response(plan),
-                plan=plan,
-                plan_status=plan.get("status"),
-                plan_action=plan.get("action"),
-                can_execute=False,
-            )
-
-        action = execution_step.get("action")
-        client_name = execution_step.get("client", "")
-
-        execution_client, client_block = self._resolve_execution_client(
-            action=action,
-            client_name=client_name,
-            availability_client=availability_client,
-            kwargs=kwargs,
-        )
-        if client_block == "unknown_client":
-            execution_step = None
-        elif client_block == "missing_client":
-            execution_client = None
-
-        if execution_step and execution_client is None:
-            logger.debug(
-                f"Execution step {action} requires {client_name}, but client not "
-                "provided. Returning planning outcome (likely clarification turn)."
-            )
-            return ExecutionGateResult(
-                path="missing_client",
-                response=build_planning_response_from_plan(plan),
-                plan=plan,
-                plan_status=plan_status,
-                plan_action=plan_action,
-                can_execute=False,
-            )
-
-        if not (execution_step and execution_client):
-            return ExecutionGateResult(
-                path="no_step",
-                response=build_planning_only_response(plan),
-                plan=plan,
-                plan_status=plan.get("status"),
-                plan_action=plan.get("action"),
-                can_execute=False,
-            )
-
-        adapter = get_execution_adapter(str(action))
-        if adapter is None:
-            return ExecutionGateResult(
-                path="no_step",
-                response=build_planning_only_response(plan),
-                plan=plan,
-                plan_status=plan.get("status"),
-                plan_action=plan.get("action"),
-                can_execute=False,
-            )
-
-        proposal_ctx = plan.get("execution_proposal_context")
-        entity_schema = plan.get("_entity_schema")
-        legacy_command = ExecutionCommand(
-            action=str(action),
-            client_name=str(client_name),
-            intent_name=str(intent_name or ""),
-            mode=str(execution_step.get("mode") or "exploratory"),
-            slots=dict(slots) if isinstance(slots, dict) else {},
-            organization_id=int(organization_id),
-            execution_proposal_context=(
-                dict(proposal_ctx) if isinstance(proposal_ctx, dict) else None
-            ),
-            entity_schema=(
-                dict(entity_schema) if isinstance(entity_schema, dict) else None
-            ),
-            turn_operation=(
-                str(plan["turn_operation"]) if plan.get("turn_operation") else None
-            ),
-            stage=str(plan["stage"]) if plan.get("stage") is not None else None,
-        )
-        prepared = adapter.prepare(
-            legacy_command,
-            session_state,
-            organization_id,
-            organization_client=organization_client,
-            kwargs=kwargs,
-            plan_snapshot=plan,
-        )
-        self._apply_prepared_to_plan(plan, prepared)
-
-        if prepared.blocked is not None:
-            blocked = prepared.blocked
-            blocked_plan = dict(plan)
-            if blocked.reason == "CUSTOMER_ID_REQUIRED":
-                blocked_plan["status"] = "NEEDS_CLARIFICATION"
-            blocked_plan["slots"] = dict(prepared.slots)
-            response = build_planning_response_from_plan(blocked_plan)
-            apply_execution_blocked_text(response, reason=blocked.reason)
-            return ExecutionGateResult(
-                path="skipped",
-                response=response,
-                plan=blocked_plan,
-                plan_status=blocked_plan.get("status"),
-                plan_action=plan_action,
-                can_execute=False,
-                blocked=blocked,
-            )
-
-        return ExecutionGateResult(
-            path="ready",
-            plan=plan,
             plan_status=plan_status,
             plan_action=plan_action,
             can_execute=True,

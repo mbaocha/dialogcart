@@ -150,20 +150,6 @@ def hydrate_working_slots_from_session(
         )
 
 
-def apply_confirmation_planning_mutations(
-    working_turn: Any,
-    confirmation: Any,
-    *,
-    session_state: Optional[Dict[str, Any]] = None,
-) -> None:
-    """Compatibility re-export — prefer ``core.planning.planning_mutations``."""
-    from core.planning.planning_mutations import (
-        apply_confirmation_planning_mutations as _apply,
-    )
-
-    _apply(working_turn, confirmation, session_state=session_state)
-
-
 def clear_booking_state(
     state: Optional[Dict[str, Any]],
     *,

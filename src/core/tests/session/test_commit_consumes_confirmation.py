@@ -223,7 +223,7 @@ def test_stage_confirmation_skips_pending_when_booking_id_exists():
 
 
 def test_stage_confirmation_clears_on_no():
-    from core.session.invalidation import apply_confirmation_planning_mutations
+    from core.planning.planning_mutations import apply_confirmation_planning_mutations
 
     session = {
         "intent_name": "CREATE_APPOINTMENT",
@@ -423,7 +423,7 @@ def test_stage09_renders_reject_wording_from_evidence():
 
 def test_stage_confirmation_clears_on_another_request():
     """AVAILABILITY + ANOTHER_REQUEST supersedes pending confirmation and invalidates trust."""
-    from core.session.invalidation import apply_confirmation_planning_mutations
+    from core.planning.planning_mutations import apply_confirmation_planning_mutations
 
     payload = _commit_ready_payload()
     payload["confirmation_state"] = "pending"
@@ -525,7 +525,7 @@ def test_stage_confirmation_clears_on_another_request():
 
 def test_stage06_availability_flag_alone_does_not_preserve_time_proposal():
     """Stale has_time flag without uttered time must not preserve time_proposal."""
-    from core.session.invalidation import apply_confirmation_planning_mutations
+    from core.planning.planning_mutations import apply_confirmation_planning_mutations
 
     payload = _commit_ready_payload()
     payload["confirmation_state"] = "pending"
@@ -574,7 +574,7 @@ def test_stage06_availability_flag_alone_does_not_preserve_time_proposal():
 
 def test_stage06_availability_preserves_current_turn_time_flag():
     """Availability with current-turn time emits preserve_current_turn_time=True."""
-    from core.session.invalidation import apply_confirmation_planning_mutations
+    from core.planning.planning_mutations import apply_confirmation_planning_mutations
 
     payload = _commit_ready_payload()
     payload["confirmation_state"] = "pending"

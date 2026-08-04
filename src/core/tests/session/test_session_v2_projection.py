@@ -1,14 +1,12 @@
-"""Direct Session V2 projection and old/new persisted-V2 parity."""
+"""Direct Session V2 projection behavioural coverage."""
 
 from __future__ import annotations
 
 from typing import Any, Dict, Optional
 from unittest.mock import patch
 
-from core.session.persist import build_session_state_from_outcome
 from core.session.session_projector import SessionProjectorV2
 from core.session.session_schema_v2 import (
-    build_working_session_from_v1_builder,
     empty_session_v2,
     prepare_session_for_persist,
 )
@@ -18,28 +16,7 @@ from core.session.session_v2_projection import (
 )
 
 
-def _persisted_via_old(
-    *,
-    outcome: Dict[str, Any],
-    outcome_status: str,
-    merged: Optional[Dict[str, Any]] = None,
-    previous: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
-    v1 = build_session_state_from_outcome(
-        outcome=outcome,
-        outcome_status=outcome_status,
-        organization_id=1,
-        merged_luma_response=merged,
-        previous_session_state=previous,
-        user_id="u1",
-    )
-    if v1 is None:
-        return None
-    working = build_working_session_from_v1_builder(v1)
-    return prepare_session_for_persist(working)
-
-
-def _persisted_via_new(
+def _persisted_v2(
     *,
     outcome: Dict[str, Any],
     outcome_status: str,
@@ -57,30 +34,6 @@ def _persisted_via_new(
     if v2 is None:
         return None
     return prepare_session_for_persist(v2)
-
-
-def _assert_canonical_parity(
-    *,
-    outcome: Dict[str, Any],
-    outcome_status: str,
-    merged: Optional[Dict[str, Any]] = None,
-    previous: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    old = _persisted_via_old(
-        outcome=outcome,
-        outcome_status=outcome_status,
-        merged=merged,
-        previous=previous,
-    )
-    new = _persisted_via_new(
-        outcome=outcome,
-        outcome_status=outcome_status,
-        merged=merged,
-        previous=previous,
-    )
-    assert old == new, f"canonical V2 mismatch\n old={old!r}\n new={new!r}"
-    assert new is not None
-    return new
 
 
 # --- Direct projection ---
@@ -194,7 +147,7 @@ def test_session_clear_lifecycle_returns_none():
 # --- Projector integration ---
 
 
-def test_projector_does_not_call_v1_builder():
+def test_projector_uses_project_session_v2_only():
     outcome = {
         "intent_name": "CREATE_APPOINTMENT",
         "slots": {"service_id": "premium haircut"},
@@ -204,8 +157,11 @@ def test_projector_does_not_call_v1_builder():
     }
     merged = {"slots": {"service_id": "premium haircut"}}
     with patch(
-        "core.session.persist.build_session_state_from_outcome"
-    ) as banned:
+        "core.session.session_projector.project_session_v2",
+        wraps=__import__(
+            "core.session.session_v2_projection", fromlist=["project_session_v2"]
+        ).project_session_v2,
+    ) as projected_fn:
         projected = SessionProjectorV2().project(
             outcome=outcome,
             outcome_status="NEEDS_CLARIFICATION",
@@ -213,10 +169,9 @@ def test_projector_does_not_call_v1_builder():
             merged_luma_response=merged,
             user_id="u1",
         )
-        banned.assert_not_called()
+        projected_fn.assert_called()
     assert projected is not None
     assert projected.get("schema_version") == 2
-    # Compatibility mirrors present after hydrate.
     assert "slots" in projected
     assert projected["slots"]["service_id"] == "premium haircut"
     pure = prepare_session_for_persist(projected)
@@ -313,20 +268,12 @@ def test_projector_appends_conversation_history():
     assert len(pure["conversation"]["history"]) == 2
 
 
-# --- Parity scenarios ---
+# --- Canonical projection scenarios ---
 
 
-def test_parity_new_empty_session_clear():
+def test_persisted_empty_session_clear():
     assert (
-        _persisted_via_old(
-            outcome={"intent_name": "UNKNOWN", "slots": {}, "facts": {}},
-            outcome_status="READY",
-            merged={"slots": {}},
-        )
-        is None
-    )
-    assert (
-        _persisted_via_new(
+        _persisted_v2(
             outcome={"intent_name": "UNKNOWN", "slots": {}, "facts": {}},
             outcome_status="READY",
             merged={"slots": {}},
@@ -335,8 +282,8 @@ def test_parity_new_empty_session_clear():
     )
 
 
-def test_parity_in_progress_create_appointment():
-    _assert_canonical_parity(
+def test_persisted_in_progress_create_appointment():
+    pure = _persisted_v2(
         outcome={
             "intent_name": "CREATE_APPOINTMENT",
             "slots": {"service_id": "premium haircut"},
@@ -347,10 +294,14 @@ def test_parity_in_progress_create_appointment():
         outcome_status="NEEDS_CLARIFICATION",
         merged={"slots": {"service_id": "premium haircut"}},
     )
+    assert pure is not None
+    assert_pure_v2_without_mirrors(pure)
+    assert pure["planning"]["slots"]["service_id"] == "premium haircut"
+    assert pure["planning"]["ask_next"] == "date"
 
 
-def test_parity_missing_required_slot():
-    _assert_canonical_parity(
+def test_persisted_missing_required_slot():
+    pure = _persisted_v2(
         outcome={
             "intent_name": "CREATE_APPOINTMENT",
             "slots": {"service_id": "premium haircut", "date": "2026-07-10"},
@@ -363,10 +314,12 @@ def test_parity_missing_required_slot():
             "slots": {"service_id": "premium haircut", "date": "2026-07-10"},
         },
     )
+    assert pure is not None
+    assert pure["planning"]["missing_slots"] == ["time"]
 
 
-def test_parity_bound_datetime():
-    _assert_canonical_parity(
+def test_persisted_bound_datetime():
+    pure = _persisted_v2(
         outcome={
             "intent_name": "CREATE_APPOINTMENT",
             "slots": {
@@ -390,10 +343,12 @@ def test_parity_bound_datetime():
             },
         },
     )
+    assert pure is not None
+    assert pure["planning"]["bound_datetime"]["start"] == "2026-07-10T10:00:00Z"
 
 
-def test_parity_successful_booking_commit():
-    _assert_canonical_parity(
+def test_persisted_successful_booking_commit():
+    pure = _persisted_v2(
         outcome={
             "intent_name": "CREATE_APPOINTMENT",
             "slots": {
@@ -414,15 +369,18 @@ def test_parity_successful_booking_commit():
             }
         },
     )
+    assert pure is not None
+    assert pure["booking"]["booking_id"] == "b-99"
+    assert pure["booking"]["booking_code"] == "ZZ"
 
 
-def test_parity_existing_persisted_v2_input():
+def test_persisted_existing_persisted_v2_input():
     previous = empty_session_v2()
     previous["customer_id"] = 7
     previous["planning"]["intent_name"] = "CREATE_APPOINTMENT"
     previous["planning"]["slots"] = {"service_id": "premium haircut"}
     previous["planning"]["status"] = "NEEDS_CLARIFICATION"
-    _assert_canonical_parity(
+    pure = _persisted_v2(
         outcome={
             "intent_name": "CREATE_APPOINTMENT",
             "slots": {"service_id": "premium haircut", "date": "2026-07-11"},
@@ -436,9 +394,13 @@ def test_parity_existing_persisted_v2_input():
         },
         previous=previous,
     )
+    assert pure is not None
+    assert pure["customer_id"] == 7
+    assert pure["planning"]["slots"]["service_id"] == "premium haircut"
+    assert "time" in (pure["planning"].get("missing_slots") or [])
 
 
-def test_parity_existing_persisted_v1_input():
+def test_persisted_existing_persisted_v1_input():
     previous = {
         "intent_name": "CREATE_APPOINTMENT",
         "status": "NEEDS_CLARIFICATION",
@@ -447,7 +409,7 @@ def test_parity_existing_persisted_v1_input():
         "customer_id": 9,
         "facts": {},
     }
-    _assert_canonical_parity(
+    pure = _persisted_v2(
         outcome={
             "intent_name": "CREATE_APPOINTMENT",
             "slots": {"service_id": "premium haircut", "date": "2026-07-12"},
@@ -461,3 +423,6 @@ def test_parity_existing_persisted_v1_input():
         },
         previous=previous,
     )
+    assert pure is not None
+    assert pure["customer_id"] == 9
+    assert pure["planning"]["slots"]["service_id"] == "premium haircut"

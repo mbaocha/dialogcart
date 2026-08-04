@@ -335,7 +335,7 @@ def test_show_more_never_searches_again(pagination_harness):
 
 
 def test_browse_persists_page_index_through_message_session_build(pagination_harness):
-    """API-path: handle_message browse + build_session_state_from_outcome (like message.py)."""
+    """API-path: handle_message browse + project_session_v2 (like message.py)."""
     user_id, session_store, availability_client, org_client = pagination_harness
     session = _setup_paginated_search(user_id, availability_client, org_client, session_store)
     full_cached_count = len(session["last_execution_result"]["slots"])

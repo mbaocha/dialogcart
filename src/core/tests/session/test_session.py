@@ -19,7 +19,7 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from core.session.persist import build_session_state_from_outcome
+from core.session.persist import assemble_session_projection_fields
 from core.adapters.cache.catalog_cache import catalog_cache
 from core.api.compat import handle_message
 from core.session.session_manager import clear_session, get_session
@@ -988,7 +988,7 @@ def test_awaiting_slot_cleared_when_slot_filled():
     user_id = "test_user_awaiting_slot"
 
     # Execute: build session state
-    session_state = build_session_state_from_outcome(
+    session_state = assemble_session_projection_fields(
         outcome=outcome,
         outcome_status=outcome_status,
         organization_id=1,
@@ -1026,7 +1026,7 @@ def test_awaiting_slot_cleared_when_slot_filled():
     merged_luma_response_2 = {"slots": outcome_2["slots"], "missing_slots": ["time"]}
 
     # Execute: build session state
-    session_state_2 = build_session_state_from_outcome(
+    session_state_2 = assemble_session_projection_fields(
         outcome=outcome_2,
         outcome_status=outcome_status,
         organization_id=1,

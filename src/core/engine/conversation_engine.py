@@ -449,7 +449,6 @@ class ConversationEngine:
                 organization_id=organization_id,
                 kwargs=kwargs,
                 command=execution_command,
-                use_execution_command=True,
             )
             if gate.path != "ready":
                 return self._finish_gate(

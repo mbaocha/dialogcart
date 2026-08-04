@@ -27,12 +27,12 @@ def resolve_durable_intent_for_session(
             if is_durable_intent(outcome_intent):
                 intent_name = outcome_intent
                 logger.debug(
-                    "[build_session_state_from_outcome] Using outcome.intent_name=%s (durable)",
+                    "[assemble_session_projection_fields] Using outcome.intent_name=%s (durable)",
                     intent_name,
                 )
             else:
                 logger.debug(
-                    "[build_session_state_from_outcome] Skipping ephemeral outcome.intent_name=%s",
+                    "[assemble_session_projection_fields] Skipping ephemeral outcome.intent_name=%s",
                     outcome_intent,
                 )
 
@@ -44,12 +44,12 @@ def resolve_durable_intent_for_session(
                 if is_durable_intent(plan_intent_name):
                     intent_name = plan_intent_name
                     logger.debug(
-                        "[build_session_state_from_outcome] Using plan.intent_name=%s (durable)",
+                        "[assemble_session_projection_fields] Using plan.intent_name=%s (durable)",
                         intent_name,
                     )
                 else:
                     logger.debug(
-                        "[build_session_state_from_outcome] Skipping ephemeral plan.intent_name=%s",
+                        "[assemble_session_projection_fields] Skipping ephemeral plan.intent_name=%s",
                         plan_intent_name,
                     )
 
@@ -61,14 +61,14 @@ def resolve_durable_intent_for_session(
             if is_durable_intent(previous_intent):
                 intent_name = previous_intent
                 logger.info(
-                    "[build_session_state_from_outcome] Preserving durable previous session intent=%s "
+                    "[assemble_session_projection_fields] Preserving durable previous session intent=%s "
                     "(outcome.intent_name was falsy/empty, status=%s)",
                     intent_name,
                     outcome_status,
                 )
             else:
                 logger.debug(
-                    "[build_session_state_from_outcome] Not preserving ephemeral previous session intent=%s",
+                    "[assemble_session_projection_fields] Not preserving ephemeral previous session intent=%s",
                     previous_intent,
                 )
 
@@ -145,7 +145,7 @@ def resolve_final_intent_name(
             if is_durable_intent(previous_intent):
                 final_intent_name = previous_intent
                 logger.info(
-                    "[build_session_state_from_outcome] Preserving durable session intent=%s "
+                    "[assemble_session_projection_fields] Preserving durable session intent=%s "
                     "(outcome.intent_name was falsy/empty, status=%s)",
                     final_intent_name,
                     outcome_status,

@@ -533,12 +533,6 @@ def prepare_session_for_persist(working: Mapping[str, Any]) -> Dict[str, Any]:
     return sync_working_session_to_pure_v2(working)
 
 
-def build_working_session_from_v1_builder(v1_session: Mapping[str, Any]) -> Dict[str, Any]:
-    """Convert a V1-shaped projector builder result into a working V2 session."""
-    v2 = normalize_session_to_v2(v1_session)
-    return hydrate_v1_compat_shims(v2)
-
-
 # ---------------------------------------------------------------------------
 # Compatibility accessors (read paths for legacy consumers)
 # ---------------------------------------------------------------------------
@@ -709,7 +703,6 @@ def _build_compat_facts(
 
 __all__ = [
     "SESSION_SCHEMA_VERSION",
-    "build_working_session_from_v1_builder",
     "defensive_copy_session",
     "detect_schema_version",
     "empty_session_v2",

@@ -30,7 +30,7 @@ class SessionProjectorV2:
       save time via ``prepare_session_for_persist``.
 
     Production path projects canonical V2 via ``project_session_v2`` then
-    ``hydrate_v1_compat_shims``. It does not call ``build_session_state_from_outcome``.
+    ``hydrate_v1_compat_shims``.
 
     Does not call Redis or any session store directly.
     """

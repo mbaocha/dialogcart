@@ -229,7 +229,6 @@ def test_coordinator_command_path_invokes_registered_adapter():
             organization_id=2,
             kwargs={"booking_client": MagicMock()},
             command=cmd,
-            use_execution_command=True,
         )
         prep.assert_called_once()
     assert gate.path == "ready"
@@ -265,7 +264,6 @@ def test_coordinator_does_not_mutate_decision_plan_via_adapter():
         organization_id=2,
         kwargs={"booking_client": MagicMock()},
         command=cmd,
-        use_execution_command=True,
     )
     assert gate.path == "ready"
     assert plan == snapshot

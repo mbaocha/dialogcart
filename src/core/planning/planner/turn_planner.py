@@ -41,19 +41,6 @@ def _build_tenant_context_from_projection(
     return tenant_context
 
 
-def _build_tenant_context(
-    organization_id: int,
-    business_category: str,
-    booking_domain: str,
-    catalog_client: CatalogClient,
-) -> Optional[Dict[str, Any]]:
-    """Compatibility wrapper — tenant_context only (no entity_schema)."""
-    tenant_context, _ = build_nlu_request_context(
-        organization_id, business_category, booking_domain, catalog_client
-    )
-    return tenant_context
-
-
 def build_nlu_request_context(
     organization_id: int,
     business_category: str,

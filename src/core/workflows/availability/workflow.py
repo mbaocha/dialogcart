@@ -347,7 +347,7 @@ class AvailabilityWorkflow:
 
         # ---- attach fingerprint / datetime_range to plan ----------------
         # Ensures these survive even when session_store is None
-        # (build_session_state_from_outcome reads them from plan).
+        # (assemble_session_projection_fields / project_session_v2 read them from plan).
         if availability_fingerprint:
             plan["availability_fingerprint"] = availability_fingerprint
             logger.debug(

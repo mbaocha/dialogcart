@@ -5,6 +5,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from core.engine.execution_coordinator import ExecutionCoordinator
+from core.execution.command_builder import build_execution_command
 from core.session.confirmation_gate import get_confirmation_state
 
 
@@ -31,6 +32,7 @@ def _confirm_plan(**slot_overrides):
 
 def _resolve(coordinator, *, plan, session_state=None, kwargs=None):
     booking_client = MagicMock()
+    command = build_execution_command(plan=plan, organization_id=2)
     return coordinator.resolve(
         plan=plan,
         session_state=session_state or {},
@@ -40,6 +42,7 @@ def _resolve(coordinator, *, plan, session_state=None, kwargs=None):
         organization_client=None,
         organization_id=2,
         kwargs={"booking_client": booking_client, **(kwargs or {})},
+        command=command,
     )
 
 
@@ -51,7 +54,7 @@ def test_confirm_blocked_without_customer_id_leaves_pending():
         "slots": {"service_id": "premium haircut"},
     }
     gate = _resolve(coordinator, plan=_confirm_plan(), session_state=session)
-    assert gate.path == "skipped"
+    assert gate.path == "blocked"
     assert gate.can_execute is False
     assert gate.response is not None
     assert "phone" in (gate.response.get("text") or "").lower()
@@ -93,12 +96,13 @@ def test_identity_block_preserves_pending_on_merged_and_session():
     plan["_merged_luma_response"] = merged
     session = {"confirmation_state": "pending"}
     gate = _resolve(coordinator, plan=plan, session_state=session)
-    assert gate.path == "skipped"
+    assert gate.path == "blocked"
     assert get_confirmation_state(session) == "pending"
     assert get_confirmation_state(merged) == "pending"
     assert get_confirmation_state(gate.plan) != "confirmed"
-    assert gate.response.get("_merged_luma_response") is merged
-    assert get_confirmation_state(gate.response["_merged_luma_response"]) == "pending"
+    response_merged = gate.response.get("_merged_luma_response")
+    assert response_merged == merged
+    assert get_confirmation_state(response_merged) == "pending"
 
 
 def test_identity_block_then_resolved_customer_allows_fresh_confirm():
@@ -113,7 +117,7 @@ def test_identity_block_then_resolved_customer_allows_fresh_confirm():
         },
     }
     blocked = _resolve(coordinator, plan=_confirm_plan(), session_state=session)
-    assert blocked.path == "skipped"
+    assert blocked.path == "blocked"
     assert get_confirmation_state(session) == "pending"
 
     session["customer_id"] = 91001
@@ -137,7 +141,7 @@ def test_coordinator_never_writes_confirmed():
     plan["_merged_luma_response"] = merged
 
     blocked = _resolve(coordinator, plan=plan, session_state=session)
-    assert blocked.path == "skipped"
+    assert blocked.path == "blocked"
     assert get_confirmation_state(session) == "pending"
     assert get_confirmation_state(merged) == "pending"
 

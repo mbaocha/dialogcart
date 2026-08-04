@@ -1,7 +1,7 @@
 """Direct canonical Session V2 projection from finalized turn artifacts.
 
 SessionProjectorV2 production path uses ``project_session_v2`` then
-``hydrate_v1_compat_shims``. It must not call ``build_session_state_from_outcome``.
+``hydrate_v1_compat_shims``.
 
 Canonical field precedence (documented table)
 --------------------------------------------

@@ -131,7 +131,6 @@ def _resolve_command(coordinator, *, plan, command, session_state=None, kwargs=N
         organization_id=2,
         kwargs={"booking_client": MagicMock(), **(kwargs or {})},
         command=command,
-        use_execution_command=True,
     )
 
 
@@ -227,7 +226,6 @@ def test_command_path_missing_client_typed_reason():
         organization_id=2,
         kwargs={},  # no booking_client
         command=cmd,
-        use_execution_command=True,
     )
     assert gate.path == "missing_client"
     assert gate.blocked is not None
@@ -250,105 +248,62 @@ def test_command_path_no_action_skips_without_policy():
             organization_id=2,
             kwargs={},
             command=None,
-            use_execution_command=True,
         )
         mocked_steps.assert_not_called()
     assert gate.path == "skipped"
     assert gate.can_execute is False
 
 
-def test_parity_confirm_ready_slots_match_legacy():
+
+
+def test_confirm_ready_injects_customer_and_org():
     plan = _confirm_plan()
     session = {"customer_id": 55}
     booking_client = MagicMock()
-    kwargs = {"booking_client": booking_client}
-    coordinator = ExecutionCoordinator()
-
-    legacy_plan = deepcopy(plan)
-    legacy = coordinator.resolve(
-        plan=legacy_plan,
+    cmd = build_execution_command(plan=plan, organization_id=2)
+    gate = ExecutionCoordinator().resolve(
+        plan=plan,
         session_state=session,
         session_store=None,
         user_id="u",
         availability_client=None,
         organization_client=None,
         organization_id=2,
-        kwargs=kwargs,
-    )
-
-    cmd_plan = deepcopy(plan)
-    cmd = build_execution_command(plan=cmd_plan, organization_id=2)
-    command_gate = coordinator.resolve(
-        plan=cmd_plan,
-        session_state=session,
-        session_store=None,
-        user_id="u",
-        availability_client=None,
-        organization_client=None,
-        organization_id=2,
-        kwargs=kwargs,
+        kwargs={"booking_client": booking_client},
         command=cmd,
-        use_execution_command=True,
     )
-
-    assert legacy.path == "ready"
-    assert command_gate.path == "ready"
-    assert legacy.action == command_gate.action
-    assert legacy.client_name == command_gate.client_name
-    assert legacy.slots.get("customer_id") == command_gate.slots.get("customer_id")
-    assert legacy.slots.get("organization_id") == command_gate.slots.get(
-        "organization_id"
-    )
-    assert legacy.slots.get("datetime_range") == command_gate.slots.get(
-        "datetime_range"
-    )
+    assert gate.path == "ready"
+    assert gate.action == "CONFIRM_APPOINTMENT"
+    assert gate.client_name == "booking_client"
+    assert gate.slots.get("customer_id") == 55
+    assert gate.slots.get("organization_id") == 2
+    assert gate.slots.get("datetime_range") == plan["slots"]["datetime_range"]
 
 
-def test_parity_availability_search_inputs():
+def test_availability_search_ready_with_catalog_mapping():
     plan = _availability_plan()
     availability_client = MagicMock()
-    kwargs = {"booking_client": MagicMock()}
-    coordinator = ExecutionCoordinator()
-
-    legacy_plan = deepcopy(plan)
+    cmd = build_execution_command(plan=plan, organization_id=2)
     with patch(
         "core.execution.catalog_resolver.load_sku_to_catalog_id_for_org",
         return_value={"sku": 1},
     ):
-        legacy = coordinator.resolve(
-            plan=legacy_plan,
+        gate = ExecutionCoordinator().resolve(
+            plan=plan,
             session_state={},
             session_store=None,
             user_id="u",
             availability_client=availability_client,
             organization_client=None,
             organization_id=2,
-            kwargs=kwargs,
-        )
-
-        cmd_plan = deepcopy(plan)
-        cmd = build_execution_command(plan=cmd_plan, organization_id=2)
-        command_gate = coordinator.resolve(
-            plan=cmd_plan,
-            session_state={},
-            session_store=None,
-            user_id="u",
-            availability_client=availability_client,
-            organization_client=None,
-            organization_id=2,
-            kwargs=kwargs,
+            kwargs={"booking_client": MagicMock()},
             command=cmd,
-            use_execution_command=True,
         )
-
-    assert legacy.path == command_gate.path == "ready"
-    assert legacy.action == command_gate.action == "SEARCH_AVAILABILITY"
-    assert legacy.client_name == command_gate.client_name
-    assert legacy.slots.get("organization_id") == 2
-    assert command_gate.slots.get("organization_id") == 2
-    assert legacy.plan.get("sku_to_catalog_id") == command_gate.plan.get(
-        "sku_to_catalog_id"
-    )
+    assert gate.path == "ready"
+    assert gate.action == "SEARCH_AVAILABILITY"
+    assert gate.client_name == "availability_client"
+    assert gate.slots.get("organization_id") == 2
+    assert gate.plan.get("sku_to_catalog_id") == {"sku": 1}
 
 
 def test_conflicting_organization_id_enforced_on_command_path():

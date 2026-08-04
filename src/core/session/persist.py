@@ -237,7 +237,6 @@ def assemble_session_projection_fields(
     Assemble planning/lifecycle projection fields for session persistence.
 
     Returns a flat planning-artifact bag (legacy V1-shaped intermediate) used by:
-    - ``build_session_state_from_outcome`` (compatibility / parity oracle)
     - ``project_session_v2`` (maps the bag onto canonical nested Session V2)
 
     CONTRACT: Persist conversation state, not just slots:
@@ -286,7 +285,7 @@ def assemble_session_projection_fields(
 
     # DIAGNOSTIC: Log what's in outcome and merged_luma_response at entry
     logger.debug(
-        f"[SESSION_MERGE] build_session_state_from_outcome entry: "
+        f"[SESSION_MERGE] assemble_session_projection_fields entry: "
         f"outcome_keys={list(outcome.keys())}, "
         f"outcome.slots_keys={list(outcome.get('slots', {}).keys()) if isinstance(outcome.get('slots'), dict) else 'N/A'}, "
         f"outcome.facts.slots_keys={list(outcome.get('facts', {}).get('slots', {}).keys()) if isinstance(outcome.get('facts'), dict) and isinstance(outcome.get('facts', {}).get('slots'), dict) else 'N/A'}, "
@@ -725,7 +724,7 @@ def assemble_session_projection_fields(
             f"same_as_local={id(session_state.get('slot_attempts')) == id(slot_attempts)}"
         )
         logger.debug(
-            f"[build_session_state_from_outcome] Persisting durable intent={final_intent_name} "
+            f"[assemble_session_projection_fields] Persisting durable intent={final_intent_name} "
             f"with {len(filtered_slots)} filtered slots and {len(serializable_facts)} facts"
         )
     else:
@@ -760,7 +759,7 @@ def assemble_session_projection_fields(
             f"same_as_local={id(session_state.get('slot_attempts')) == id(slot_attempts)}"
         )
         logger.debug(
-            f"[build_session_state_from_outcome] Ephemeral intent={final_intent_name} - "
+            f"[assemble_session_projection_fields] Ephemeral intent={final_intent_name} - "
             f"NOT persisting intent or slots, but persisting {len(serializable_facts)} facts"
         )
 
@@ -1137,27 +1136,3 @@ def assemble_session_projection_fields(
     )
 
     return session_state
-
-
-def build_session_state_from_outcome(
-    outcome: Dict[str, Any],
-    outcome_status: str,
-    organization_id: int,
-    merged_luma_response: Optional[Dict[str, Any]] = None,
-    previous_session_state: Optional[Dict[str, Any]] = None,
-    user_id: Optional[str] = None,
-    session_store: Optional[Any] = None,
-) -> Optional[Dict[str, Any]]:
-    """Compatibility / parity-oracle wrapper over lifecycle field assembly.
-
-    Production Session V2 projection must use ``project_session_v2`` instead.
-    """
-    return assemble_session_projection_fields(
-        outcome=outcome,
-        outcome_status=outcome_status,
-        organization_id=organization_id,
-        merged_luma_response=merged_luma_response,
-        previous_session_state=previous_session_state,
-        user_id=user_id,
-        session_store=session_store,
-    )
