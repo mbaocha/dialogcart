@@ -34,13 +34,13 @@ def _system_prompt(
 ) -> str:
     ctx_block = format_conversation_context(conversation_context or {})
     ctx_section = f"\n{ctx_block}\n" if ctx_block else ""
-    return f"""You are a slot extractor for a booking platform.
-Extract booking reference slots from the user message.
+    return f"""{intent_validation_section(candidate_intent)}
+
+── EXTRACTION (VIEW) ───────────────────────────────────────────────────────
+Extract booking reference slots for validated_intent only.
 
 Current date/time: {now}
 {ctx_section}
-{intent_validation_section(candidate_intent)}
-
 The user is asking about or managing an existing booking.
 Extract the booking_id if they provide one. If not provided, leave it null.
 

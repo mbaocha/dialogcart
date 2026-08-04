@@ -198,7 +198,7 @@ def build_attached_request(intent_decision: "IntentDecision") -> AttachedRequest
 
 
 LEGACY_INTENT_DECISION_READ_SITES: Tuple[str, ...] = (
-    "decide_handler_delegation: IntentDecision handler/non-durable fields",
+    "decide_handler_delegation: IntentDecision non-durable / OFF_TOPIC / RAG fields",
     "build_attached_request: single projection IntentDecision → AttachedRequest",
 )
 

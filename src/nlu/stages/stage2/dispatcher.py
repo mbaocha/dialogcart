@@ -1,14 +1,15 @@
 """
-Stage 2 dispatcher — routes a Stage 1 intent to the correct group extractor.
+Stage 2 dispatcher — routes a Stage 1 proposal to a group extractor.
 
+Stage 1 supplies a candidate intent (proposal / prior only).
 Each group extractor:
-- Receives the candidate intent from Stage 1
-- Extracts slots using a focused, group-specific prompt
-- Is the final authority on intent (can re-route via validated_intent)
+- Consumes the shared Intent Validation Contract (base_prompt.intent_validation_section)
+- Independently validates the proposal → validated_intent (semantic authority)
+- Extracts slots for the validated intent (group-specific extraction only)
 - Owns temporal understanding via Temporal; projects legacy fields for compatibility
 
 Routing rules:
-- UNKNOWN → create group (create validates intent from full conversation context)
+- UNKNOWN → create group (first-pass extraction; validation may re-route)
 - CONFIRM_ACTION / REJECT_ACTION → no extraction (pipeline handles directly)
 - When validated_intent maps to a different Stage 2 group, Stage 3 re-runs
   the correct group extractor and replaces the Stage 2 output entirely.
@@ -18,6 +19,7 @@ from typing import Any, Dict, Optional
 
 from ...registry.intent_groups import get_stage2_group
 from ...temporal.stage2_output import empty_temporal_dict
+from .entity_schema import CompiledBusinessEntities
 from .groups.availability import AvailabilityGroupExtractor
 from .groups.cancel import CancelGroupExtractor
 from .groups.create import CreateGroupExtractor
@@ -69,6 +71,8 @@ def _empty_result(intent: str) -> Dict[str, Any]:
         "search_query": None,
         "temporal": empty_temporal_dict(0.0),
         "off_topic_query": None,
+        "answerable": None,
+        "answer": None,
     }
 
 
@@ -86,15 +90,20 @@ def _run_group_extractor(
     now: str,
     tenant_context: Dict[str, Any],
     conversation_context: Optional[Dict[str, Any]],
+    compiled_entities: Optional[CompiledBusinessEntities] = None,
 ) -> Dict[str, Any]:
     extractor = _get_extractor(group)
-    return extractor.extract(
-        text=text,
-        now=now,
-        tenant_context=tenant_context,
-        candidate_intent=candidate_intent,
-        conversation_context=conversation_context,
-    )
+    kwargs: Dict[str, Any] = {
+        "text": text,
+        "now": now,
+        "tenant_context": tenant_context,
+        "candidate_intent": candidate_intent,
+        "conversation_context": conversation_context,
+    }
+    # CREATE-only: forward already-compiled entities (no schema interpretation here).
+    if group == "create" and compiled_entities is not None:
+        kwargs["compiled_entities"] = compiled_entities
+    return extractor.extract(**kwargs)
 
 
 def extract_slots(
@@ -103,6 +112,7 @@ def extract_slots(
     now: str,
     tenant_context: Dict[str, Any],
     conversation_context: Optional[Dict[str, Any]] = None,
+    compiled_entities: Optional[CompiledBusinessEntities] = None,
 ) -> Dict[str, Any]:
     """Route intent to Stage 2, optionally Stage 3 when validated intent changes group.
 
@@ -118,7 +128,13 @@ def extract_slots(
     logger.debug("Stage2 dispatcher: intent=%r → group=%r", intent, routed_group)
 
     result = _run_group_extractor(
-        routed_group, intent, text, now, tenant_context, conversation_context,
+        routed_group,
+        intent,
+        text,
+        now,
+        tenant_context,
+        conversation_context,
+        compiled_entities=compiled_entities,
     )
 
     final_intent = result.get("intent", intent)
@@ -135,7 +151,13 @@ def extract_slots(
             final_intent, final_group, routed_group, text,
         )
         result = _run_group_extractor(
-            final_group, final_intent, text, now, tenant_context, conversation_context,
+            final_group,
+            final_intent,
+            text,
+            now,
+            tenant_context,
+            conversation_context,
+            compiled_entities=compiled_entities,
         )
 
     return _ensure_temporal(result)

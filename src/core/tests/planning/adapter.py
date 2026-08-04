@@ -112,6 +112,16 @@ def normalize_planning_outcome(core_result: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(missing_slots, list):
             missing_slots = []
 
+    ask_next = plan_data.get("ask_next")
+    if ask_next is None:
+        facts = plan_data.get("facts", {})
+        if isinstance(facts, dict):
+            ask_next = facts.get("ask_next")
+    if ask_next is None:
+        plan_dict = plan_data.get("plan", {})
+        if isinstance(plan_dict, dict):
+            ask_next = plan_dict.get("ask_next")
+
     # Extract slots - from planning logic only
     slots = plan_data.get("slots", {})
     if not isinstance(slots, dict):
@@ -161,7 +171,8 @@ def normalize_planning_outcome(core_result: Dict[str, Any]) -> Dict[str, Any]:
         "intent": intent_name,
         "status": status,
         "required_slots": required_slots,
-        "missing_slots": sorted(missing_slots),  # Deterministic ordering
+        "missing_slots": list(missing_slots),  # Preserve planning policy order
+        "ask_next": ask_next,
         "slots": slots,
         "plan": {"stage": stage, "action": action},
     }

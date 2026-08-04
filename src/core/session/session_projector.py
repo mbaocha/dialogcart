@@ -54,7 +54,7 @@ class SessionProjectorV2:
         if isinstance(workflow_result, dict):
             projection_outcome["_workflow_result"] = workflow_result
 
-        if outcome_status == "HANDLER_DELEGATED":
+        if outcome_status == "HANDLER_DELEGATED" or outcome_status == "OFF_TOPIC":
             base = working_session_state or previous_session_state or {}
             working = prepare_session_for_load(base)
         else:
@@ -79,9 +79,11 @@ class SessionProjectorV2:
             capability_result=capability_result,
             handler_conversation_update=handler_conversation_update,
             conversation_messages=conversation_messages,
-            # Digressions must not clear booking authorization / bound datetime
-            # from an empty NLU payload (GENERAL_INQUIRY, OFF_TOPIC, …).
-            preserve_booking_authorization=(outcome_status == "HANDLER_DELEGATED"),
+            # Digressions (RAG HANDLER_DELEGATED, Core OFF_TOPIC) must not clear
+            # booking authorization / bound datetime from an empty NLU payload.
+            preserve_booking_authorization=(
+                outcome_status in ("HANDLER_DELEGATED", "OFF_TOPIC")
+            ),
         )
         return working
 
@@ -119,6 +121,7 @@ class SessionProjectorV2:
                 "last_execution_result",
                 "presented_availability",
                 "availability_presentation",
+                "customer_id",
             ):
                 if working_session_state.get(key) is not None:
                     working[key] = working_session_state[key]

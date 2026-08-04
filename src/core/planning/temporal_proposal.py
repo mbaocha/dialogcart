@@ -313,11 +313,31 @@ def build_selection_user_facts(
             facts["time"] = tp.get("value")
             facts["time_from_current_turn"] = True
 
-    for key in ("service_id", "location", "staff", "resource", "resource_id"):
-        turn_key = f"_current_turn_{key}"
+    from core.adapters.nlu.entity_schema_builder import (
+        SEARCH_CRITERIA_KEY_ALIASES,
+        canonicalize_search_criteria_key,
+        search_criteria_slot_keys_from_entity_schema,
+    )
+
+    schema = turn_payload.get("_entity_schema")
+    if not isinstance(schema, dict):
+        schema = None
+    criteria_keys = set(search_criteria_slot_keys_from_entity_schema(schema))
+    criteria_keys.update(SEARCH_CRITERIA_KEY_ALIASES.keys())
+    for key in sorted(criteria_keys):
+        canon = canonicalize_search_criteria_key(key)
+        turn_key = f"_current_turn_{canon}"
         if turn_payload.get(turn_key) is not None:
-            facts[key] = turn_payload.get(turn_key)
-            facts[f"{key}_from_current_turn"] = True
+            facts[canon] = turn_payload.get(turn_key)
+            facts[f"{canon}_from_current_turn"] = True
+        # Legacy payload key support
+        legacy_key = f"_current_turn_{key}"
+        if key != canon and turn_payload.get(legacy_key) is not None:
+            facts[canon] = turn_payload.get(legacy_key)
+            facts[f"{canon}_from_current_turn"] = True
+
+    if isinstance(schema, dict):
+        facts["_entity_schema"] = schema
 
     return facts
 
@@ -913,9 +933,13 @@ def resolve_execution_proposals(
         plan_context = plan.get("execution_proposal_context")
         if isinstance(plan_context, dict):
             context = plan_context
+    context_invalidated = bool(
+        isinstance(context, dict) and context.get("availability_invalidated")
+    )
     revision_invalidated = bool(
         plan.get("_revision_invalidated_availability")
         or merged.get("_revision_invalidated_availability")
+        or context_invalidated
     )
     established_availability = _has_established_availability_search(session_state)
     # Mid-flow service/date revision after a prior SEARCH must not reuse the old

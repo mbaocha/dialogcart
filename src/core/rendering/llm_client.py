@@ -1,7 +1,6 @@
-"""
-Shared Anthropic client for rendering-layer LLM operations.
+"""Shared Anthropic client for rendering-layer LLM operations.
 
-Used by ``llm_renderer`` (wording) and ``off_topic`` (OFF_TOPIC factual evidence).
+Used by ``llm_renderer`` (wording) and other Core render builders.
 """
 
 from __future__ import annotations

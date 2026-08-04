@@ -10,7 +10,7 @@ No fallback to legacy configs - policy file is required.
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 import yaml
 
@@ -134,6 +134,31 @@ def get_intent_durable(intent_name: str) -> bool:
         return False
 
     return metadata.get("durable", False)
+
+
+def is_intent_plannable(intent_name: str) -> bool:
+    """True when policy defines planning completeness for this intent.
+
+    Plannability is independent of durability. A non-durable intent may still
+    continue through the planner to collect missing slots or run exploratory
+    steps. Cold-start AVAILABILITY is redirected to CREATE_APPOINTMENT in
+    Stage 01 before planning owns intent_name.
+    """
+    intent_upper = intent_name.upper() if intent_name else None
+    if not intent_upper:
+        return False
+
+    unified_policy = _load_unified_policy()
+    intent_config = unified_policy.get(intent_upper)
+    if not isinstance(intent_config, dict):
+        return False
+
+    planning_config = intent_config.get("planning")
+    if not isinstance(planning_config, dict):
+        return False
+
+    required_slots = planning_config.get("required_slots")
+    return isinstance(required_slots, list) and bool(required_slots)
 
 
 def is_durable_intent(intent_name: str) -> bool:
@@ -391,11 +416,20 @@ def _evaluate_step_requirement(requirement: str, *, flags: Dict[str, Any]) -> bo
 
 
 def evaluate_execution_step_candidates(
-    intent_name: str, slots: Dict[str, Any], flags: Optional[Dict[str, Any]] = None
+    intent_name: str,
+    slots: Dict[str, Any],
+    flags: Optional[Dict[str, Any]] = None,
+    *,
+    entity_schema: Optional[Mapping[str, Any]] = None,
 ) -> tuple[Optional[Dict[str, Any]], List[Dict[str, Any]]]:
     """
     Evaluate every policy execution step and return the selected step plus
     per-candidate evaluation detail for decision tracing.
+
+    Committing steps gate on composed planning requiredness (platform +
+    schema-required business slots). Exploratory steps use platform
+    step.required_slots plus required schema slots with effective
+    ``availability_criteria``.
     """
     if flags is None:
         flags = {}
@@ -408,20 +442,28 @@ def evaluate_execution_step_candidates(
     if not steps:
         return None, []
 
+    from core.planning.planner.missing_slots import (
+        compose_execution_step_required_slots,
+    )
+
     collected_slot_names = set(
         slot_name for slot_name, slot_value in slots.items() if slot_value is not None
     )
-    planning_required_slots = get_planning_required_slots(intent_name)
-    planning_required_slots_set = set(planning_required_slots)
 
     selected_step: Optional[Dict[str, Any]] = None
     candidates: List[Dict[str, Any]] = []
 
     for step in steps:
         action = step.get("action")
-        required_slots = step.get("required_slots", [])
+        step_required_slots = step.get("required_slots", [])
         requires = step.get("requires", [])
         mode = step.get("mode", "exploratory")
+        effective_required = compose_execution_step_required_slots(
+            intent_name=intent_upper,
+            step_required_slots=step_required_slots,
+            mode=mode,
+            entity_schema=entity_schema,
+        )
 
         blocking_requirements: List[str] = []
         missing_requirements: List[str] = []
@@ -431,13 +473,14 @@ def evaluate_execution_step_candidates(
         reason_code = "STEP_SELECTED"
         reason_text = f"Execution step {action!r} is eligible"
 
-        if mode == "committing":
-            missing_planning = sorted(
-                planning_required_slots_set - collected_slot_names
-            )
-            if missing_planning:
-                matched = False
-                missing_slots = missing_planning
+        # Preserve compose_execution_step_required_slots order for ask_next.
+        missing_effective = [
+            slot for slot in effective_required if slot not in collected_slot_names
+        ]
+        if missing_effective:
+            matched = False
+            missing_slots = missing_effective
+            if mode == "committing":
                 reason_code = "SLOTS_INCOMPLETE"
                 reason_text = (
                     f"Committing step {action!r} blocked by missing planning slots"
@@ -449,19 +492,17 @@ def evaluate_execution_step_candidates(
                         "reason_code": "SLOTS_INCOMPLETE",
                     }
                 )
-        else:
-            required_slots_set = set(required_slots)
-            missing_step_slots = sorted(required_slots_set - collected_slot_names)
-            if missing_step_slots:
-                matched = False
-                missing_slots = missing_step_slots
+            else:
                 reason_code = "SLOTS_INCOMPLETE"
                 reason_text = (
                     f"Exploratory step {action!r} blocked by missing step slots"
                 )
                 failed_predicates.append(
                     {
-                        "predicate": f"step.required_slots({required_slots}) ⊆ collected_slots",
+                        "predicate": (
+                            f"step.required_slots({list(step_required_slots)}) "
+                            f"⊆ collected_slots"
+                        ),
                         "actual": sorted(collected_slot_names),
                         "reason_code": "SLOTS_INCOMPLETE",
                     }
@@ -495,6 +536,10 @@ def evaluate_execution_step_candidates(
                 "missing_requirements": missing_requirements,
                 "failed_predicates": failed_predicates,
                 "missing_slots": missing_slots,
+                "effective_required": list(effective_required),
+                "mode": mode,
+                "optional_slots": list(step.get("optional_slots") or []),
+                "resolves": list(step.get("resolves") or []),
             }
         )
 
@@ -505,7 +550,11 @@ def evaluate_execution_step_candidates(
 
 
 def select_next_execution_step(
-    intent_name: str, slots: Dict[str, Any], flags: Optional[Dict[str, Any]] = None
+    intent_name: str,
+    slots: Dict[str, Any],
+    flags: Optional[Dict[str, Any]] = None,
+    *,
+    entity_schema: Optional[Mapping[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Select the next execution step to execute based on policy and current state.
@@ -513,7 +562,8 @@ def select_next_execution_step(
     Selection rules (from policy):
     - Each step in intent_policy.yaml is evaluated in order.
     - Exploratory steps require their step required_slots plus all ``requires`` business facts.
-    - Committing steps require planning.required_slots plus all ``requires`` business facts.
+    - Committing steps require composed planning required slots (platform +
+      schema-required business) plus all ``requires`` business facts.
 
     Args:
         intent_name: Intent name (e.g., "CREATE_APPOINTMENT")
@@ -521,6 +571,7 @@ def select_next_execution_step(
         flags: Optional flags dictionary from build_policy_execution_flags(), including
             business facts (availability_ready, user_confirmation_satisfied, etc.) and
             runtime flags (availability_resolved, confirmation_state, etc.)
+        entity_schema: Optional active entity schema for business requiredness
 
     Returns:
         Selected execution step dictionary (same format as get_execution_steps),
@@ -533,7 +584,9 @@ def select_next_execution_step(
     if not intent_upper:
         return None
 
-    selected_step, _ = evaluate_execution_step_candidates(intent_name, slots, flags)
+    selected_step, _ = evaluate_execution_step_candidates(
+        intent_name, slots, flags, entity_schema=entity_schema
+    )
     if selected_step is None:
         return None
 

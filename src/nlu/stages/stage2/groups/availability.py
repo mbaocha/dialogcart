@@ -16,6 +16,7 @@ from ..base_prompt import (
     service_rules,
     temporal_rules,
 )
+from ..browse_operation import normalize_operation, operation_rules
 from ...shared.context import format_conversation_context
 from ....temporal.stage2_output import (
     empty_temporal_dict,
@@ -36,27 +37,6 @@ _TOOL = build_tool(
     include_operation=True,
 )
 
-_VALID_OPERATIONS = frozenset({"browse_next", "browse_previous"})
-
-
-def _operation_rules() -> str:
-    return """── AVAILABILITY OPERATION ───────────────────────────────────────────────────
-Set operation when the user is navigating previously presented availability — not
-requesting a new search. Otherwise leave operation null.
-
-browse_next — user wants more times from a prior result:
-  "show more", "show me more times", "are there other slots?", "anything later?",
-  "what else do you have?"
-  → operation = "browse_next"
-  → temporal must be null (no date/time extraction)
-
-browse_previous — user wants earlier times from a prior result:
-  "go back", "previous times", "show earlier"
-  → operation = "browse_previous"
-  → temporal must be null
-
-New availability queries (dates, services, "what times are free") → operation = null."""
-
 
 def _system_prompt(
     now: str,
@@ -67,17 +47,17 @@ def _system_prompt(
     aliases = tenant_context.get("aliases", {})
     ctx_block = format_conversation_context(conversation_context or {})
     ctx_section = f"\n{ctx_block}\n" if ctx_block else ""
-    return f"""You are a slot extractor for a booking platform.
-Extract availability query slots from the user message.
+    return f"""{intent_validation_section(candidate_intent)}
+
+── EXTRACTION (AVAILABILITY) ───────────────────────────────────────────────
+Extract availability query slots for validated_intent only.
 
 Current date/time (tenant-local): {now}
 {ctx_section}
-{intent_validation_section(candidate_intent)}
-
 The user is asking about available time slots, not booking yet.
 Extract which service, date, and time window they want to check.
 
-{_operation_rules()}
+{operation_rules()}
 
 {service_rules(aliases)}
 
@@ -115,28 +95,24 @@ class AvailabilityGroupExtractor:
 
         for block in response.content:
             if block.type == "tool_use" and block.name == "extract_availability_slots":
-                return _merge(block.input, candidate_intent)
+                return _merge(block.input, candidate_intent, text=text)
 
         logger.warning("AvailabilityGroupExtractor: no tool_use block for text=%r", text)
         return _empty(candidate_intent)
 
 
-def _normalize_operation(raw: Any) -> Optional[str]:
-    if raw is None:
-        return None
-    operation = str(raw).strip().lower().replace("-", "_")
-    if operation in _VALID_OPERATIONS:
-        return operation
-    return None
-
-
-def _merge(raw: Dict[str, Any], candidate_intent: str) -> Dict[str, Any]:
+def _merge(
+    raw: Dict[str, Any],
+    candidate_intent: str,
+    *,
+    text: str = "",
+) -> Dict[str, Any]:
     validated = raw.get("validated_intent") or candidate_intent
     confidence = float(raw.get("confidence", 0.8))
     facts = raw.get("facts") or {}
-    operation = _normalize_operation(raw.get("operation"))
+    operation = normalize_operation(raw.get("operation"))
     temporal, temporal_facts, time_constraint = materialize_temporal_ownership(
-        raw, confidence=confidence
+        raw, confidence=confidence, source_text=text
     )
     result = {
         "intent": validated,

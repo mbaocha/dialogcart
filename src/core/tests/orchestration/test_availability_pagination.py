@@ -244,7 +244,7 @@ class TestTryHandleAvailabilityBrowseTurn:
         store = self._Store(self._session())
         response = try_handle_availability_browse_turn(
             plan=self._plan(
-                source_text="show me additional times",
+                source_text="show more",
                 raw_intent="AVAILABILITY",
             ),
             session_state=store.get_session(1, "u1"),

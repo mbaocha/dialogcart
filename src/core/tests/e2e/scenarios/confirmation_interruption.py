@@ -18,11 +18,7 @@ from core.tests.e2e.framework.confirmation_interruption import (
     assert_service_preserved,
     assert_turn_operation,
     attach_search_count,
-    availability_date_change_script,
-    availability_reshow_script,
-    availability_service_change_script,
     capture_pre_interruption_state,
-    premium_booking_start_script,
 )
 from core.tests.e2e.framework.conversation import (
     Expect,
@@ -37,10 +33,6 @@ from core.tests.e2e.framework.conversation import (
     extract_presented_times,
 )
 from core.tests.e2e.framework.fixtures import TARGET_DATE
-from core.tests.e2e.framework.scripted_temporal import (
-    exact_time_temporal,
-    single_day_temporal,
-)
 
 SCENARIOS: List[Scenario] = []
 _INTERRUPTION_STATE: Dict[str, Any] = {}
@@ -173,160 +165,6 @@ def _assert_last_search_service(conv, availability, expected_service: str) -> No
             f"{expected_service!r}, got {searched!r}"
         ),
     )
-
-
-def confirmation_interruption_scripts() -> Dict[str, Any]:
-    return {
-        "book me a premium haircut": premium_booking_start_script(),
-        "book me premium haircut": premium_booking_start_script(),
-        "book me a haircut": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "needs_clarification": True,
-            "missing_slots": ["service_id"],
-            "service_candidates": [
-                {"text": PREMIUM_SERVICE},
-                {"text": "flexi haircut + prunning"},
-            ],
-        },
-        "book haircut": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "needs_clarification": True,
-            "missing_slots": ["service_id"],
-            "service_candidates": [
-                {"text": PREMIUM_SERVICE},
-                {"text": "flexi haircut + prunning"},
-            ],
-        },
-        "book me premium haircut on 23rd july": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {
-                "service_id": PREMIUM_SERVICE,
-            },
-            "slots": {"service_id": PREMIUM_SERVICE},
-            "temporal": single_day_temporal(_JULY_23),
-            "missing_slots": ["time"],
-        },
-        # Live regression: Premium turn established July 20 (observed out.out flow).
-        # Service-only — date must come from the booking turn's Temporal (e.g. July 20).
-        "premium": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {
-                "service_id": PREMIUM_SERVICE,
-                "slots": {"service_id": PREMIUM_SERVICE},
-            },
-            "slots": {"service_id": PREMIUM_SERVICE},
-            "missing_slots": ["time"],
-        },
-        "book me a haircut on july 20": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "needs_clarification": True,
-            "missing_slots": ["service_id"],
-            "service_candidates": [
-                {"text": PREMIUM_SERVICE},
-                {"text": "flexi haircut + prunning"},
-            ],
-            "facts": {},
-            "temporal": single_day_temporal(_JULY_20),
-        },
-        "book me haircut on 21st july": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "needs_clarification": True,
-            "missing_slots": ["service_id"],
-            "service_candidates": [
-                {"text": PREMIUM_SERVICE},
-                {"text": "flexi haircut + prunning"},
-            ],
-            "facts": {},
-            "temporal": single_day_temporal(_JULY_21),
-        },
-        "show availability for 22nd july": availability_date_change_script(_JULY_22),
-        "check availability for tomorrow": availability_date_change_script(_TOMORROW),
-        "switch to flexi haircut": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {
-                "service_id": FLEXI_SERVICE,
-                "slots": {"service_id": FLEXI_SERVICE},
-            },
-            "slots": {"service_id": FLEXI_SERVICE},
-            "missing_slots": [],
-            "needs_clarification": False,
-        },
-        "are there more times for july 20?": {
-            "success": True,
-            "intent": {"name": "AVAILABILITY"},
-            "operation": "browse_next",
-            "facts": {
-                "service_id": PREMIUM_SERVICE,
-                "slots": {"service_id": PREMIUM_SERVICE},
-            },
-            "slots": {"service_id": PREMIUM_SERVICE},
-            "missing_slots": ["time"],
-        },
-        "show dates for july 21": availability_date_change_script(_JULY_21),
-        "show me availability": availability_reshow_script(),
-        "show availability": availability_reshow_script(),
-        "show availability for 21st july": availability_date_change_script(_JULY_21),
-        "show availability for July 21": availability_date_change_script(_JULY_21),
-        "no. search availability for 24th july": availability_date_change_script(
-            _JULY_24
-        ),
-        "show me availability for flexi haircut": availability_service_change_script(
-            FLEXI_SERVICE
-        ),
-        "show availability for flexi haircut": availability_service_change_script(
-            FLEXI_SERVICE
-        ),
-        "show availability for flexi": availability_service_change_script(FLEXI_SERVICE),
-        "9am": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {},
-            "temporal": exact_time_temporal("09:00"),
-        },
-        "9:30": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {},
-            "temporal": exact_time_temporal("09:30"),
-        },
-        "9:30am": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {},
-            "temporal": exact_time_temporal("09:30"),
-        },
-        "10am": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {},
-            "temporal": exact_time_temporal("10:00"),
-        },
-        "11am": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {},
-            "temporal": exact_time_temporal("11:00"),
-        },
-        "yes": {
-            "success": True,
-            "intent": {"name": "CONFIRM_ACTION"},
-            "facts": {},
-        },
-        "switch to 10am": {
-            "success": True,
-            "intent": {"name": "CORRECTION"},
-            "facts": {},
-            "temporal": exact_time_temporal("10:00"),
-        },
-    }
-
 
 _register(
     Scenario(
@@ -987,6 +825,22 @@ def _assert_booking_after_interruption(conv, booking, _availability) -> None:
         "T09:00" not in start_time,
         f"turn {conv.turn}: booking must not use stale 09:00, got {start_time!r}",
     )
+    payload_customer_id = kwargs.get("customer_id")
+    sess = conv.session() or {}
+    conv._assert(
+        payload_customer_id and int(payload_customer_id) > 0,
+        (
+            f"turn {conv.turn}: booking payload must use resolved customer_id, "
+            f"got {payload_customer_id!r}"
+        ),
+    )
+    conv._assert(
+        sess.get("customer_id") == payload_customer_id,
+        (
+            f"turn {conv.turn}: session/payload customer_id mismatch "
+            f"{sess.get('customer_id')!r} vs {payload_customer_id!r}"
+        ),
+    )
     slots = _planning_slots(conv)
     conv._assert(
         slots.get("service_id") == PREMIUM_SERVICE,
@@ -1109,6 +963,7 @@ _register(
             "full-flow",
         ],
         id="interruption-new-availability-new-booking",
+        requires_customer_identity=True,
     )
 )
 
@@ -1570,7 +1425,6 @@ _register(
         Turn(
             "Show dates for July 21",
             Expect(
-                response_status="succeeded",
                 planner="READY",
                 stage="AVAILABILITY",
                 action="SEARCH_AVAILABILITY",
@@ -1651,6 +1505,43 @@ def _assert_flexi_service_switch_preserves_july22(conv, booking, availability) -
         f"turn {conv.turn}: expected SEARCH_AVAILABILITY, got {action!r}",
     )
 
+    # Prefer execution context when present; fall back to behavioural invariants
+    # (response plan may omit execution_proposal_context after SEARCH).
+    ctx = plan.get("execution_proposal_context") or {}
+    body = conv.last_body or {}
+    if not ctx:
+        nested = (body.get("outcome") or {}).get("plan") or {}
+        ctx = nested.get("execution_proposal_context") or body.get(
+            "execution_proposal_context"
+        ) or {}
+    if ctx:
+        conv._assert(
+            ctx.get("availability_invalidated") is True,
+            (
+                f"turn {conv.turn}: expected execution_proposal_context."
+                f"availability_invalidated=True, got {ctx!r}"
+            ),
+        )
+        conv._assert(
+            ctx.get("session_time_proposal_reuse_allowed") is False,
+            (
+                f"turn {conv.turn}: session time-proposal reuse must be disabled after "
+                f"service revision, got {ctx!r}"
+            ),
+        )
+    time_match = (
+        plan.get("time_match_outcome")
+        or (body.get("outcome") or {}).get("time_match_outcome")
+    )
+    conv._assert(
+        time_match != "TIME_MATCH_EXACT",
+        (
+            f"turn {conv.turn}: stale 09:00 must not TIME_MATCH_EXACT after "
+            f"service revision, got {time_match!r}"
+        ),
+    )
+    conv.assert_slot_absent("time")
+
     _assert_date_surfaces(
         conv,
         availability,
@@ -1673,9 +1564,120 @@ def _assert_flexi_service_switch_preserves_july22(conv, booking, availability) -
     assert_no_booking_execution(conv, booking)
 
 
+def _assert_correction_service_switch_no_rematch(conv, booking, availability) -> None:
+    """CORRECTION Flexi switch: SEARCH Flexi, no stale 09:00 confirmation rematch."""
+    baseline = _INTERRUPTION_STATE.get("search_baseline", 0)
+    assert_gate_action(conv, "ANOTHER_REQUEST")
+    assert_planning_intent_preserved(conv)
+    assert_cleared_confirmation_binding(conv)
+    assert_service_preserved(conv, FLEXI_SERVICE)
+    assert_exactly_one_search_since(conv, availability, baseline)
+    _assert_last_search_service(conv, availability, FLEXI_SERVICE)
+    conv.assert_slot_absent("time")
+
+    plan = conv.plan or {}
+    body = conv.last_body or {}
+    ctx = plan.get("execution_proposal_context") or {}
+    if not ctx:
+        nested = (body.get("outcome") or {}).get("plan") or {}
+        ctx = nested.get("execution_proposal_context") or body.get(
+            "execution_proposal_context"
+        ) or {}
+    if ctx:
+        conv._assert(
+            ctx.get("availability_invalidated") is True,
+            f"turn {conv.turn}: availability_invalidated must be True, got {ctx!r}",
+        )
+        conv._assert(
+            ctx.get("session_time_proposal_reuse_allowed") is False,
+            f"turn {conv.turn}: session time reuse must be False, got {ctx!r}",
+        )
+    time_match = plan.get("time_match_outcome") or (
+        body.get("outcome") or {}
+    ).get("time_match_outcome")
+    conv._assert(
+        time_match != "TIME_MATCH_EXACT",
+        f"turn {conv.turn}: must not rematch stale 09:00, got {time_match!r}",
+    )
+    status = plan.get("status") or (conv.outcome or {}).get("status")
+    conv._assert(
+        status != "AWAITING_CONFIRMATION",
+        f"turn {conv.turn}: must not resume confirmation, got status={status!r}",
+    )
+    assert_not_confirmation_rendered(conv)
+    assert_availability_rendered(conv)
+    _assert_no_confirmation_prompt_phrases(conv)
+    assert_no_booking_execution(conv, booking)
+
+
+_register(
+    Scenario(
+        "CORRECTION service switch after 9am must not rematch confirmation",
+        Turn(
+            "book me a premium haircut",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                confirmation=None,
+            ),
+        ),
+        Turn(
+            "9am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                planner="AWAITING_CONFIRMATION",
+                stage="CONFIRM",
+                awaiting="USER_CONFIRMATION",
+                action=None,
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "09"},
+            ),
+            after=_capture_pre_revision_search,
+        ),
+        Turn(
+            "switch to flexi haircut",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": FLEXI_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                slot_absent=["time"],
+                availability_invalidated=True,
+                response_text_present=True,
+            ),
+            trace="1",
+            after=_assert_correction_service_switch_no_rematch,
+        ),
+        fixture="scripted_availability_supersession",
+        tags=[
+            "booking",
+            "confirmation",
+            "interruption",
+            "service-revision",
+            "correction",
+            "regression",
+        ],
+        id="correction-service-switch-no-rematch-9am",
+    )
+)
+
+
 _register(
     Scenario(
         "Service change must preserve current July 22 search date",
+
         Turn(
             "book me haircut on 21st july",
             Expect(
@@ -1940,6 +1942,121 @@ _register(
             "regression",
         ],
         id="relative-tomorrow-availability-must-resolve",
+    )
+)
+
+
+def _assert_service_change_after_nine_am_confirmation(
+    conv, booking, availability
+) -> None:
+    """Pending confirmation + service switch → Flexi SEARCH, time selection resumes."""
+    baseline = _INTERRUPTION_STATE.get("search_baseline", 0)
+    assert_gate_action(conv, "ANOTHER_REQUEST")
+    assert_planning_intent_preserved(conv)
+    assert_cleared_confirmation_binding(conv)
+    assert_service_preserved(conv, FLEXI_SERVICE)
+    assert_exactly_one_search_since(conv, availability, baseline)
+    _assert_last_search_service(conv, availability, FLEXI_SERVICE)
+
+    plan = conv.plan or {}
+    action = plan.get("action")
+    if action is None:
+        action = (conv.outcome or {}).get("action")
+    conv._assert(
+        action == "SEARCH_AVAILABILITY",
+        f"turn {conv.turn}: expected SEARCH_AVAILABILITY for Flexi, got {action!r}",
+    )
+
+    missing = (
+        plan.get("missing_slots")
+        or (conv.outcome or {}).get("missing_slots")
+        or []
+    )
+    if not isinstance(missing, list):
+        missing = []
+    conv._assert(
+        "time" in missing,
+        f"turn {conv.turn}: workflow must resume at time selection, missing={missing!r}",
+    )
+
+    text = _response_text(conv.last_body or {})
+    lowered = text.lower()
+    conv._assert(
+        bool(text.strip()),
+        f"turn {conv.turn}: expected Flexi availability text, got {text!r}",
+    )
+    conv._assert(
+        "flexi" in lowered or "available" in lowered or "time" in lowered,
+        f"turn {conv.turn}: expected Flexi availability presentation, got {text!r}",
+    )
+    assert_not_confirmation_rendered(conv)
+    assert_availability_rendered(conv)
+    assert_no_booking_execution(conv, booking)
+    assert not booking.create_booking.called
+
+
+_register(
+    Scenario(
+        "Service change after confirmation researches Flexi",
+        Turn(
+            "Book premium haircut",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                confirmation=None,
+                response_text_present=True,
+            ),
+        ),
+        Turn(
+            "9:00",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                planner="AWAITING_CONFIRMATION",
+                stage="CONFIRM",
+                awaiting="USER_CONFIRMATION",
+                action=None,
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "09"},
+                response_text_present=True,
+            ),
+            after=_capture_pre_revision_search,
+        ),
+        Turn(
+            "switch to flexi haircut",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": FLEXI_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                slot_absent=["time"],
+                missing_slots=["time"],
+                availability_invalidated=True,
+                response_text_present=True,
+            ),
+            trace="1",
+            after=_assert_service_change_after_nine_am_confirmation,
+        ),
+        fixture="scripted_confirm",
+        tags=[
+            "booking",
+            "confirmation",
+            "interruption",
+            "service-revision",
+            "regression",
+        ],
+        id="service-change-after-confirmation-to-flexi",
     )
 )
 

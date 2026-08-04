@@ -37,6 +37,27 @@ def _validate_booking_organization(
         )
 
 
+def _require_customer_id(slots: Dict[str, Any]) -> int:
+    """Require a resolved commerce customer_id; never invent a default."""
+    raw = slots.get("customer_id")
+    if raw is None:
+        raise ValueError(
+            "customer_id is required for booking execution; "
+            "resolve a tenant customer before commit"
+        )
+    try:
+        customer_id = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"customer_id must be a positive integer, got {raw!r}"
+        ) from exc
+    if customer_id <= 0:
+        raise ValueError(
+            f"customer_id must be a positive integer, got {customer_id}"
+        )
+    return customer_id
+
+
 def execute(
     plan: Dict[str, Any],
     availability_client: Optional[Any] = None,
@@ -133,6 +154,12 @@ def _execute_search_availability(
 
     slots = plan.get("slots", {})
     intent_name = plan.get("intent_name", "")
+    entity_schema = None
+    facts = plan.get("facts")
+    if isinstance(facts, dict) and isinstance(facts.get("_entity_schema"), dict):
+        entity_schema = facts.get("_entity_schema")
+    elif isinstance(plan.get("_entity_schema"), dict):
+        entity_schema = plan.get("_entity_schema")
 
     # Extract organization_id (required for all availability calls)
     organization_id = slots.get("organization_id")
@@ -151,6 +178,7 @@ def _execute_search_availability(
             intent_name=intent_name,
             booking_client=booking_client,
             sku_to_catalog_id=sku_to_catalog_id,
+            entity_schema=entity_schema,
         )
     elif intent_name == "CREATE_RESERVATION":
         # Reservation availability search
@@ -168,6 +196,7 @@ def _execute_search_availability(
             intent_name=intent_name,
             booking_client=booking_client,
             sku_to_catalog_id=sku_to_catalog_id,
+            entity_schema=entity_schema,
         )
     else:
         # Default to service availability for unknown intents
@@ -181,6 +210,7 @@ def _execute_search_availability(
             intent_name=intent_name,
             booking_client=booking_client,
             sku_to_catalog_id=sku_to_catalog_id,
+            entity_schema=entity_schema,
         )
 
 
@@ -220,13 +250,8 @@ def _execute_confirm_appointment(
     sku_to_catalog_id = plan.get("sku_to_catalog_id") or {}
     catalog_item_id = resolve_catalog_item_id(service_id, sku_to_catalog_id)
 
-    # Extract customer_id (default to 1 if not provided)
-    customer_id = slots.get("customer_id", 1)
-    if not isinstance(customer_id, int):
-        try:
-            customer_id = int(customer_id)
-        except (ValueError, TypeError):
-            customer_id = 1
+    # Extract customer_id — never invent; require a resolved tenant customer.
+    customer_id = _require_customer_id(slots)
 
     # Extract start_time and end_time from slots or temporal
     start_time, end_time = _extract_datetime_from_slots(slots, temporal)
@@ -757,13 +782,8 @@ def _execute_create_booking_hold(
             "organization_id is required in slots for booking hold creation"
         )
 
-    # Extract customer_id (default to 1 if not provided)
-    customer_id = slots.get("customer_id", 1)
-    if not isinstance(customer_id, int):
-        try:
-            customer_id = int(customer_id)
-        except (ValueError, TypeError):
-            customer_id = 1
+    # Extract customer_id — never invent; require a resolved tenant customer.
+    customer_id = _require_customer_id(slots)
 
     # IDEMPOTENCY CHECK: If booking_id already exists in slots, return existing booking
     existing_booking_id = slots.get("booking_id")
@@ -1163,6 +1183,7 @@ def _execute_service_availability(
     intent_name: Optional[str] = None,
     booking_client: Optional[Any] = None,
     sku_to_catalog_id: Optional[Dict[str, int]] = None,
+    entity_schema: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Execute service availability search.
@@ -1173,6 +1194,7 @@ def _execute_service_availability(
         availability_client: Availability client instance
         intent_name: Optional intent name (needed for MODIFY_BOOKING to fetch service_id from booking)
         booking_client: Optional booking client instance (needed for MODIFY_BOOKING to fetch service_id from booking)
+        entity_schema: Active business entity schema for availability criteria
 
     Returns:
         Normalized execution result
@@ -1229,10 +1251,22 @@ def _execute_service_availability(
             catalog_item_id,
         )
 
-    # Extract date (can be date, start_date, or from date_range/datetime_range)
-    # POLICY: date is OPTIONAL for SEARCH_AVAILABILITY (mode=exploratory)
-    # Only service_id is required per intent_policy.yaml
-    date = _extract_date_from_slots(slots)
+    # Planning slots → availability request (adapter owns backend param names).
+    from core.workflows.availability.request_adapter import (
+        build_service_availability_request,
+    )
+
+    schema = entity_schema
+    if schema is None and isinstance(slots.get("_entity_schema"), dict):
+        schema = slots.get("_entity_schema")
+    request = build_service_availability_request(
+        slots,
+        organization_id=organization_id,
+        api_service_id=api_service_id,
+        entity_schema=schema,
+    )
+    date = request.get("date")
+    extra_params = request.get("extra_params") or {}
 
     # DATE_NORMALIZATION_TRACE: Log date value used for availability execution
     is_iso_date = (
@@ -1247,10 +1281,9 @@ def _execute_service_availability(
             "is_iso_format": is_iso_date,
             "action": "SEARCH_AVAILABILITY",
             "normalization_point": "dispatcher:_execute_service_availability",
+            "availability_extra_params": sorted(extra_params.keys()),
         },
     )
-
-    # Call availability client
 
     # Pass date=None if not present - availability client should handle this
     # and return broad availability (as designed for exploratory mode)
@@ -1259,6 +1292,7 @@ def _execute_service_availability(
             organization_id=organization_id,
             service_id=api_service_id,
             date=date,  # Can be None - client should handle this
+            extra_params=extra_params or None,
         )
     except AttributeError as e:
         raise AttributeError(

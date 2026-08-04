@@ -33,6 +33,7 @@ def clear_booking_state(
     clear_date: bool = False,
     clear_availability: bool = False,
     clear_service: bool = False,
+    clear_extra_slots: Optional[Set[str]] = None,
     reason: str = "",
 ) -> Dict[str, Any]:
     """Apply planner-selected booking invalidation to a processing state."""
@@ -41,7 +42,7 @@ def clear_booking_state(
 
     set_confirmation_state(state, None)
 
-    if clear_time or clear_date or clear_service:
+    if clear_time or clear_date or clear_service or clear_extra_slots:
         slots = dict(state.get("slots") or {})
         if clear_time:
             slots.pop("time", None)
@@ -53,6 +54,8 @@ def clear_booking_state(
         if clear_service:
             slots.pop("service_id", None)
             slots.pop("_canonical_service_id", None)
+        for key in clear_extra_slots or ():
+            slots.pop(key, None)
         state["slots"] = slots
         state.pop("resolved_datetime_range", None)
 
@@ -73,6 +76,8 @@ def clear_booking_state(
                 if clear_service:
                     fact_slots.pop("service_id", None)
                     fact_slots.pop("_canonical_service_id", None)
+                for key in clear_extra_slots or ():
+                    fact_slots.pop(key, None)
                 facts["slots"] = fact_slots
             state["facts"] = facts
 
@@ -83,12 +88,13 @@ def clear_booking_state(
     if reason:
         logger.debug(
             "[BOOKING_INVALIDATION] reason=%s clear_time=%s clear_date=%s "
-            "clear_availability=%s clear_service=%s",
+            "clear_availability=%s clear_service=%s clear_extra_slots=%s",
             reason,
             clear_time,
             clear_date,
             clear_availability,
             clear_service,
+            sorted(clear_extra_slots or ()),
         )
     return state
 
@@ -207,13 +213,18 @@ def _revision_clear_sets(
     clear_slots: Set[str] = set()
     clear_state: Set[str] = set()
 
-    if revision.time or revision.date or revision.service:
+    if revision.time or revision.date or revision.service or revision.criteria:
         clear_slots.add("time")
     if revision.date or revision.service:
         clear_slots.update({"date", "date_range"})
     if revision.service:
         clear_slots.add("service_id")
-    if revision.date or revision.service:
+    if revision.criteria:
+        for change in revision.changes:
+            if change.field in ("service", "date", "time"):
+                continue
+            clear_slots.add(change.field)
+    if revision.invalidates_availability:
         clear_state.update(_AVAILABILITY_STATE_KEYS)
 
     return clear_slots, clear_state
@@ -222,13 +233,23 @@ def _revision_clear_sets(
 def _confirmation_flags_from_sets(
     clear_slots: Set[str],
     clear_state: Set[str],
-) -> Dict[str, bool]:
+) -> Dict[str, Any]:
     """Translate declarative slot/state sets into booking invalidation flags."""
+    known = {
+        "time",
+        "has_datetime",
+        "datetime_range",
+        "date",
+        "date_range",
+        "service_id",
+        "_canonical_service_id",
+    }
     return {
         "clear_time": "time" in clear_slots,
         "clear_date": "date" in clear_slots or "date_range" in clear_slots,
         "clear_service": "service_id" in clear_slots,
         "clear_availability": bool(clear_state & _AVAILABILITY_STATE_KEYS),
+        "clear_extra_slots": frozenset(clear_slots - known),
     }
 
 
@@ -310,6 +331,11 @@ def _invalidate_new_booking_request(
         del session_state["availability_fingerprint"]
         logger.info(
             "Cleared availability_fingerprint due to new booking request")
+    if session_state is not None:
+        session_state["declined_slots"] = []
+        planning = session_state.get("planning")
+        if isinstance(planning, dict):
+            planning["declined_slots"] = []
 
     logger.info(
         "Cleared booking_id due to new booking request: intent=%s, new_slots=%s",

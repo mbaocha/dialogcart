@@ -58,25 +58,210 @@ def _explicit_availability_requires_list_rendering(
     )
 
 
-def _browse_guidance_clause(browse_hints: Optional[Dict[str, Any]]) -> str:
-    """Wording hints based on prepared browse_hints only."""
-    if not isinstance(browse_hints, dict):
+
+def _recovery_action_types(recovery_actions: Optional[Any]) -> List[str]:
+    from core.planning.recovery_actions import action_types
+
+    return action_types(recovery_actions if isinstance(recovery_actions, list) else None)
+
+
+def format_browse_window_recovery_text(
+    recovery_actions: Optional[Any],
+) -> Optional[str]:
+    """User-facing browse-window navigation sentence from structured actions."""
+    from core.planning.recovery_actions import BROWSE_NEXT, BROWSE_PREVIOUS
+
+    types = set(_recovery_action_types(recovery_actions))
+    has_next = BROWSE_NEXT in types
+    has_previous = BROWSE_PREVIOUS in types
+    if has_next and has_previous:
+        return (
+            "You can reply with `next` for later times or `previous` to go back."
+        )
+    if has_next:
+        return "You can also reply with `next` to see more times."
+    if has_previous:
+        return "You can also reply with `previous` to go back."
+    return None
+
+
+def browse_navigation_hint_text(
+    browse_hints: Optional[Dict[str, Any]],
+    *,
+    recovery_actions: Optional[Any] = None,
+) -> Optional[str]:
+    """User-facing navigation sentence for the current browse window, or None.
+
+    Prefer structured ``recovery_actions`` when provided; otherwise derive from
+    browse_hints for legacy callers.
+    """
+    if recovery_actions is not None:
+        return format_browse_window_recovery_text(recovery_actions)
+    from core.planning.recovery_actions import recovery_actions_for_browse_window
+
+    return format_browse_window_recovery_text(
+        recovery_actions_for_browse_window(browse_hints)
+    )
+
+
+def _browse_guidance_clause(
+    browse_hints: Optional[Dict[str, Any]],
+    *,
+    recovery_actions: Optional[Any] = None,
+) -> str:
+    """Advertise only valid page-navigation directions for the current window."""
+    hint = browse_navigation_hint_text(
+        browse_hints, recovery_actions=recovery_actions
+    )
+    if hint:
+        return f" Then tell them: {hint}"
+    return " Do not mention next or previous page navigation."
+
+
+def format_recovery_actions_llm_clause(
+    recovery_actions: Optional[Any],
+    *,
+    context: str = "mismatch",
+) -> str:
+    """LLM instruction fragment for structured recovery actions."""
+    from core.planning.recovery_actions import (
+        BROWSE_NEXT,
+        BROWSE_PREVIOUS,
+        CHOOSE_ANOTHER_DATE,
+        CHOOSE_VISIBLE_OPTION,
+    )
+
+    types = _recovery_action_types(recovery_actions)
+    if not types:
         return ""
-    suggested_next = browse_hints.get("suggested_next")
-    if suggested_next == "show more":
+
+    has_next = BROWSE_NEXT in types
+    has_previous = BROWSE_PREVIOUS in types
+    has_visible = CHOOSE_VISIBLE_OPTION in types
+    has_date = CHOOSE_ANOTHER_DATE in types
+
+    if context == "browse_boundary_previous":
+        if has_next and has_date:
+            return (
+                " Tell them they can reply with `next` to return to the later "
+                "times, or ask for another date. Do not advertise `previous`."
+            )
+        if has_date:
+            return (
+                " Ask them to ask for another date. Do not advertise `previous`."
+            )
+        return ""
+
+    if context == "browse_boundary_next":
+        if has_previous and has_date:
+            return (
+                " Tell them they can reply with `previous` to go back to the "
+                "earlier times, or ask for another date. Do not advertise `next`."
+            )
+        if has_date:
+            return (
+                " Ask them to ask for another date. Do not advertise `next`."
+            )
+        return ""
+
+    # selection mismatch
+    if has_previous and has_visible:
         return (
-            ' You can mention that the user can say "show more" to see additional times.'
+            " Tell them to reply with `previous` to return to those times, "
+            "or choose one of the currently shown times. Do not advertise `next` "
+            "as the route to the requested time."
         )
-    if suggested_next == "next day":
+    if has_next and has_visible:
         return (
-            ' You can mention that the user can say "next day" to see another '
-            "available date."
+            " Tell them to reply with `next` to return to those times, "
+            "or choose one of the currently shown times. Do not advertise `previous` "
+            "as the route to the requested time."
         )
-    if browse_hints.get("has_more_any"):
+    if has_visible and has_date:
         return (
-            ' You can mention that the user can say "show more" to continue browsing.'
+            " Ask them to choose one of the currently shown times or ask for "
+            "another date. Do not advertise next/previous as a route to that time."
         )
+    if has_visible:
+        return " Ask them to choose one of the currently shown times."
     return ""
+
+
+def format_mismatch_recovery_text(
+    recovery_actions: Optional[Any],
+) -> Optional[str]:
+    """Deterministic recovery sentence for selection-mismatch actions."""
+    from core.planning.recovery_actions import (
+        BROWSE_NEXT,
+        BROWSE_PREVIOUS,
+        CHOOSE_ANOTHER_DATE,
+        CHOOSE_VISIBLE_OPTION,
+    )
+
+    types = _recovery_action_types(recovery_actions)
+    if not types:
+        return None
+    has_next = BROWSE_NEXT in types
+    has_previous = BROWSE_PREVIOUS in types
+    has_visible = CHOOSE_VISIBLE_OPTION in types
+    has_date = CHOOSE_ANOTHER_DATE in types
+
+    if has_previous and has_visible:
+        return (
+            "Reply `previous` to return to those times, "
+            "or choose one of the times above."
+        )
+    if has_next and has_visible:
+        return (
+            "Reply `next` to return to those times, "
+            "or choose one of the times above."
+        )
+    if has_visible and has_date:
+        return (
+            "Please choose one of the times currently shown, "
+            "or ask for another date."
+        )
+    if has_visible:
+        return "Please choose one of the times currently shown."
+    return None
+
+
+def format_browse_boundary_recovery_text(
+    recovery_actions: Optional[Any],
+    *,
+    direction: str,
+) -> Optional[str]:
+    """Deterministic recovery sentence for browse boundary/exhaustion."""
+    from core.planning.recovery_actions import (
+        BROWSE_NEXT,
+        BROWSE_PREVIOUS,
+        CHOOSE_ANOTHER_DATE,
+    )
+
+    types = _recovery_action_types(recovery_actions)
+    axis = str(direction or "next").strip().lower()
+    has_next = BROWSE_NEXT in types
+    has_previous = BROWSE_PREVIOUS in types
+    has_date = CHOOSE_ANOTHER_DATE in types
+
+    if axis == "previous":
+        if has_next and has_date:
+            return (
+                "You can reply with `next` to return to the later "
+                "times, or ask for another date."
+            )
+        if has_date:
+            return "Ask for another date."
+        return None
+
+    if has_previous and has_date:
+        return (
+            "You can reply with `previous` to go back to the earlier "
+            "times, or ask for another date."
+        )
+    if has_date:
+        return "Ask for another date."
+    return None
 
 
 def _looks_like_availability_assistant_reply(text: str) -> bool:
@@ -282,6 +467,11 @@ def build_availability_render_request(
     service_name = _service_name_from_execution(execution_result)
     browse_hints = presented.get("browse_hints")
     browse_hints = browse_hints if isinstance(browse_hints, dict) else {}
+    recovery_actions = presented.get("recovery_actions")
+    if not isinstance(recovery_actions, list):
+        from core.planning.recovery_actions import recovery_actions_for_browse_window
+
+        recovery_actions = recovery_actions_for_browse_window(browse_hints)
     search_date = presented.get("search_date")
     if not search_date and isinstance(availability, dict):
         search_date = availability.get("search_date")
@@ -304,6 +494,7 @@ def build_availability_render_request(
         "times": times,
         "more_count": more_count,
         "browse_hints": browse_hints,
+        "recovery_actions": recovery_actions,
     }
 
     if total_unique == 0 and outcome != TIME_MATCH_MISMATCH:
@@ -368,7 +559,56 @@ def build_availability_render_request(
         availability_facts["times"] = alt_labels
         availability_facts["more_count"] = max(0, len(alternatives) - len(alt_labels))
         requested = resolution.get("requested_time")
-        if alt_labels:
+        mismatch_location = str(resolution.get("mismatch_location") or "").strip()
+        mismatch_recovery = resolution.get("recovery_actions")
+        if not isinstance(mismatch_recovery, list):
+            from core.planning.recovery_actions import (
+                recovery_actions_for_selection_mismatch,
+            )
+
+            mismatch_recovery = recovery_actions_for_selection_mismatch(
+                mismatch_location=mismatch_location,
+                browse_hints=browse_hints,
+            )
+        availability_facts["recovery_actions"] = mismatch_recovery
+        recovery_clause = format_recovery_actions_llm_clause(
+            mismatch_recovery, context="mismatch"
+        )
+        if mismatch_location == "EARLIER_PAGE":
+            render_instruction = (
+                f"The user is booking {service_name}. "
+                f"Their requested time ({requested}) is not on the currently shown page; "
+                "it was on an earlier page."
+                + (recovery_clause or " Ask them to choose one of the currently shown times.")
+                + " Do not claim the time is currently selectable. "
+                "Do not bind or invent availability. Keep the reply to 1–2 sentences."
+            )
+        elif mismatch_location == "LATER_PAGE":
+            render_instruction = (
+                f"The user is booking {service_name}. "
+                f"Their requested time ({requested}) is not on the currently shown page; "
+                "it was on a later page."
+                + (recovery_clause or " Ask them to choose one of the currently shown times.")
+                + " Do not claim the time is currently selectable. "
+                "Do not bind or invent availability. Keep the reply to 1–2 sentences."
+            )
+        elif mismatch_location == "NOT_IN_CACHE":
+            date_clause = f" for {search_date}" if search_date else ""
+            render_instruction = (
+                f"The user is booking {service_name}. "
+                f"Their requested time ({requested}) is not available{date_clause}. "
+                "Tell them clearly it is unavailable."
+                + (
+                    recovery_clause
+                    or (
+                        " Ask them to choose one of the currently shown times or ask for "
+                        "another date. Do not advertise next/previous as a route to that time."
+                    )
+                )
+                + " Do not claim it was shown on an earlier or later page. "
+                "Do not invent availability. Keep the reply to 1–2 sentences."
+            )
+        elif alt_labels:
             render_instruction = (
                 f"The user is booking {service_name}. "
                 f"Their requested time ({requested}) is not available. "
@@ -387,7 +627,9 @@ def build_availability_render_request(
                 "Do not invent availability. Keep the reply to 2–3 sentences."
             )
     else:
-        guidance = _browse_guidance_clause(browse_hints)
+        guidance = _browse_guidance_clause(
+            browse_hints, recovery_actions=recovery_actions
+        )
         date_clause = f" for {search_date}" if search_date else ""
         date_authority = ""
         if search_date:
@@ -399,13 +641,15 @@ def build_availability_render_request(
         render_instruction = (
             f"The user is booking {service_name}. "
             f"Present the available appointment times{date_clause} listed below "
-            "in a short bullet list. "
+            "in a short bullet list under a heading like "
+            f"\"Available times{date_clause}:\". "
             "Ask which time they would like. "
             f"{guidance}"
             f"{date_authority}"
+            " Do not teach date-axis commands such as \"next day\" or \"previous day\". "
             " Keep the reply to 2–3 sentences plus the list. "
             "Do not invent times or mention staff names. "
-            "Do not invent browse options beyond the provided browse_hints."
+            "Do not invent browse directions beyond the navigation sentence above."
         )
 
     facts: Dict[str, Any] = {
@@ -430,10 +674,11 @@ def build_availability_browse_status_render_request(
     direction: str,
     browse_status: str,
     browse_hints: Optional[Dict[str, Any]] = None,
+    search_date: Optional[str] = None,
     structured_context: Optional[Dict[str, Any]] = None,
     conversation_history: Optional[List[Dict[str, str]]] = None,
 ) -> LlmRenderRequest:
-    """Build render request for axis-aware browse exhaustion (prepared facts only)."""
+    """Build render request for browse exhaustion (prepared facts only)."""
     service_name = "your appointment"
     if isinstance(decision, dict):
         facts = decision.get("facts")
@@ -446,81 +691,40 @@ def build_availability_browse_status_render_request(
             service_name = text.title() if text.islower() else text
 
     hints = browse_hints if isinstance(browse_hints, dict) else {}
-    has_next_date = bool(hints.get("has_next_date"))
-    has_previous_date = bool(hints.get("has_previous_date"))
+    date_label = search_date or hints.get("search_date")
+    date_clause = f" for {date_label}" if date_label else ""
+    from core.planning.recovery_actions import recovery_actions_for_browse_boundary
 
-    if browse_status == "no_more_times_for_date":
-        if has_next_date:
-            instruction = (
-                f"The user is booking {service_name}. "
-                "They asked for more times on the current date, but there are no "
-                "additional times left that day. "
-                'Tell them clearly, and mention they can say "next day" to see '
-                "another available date. "
-                "Do not repeat the time list. Keep it to 1–2 sentences."
-            )
-        else:
-            instruction = (
-                f"The user is booking {service_name}. "
-                "They asked for more times, but there are no additional times on "
-                "this date and no later dates in the current search. "
-                "Tell them clearly there are no more times to show. "
-                "Do not repeat the time list. Keep it to 1–2 sentences."
-            )
-    elif browse_status == "no_previous_times_for_date":
-        if has_previous_date:
-            instruction = (
-                f"The user is booking {service_name}. "
-                "They asked for earlier times on the current date, but they are "
-                "already viewing the earliest times that day. "
-                'Mention they can say "previous day" to see an earlier available date. '
-                "Do not repeat the time list. Keep it to 1–2 sentences."
-            )
-        else:
-            instruction = (
-                f"The user is booking {service_name}. "
-                "They asked for earlier times, but they are already viewing the "
-                "earliest available times from the last search. "
-                "Tell them clearly there are no earlier times to show. "
-                "Do not repeat the time list. Keep it to 1–2 sentences."
-            )
-    elif browse_status == "no_next_date":
-        instruction = (
-            f"The user is booking {service_name}. "
-            "They asked for the next day, but there are no later dates with "
-            "availability in the current search. "
-            "Tell them clearly. Do not invent dates. Keep it to 1–2 sentences."
+    recovery = recovery_actions_for_browse_boundary(
+        direction=direction, browse_hints=hints
+    )
+    if direction == "previous":
+        nav_clause = format_recovery_actions_llm_clause(
+            recovery, context="browse_boundary_previous"
         )
-    elif browse_status == "no_previous_date":
-        instruction = (
-            f"The user is booking {service_name}. "
-            "They asked for the previous day, but there are no earlier dates with "
-            "availability in the current search. "
-            "Tell them clearly. Do not invent dates. Keep it to 1–2 sentences."
-        )
-    elif browse_status == "target_date_not_in_cache":
-        instruction = (
-            f"The user is booking {service_name}. "
-            "They asked about a date that is not in the current availability results. "
-            "Tell them clearly that date is not available in the current search, "
-            "and offer to check another day from the current results or search again. "
-            "Do not invent times for that date. Keep it to 1–2 sentences."
-        )
-    elif direction == "previous":
         instruction = (
             f"The user is booking {service_name}. "
             "They asked to go back, but they are already at the earliest available "
-            "results from the last search. "
-            "Tell them clearly there is nothing earlier to show. "
-            "Do not repeat the time list. Keep it to 1–2 sentences."
+            f"results{date_clause} from the last search. "
+            "Tell them clearly there is nothing earlier to show."
+            + nav_clause
+            + " Do not repeat the time list. Do not teach date-axis browse commands. "
+            "Keep it to 1–2 sentences."
         )
     else:
+        nav_clause = format_recovery_actions_llm_clause(
+            recovery, context="browse_boundary_next"
+        )
         instruction = (
             f"The user is booking {service_name}. "
             "They asked to see more availability, but there is nothing further "
-            "to show from the last search. "
-            "Tell them clearly there are no more available times or dates. "
-            "Do not repeat the time list. Keep it to 1–2 sentences."
+            f"to show{date_clause} from the last search. "
+            "Tell them clearly there are no more times"
+            + (f" for {date_label}" if date_label else "")
+            + "."
+            + nav_clause
+            + " Do not repeat the time list. Do not teach date-axis browse commands. "
+            "Keep it to 1–2 sentences."
         )
 
     return LlmRenderRequest(
@@ -529,10 +733,198 @@ def build_availability_browse_status_render_request(
             "structured_context": structured_context or {},
             "browse_status": browse_status,
             "browse_hints": hints,
+            "recovery_actions": recovery,
             "direction": direction,
+            "search_date": date_label,
         },
+        # History is retained for continuity metadata only. Wording for browse
+        # status is resolved deterministically (see resolve_browse_status_text)
+        # so prior availability lists cannot be re-presented as a fresh offer.
         conversation_history=conversation_history or [],
     )
+
+
+_BROWSE_STATUS_DEFAULT_TEXT = (
+    "There are no more times to show from your last search. "
+    "Ask for another date."
+)
+
+
+def _format_requested_clock_label(requested_time: Optional[str]) -> Optional[str]:
+    """Turn a normalized clock (e.g. ``17:00``) into a short display label."""
+    if not isinstance(requested_time, str):
+        return None
+    raw = requested_time.strip()
+    if not raw:
+        return None
+    if len(raw) == 5 and raw[2] == ":":
+        return format_display_time(f"2000-01-01T{raw}:00")
+    if "T" in raw:
+        return format_display_time(raw)
+    return raw
+
+
+def resolve_time_mismatch_text(
+    *,
+    requested_time: Optional[str] = None,
+    times: Optional[List[str]] = None,
+    alternatives: Optional[List[str]] = None,
+    mismatch_location: Optional[str] = None,
+    search_date: Optional[str] = None,
+    browse_hints: Optional[Dict[str, Any]] = None,
+    recovery_actions: Optional[Any] = None,
+) -> str:
+    """Deterministic wording when a requested time is not among presented offers.
+
+    Explanation uses structured ``mismatch_location``. Recovery wording uses
+    structured ``recovery_actions`` (owned by planning/presentation).
+    Legacy callers without a location keep the prior alternatives listing.
+    """
+    from core.planning.recovery_actions import (
+        recovery_actions_for_selection_mismatch,
+    )
+    from core.planning.time_resolution import (
+        MISMATCH_LOCATION_EARLIER_PAGE,
+        MISMATCH_LOCATION_LATER_PAGE,
+        MISMATCH_LOCATION_NOT_IN_CACHE,
+    )
+
+    requested_label = _format_requested_clock_label(requested_time)
+    location = str(mismatch_location or "").strip().upper()
+    actions = recovery_actions
+    if not isinstance(actions, list):
+        actions = recovery_actions_for_selection_mismatch(
+            mismatch_location=location,
+            browse_hints=browse_hints,
+        )
+    recovery = format_mismatch_recovery_text(actions)
+
+    if location == MISMATCH_LOCATION_EARLIER_PAGE:
+        base = (
+            f"{requested_label} isn't one of the times currently shown—"
+            "it was on an earlier page."
+            if requested_label
+            else (
+                "That time isn't one of the times currently shown—"
+                "it was on an earlier page."
+            )
+        )
+        return f"{base} {recovery}" if recovery else base
+
+    if location == MISMATCH_LOCATION_LATER_PAGE:
+        base = (
+            f"{requested_label} isn't one of the times currently shown—"
+            "it was on a later page."
+            if requested_label
+            else (
+                "That time isn't one of the times currently shown—"
+                "it was on a later page."
+            )
+        )
+        return f"{base} {recovery}" if recovery else base
+
+    if location == MISMATCH_LOCATION_NOT_IN_CACHE:
+        date_label = _format_exhaustion_date_label(
+            str(search_date) if search_date else None
+        )
+        if requested_label and date_label:
+            unavailable = f"{requested_label} isn't available for {date_label}"
+        elif requested_label:
+            unavailable = f"{requested_label} isn't available"
+        else:
+            unavailable = "That time isn't available"
+        if recovery:
+            return f"{unavailable}. {recovery}"
+        return (
+            f"{unavailable}. Please choose one of the times currently shown, "
+            "or ask for another date."
+        )
+
+    labels: List[str] = []
+    if times:
+        labels = [str(t) for t in times if t]
+    elif alternatives:
+        labels = _format_alternative_labels([str(a) for a in alternatives if a])
+
+    unavailable = (
+        f"{requested_label} isn't available"
+        if requested_label
+        else "That time isn't available"
+    )
+
+    if not labels:
+        return f"{unavailable}. Please choose another time."
+
+    if len(labels) == 1:
+        times_clause = labels[0]
+    elif len(labels) == 2:
+        times_clause = f"{labels[0]} and {labels[1]}"
+    else:
+        times_clause = ", ".join(labels[:-1]) + f" and {labels[-1]}"
+    return (
+        f"{unavailable}. The available times are {times_clause}. "
+        "Which one would you prefer?"
+    )
+
+
+def _format_exhaustion_date_label(search_date: Optional[str]) -> Optional[str]:
+    """Format YYYY-MM-DD as a short display label (e.g. July 24)."""
+    if not isinstance(search_date, str) or len(search_date.strip()) < 10:
+        return None
+    raw = search_date.strip()[:10]
+    try:
+        from datetime import datetime
+
+        dt = datetime.strptime(raw, "%Y-%m-%d")
+        return f"{dt.strftime('%B')} {dt.day}"
+    except ValueError:
+        return raw
+
+
+def resolve_browse_status_text(
+    *,
+    browse_status: str,
+    direction: str = "next",
+    browse_hints: Optional[Dict[str, Any]] = None,
+    search_date: Optional[str] = None,
+    recovery_actions: Optional[Any] = None,
+) -> str:
+    """Deterministic user-facing wording for browse exhaustion / boundary status.
+
+    Must never re-list previously presented availability times.
+    Must never teach date-axis browse commands.
+    Recovery wording comes from structured ``recovery_actions``.
+    """
+    from core.planning.recovery_actions import recovery_actions_for_browse_boundary
+
+    hints = browse_hints if isinstance(browse_hints, dict) else {}
+    status = str(browse_status or "").strip()
+    axis = str(direction or "next").strip().lower()
+    date_raw = search_date or hints.get("search_date")
+    date_label = _format_exhaustion_date_label(
+        str(date_raw) if date_raw else None
+    )
+    actions = recovery_actions
+    if not isinstance(actions, list):
+        actions = recovery_actions_for_browse_boundary(
+            direction=axis, browse_hints=hints
+        )
+    recovery = format_browse_boundary_recovery_text(actions, direction=axis)
+
+    if axis == "previous":
+        if date_label:
+            base = f"There are no earlier available times for {date_label}."
+        else:
+            base = "There is nothing earlier to show from your last search."
+        return f"{base} {recovery}" if recovery else base
+
+    if date_label:
+        base = f"There are no more times for {date_label}."
+    elif status:
+        base = "There are no more times to show from your last search."
+    else:
+        base = "There are no more times to show from your last search."
+    return f"{base} {recovery}" if recovery else base
 
 
 def build_availability_no_more_render_request(
@@ -543,6 +935,7 @@ def build_availability_no_more_render_request(
     conversation_history: Optional[List[Dict[str, str]]] = None,
     browse_status: str = "exhausted",
     browse_hints: Optional[Dict[str, Any]] = None,
+    search_date: Optional[str] = None,
 ) -> LlmRenderRequest:
     """Compatibility wrapper for browse exhaustion rendering."""
     return build_availability_browse_status_render_request(
@@ -550,6 +943,7 @@ def build_availability_no_more_render_request(
         direction=direction,
         browse_status=browse_status,
         browse_hints=browse_hints,
+        search_date=search_date,
         structured_context=structured_context,
         conversation_history=conversation_history,
     )

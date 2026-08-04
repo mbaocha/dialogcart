@@ -1,0 +1,51 @@
+{
+  "key": {
+    "conversation_context": {},
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": "haircut",
+        "premium haircut": "haircut"
+      },
+      "booking_mode": "service"
+    },
+    "text": "Who is the president of Nigeria?",
+    "timezone": "UTC"
+  },
+  "response": {
+    "answer": "Bola Tinubu has been the president of Nigeria since May 2023, following his election in February 2023.",
+    "answerable": true,
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service_id": null,
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "OFF_TOPIC"
+    },
+    "off_topic_query": "Who is the president of Nigeria?",
+    "service_candidates": [
+      "premium haircut",
+      "flexi haircut + prunning"
+    ],
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": null,
+      "mode": "none",
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

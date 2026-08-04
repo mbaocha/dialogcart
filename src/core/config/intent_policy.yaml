@@ -230,6 +230,37 @@ intents:
   CHECK_AVAILABILITY:
     metadata:
       durable: false
+    # Cold-start redirected to CREATE_APPOINTMENT in Stage 01 (same as AVAILABILITY).
+    planning:
+      required_slots:
+        - service_id
+      optional_slots:
+        - date
+        - time
+        - date_range
+      executable_with:
+        - service_id
+    execution:
+      SEARCH_AVAILABILITY:
+        mode: exploratory
+        required_slots:
+          - service_id
+        optional_slots:
+          - date
+          - time
+          - date_range
+        requires:
+          - availability_check_required
+        resolves:
+          - availability
+        client: availability_client
+
+  # NLU emits AVAILABILITY (not CHECK_AVAILABILITY). Same exploratory search
+  # contract; durable:false. Stage 01 redirects cold-start onto CREATE_APPOINTMENT
+  # so planning never owns an ephemeral intent_name.
+  AVAILABILITY:
+    metadata:
+      durable: false
     planning:
       required_slots:
         - service_id

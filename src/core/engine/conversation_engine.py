@@ -7,7 +7,8 @@ run capability/handler boundaries (those live in ``core.api``).
 Turn flow (``process_turn``):
     planning via ``plan_message()`` → ``plan_turn()``
         ↓  planning failure → error result
-        ↓  HANDLER_DELEGATED → early result (API runs handler boundary)
+        ↓  OFF_TOPIC → Core ``ResponseRenderer.render_off_topic``
+        ↓  HANDLER_DELEGATED → early result (API runs extension handler boundary)
         ↓  availability browse/pagination → early result (no SEARCH_AVAILABILITY)
         ↓  ``ExecutionCoordinator.resolve()`` — eligibility gate (may skip execution)
         ↓  ``ExecutionCoordinator.run()`` — tool dispatch + workflow post-process
@@ -298,13 +299,73 @@ class ConversationEngine:
                     plan=plan if isinstance(plan, dict) else None,
                 )
 
+            if plan.get("status") == "OFF_TOPIC":
+                ot_outcome = {
+                    "status": "OFF_TOPIC",
+                    "intent_name": plan.get("intent_name", "") or "OFF_TOPIC",
+                    "off_topic_query": plan.get("off_topic_query"),
+                    "slots": plan.get("slots", {}),
+                    "missing_slots": plan.get("missing_slots", []),
+                    "facts": plan.get("facts", {}),
+                }
+                if plan.get("answerable") is not None:
+                    ot_outcome["answerable"] = plan.get("answerable")
+                if plan.get("answer") is not None:
+                    ot_outcome["answer"] = plan.get("answer")
+                turn = plan.get("turn")
+                if isinstance(turn, dict) and turn:
+                    ot_outcome["turn"] = dict(turn)
+                nested_plan = plan.get("plan")
+                if isinstance(nested_plan, dict) and isinstance(
+                    nested_plan.get("turn"), dict
+                ):
+                    ot_outcome.setdefault("turn", dict(nested_plan["turn"]))
+                ot_response: Dict[str, Any] = {
+                    "success": True,
+                    "outcome": ot_outcome,
+                    "result": ot_outcome,
+                    "_working_session": session_state,
+                }
+                if plan.get("_merged_luma_response") is not None:
+                    ot_response["_merged_luma_response"] = plan.get(
+                        "_merged_luma_response"
+                    )
+                renderer.render_off_topic(
+                    ot_response,
+                    outcome=ot_outcome,
+                    session_state=session_state
+                    if isinstance(session_state, dict)
+                    else {},
+                    user_input=text,
+                )
+                from core.adapters.nlu.conversation_memory import update_conversation
+
+                _conv_base = (
+                    session_state if isinstance(session_state, dict) else {}
+                )
+                _updated_session = update_conversation(
+                    _conv_base,
+                    user_text=text,
+                    intent=ot_outcome.get("intent_name", "OFF_TOPIC"),
+                    search_query=None,
+                    assistant_text=ot_response.get("text") or ot_outcome.get("text"),
+                )
+                ot_response["_working_session"] = _updated_session
+                # Same persistence key as RAG digressions (session projector input).
+                ot_response["_handler_conversation_update"] = _updated_session.get(
+                    "conversation"
+                )
+                return stages.finish(
+                    ot_response,
+                    plan=plan,
+                )
+
             if plan.get("status") == "HANDLER_DELEGATED":
                 hd_outcome = {
                     "status": "HANDLER_DELEGATED",
                     "intent_name": plan.get("intent_name", ""),
                     "active_handler": plan.get("active_handler"),
                     "search_query": plan.get("search_query"),
-                    "off_topic_query": plan.get("off_topic_query"),
                     "slots": plan.get("slots", {}),
                     "missing_slots": plan.get("missing_slots", []),
                     "facts": plan.get("facts", {}),

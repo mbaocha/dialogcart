@@ -16,12 +16,12 @@ from core.rendering.availability_renderer import (
 from core.workflows.availability.discovery.bridge import (
     browse_via_discovery,
     present_via_discovery,
-    project_via_discovery,
 )
 from core.workflows.availability.presentation import (
     availability_cache_from_session,
     presentation_meta_from_presented,
     presented_availability_from_session,
+    search_criteria_from_session,
 )
 from core.workflows.availability.selection import (
     REASON_CRITERIA_CHANGED,
@@ -34,7 +34,8 @@ from core.execution.result import normalize_execution_result
 logger = logging.getLogger(__name__)
 
 _NO_MORE_FALLBACK_TEXT = (
-    "There are no more available times to show from your last search."
+    "There are no more available times to show from your last search. "
+    "Ask for another date."
 )
 
 
@@ -85,13 +86,17 @@ def _render_pagination_text(
 
     if no_more or browse_status:
         hints = {}
-        if isinstance(presented, dict) and isinstance(presented.get("browse_hints"), dict):
-            hints = presented["browse_hints"]
+        search_date = None
+        if isinstance(presented, dict):
+            if isinstance(presented.get("browse_hints"), dict):
+                hints = presented["browse_hints"]
+            search_date = presented.get("search_date")
         request = build_availability_browse_status_render_request(
             decision,
             direction=direction or "next",
             browse_status=browse_status or "exhausted",
             browse_hints=hints,
+            search_date=search_date if isinstance(search_date, str) else None,
             structured_context=structured_context,
             conversation_history=conversation_history,
         )
@@ -109,18 +114,6 @@ def _render_pagination_text(
     if not render_request:
         return None
     return render_llm(render_request)
-
-
-def _date_only_projection_request(
-    merged: Dict[str, Any],
-) -> Optional[str]:
-    """Return current-turn date when this is a date-only discovery request."""
-    if not merged.get("_current_turn_has_date"):
-        return None
-    if merged.get("_current_turn_has_time"):
-        return None
-    date = merged.get("_current_turn_date")
-    return str(date) if date else None
 
 
 def _criteria_changed_for_turn(
@@ -276,10 +269,11 @@ def try_handle_availability_browse_turn(
     organization_id: int,
     user_id: str,
 ) -> Optional[Dict[str, Any]]:
-    """Advance or project presented availability for browse / date-only turns.
+    """Advance presented availability for browse_next / browse_previous turns.
 
     Returns a full handle_message response when handled, otherwise None.
     Never calls SEARCH_AVAILABILITY or mutates booking slots/proposals.
+    Absolute date requests are not handled here — they require SEARCH.
     """
     _ = session_store  # Compatibility-only; browse persistence is turn-end only.
 
@@ -294,19 +288,15 @@ def try_handle_availability_browse_turn(
         else None
     )
     cache = availability_cache_from_session(session_state)
-    date_only = (
-        _date_only_projection_request(merged) if isinstance(merged, dict) else None
-    )
     logger.debug(
         "[AVAILABILITY_PAGINATION] ENTRY user_id=%s called=true "
         "plan_keys=%s merged_is_dict=%s merged_intent=%s "
-        "browse_intent=%s date_only=%s session_has_cache=%s",
+        "browse_intent=%s session_has_cache=%s",
         user_id,
         list(plan.keys()) if isinstance(plan, dict) else None,
         isinstance(merged, dict),
         intent_name,
         browse_intent,
-        date_only,
         cache is not None,
     )
 
@@ -327,7 +317,7 @@ def try_handle_availability_browse_turn(
     logger.debug(
         "[AVAILABILITY_PAGINATION] probe user_id=%s merged_keys=%s intent=%s "
         "availability_browse=%s operation=%s facts.operation=%s "
-        "extract_browse=%s resolved_browse=%s date_only=%s",
+        "extract_browse=%s resolved_browse=%s",
         user_id,
         list(merged.keys()),
         intent_name,
@@ -336,10 +326,9 @@ def try_handle_availability_browse_turn(
         facts_operation,
         explicit_browse,
         browse_intent,
-        date_only,
     )
 
-    if not browse_intent and not date_only:
+    if not browse_intent:
         _emit_pagination_skip(
             skip_reason="browse_not_detected",
             session_state=session_state,
@@ -347,7 +336,7 @@ def try_handle_availability_browse_turn(
         return None
 
     # Planner already decided a new search is required (e.g. date/service
-    # criteria changed). Do not project or paginate from the stale cache —
+    # criteria changed). Do not paginate from the stale cache —
     # that would swallow SEARCH_AVAILABILITY.
     if plan.get("action") == "SEARCH_AVAILABILITY":
         _emit_pagination_skip(
@@ -363,7 +352,7 @@ def try_handle_availability_browse_turn(
         )
         return None
 
-    # Criteria changes are planner concerns — do not browse/project or search here.
+    # Criteria changes are planner concerns — do not browse or search here.
     if _criteria_changed_for_turn(merged, session_state):
         merged["_selection_resolution"] = {
             "status": "criteria_changed",
@@ -377,73 +366,53 @@ def try_handle_availability_browse_turn(
         return None
 
     session = dict(session_state or {})
+    criteria_slots, criteria_date_proposal = search_criteria_from_session(session_state)
     current = presented_availability_from_session(session_state)
     if current is None or not (current.get("slots") or []):
-        current = present_via_discovery(cache)
-
-    if browse_intent:
-        direction = browse_intent.get("direction")
-        if direction not in ("next", "previous"):
-            _emit_pagination_skip(
-                skip_reason="invalid_browse_direction",
-                session_state=session_state,
-            )
-            return None
-        try:
-            from core.tracing.browse import (
-                BROWSE_RESOLVE_ID,
-                emit_pagination_handle_trace,
-            )
-            from core.tracing.decision_trace import TurnTrace
-
-            browse_resolve_id = None
-            trace = TurnTrace.current()
-            if trace and trace.has_record(BROWSE_RESOLVE_ID):
-                browse_resolve_id = BROWSE_RESOLVE_ID
-            emit_pagination_handle_trace(
-                handled=True,
-                direction=direction,
-                session_state=session_state,
-                browse_resolve_id=browse_resolve_id,
-            )
-        except ImportError:
-            pass
-
-        projection = browse_via_discovery(cache, current, browse_intent)
-        presented_payload = projection.get("presented") or current
-        moved = bool(projection.get("moved"))
-        reason_code = projection.get("reason_code") or (
-            "moved" if moved else "exhausted"
+        current = present_via_discovery(
+            cache,
+            slots=criteria_slots,
+            date_proposal=criteria_date_proposal,
         )
-        return _build_presentation_response(
-            plan=plan,
-            merged=merged,
-            session=session,
-            organization_id=organization_id,
-            presented_payload=presented_payload,
-            presentation_payload=presentation_meta_from_presented(presented_payload),
-            moved=moved,
-            reason_code=reason_code,
-            direction=direction,
-            axis_hint=browse_intent.get("axis_hint") or "any",
+
+    direction = browse_intent.get("direction")
+    if direction not in ("next", "previous"):
+        _emit_pagination_skip(
+            skip_reason="invalid_browse_direction",
             session_state=session_state,
         )
+        return None
+    try:
+        from core.tracing.browse import (
+            BROWSE_RESOLVE_ID,
+            emit_pagination_handle_trace,
+        )
+        from core.tracing.decision_trace import TurnTrace
 
-    # Date-only projection (no complete time): browse/discovery, not selection.
-    assert date_only is not None
-    projection = project_via_discovery(
-        cache, date_only, current_presentation=current
+        browse_resolve_id = None
+        trace = TurnTrace.current()
+        if trace and trace.has_record(BROWSE_RESOLVE_ID):
+            browse_resolve_id = BROWSE_RESOLVE_ID
+        emit_pagination_handle_trace(
+            handled=True,
+            direction=direction,
+            session_state=session_state,
+            browse_resolve_id=browse_resolve_id,
+        )
+    except ImportError:
+        pass
+
+    projection = browse_via_discovery(
+        cache,
+        current,
+        browse_intent,
+        slots=criteria_slots,
+        date_proposal=criteria_date_proposal,
     )
     presented_payload = projection.get("presented") or current
     moved = bool(projection.get("moved"))
     reason_code = projection.get("reason_code") or (
-        "date_projected" if moved else "target_date_not_in_cache"
-    )
-    logger.debug(
-        "[AVAILABILITY_PAGINATION] date_projection date=%s moved=%s reason=%s",
-        date_only,
-        moved,
-        reason_code,
+        "moved" if moved else "exhausted"
     )
     return _build_presentation_response(
         plan=plan,
@@ -454,7 +423,7 @@ def try_handle_availability_browse_turn(
         presentation_payload=presentation_meta_from_presented(presented_payload),
         moved=moved,
         reason_code=reason_code,
-        direction=None,
-        axis_hint="date",
+        direction=direction,
+        axis_hint=browse_intent.get("axis_hint") or "any",
         session_state=session_state,
     )

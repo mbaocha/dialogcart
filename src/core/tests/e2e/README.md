@@ -2,11 +2,45 @@
 
 Multi-turn conversation tests against the Core HTTP `/api/message` path.
 
-## NLU clients
+## Philosophy
 
-### RecordingLumaClient (preferred for live `/resolve`)
+E2E replays real production `/resolve` responses. Handwritten NLU payloads are not used.
 
-Composition wrapper used by live booking fixtures:
+The **only** intentional difference between production and E2E is:
+
+| Environment | NLU boundary |
+|-------------|--------------|
+| Production | Live Luma (`/resolve`) |
+| E2E | `RecordingLumaClient` (replayed `/resolve`) |
+
+Everything after the NLU boundary (session merge, planner, execution, renderer) must execute identically to production.
+
+## Single reference clock
+
+Relative dates (`tomorrow`, weekdays, …) must resolve against one instant shared by Core E2E fixtures and NLU test bootstrap.
+
+| Symbol | Source |
+|--------|--------|
+| `TEST_NOW` / `TEST_NOW_ISO` / `FROZEN_TIME` | `core.tests.harness.test_clock` |
+
+Consumers:
+
+- E2E fixtures (`FROZEN_TIME` via `framework/conversation.py`)
+- `run.py` (sets `LUMA_TEST_NOW` for NLU test bootstrap only)
+- `LumaClient.resolve` (sends body `test_now` when env or argument is set)
+- `RecordingLumaClient` (forwards `test_now` on **live** miss/recache only; **cache keys omit `test_now`**)
+
+Production NLU (`python -m nlu.api` without `LUMA_TEST_NOW`) uses wall clock. Production `LumaClient` omits `test_now` when the env is unset.
+
+For deterministic live/recache relative dates, start NLU with:
+
+```bash
+python run.py
+```
+
+## RecordingLumaClient
+
+Composition wrapper used by all E2E booking fixtures:
 
 ```text
 RecordingLumaClient
@@ -20,13 +54,14 @@ Wired in `framework/fixtures.py` via `_wire_booking_deps` for:
 
 - `booking_conversation`
 - `paginated_booking_conversation`
+- `build_recorded_bundle` (scenario runners)
 
 **Behaviour**
 
 | Mode | What happens |
 |------|----------------|
-| Default | Lookup recording → replay on hit; on miss call live `/resolve`, save raw JSON, return it |
-| `--recache-luma` | Ignore cache → live `/resolve` → overwrite recording → return |
+| Default | Lookup recording → **on hit return recorded payload and never call inner**; on miss call live `/resolve`, save raw JSON, return it |
+| `--recache-luma` | Bypass cache for the **default** E2E recordings corpus only → live `/resolve` → overwrite → return. Custom dirs (e.g. unit-test `tmp_path`) still honor hits. |
 
 Recordings live under:
 
@@ -34,7 +69,7 @@ Recordings live under:
 core/tests/e2e/recordings/luma/<sha256(key)[:16]>.json
 ```
 
-Each file stores `{ "key": {...}, "response": <raw /resolve JSON> }`. Responses are never reshaped; planner-only fields are never injected.
+Each file stores `{ "key": {...}, "response": <raw /resolve JSON> }`. Responses are never reshaped; planner-only fields are never injected. Recording keys do not include `test_now`.
 
 **CLI**
 
@@ -47,33 +82,10 @@ pytest core/tests/e2e --recache-luma
 
 `--recache-luma` sets `DIALOGCART_RECACHE_LUMA=1`.
 
-**When to use**
+## Availability mocks
 
-- Any E2E that should exercise production `/resolve` shapes
-- Replacing handwritten NLU fixtures over time
-
-**Opt in** (other fixtures):
-
-```python
-RecordingLumaClient(TestLumaClient(test_aliases=...))
-```
-
-**Limitation:** Core `LumaClient` does not send `test_now` on the wire. Relative dates (`tomorrow`) can drift with the NLU clock unless the NLU process is started with a fixed `LUMA_TEST_NOW`.
-
-### ScriptedLumaClient (still appropriate when)
-
-Use handwritten resolve bodies when you need:
-
-- Deterministic Core/planner branches without live NLU
-- Forced AVAILABILITY / correction shapes that are hard to elicit live
-- Explicit NLU post-process harnesses (`NluServiceResolutionScriptedLumaClient`)
-
-Scripted clients short-circuit before HTTP and **do not** use the recording cache. Prefer production-shaped payloads (`intent`, `facts`, `time_constraint`, …) — avoid inventing Core-only fields such as `date_proposal` in fake `/resolve` bodies.
-
-### TestLumaClient alone
-
-Thin live client that only injects catalog aliases. Prefer wrapping with `RecordingLumaClient` for E2E so runs become deterministic after the first live miss.
+Fixture params in `E2E_FIXTURE_PARAMS` configure **mocked availability slot layouts only**. They do not fabricate NLU responses.
 
 ## Markers
 
-- `@pytest.mark.live_luma` — skips when Live Luma is unreachable (`live_luma_available()`).
+- `@pytest.mark.live_luma` — skips when Live Luma is unreachable (`live_luma_available()`). Required for cache-miss / recache runs.

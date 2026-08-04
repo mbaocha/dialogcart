@@ -7,16 +7,10 @@ from typing import Any, Dict, Optional
 from core.rendering.booking_confirmation_renderer import render_booking_confirmation_prompt
 from core.tests.e2e.framework.conversation import (
     BookingConversation,
-    FLEXI_SERVICE,
-    PREMIUM_SERVICE,
     _presentation_page_index,
     extract_presented_times,
 )
 from core.tests.e2e.framework.fixtures import TARGET_DATE
-from core.tests.e2e.framework.scripted_temporal import (
-    exact_time_temporal,
-    single_day_temporal,
-)
 
 
 def _planning_section(session: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -335,46 +329,3 @@ def assert_returns_to_pending_confirmation(conv: BookingConversation) -> None:
         confirmation="pending",
         intent="CREATE_APPOINTMENT",
     )
-
-
-def premium_booking_start_script() -> Dict[str, Any]:
-    return {
-        "success": True,
-        "intent": {"name": "CREATE_APPOINTMENT"},
-        "facts": {
-            "service_id": PREMIUM_SERVICE,
-        },
-        "slots": {"service_id": PREMIUM_SERVICE},
-        "temporal": single_day_temporal(TARGET_DATE),
-        "missing_slots": ["time"],
-    }
-
-
-def availability_reshow_script() -> Dict[str, Any]:
-    return {
-        "success": True,
-        "intent": {"name": "AVAILABILITY"},
-    }
-
-
-def availability_date_change_script(date_value: str) -> Dict[str, Any]:
-    return {
-        "success": True,
-        "intent": {"name": "AVAILABILITY"},
-        "facts": {
-            "service_id": PREMIUM_SERVICE,
-        },
-        "temporal": single_day_temporal(date_value),
-    }
-
-
-def availability_service_change_script(service_id: str) -> Dict[str, Any]:
-    return {
-        "success": True,
-        "intent": {"name": "AVAILABILITY"},
-        "facts": {
-            "service_id": service_id,
-            "slots": {"service_id": service_id},
-        },
-        "slots": {"service_id": service_id},
-    }

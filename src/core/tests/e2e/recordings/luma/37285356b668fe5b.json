@@ -43,11 +43,11 @@
       ]
     },
     "intent": {
-      "confidence": 0.7,
+      "confidence": 0.85,
       "name": "CREATE_APPOINTMENT"
     },
     "temporal": {
-      "confidence": 0.9,
+      "confidence": 0.95,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,

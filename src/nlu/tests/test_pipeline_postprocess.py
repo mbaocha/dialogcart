@@ -17,14 +17,15 @@ from nlu.pipeline import (  # noqa: E402
     _fix_iso_weekday_mismatch,
     _ground_service_term_in_text,
     _normalize_booking_id,
-    _normalize_cancel_intent,
     _normalize_fuzzy_time,
     _resolve_calendar_binding_intent,
     _resolve_slot_fill_intent,
     _strip_unmentioned_dates,
     _strip_unmentioned_service,
+    _strip_unmentioned_times,
     _text_mentions_date,
     _text_mentions_service,
+    _text_mentions_time,
 )
 
 @pytest.mark.parametrize(
@@ -305,6 +306,177 @@ def test_strip_unmentioned_service_clears_facts_service_id_on_tomorrow():
     assert result["facts"]["service_id"] is None
 
 
+@pytest.mark.parametrize(
+    "text,expected",
+    [
+        ("show availability for flexi", False),
+        ("book me a premium haircut", False),
+        ("9am", True),
+        ("at 9", True),
+        ("9", True),
+        ("9:30", True),
+        ("switch to 10am", True),
+        ("tomorrow morning", True),
+        ("in the evening", True),
+        ("at noon", True),
+        ("book haircut at 10am", True),
+        ("3 o'clock", True),
+        ("by 12pm", True),
+    ],
+)
+def test_text_mentions_time(text, expected):
+    assert _text_mentions_time(text) is expected
+
+
+def _slm_with_leaked_time(time_value: str = "09:00") -> dict:
+    return {
+        "intent": "AVAILABILITY",
+        "confidence": 0.95,
+        "facts": {
+            "dates": [],
+            "times": [time_value],
+            "date_time_pairs": [],
+            "service_id": "flexi haircut + prunning",
+            "booking_id": None,
+        },
+        "temporal": {
+            "expression": time_value,
+            "start_date_expression": None,
+            "start_time_expression": None,
+            "end_date_expression": None,
+            "end_time_expression": None,
+            "start_date": None,
+            "start_time": time_value,
+            "end_date": None,
+            "end_time": None,
+            "mode": "none",
+            "confidence": 0.75,
+        },
+        "time_constraint": {
+            "mode": "exact",
+            "start": time_value,
+            "end": time_value,
+            "label": None,
+        },
+    }
+
+
+def test_strip_unmentioned_times_clears_context_leak_on_service_revision():
+    """Prior-turn 9am must not remain as current-turn time for a service-only ask."""
+    slm = _slm_with_leaked_time()
+    result = _strip_unmentioned_times("show availability for flexi", slm)
+    assert result["facts"]["times"] == []
+    assert result["temporal"]["start_time"] is None
+    assert result["temporal"]["expression"] is None
+    assert result["time_constraint"] is None
+    assert result["facts"]["service_id"] == "flexi haircut + prunning"
+
+
+def test_strip_unmentioned_times_preserves_explicit_clock():
+    slm = _slm_with_leaked_time("10:00")
+    result = _strip_unmentioned_times("book haircut at 10am", slm)
+    assert result["facts"]["times"] == ["10:00"]
+    assert result["temporal"]["start_time"] == "10:00"
+
+
+def test_strip_unmentioned_times_preserves_bare_hour_slot_fill():
+    slm = _slm_with_leaked_time("09:00")
+    result = _strip_unmentioned_times("9", slm)
+    assert result["facts"]["times"] == ["09:00"]
+    assert result["temporal"]["start_time"] == "09:00"
+
+
+def test_strip_unmentioned_times_preserves_fuzzy_period():
+    slm = {
+        "intent": "CREATE_APPOINTMENT",
+        "facts": {
+            "dates": [],
+            "times": [],
+            "date_time_pairs": [],
+            "service_id": None,
+            "booking_id": None,
+        },
+        "temporal": {
+            "expression": "evening",
+            "start_date_expression": None,
+            "start_time_expression": "evening",
+            "end_date_expression": None,
+            "end_time_expression": None,
+            "start_date": None,
+            "start_time": None,
+            "end_date": None,
+            "end_time": None,
+            "mode": "none",
+            "confidence": 0.9,
+        },
+        "time_constraint": {
+            "mode": "fuzzy",
+            "label": "evening",
+            "start": "17:00",
+            "end": "21:59",
+        },
+    }
+    result = _strip_unmentioned_times("book something this evening", slm)
+    assert result["temporal"]["start_time_expression"] == "evening"
+
+
+def test_strip_unmentioned_times_keeps_date_clears_leaked_clock():
+    slm = {
+        "intent": "AVAILABILITY",
+        "facts": {
+            "dates": ["2026-07-03"],
+            "times": ["09:00"],
+            "date_time_pairs": [{"date": "2026-07-03", "time": "09:00"}],
+            "service_id": None,
+            "booking_id": None,
+        },
+        "temporal": {
+            "expression": "tomorrow",
+            "start_date_expression": "tomorrow",
+            "start_time_expression": None,
+            "end_date_expression": None,
+            "end_time_expression": None,
+            "start_date": "2026-07-03",
+            "start_time": "09:00",
+            "end_date": None,
+            "end_time": None,
+            "mode": "single_day",
+            "confidence": 0.9,
+        },
+        "time_constraint": {
+            "mode": "exact",
+            "start": "09:00",
+            "end": "09:00",
+            "label": None,
+        },
+    }
+    result = _strip_unmentioned_times("show availability tomorrow", slm)
+    assert result["temporal"]["start_date"] == "2026-07-03"
+    assert result["temporal"]["start_time"] is None
+    assert result["facts"]["times"] == []
+    assert result["time_constraint"] is None
+
+
+def test_pipeline_strips_context_leaked_time_through_final():
+    from nlu.pipeline import NLUPipeline
+
+    slm = _slm_with_leaked_time()
+    pipeline = NLUPipeline()
+    pipeline._slm_extract = lambda *a, **k: slm
+    result = pipeline.run(
+        "show availability for a different service",
+        {
+            "booking_mode": "service",
+            "aliases": {"flexi haircut + prunning": "haircut"},
+        },
+        now="2026-07-02T10:00:00Z",
+        timezone="UTC",
+    )
+    assert result.facts.get("times") in ([], None)
+    assert result.temporal is None or result.temporal.get("start_time") in (None, "")
+    assert result.time_constraint is None
+
+
 def test_apply_booking_mode_promotes_book_room():
     slm = {
         "intent": "UNKNOWN",
@@ -328,6 +500,91 @@ def test_apply_booking_mode_ignored_for_service():
     assert result["intent"] == "UNKNOWN"
 
 
+def test_pipeline_preserves_reject_action_despite_cancel_keyword():
+    """Post-Stage-2 normalisation must not rewrite REJECT_ACTION → CANCEL_BOOKING."""
+    from nlu.pipeline import NLUPipeline
+
+    slm = {
+        "intent": "REJECT_ACTION",
+        "confidence": 0.95,
+        "facts": {
+            "dates": [],
+            "times": [],
+            "date_time_pairs": [],
+            "service_id": None,
+            "booking_id": None,
+        },
+        "temporal": {
+            "expression": None,
+            "start_date_expression": None,
+            "start_time_expression": None,
+            "end_date_expression": None,
+            "end_time_expression": None,
+            "start_date": None,
+            "start_time": None,
+            "end_date": None,
+            "end_time": None,
+            "mode": "none",
+            "confidence": 0.0,
+        },
+        "service_term": None,
+        "service_candidates": [],
+        "time_constraint": None,
+        "search_query": None,
+    }
+    pipeline = NLUPipeline()
+    pipeline._slm_extract = lambda *a, **k: slm
+    result = pipeline.run(
+        "Cancel that",
+        {"booking_mode": "service", "aliases": {}},
+        now="2026-08-03T12:00:00",
+        timezone="UTC",
+    )
+    assert result.intent["name"] == "REJECT_ACTION"
+
+
+def test_pipeline_preserves_cancel_booking_when_stage2_emits_it():
+    from nlu.pipeline import NLUPipeline
+
+    slm = {
+        "intent": "CANCEL_BOOKING",
+        "confidence": 0.95,
+        "facts": {
+            "dates": [],
+            "times": [],
+            "date_time_pairs": [],
+            "service_id": None,
+            "booking_id": None,
+        },
+        "temporal": {
+            "expression": None,
+            "start_date_expression": None,
+            "start_time_expression": None,
+            "end_date_expression": None,
+            "end_time_expression": None,
+            "start_date": None,
+            "start_time": None,
+            "end_date": None,
+            "end_time": None,
+            "mode": "none",
+            "confidence": 0.0,
+        },
+        "service_term": None,
+        "service_candidates": [],
+        "time_constraint": None,
+        "search_query": None,
+    }
+    pipeline = NLUPipeline()
+    pipeline._slm_extract = lambda *a, **k: slm
+    result = pipeline.run(
+        "Cancel my booking",
+        {"booking_mode": "service", "aliases": {}},
+        now="2026-08-03T12:00:00",
+        timezone="UTC",
+    )
+    assert result.intent["name"] == "CANCEL_BOOKING"
+
+
 class TestNormalizeFuzzyTime:
     def _slm(self, times=None, tc=None):
         return {
@@ -349,20 +606,6 @@ class TestNormalizeFuzzyTime:
     def test_explicit_clock_with_evening_unchanged(self):
         slm = self._slm(times=["19:00"])
         result = _normalize_fuzzy_time("friday evening at 7pm", slm)
-        assert result is slm
-
-
-class TestNormalizeCancelIntent:
-    def _slm(self, intent="UNKNOWN"):
-        return {"intent": intent, "facts": {}}
-
-    def test_cancel_promoted(self):
-        result = _normalize_cancel_intent("nevermind cancel", self._slm())
-        assert result["intent"] == "CANCEL_BOOKING"
-
-    def test_negated_cancel_passthrough(self):
-        slm = self._slm("CREATE_APPOINTMENT")
-        result = _normalize_cancel_intent("please do not cancel it", slm)
         assert result is slm
 
 

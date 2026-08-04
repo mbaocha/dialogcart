@@ -7,83 +7,80 @@ Delegates to core.planning.pipeline.run_planning_pipeline.
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 from core.adapters.cache.catalog_cache import catalog_cache
 from core.adapters.cache.org_domain_cache import org_domain_cache
 from core.adapters.clients.catalog_client import CatalogClient
 from core.adapters.clients.organization_client import OrganizationClient
 from core.adapters.nlu import LumaClient
+from core.adapters.nlu.catalog_projection import (
+    aliases_from_projection,
+    project_catalog_collections,
+)
+from core.adapters.nlu.entity_schema_builder import build_entity_schema
+from core.config.business_category_loader import (
+    get_catalog_collection_keys,
+    is_configured_category,
+)
 from core.planning.pipeline.orchestrator import run_planning_pipeline
 
 logger = logging.getLogger(__name__)
 turn_logger = logging.getLogger("core.turn_log")
 
 
-def _build_tenant_context(
-    organization_id: int,
-    derived_domain: str,
-    catalog_client: CatalogClient,
-) -> Optional[Dict[str, Any]]:
-    if derived_domain not in ("service", "reservation"):
-        return None
-    catalog_data = catalog_cache.get_catalog(
-        organization_id, catalog_client, domain=derived_domain
-    )
-    alias_map: Dict[str, Any] = {}
-    if derived_domain == "service":
-        services = (
-            catalog_data.get("services", [])
-            if isinstance(catalog_data, dict)
-            else []
-        )
-        for svc in services:
-            if not isinstance(svc, dict) or svc.get("is_active") is False:
-                continue
-            name = svc.get("name")
-            if not name:
-                continue
-            item_id = svc.get("id")
-            if item_id is not None:
-                try:
-                    alias_map[name.lower()] = int(item_id)
-                    continue
-                except (TypeError, ValueError):
-                    pass
-            canonical_key = (
-                svc.get("service_family_id")
-                or svc.get("canonical")
-                or svc.get("slug")
-                or name.lower().replace(" ", "_")
-            )
-            if not canonical_key:
-                continue
-            if "." not in str(canonical_key):
-                canonical_key = f"beauty_and_wellness.{canonical_key}"
-            alias_map[name.lower()] = canonical_key
-    else:
-        for collection, key_fn in (
-            ("rooms", lambda rt: rt.get("canonical_key") or rt.get("canonical") or rt.get("slug")),
-            ("extras", lambda ex: ex.get("canonical") or ex.get("slug")),
-        ):
-            items = (
-                catalog_data.get(collection, [])
-                if isinstance(catalog_data, dict)
-                else []
-            )
-            for item in items:
-                if not isinstance(item, dict) or item.get("is_active") is False:
-                    continue
-                name = item.get("name")
-                if not name:
-                    continue
-                canonical_key = key_fn(item) or name.lower().replace(" ", "_")
-                alias_map[name.lower()] = canonical_key
-
-    tenant_context: Dict[str, Any] = {"booking_mode": derived_domain}
+def _build_tenant_context_from_projection(
+    booking_domain: str,
+    projected_collections: Dict[str, Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Build tenant_context; aliases are a compatibility view of the projection."""
+    tenant_context: Dict[str, Any] = {"booking_mode": booking_domain}
+    alias_map = aliases_from_projection(projected_collections)
     if alias_map:
         tenant_context["aliases"] = alias_map
     return tenant_context
+
+
+def _build_tenant_context(
+    organization_id: int,
+    business_category: str,
+    booking_domain: str,
+    catalog_client: CatalogClient,
+) -> Optional[Dict[str, Any]]:
+    """Compatibility wrapper — tenant_context only (no entity_schema)."""
+    tenant_context, _ = build_nlu_request_context(
+        organization_id, business_category, booking_domain, catalog_client
+    )
+    return tenant_context
+
+
+def build_nlu_request_context(
+    organization_id: int,
+    business_category: str,
+    booking_domain: str,
+    catalog_client: CatalogClient,
+) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """Build tenant_context and entity_schema from one catalog projection.
+
+    ``business_category`` owns the entity schema and which catalog collections
+    to project. ``booking_domain`` selects the catalog API endpoint.
+    """
+    if not is_configured_category(business_category):
+        return None, None
+    catalog_data = catalog_cache.get_catalog(
+        organization_id, catalog_client, domain=booking_domain
+    )
+    collection_keys = get_catalog_collection_keys(business_category)
+    projected = project_catalog_collections(
+        catalog_data,
+        collection_keys=collection_keys or None,
+    )
+    tenant_context = _build_tenant_context_from_projection(booking_domain, projected)
+    entity_schema = build_entity_schema(
+        business_category,
+        projected_collections=projected,
+    )
+    return tenant_context, entity_schema
 
 
 def plan_turn(
@@ -113,20 +110,21 @@ def plan_turn(
     if organization_client is None:
         organization_client = OrganizationClient()
 
-    derived_domain, _ = org_domain_cache.get_domain(
+    business_category, booking_domain, _ = org_domain_cache.resolve(
         organization_id, organization_client, force_refresh=False
     )
-    tenant_context = _build_tenant_context(
-        organization_id, derived_domain, catalog_client
+    tenant_context, entity_schema = build_nlu_request_context(
+        organization_id, business_category, booking_domain, catalog_client
     )
 
     return run_planning_pipeline(
         user_id=user_id,
         text=text,
         organization_id=organization_id,
-        derived_domain=derived_domain,
+        derived_domain=booking_domain,
         timezone=timezone,
         tenant_context=tenant_context,
+        entity_schema=entity_schema,
         session_state=session_state,
         luma_client=luma_client,
         organization_client=organization_client,

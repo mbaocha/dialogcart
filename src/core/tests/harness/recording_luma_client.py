@@ -53,7 +53,12 @@ def build_recording_key(
     conversation_context: Optional[Dict[str, Any]],
     test_now: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Canonical request fields used for cache identity (excludes user_id)."""
+    """Canonical request fields used for cache identity (excludes user_id).
+
+    ``test_now`` is accepted for callers/tests but is **not** included in the
+    key by default policy of :class:`RecordingLumaClient` (stable absolute-date
+    recording filenames). Kept on the signature for explicit opt-in tools.
+    """
     key: Dict[str, Any] = {
         "text": text,
         "domain": domain,
@@ -74,17 +79,31 @@ def recording_filename(key: Dict[str, Any]) -> str:
     return f"{digest[:16]}.json"
 
 
+def _resolve_test_now(
+    explicit: Optional[str] = None,
+) -> Optional[str]:
+    if explicit and str(explicit).strip():
+        return str(explicit).strip()
+    env_now = os.getenv("LUMA_TEST_NOW", "").strip()
+    return env_now or None
+
+
 class RecordingLumaClient:  # noqa: N801
     __test__ = False
 
     """Composition wrapper: lookup/replay recordings; miss or recache → live.
 
-    Known limitation: production ``LumaClient.resolve`` does not forward
-    ``test_now`` to ``/resolve``. Relative-date recordings may drift with the
-    NLU server clock unless the service is started with a fixed
-    ``LUMA_TEST_NOW``. When ``test_now`` is passed into ``resolve`` (kwargs) or
-    present as ``LUMA_TEST_NOW`` in the environment, it is included in the
-    cache key only — this client does not redesign the HTTP payload.
+    Cache hit invariant: when a recording file exists and is eligible for
+    replay, return it and **never** call the inner client.
+
+    ``--recache-luma`` / ``DIALOGCART_RECACHE_LUMA`` bypasses cache only for the
+    default E2E recordings corpus (force live + overwrite). Custom
+    ``recordings_dir`` (e.g. pytest ``tmp_path``) always honors hits so the
+    replay invariant remains testable under a suite-level recache flag.
+
+    Cache keys deliberately omit ``test_now`` so existing absolute-date
+    recordings keep matching. On live miss / corpus recache, ``test_now`` is
+    forwarded to the inner client when set via kwargs or ``LUMA_TEST_NOW``.
     """
 
     def __init__(
@@ -99,6 +118,15 @@ class RecordingLumaClient:  # noqa: N801
         self.last_recording_path: Optional[Path] = None
         self.last_cache_hit: Optional[bool] = None
 
+    def _bypass_cache_for_recache(self) -> bool:
+        """Force live only for the shared E2E corpus under ``--recache-luma``."""
+        if not recache_luma_enabled():
+            return False
+        try:
+            return self.recordings_dir.resolve() == _DEFAULT_RECORDINGS_DIR.resolve()
+        except OSError:
+            return False
+
     def resolve(
         self,
         user_id: str,
@@ -109,23 +137,22 @@ class RecordingLumaClient:  # noqa: N801
         conversation_context: Optional[Dict[str, Any]] = None,
         **kwargs: Any,
     ) -> Dict[str, Any]:
-        test_now = kwargs.get("test_now")
-        if not test_now:
-            env_now = os.getenv("LUMA_TEST_NOW", "").strip()
-            test_now = env_now or None
+        test_now = _resolve_test_now(kwargs.get("test_now"))
 
+        # Stable cache identity — do not include test_now in the key.
         key = build_recording_key(
             text=text,
             domain=domain,
             timezone=timezone,
             tenant_context=tenant_context,
             conversation_context=conversation_context,
-            test_now=test_now,
+            test_now=None,
         )
         path = self.recordings_dir / recording_filename(key)
         self.last_recording_path = path
 
-        if not recache_luma_enabled() and path.is_file():
+        # Cache hit → replay only. Never invoke inner on this path.
+        if path.is_file() and not self._bypass_cache_for_recache():
             recorded = json.loads(path.read_text(encoding="utf-8"))
             response = recorded.get("response")
             if not isinstance(response, dict):
@@ -134,8 +161,11 @@ class RecordingLumaClient:  # noqa: N801
             self.last_response = response
             return response
 
-        # Live call — do not forward test_now into production LumaClient
-        # (it is not on the /resolve wire yet; see class docstring).
+        # Miss (or default-corpus recache bypass) → live, then save.
+        live_kwargs: Dict[str, Any] = {}
+        if test_now:
+            live_kwargs["test_now"] = test_now
+
         response = self._inner.resolve(
             user_id=user_id,
             text=text,
@@ -143,6 +173,8 @@ class RecordingLumaClient:  # noqa: N801
             timezone=timezone,
             tenant_context=tenant_context,
             conversation_context=conversation_context,
+            entity_schema=kwargs.get("entity_schema"),
+            **live_kwargs,
         )
         self._save_recording(path, key, response)
         self.last_cache_hit = False

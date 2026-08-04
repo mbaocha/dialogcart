@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field, fields
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any, Callable, Dict, List, Optional, Sequence, Union
 from unittest.mock import Mock
 
@@ -221,6 +221,8 @@ class Scenario:
     before: Optional[ScenarioHook] = None
     after: Optional[ScenarioHook] = None
     id: Optional[str] = None
+    # When True, runner attaches tenant customer identity for commit paths.
+    requires_customer_identity: bool = False
 
     def __init__(
         self,
@@ -231,6 +233,7 @@ class Scenario:
         before: Optional[ScenarioHook] = None,
         after: Optional[ScenarioHook] = None,
         id: Optional[str] = None,
+        requires_customer_identity: bool = False,
     ) -> None:
         self.name = name
         self.turns = [coerce_turn(t) for t in turns]
@@ -239,9 +242,25 @@ class Scenario:
         self.before = before
         self.after = after
         self.id = id or _slugify(name)
+        self.requires_customer_identity = requires_customer_identity
 
     def pytest_id(self) -> str:
         return self.id
+
+
+# Deterministic E2E channel identity for successful commit scenarios.
+# Resolved via commerce upsert at Core ingress (org-scoped); never a chat user_id.
+E2E_COMMIT_CUSTOMER_PHONE = "+15551234001"
+E2E_COMMIT_CUSTOMER_EMAIL = "e2e.commit@dialogcart.test"
+E2E_COMMIT_CUSTOMER_NAME = "E2E Commit Customer"
+
+
+def attach_commit_customer_identity(conv: "BookingConversation") -> None:
+    """Wire ingress identity for scenarios that expect successful booking commit."""
+    conv.customer_phone = E2E_COMMIT_CUSTOMER_PHONE
+    conv.customer_email = E2E_COMMIT_CUSTOMER_EMAIL
+    conv.customer_name = E2E_COMMIT_CUSTOMER_NAME
+    conv.customer_id = None  # force resolve-or-create; do not invent a PK
 
 
 def _slugify(name: str) -> str:
@@ -257,18 +276,47 @@ HAIRCUT_CATALOG = {
     "flexi haircut + prunning": "haircut",
 }
 
-FROZEN_TIME = datetime(2026, 7, 1, 10, 0, 0, tzinfo=timezone.utc)
+from core.tests.harness.test_clock import FROZEN_TIME
+
 ORG_ID = int(os.getenv("ORG_ID", "1"))
 PREMIUM_SERVICE = "premium haircut"
 FLEXI_SERVICE = "flexi haircut + prunning"
 
+# Deterministic stand-in for the availability backend's "first available day"
+# when SEARCH_AVAILABILITY omits ``date`` (production parity under FROZEN_TIME).
+FIRST_AVAILABLE_DATE = (FROZEN_TIME + timedelta(days=2)).strftime("%Y-%m-%d")
 
-def _resolve_search_date(raw: Optional[str]) -> str:
+
+def _normalize_explicit_search_date(raw: Optional[str]) -> Optional[str]:
+    """Return YYYY-MM-DD when the caller supplied an explicit search date."""
     if raw and isinstance(raw, str):
         cleaned = raw.split("T")[0].strip()
         if len(cleaned) == 10 and cleaned[4] == "-" and cleaned[7] == "-":
             return cleaned
-    return (FROZEN_TIME + timedelta(days=2)).strftime("%Y-%m-%d")
+    return None
+
+
+def _resolve_search_date(raw: Optional[str]) -> str:
+    """Effective offer day: explicit request date, else backend first-available."""
+    return _normalize_explicit_search_date(raw) or FIRST_AVAILABLE_DATE
+
+
+def _offer_date_for_availability_request(
+    requested_date: Optional[str],
+    *,
+    frozen_time: datetime = FROZEN_TIME,
+) -> str:
+    """Choose the calendar day stamped onto mock offers.
+
+    Mirrors production ``AvailabilityClient``:
+    - explicit ``date`` → slots on that day
+    - ``date is None`` → backend selects first available day (not a fabricated
+      request parameter). Core derives ``presented.search_date`` from offers.
+    """
+    explicit = _normalize_explicit_search_date(requested_date)
+    if explicit:
+        return explicit
+    return (frozen_time + timedelta(days=2)).strftime("%Y-%m-%d")
 
 
 def create_slot_availability_client(
@@ -276,11 +324,13 @@ def create_slot_availability_client(
     start_hours: tuple[int, ...] = (10, 11),
     frozen_time: datetime = FROZEN_TIME,
 ) -> Mock:
-    """Availability mock returning only the given UTC start hours on the search date."""
+    """Availability mock returning only the given UTC start hours on the offer day."""
     mock_client = Mock(spec=AvailabilityClient)
 
     def get_service_availability(**kwargs):
-        date = _resolve_search_date(kwargs.get("date"))
+        date = _offer_date_for_availability_request(
+            kwargs.get("date"), frozen_time=frozen_time
+        )
         return {
             "slots": [
                 {
@@ -325,7 +375,9 @@ def create_paginated_availability_client(
     mock_client = Mock(spec=AvailabilityClient)
 
     def get_service_availability(**kwargs):
-        date = _resolve_search_date(kwargs.get("date"))
+        date = _offer_date_for_availability_request(
+            kwargs.get("date"), frozen_time=frozen_time
+        )
         return {
             "slots": [
                 {
@@ -432,14 +484,27 @@ def assert_no_booking_execution(
     conv: "BookingConversation",
     booking_client: Mock,
 ) -> None:
+    """Assert booking was not executed (does not imply confirmation cleared)."""
     assert not booking_client.create_booking.called, (
         f"turn {conv.turn}: booking should not have been created"
     )
-    conv.assert_confirmation(None)
     execution = _execution_view(conv.last_body, conv.session())
     assert execution.get("type") != "booking", (
         f"turn {conv.turn}: unexpected booking execution"
     )
+
+
+def assert_confirmation_pending(conv: "BookingConversation") -> None:
+    conv.assert_confirmation("pending")
+
+
+def assert_confirmation_cleared(conv: "BookingConversation") -> None:
+    conv.assert_confirmation(None)
+
+
+def assert_confirmation_superseded(conv: "BookingConversation") -> None:
+    """Confirmation binding cleared after superseding revision/interruption."""
+    assert_confirmation_cleared(conv)
 
 
 _EXECUTION_OUTCOME_STATUSES = frozenset(
@@ -525,7 +590,12 @@ def _plan_view(outcome: Dict[str, Any], body: Optional[Dict[str, Any]] = None) -
     After execution, HTTP ``MessageResponse`` often omits root ``plan`` and the
     outcome is an execution artifact (``status=succeeded``). Planner status must
     never be taken from that execution outcome status — use decision_trace
-    (``decision.planner.status``) when the plan object is missing.
+    when the plan object / planner outcome status is missing.
+
+    Prefer HTTP planner status (merged plan, then outcome) over the summary
+    trace winner: the tracer's ``decision.planner.status`` follows Stage 08's
+    finalized status (including reconciliation to NEEDS_CLARIFICATION or
+    READY presentation).
     """
     nested = outcome.get("plan") if isinstance(outcome.get("plan"), dict) else {}
     root_plan = (body or {}).get("plan") if isinstance((body or {}).get("plan"), dict) else {}
@@ -533,23 +603,25 @@ def _plan_view(outcome: Dict[str, Any], body: Optional[Dict[str, Any]] = None) -
     merged = {**nested, **root_plan}
     trace_fields = _planner_fields_from_decision_trace(body)
 
-    status = _coerce_planner_status(trace_fields.get("status"))
-    if status is None:
-        status = _coerce_planner_status(merged.get("status"))
+    status = _coerce_planner_status(merged.get("status"))
     if status is None:
         # Non-executed turns copy planner status onto outcome.status.
         status = _coerce_planner_status(outcome.get("status"))
+    if status is None:
+        status = _coerce_planner_status(trace_fields.get("status"))
 
-    stage = trace_fields.get("stage")
-    if stage is None:
-        stage = merged.get("stage")
+    stage = merged.get("stage")
     if stage is None:
         stage = outcome.get("stage")
+    if stage is None:
+        stage = trace_fields.get("stage")
 
-    if "action" in trace_fields:
-        action = trace_fields.get("action")
-    elif "action" in merged:
+    if "action" in merged:
         action = merged.get("action")
+    elif "action" in outcome and outcome.get("status") not in _EXECUTION_OUTCOME_STATUSES:
+        action = outcome.get("action")
+    elif "action" in trace_fields:
+        action = trace_fields.get("action")
     else:
         # Execution artifacts expose the executed action; that is fine for asserts.
         action = outcome.get("action")
@@ -558,12 +630,12 @@ def _plan_view(outcome: Dict[str, Any], body: Optional[Dict[str, Any]] = None) -
         "status": status,
         "stage": stage,
         "action": action,
-        "awaiting": trace_fields.get("awaiting")
+        "awaiting": merged.get("awaiting")
         or outcome.get("awaiting")
-        or merged.get("awaiting"),
-        "time_match_outcome": trace_fields.get("time_match_outcome")
-        or merged.get("time_match_outcome")
-        or outcome.get("time_match_outcome"),
+        or trace_fields.get("awaiting"),
+        "time_match_outcome": merged.get("time_match_outcome")
+        or outcome.get("time_match_outcome")
+        or trace_fields.get("time_match_outcome"),
     }
 
 
@@ -596,6 +668,11 @@ class BookingConversation:
         self.last_http = None
         self.last_body: Dict[str, Any] = {}
         self.turn = 0
+        # Optional channel identity for commit scenarios (never chat user_id).
+        self.customer_id: Optional[int] = None
+        self.customer_phone: Optional[str] = None
+        self.customer_email: Optional[str] = None
+        self.customer_name: Optional[str] = None
 
     def send(self, text: str, *, trace: Optional[str] = None) -> Dict[str, Any]:
         self.turn += 1
@@ -603,16 +680,25 @@ class BookingConversation:
         # the tool result (``succeeded``). Always request decision_trace so
         # ``assert_planner_status`` can read ``decision.planner.status``.
         params = {"trace": trace or "summary"}
+        payload: Dict[str, Any] = {
+            "user_id": self.user_id,
+            "text": text,
+            "organization_id": self.organization_id,
+            "domain": "service",
+            "timezone": "UTC",
+        }
+        if self.customer_id is not None:
+            payload["customer_id"] = self.customer_id
+        if self.customer_phone:
+            payload["customer_phone"] = self.customer_phone
+        if self.customer_email:
+            payload["customer_email"] = self.customer_email
+        if self.customer_name:
+            payload["customer_name"] = self.customer_name
         self.last_http = self.api_client.post(
             "/api/message",
             params=params,
-            json={
-                "user_id": self.user_id,
-                "text": text,
-                "organization_id": self.organization_id,
-                "domain": "service",
-                "timezone": "UTC",
-            },
+            json=payload,
         )
         self.last_body = self.last_http.json()
         stash_decision_trace_from_body(self.last_body)
@@ -831,7 +917,7 @@ class BookingConversation:
         sess = self.session() or {}
         actual = sess.get("missing_slots") or self.outcome.get("missing_slots") or []
         self._assert(
-            sorted(actual) == sorted(expected),
+            list(actual) == list(expected),
             f"turn {self.turn}: missing_slots expected {expected}, got {actual}",
         )
 

@@ -118,15 +118,30 @@ def plan_message(
         plan_structure.setdefault(
             "execution_proposal_context", dict(proposal_context)
         )
+    entity_schema = outcome_plan.get("_entity_schema")
+    if not isinstance(entity_schema, dict):
+        facts = outcome.get("facts")
+        if isinstance(facts, dict):
+            entity_schema = facts.get("_entity_schema")
+    if isinstance(entity_schema, dict):
+        planning_result["_entity_schema"] = entity_schema
+        plan_structure.setdefault("_entity_schema", entity_schema)
 
     # Preserve explicit degraded-turn metadata through the engine boundary.
     for fallback_key in ("recovered", "recovery_reason", "message_applied"):
         if fallback_key in outcome:
             planning_result[fallback_key] = outcome[fallback_key]
 
-    # Carry HANDLER_DELEGATED routing fields — stripped by standard planning_result construction
-    if outcome.get("status") == "HANDLER_DELEGATED":
-        for _k in ("active_handler", "search_query", "off_topic_query", "turn"):
+    # Carry digression / RAG routing fields — stripped by standard planning_result construction
+    if outcome.get("status") in ("HANDLER_DELEGATED", "OFF_TOPIC"):
+        for _k in (
+            "active_handler",
+            "search_query",
+            "off_topic_query",
+            "answerable",
+            "answer",
+            "turn",
+        ):
             if outcome.get(_k) is not None:
                 planning_result[_k] = outcome[_k]
                 if _k == "turn" and isinstance(outcome[_k], dict):

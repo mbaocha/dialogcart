@@ -31,23 +31,24 @@ def _booking_session_with_authorization() -> dict:
     }
 
 
-def test_handler_delegated_preserves_confirmation_and_bound_datetime():
+def test_off_topic_digression_preserves_confirmation_and_bound_datetime():
     """Digression NLU without confirmation/bound must not clear prior booking auth."""
     previous = _booking_session_with_authorization()
     digression_nlu = {
         "intent": {"name": "OFF_TOPIC"},
         "facts": {},
         "search_query": None,
+        "answerable": True,
+        "answer": "A short joke.",
         # No confirmation_state, no resolved_datetime_range — the bug trigger.
     }
     projected = SessionProjectorV2().project(
         outcome={
-            "status": "HANDLER_DELEGATED",
+            "status": "OFF_TOPIC",
             "intent_name": "OFF_TOPIC",
-            "active_handler": "off_topic",
             "slots": {},
         },
-        outcome_status="HANDLER_DELEGATED",
+        outcome_status="OFF_TOPIC",
         organization_id=1,
         merged_luma_response=digression_nlu,
         previous_session_state=previous,
@@ -106,6 +107,34 @@ def test_handler_delegated_preserves_for_general_inquiry_payload():
         user_id="test-hd-gi",
     )
     assert projected is not None
+    assert get_confirmation_state(projected) == "pending"
+    assert (projected.get("planning") or {}).get("bound_datetime", {}).get(
+        "start"
+    ) == "2026-07-21T14:00:00+00:00"
+
+
+def test_handler_delegated_preserves_for_payment_status_payload():
+    previous = _booking_session_with_authorization()
+    projected = SessionProjectorV2().project(
+        outcome={
+            "status": "HANDLER_DELEGATED",
+            "intent_name": "PAYMENT_STATUS",
+            "active_handler": "rag",
+            "search_query": "why total 105",
+            "slots": {},
+        },
+        outcome_status="HANDLER_DELEGATED",
+        organization_id=1,
+        merged_luma_response={
+            "intent": {"name": "PAYMENT_STATUS"},
+            "search_query": "why total 105",
+        },
+        previous_session_state=previous,
+        working_session_state=previous,
+        user_id="test-hd-pay",
+    )
+    assert projected is not None
+    assert projected.get("intent_name") == "CREATE_APPOINTMENT"
     assert get_confirmation_state(projected) == "pending"
     assert (projected.get("planning") or {}).get("bound_datetime", {}).get(
         "start"

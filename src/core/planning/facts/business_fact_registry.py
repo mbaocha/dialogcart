@@ -291,10 +291,13 @@ def evaluate_availability_evidence_ready(
     Proposal-expanded date/time and co-present slots.date/time alone are not
     sufficient — require a successful availability cache and fingerprint match,
     or a resolved_datetime_range from presented-offer binding.
+
+    Hydrating the currently presented search day into ``date_proposal`` after an
+    undated exploratory SEARCH is not a criteria change for readiness.
     """
     from core.workflows.availability.fingerprint import (
         build_availability_fingerprint_slots,
-        slots_match_availability_fingerprint,
+        slots_match_availability_fingerprint_for_readiness,
     )
 
     revision_invalidated = bool(
@@ -306,6 +309,7 @@ def evaluate_availability_evidence_ready(
         return True
 
     stored_fingerprint = None
+    readiness_session = None if revision_invalidated else session_state
     if not revision_invalidated and isinstance(session_state, dict):
         stored_fingerprint = session_state.get("availability_fingerprint")
 
@@ -315,12 +319,15 @@ def evaluate_availability_evidence_ready(
         intent_name=intent_name,
         organization_id=organization_id,
         luma_response=luma_response,
-        session_state=None if revision_invalidated else session_state,
+        session_state=readiness_session,
         nlu_facts=facts_obj if isinstance(facts_obj, dict) else None,
     )
 
-    fingerprint_matched = slots_match_availability_fingerprint(
-        fingerprint_slots, stored_fingerprint, intent_name=intent_name
+    fingerprint_matched = slots_match_availability_fingerprint_for_readiness(
+        fingerprint_slots,
+        stored_fingerprint,
+        intent_name=intent_name,
+        session_state=readiness_session,
     )
     if (
         fingerprint_matched

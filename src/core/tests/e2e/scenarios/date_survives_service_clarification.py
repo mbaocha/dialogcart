@@ -22,7 +22,6 @@ from core.tests.e2e.framework.conversation import (
     extract_presented_times,
 )
 from core.workflows.availability.fingerprint import compute_availability_fingerprint
-from core.tests.e2e.framework.scripted_temporal import single_day_temporal
 
 SCENARIOS: List[Scenario] = []
 
@@ -35,57 +34,6 @@ TODAY = FROZEN_TIME.strftime("%Y-%m-%d")
 def _register(scenario: Scenario) -> Scenario:
     SCENARIOS.append(scenario)
     return scenario
-
-
-def date_survives_service_clarification_scripts() -> Dict[str, Any]:
-    return {
-        "book me for a haircut on july 21": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "needs_clarification": True,
-            "missing_slots": ["service_id", "time"],
-            "service_candidates": [
-                {"text": PREMIUM_SERVICE},
-                {"text": "flexi haircut + prunning"},
-            ],
-            "facts": {},
-            "temporal": single_day_temporal(JULY_21),
-        },
-        "book me haircut on 23rd july": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "needs_clarification": True,
-            "missing_slots": ["service_id", "time"],
-            "service_candidates": [
-                {"text": PREMIUM_SERVICE},
-                {"text": "flexi haircut + prunning"},
-            ],
-            "facts": {},
-            "temporal": single_day_temporal(JULY_23),
-        },
-        # Service only — date must come from session Temporal, not this turn.
-        "premium": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {
-                "service_id": PREMIUM_SERVICE,
-                "slots": {"service_id": PREMIUM_SERVICE},
-            },
-            "slots": {"service_id": PREMIUM_SERVICE},
-            "missing_slots": ["time"],
-        },
-        "premium haircut": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {
-                "service_id": PREMIUM_SERVICE,
-                "slots": {"service_id": PREMIUM_SERVICE},
-            },
-            "slots": {"service_id": PREMIUM_SERVICE},
-            "missing_slots": ["time"],
-        },
-    }
-
 
 def _slot_dates(starts: List[str]) -> List[str]:
     return [s[:10] for s in starts if isinstance(s, str) and len(s) >= 10]

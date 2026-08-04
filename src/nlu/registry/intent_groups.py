@@ -49,9 +49,9 @@ INTENT_GROUPS: Dict[str, dict] = {
         "requires_booking_verb": False,
         "search_query": False,
         "intents": {
-            "CONFIRM_ACTION": "confirming a proposed action (yes, confirm, ok, sure)",
+            "CONFIRM_ACTION": "authorizing a pending proposed action to proceed (yes, go ahead, book it, confirm) — NOT state/correctness questions; pending 'book it'/'reserve it'/'schedule it' are confirm, not CREATE_*",
             "REJECT_ACTION":  "rejecting a proposed action (no, cancel that, don't)",
-            "CORRECTION":     "correcting or replacing a slot in the CURRENT flow — ONLY when conversation context shows an active booking intent",
+            "CORRECTION":     "replacing/correcting a workflow slot or selection in the CURRENT flow (service/date/time/staff/etc.) — NOT disputing prices, policies, or explanations",
         },
     },
     "fallback": {

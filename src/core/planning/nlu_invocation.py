@@ -42,6 +42,7 @@ def invoke_nlu_for_planning(
     tenant_context: Optional[Dict[str, Any]],
     session_state: Optional[Dict[str, Any]],
     luma_client: LumaClient,
+    entity_schema: Optional[Dict[str, Any]] = None,
 ) -> NluInvocationResult:
     """Call NLU and validate contract; return structured ok/failure status."""
     conversation_context = build_conversation_context(session_state)
@@ -58,6 +59,8 @@ def invoke_nlu_for_planning(
         logger.warning(
             f"[ORCHESTRATOR] No tenant_context to send to Luma (domain={derived_domain})"
         )
+    if entity_schema:
+        luma_payload["entity_schema"] = entity_schema
 
     logger.info(
         "Luma request payload: %s", json.dumps(luma_payload, ensure_ascii=False)
@@ -81,6 +84,7 @@ def invoke_nlu_for_planning(
                 timezone=timezone,
                 tenant_context=tenant_context,
                 conversation_context=conversation_context,
+                entity_schema=entity_schema,
             )
     except UpstreamError as e:
         logger.error(

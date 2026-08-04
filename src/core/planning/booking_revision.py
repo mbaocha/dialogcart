@@ -3,7 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional, Set
+
+from core.adapters.nlu.entity_schema_builder import (
+    canonicalize_search_criteria_key,
+    search_criteria_slot_keys_from_entity_schema,
+)
 
 
 def has_committed_create_appointment(
@@ -30,11 +35,24 @@ class BookingRevision:
     service: bool = False
     date: bool = False
     time: bool = False
+    # Non-service search-criteria keys that changed (e.g. staff_id).
+    criteria: bool = False
     changes: tuple = ()
 
     @property
     def any(self) -> bool:
-        return bool(self.changes) or self.service or self.date or self.time
+        return (
+            bool(self.changes)
+            or self.service
+            or self.date
+            or self.time
+            or self.criteria
+        )
+
+    @property
+    def invalidates_availability(self) -> bool:
+        """True when trusted availability search identity must be cleared."""
+        return self.service or self.date or self.criteria
 
 
 def _normalize_date_value(value: Any) -> Optional[str]:
@@ -75,36 +93,81 @@ def _active_search_date(session_state: Optional[Dict[str, Any]]) -> Optional[str
     return None
 
 
+def _entity_schema_from_payload(
+    luma_response: Optional[Dict[str, Any]],
+) -> Optional[Mapping[str, Any]]:
+    if not isinstance(luma_response, dict):
+        return None
+    schema = luma_response.get("_entity_schema")
+    return schema if isinstance(schema, dict) else None
+
+
+def _current_turn_value(
+    luma_response: Dict[str, Any],
+    key: str,
+) -> Optional[str]:
+    """Prefer facts, then promoted slots, for a search-criteria key."""
+    facts = luma_response.get("facts")
+    if isinstance(facts, dict):
+        value = _meaningful_text(facts.get(key))
+        if value:
+            return value
+        # Legacy alias (staff → staff_id already canonicalized by callers).
+        for raw_key, raw_val in facts.items():
+            if canonicalize_search_criteria_key(str(raw_key)) == key:
+                value = _meaningful_text(raw_val)
+                if value:
+                    return value
+    slots = luma_response.get("slots")
+    if isinstance(slots, dict):
+        return _meaningful_text(slots.get(key))
+    return None
+
+
 def detect_booking_revision(
     luma_response: Optional[Dict[str, Any]],
     session_state: Optional[Dict[str, Any]],
+    *,
+    entity_schema: Optional[Mapping[str, Any]] = None,
 ) -> BookingRevision:
-    """Detect mid-flow service/date/time replacements against durable session slots.
+    """Detect mid-flow search-criteria / temporal replacements vs durable state.
 
     First acquisition (None → value), same-value restatement, and absent current-turn
     values are not revisions. Only a prior durable value replaced by a different
     meaningful value is classified as a revision (and may invalidate availability).
 
-    For dates, the prior value is the active search date: durable ``slots.date``
-    when present, otherwise the carried session ``date_proposal`` from the last
-    exploratory search. Proposal-only search context must still revise.
+    Availability-criteria business keys come from
+    ``search_criteria_slot_keys_from_entity_schema`` (effective
+    ``availability_criteria``, with role defaults when absent).
     """
     session_slots = (
         session_state.get("slots") if isinstance(session_state, dict) else None
     ) or {}
     changes = []
+    schema = entity_schema or _entity_schema_from_payload(luma_response)
+    criteria_keys: Set[str] = set(search_criteria_slot_keys_from_entity_schema(schema))
+    # Temporal keys are handled separately below.
+    criteria_keys -= {"date", "start_date", "date_range"}
 
     service_changed = False
     new_service = None
     if isinstance(luma_response, dict):
-        facts = luma_response.get("facts")
-        if isinstance(facts, dict):
-            new_service = facts.get("service_id")
-    new_service = _meaningful_text(new_service)
+        new_service = _current_turn_value(luma_response, "service_id")
     current_service = _meaningful_text(session_slots.get("service_id"))
     if new_service and current_service and new_service != current_service:
         service_changed = True
         changes.append(FieldChange("service", current_service, new_service))
+
+    criteria_changed = False
+    if isinstance(luma_response, dict):
+        for key in sorted(criteria_keys):
+            if key == "service_id":
+                continue  # tracked via service flag for restore compatibility
+            new_val = _current_turn_value(luma_response, key)
+            current_val = _meaningful_text(session_slots.get(key))
+            if new_val and current_val and new_val != current_val:
+                criteria_changed = True
+                changes.append(FieldChange(key, current_val, new_val))
 
     date_changed = False
     new_date = None
@@ -144,6 +207,7 @@ def detect_booking_revision(
         service=service_changed,
         date=date_changed,
         time=time_changed,
+        criteria=criteria_changed,
         changes=tuple(changes),
     )
 

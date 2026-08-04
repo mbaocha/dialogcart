@@ -57,15 +57,15 @@
       "name": "CORRECTION"
     },
     "temporal": {
-      "confidence": 0.95,
+      "confidence": 0.9,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,
       "end_time_expression": null,
-      "expression": "july 9",
+      "expression": "July 9",
       "mode": "single_day",
       "start_date": "2026-07-09",
-      "start_date_expression": "july 9",
+      "start_date_expression": "July 9",
       "start_time": null,
       "start_time_expression": null
     },

@@ -4,68 +4,120 @@ Slot fingerprint utilities for availability resolution.
 Fingerprints represent **search criteria only** — the parameters that
 triggered or would trigger SEARCH_AVAILABILITY. Selection and presentation
 state (time, time_proposal, page_index, presented_availability) must never
-affect the fingerprint.
+affect the fingerprint hash itself.
 
-Search criteria: organization_id, service_id, date, and optional
-location/staff/resource when applicable.
+Readiness comparison may treat hydrating the already-presented search day
+into ``date_proposal`` as equivalent to an undated exploratory fingerprint
+(see ``slots_match_availability_fingerprint_for_readiness``). That is a
+readiness equivalence check — not a fingerprint field.
+
+Availability criteria come from ``search_criteria_slot_keys_from_entity_schema``
+(single source of truth). When possible the hashed identity aligns with the
+availability request adapter output.
 """
 
 import hashlib
 import json
 import logging
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
+
+from core.adapters.nlu.entity_schema_builder import (
+    canonicalize_search_criteria_key,
+    search_criteria_slot_keys_from_entity_schema,
+)
 
 logger = logging.getLogger(__name__)
 
-_SEARCH_CRITERIA_SLOT_KEYS = frozenset(
-    {
-        "service_id",
-        "date",
-        "start_date",
-        "date_range",
-        "location",
-        "staff",
-        "resource",
-        "resource_id",
-    }
-)
+
+def _canonicalize_criteria_slots(slots: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize legacy aliases (e.g. staff → staff_id) for search criteria."""
+    if not isinstance(slots, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    for key, value in slots.items():
+        if value is None:
+            continue
+        canonical = canonicalize_search_criteria_key(str(key))
+        # Prefer an already-canonical value over a legacy alias.
+        if canonical in out and key != canonical:
+            continue
+        out[canonical] = value
+    return out
 
 
 def _normalize_time_for_fingerprint(time_value: Any) -> Optional[str]:
-    """Normalize time strings to HH:MM (24h) for stable comparison outside fingerprints."""
+    """Normalize clock strings to canonical ``HH:MM`` (24-hour).
+
+    Contract:
+    - Valid clock input → ``HH:MM`` string (zero-padded).
+    - Absent / empty / unrecognized / out-of-range → ``None`` (explicit failure).
+
+    Callers must treat only a non-``None`` return as successful normalization.
+    Never returns the raw input string for unrecognized forms.
+
+    Supported forms (optional spaces): ``1:30``, ``1.30``, ``13:30``, ``1.30pm``,
+    ``5pm``, ``9``, ``9am``.
+    """
     if time_value is None:
         return None
     raw = str(time_value).lower().strip()
     if not raw:
         return None
 
-    m = re.match(r"^(\d{1,2}):(\d{2})$", raw)
-    if m:
-        return f"{int(m.group(1)):02d}:{m.group(2)}"
+    compact = re.sub(r"\s+", "", raw)
 
-    m = re.match(r"^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$", raw)
+    # Colon or dot minute separator without meridiem: 1:30 / 1.30 / 13:30
+    m = re.fullmatch(r"(\d{1,2})[:.](\d{2})", compact)
+    if m:
+        hour, minute = int(m.group(1)), int(m.group(2))
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            return f"{hour:02d}:{minute:02d}"
+        return None
+
+    # Hour with optional minutes (colon or dot) and required meridiem: 1.30pm / 5pm
+    m = re.fullmatch(r"(\d{1,2})(?:[:.](\d{2}))?(am|pm)", compact)
     if m:
         hour = int(m.group(1))
         minute = int(m.group(2) or 0)
         meridiem = m.group(3)
+        if hour < 1 or hour > 12 or minute < 0 or minute > 59:
+            return None
         if meridiem == "pm" and hour < 12:
             hour += 12
         elif meridiem == "am" and hour == 12:
             hour = 0
         return f"{hour:02d}:{minute:02d}"
 
-    return raw
+    # Bare hour without meridiem: "9" → 09:00
+    m = re.fullmatch(r"(\d{1,2})", compact)
+    if m:
+        hour = int(m.group(1))
+        if 0 <= hour <= 23:
+            return f"{hour:02d}:00"
+        return None
+
+    return None
 
 
-def _extract_search_criteria_slots(slots: Dict[str, Any]) -> Dict[str, Any]:
-    """Keep only durable search-parameter slots; drop selection/presentation fields."""
-    if not isinstance(slots, dict):
-        return {}
+def _criteria_keys(
+    entity_schema: Optional[Mapping[str, Any]] = None,
+) -> frozenset:
+    return search_criteria_slot_keys_from_entity_schema(entity_schema)
+
+
+def _extract_search_criteria_slots(
+    slots: Dict[str, Any],
+    *,
+    entity_schema: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Keep only durable availability-criteria slots; drop selection fields."""
+    canonical = _canonicalize_criteria_slots(slots if isinstance(slots, dict) else {})
+    allowed = _criteria_keys(entity_schema)
     return {
         key: value
-        for key, value in slots.items()
-        if key in _SEARCH_CRITERIA_SLOT_KEYS and value is not None
+        for key, value in canonical.items()
+        if key in allowed and value is not None
     }
 
 
@@ -133,6 +185,29 @@ def _resolve_organization_id_for_fingerprint(
     return organization_id
 
 
+def _entity_schema_from_sources(
+    *,
+    entity_schema: Optional[Mapping[str, Any]] = None,
+    luma_response: Optional[Dict[str, Any]] = None,
+    session_state: Optional[Dict[str, Any]] = None,
+    slots: Optional[Dict[str, Any]] = None,
+) -> Optional[Mapping[str, Any]]:
+    if isinstance(entity_schema, Mapping):
+        return entity_schema
+    for container in (luma_response, session_state, slots):
+        if not isinstance(container, dict):
+            continue
+        schema = container.get("_entity_schema")
+        if isinstance(schema, Mapping):
+            return schema
+        facts = container.get("facts")
+        if isinstance(facts, dict):
+            nested = facts.get("_entity_schema")
+            if isinstance(nested, Mapping):
+                return nested
+    return None
+
+
 def build_availability_fingerprint_slots(
     slots: Dict[str, Any],
     *,
@@ -144,6 +219,7 @@ def build_availability_fingerprint_slots(
     luma_response: Optional[Dict[str, Any]] = None,
     session_state: Optional[Dict[str, Any]] = None,
     temporal: Optional[Dict[str, Any]] = None,
+    entity_schema: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Assemble canonical **search-criteria** slot inputs for fingerprint store/compare.
 
@@ -157,6 +233,12 @@ def build_availability_fingerprint_slots(
 
     luma_response = luma_response if isinstance(luma_response, dict) else {}
     session_state = session_state if isinstance(session_state, dict) else {}
+    schema = _entity_schema_from_sources(
+        entity_schema=entity_schema,
+        luma_response=luma_response,
+        session_state=session_state,
+        slots=slots if isinstance(slots, dict) else None,
+    )
     proposals = _resolve_fingerprint_proposals(
         luma_response=luma_response,
         session_state=session_state,
@@ -190,7 +272,9 @@ def build_availability_fingerprint_slots(
         else luma_response.get("operation"),
     )
 
-    criteria_slots = _extract_search_criteria_slots(slots or {})
+    criteria_slots = _extract_search_criteria_slots(
+        slots or {}, entity_schema=schema
+    )
 
     expanded = expand_slots_for_planning(
         criteria_slots,
@@ -205,22 +289,28 @@ def build_availability_fingerprint_slots(
     expanded["organization_id"] = _resolve_organization_id_for_fingerprint(
         organization_id
     )
+    if schema is not None:
+        expanded["_entity_schema"] = schema
 
     logger.debug(
         "[FINGERPRINT_SLOTS_OUTPUT] criteria_slots=%s",
-        expanded,
+        {k: v for k, v in expanded.items() if k != "_entity_schema"},
     )
     return expanded
 
 
 def compute_availability_fingerprint(
-    slots: Dict[str, Any], intent_name: Optional[str] = None
+    slots: Dict[str, Any],
+    intent_name: Optional[str] = None,
+    *,
+    entity_schema: Optional[Mapping[str, Any]] = None,
 ) -> Optional[str]:
     """
-    Compute a deterministic fingerprint from **search criteria** slots.
+    Compute a deterministic fingerprint from **availability criteria** slots.
 
-    Includes: organization_id, service_id, date, and optional location/staff.
-    Never includes time or presentation/selection fields.
+    Includes organization_id, service_id, date, and any other keys from
+    ``search_criteria_slot_keys_from_entity_schema``. Never includes time or
+    presentation/selection fields.
     """
     logger.debug(
         "[FINGERPRINT_COMPUTE_INPUT] slots=%s intent=%s",
@@ -228,31 +318,66 @@ def compute_availability_fingerprint(
         intent_name,
     )
 
-    normalized_org, normalized_service, normalized_date, ignored_time = (
-        _extract_normalized_slots(slots)
+    schema = _entity_schema_from_sources(
+        entity_schema=entity_schema,
+        slots=slots if isinstance(slots, dict) else None,
     )
-
-    if not normalized_service:
+    criteria = _canonicalize_criteria_slots(slots if isinstance(slots, dict) else {})
+    service = criteria.get("service_id")
+    if not service:
         logger.debug("[FINGERPRINT_COMPUTE_OUTPUT] skipped: missing service_id")
         return None
 
-    fingerprint_dict: Dict[str, Any] = {
-        "organization_id": normalized_org,
-        "service_id": normalized_service,
-        "date": normalized_date,
-    }
+    # Prefer identity aligned with the availability request adapter.
+    from core.workflows.availability.request_adapter import (
+        build_service_availability_request,
+    )
 
-    for optional_key in ("location", "staff", "resource", "resource_id"):
-        raw = slots.get(optional_key)
-        if raw is not None and raw != "":
-            fingerprint_dict[optional_key] = str(raw).lower().strip()
+    org = criteria.get("organization_id")
+    try:
+        org_id: Any = int(org) if org is not None else None
+    except (TypeError, ValueError):
+        org_id = org
+    request = build_service_availability_request(
+        criteria,
+        organization_id=org_id,
+        api_service_id=service,
+        entity_schema=schema,
+    )
+    identity = dict(request.get("identity") or {})
+    # Preserve legacy fingerprint shape when organization_id was omitted.
+    if org is None:
+        identity["organization_id"] = None
+    return _hash_fingerprint_identity(identity, ignored_time=criteria.get("time"))
 
-    fingerprint_json = json.dumps(fingerprint_dict, sort_keys=True, ensure_ascii=False)
+
+def _hash_fingerprint_identity(
+    identity: Mapping[str, Any],
+    *,
+    ignored_time: Any = None,
+) -> Optional[str]:
+    if not identity.get("service_id"):
+        return None
+    normalized: Dict[str, Any] = {}
+    for key, value in identity.items():
+        if value is None or value == "" or key == "_entity_schema":
+            continue
+        if key == "organization_id":
+            normalized[key] = str(value).lower().strip()
+        elif key in ("service_id", "date"):
+            normalized[key] = str(value).lower().strip()
+        else:
+            normalized[key] = str(value).lower().strip()
+    if "service_id" not in normalized:
+        return None
+    # Ensure date key present (may be None) for stable salon/hotel hashes.
+    if "date" not in normalized:
+        normalized["date"] = None
+    fingerprint_json = json.dumps(normalized, sort_keys=True, ensure_ascii=False)
     fingerprint_hash = hashlib.sha256(fingerprint_json.encode("utf-8")).hexdigest()
-
     logger.debug(
         "[FINGERPRINT_COMPUTE_OUTPUT] fingerprint_dict=%s ignored_time=%s hash=%s",
-        fingerprint_dict,
+        normalized,
         ignored_time,
         fingerprint_hash[:16],
     )
@@ -263,6 +388,8 @@ def slots_match_availability_fingerprint(
     slots: Dict[str, Any],
     stored_fingerprint: Optional[str],
     intent_name: Optional[str] = None,
+    *,
+    entity_schema: Optional[Mapping[str, Any]] = None,
 ) -> bool:
     """
     Check if current search criteria match a stored availability fingerprint.
@@ -278,8 +405,95 @@ def slots_match_availability_fingerprint(
     if not stored_fingerprint:
         return False
 
-    current_fingerprint = compute_availability_fingerprint(slots, intent_name)
+    current_fingerprint = compute_availability_fingerprint(
+        slots, intent_name, entity_schema=entity_schema
+    )
     if not current_fingerprint:
         return False
 
     return current_fingerprint == stored_fingerprint
+
+
+def _active_presented_search_date(
+    session_state: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    """Concrete day already shown from the trusted availability presentation/cache."""
+    if not isinstance(session_state, dict):
+        return None
+    from core.workflows.availability.presentation import normalize_search_date
+
+    presented = session_state.get("presented_availability")
+    if isinstance(presented, dict):
+        search_date = normalize_search_date(presented.get("search_date"))
+        if search_date:
+            return search_date
+    last = session_state.get("last_execution_result")
+    if isinstance(last, dict):
+        search_date = normalize_search_date(last.get("search_date"))
+        if search_date:
+            return search_date
+    availability = session_state.get("availability")
+    if isinstance(availability, dict):
+        presentation = availability.get("presentation") or {}
+        if isinstance(presentation, dict):
+            nested = presentation.get("presented") or {}
+            if isinstance(nested, dict):
+                search_date = normalize_search_date(nested.get("search_date"))
+                if search_date:
+                    return search_date
+        cache = availability.get("cache") or {}
+        if isinstance(cache, dict):
+            search_result = cache.get("search_result") or {}
+            if isinstance(search_result, dict):
+                search_date = normalize_search_date(search_result.get("search_date"))
+                if search_date:
+                    return search_date
+    return None
+
+
+def slots_match_availability_fingerprint_for_readiness(
+    slots: Dict[str, Any],
+    stored_fingerprint: Optional[str],
+    *,
+    intent_name: Optional[str] = None,
+    session_state: Optional[Dict[str, Any]] = None,
+    entity_schema: Optional[Mapping[str, Any]] = None,
+) -> bool:
+    """Fingerprint match for availability readiness, including presentation-date hydration.
+
+    Undated exploratory SEARCH stores a service-only fingerprint while the
+    concrete day lives on presentation. Hydrating that same day into
+    ``date_proposal`` must not look like a criteria change.
+
+    Equivalence holds only when the current date equals the already-presented
+    search day and the undated criteria still match the stored fingerprint.
+    A different explicit date remains a real criteria change.
+    """
+    schema = entity_schema or _entity_schema_from_sources(
+        slots=slots if isinstance(slots, dict) else None,
+        session_state=session_state,
+    )
+    if slots_match_availability_fingerprint(
+        slots, stored_fingerprint, intent_name, entity_schema=schema
+    ):
+        return True
+    if not stored_fingerprint:
+        return False
+
+    presented_date = _active_presented_search_date(session_state)
+    if not presented_date:
+        return False
+
+    _, _, current_date, _ = _extract_normalized_slots(slots)
+    presented_norm = str(presented_date).lower().strip()
+    if not current_date or current_date != presented_norm:
+        return False
+
+    undated_slots = {
+        key: value
+        for key, value in slots.items()
+        if key not in ("date", "start_date", "date_range") and value is not None
+    }
+    return slots_match_availability_fingerprint(
+        undated_slots, stored_fingerprint, intent_name, entity_schema=schema
+    )

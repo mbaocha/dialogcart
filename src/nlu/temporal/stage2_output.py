@@ -7,10 +7,16 @@ Fallback: legacy LLM fields → Temporal → legacy (behaviour-preserving).
 
 from __future__ import annotations
 
+import re
+from dataclasses import replace
 from typing import Any, Dict, Optional, Tuple
 
 from .models import Temporal
 from .project_legacy import project_legacy_from_temporal
+
+# Documented Stage 2 exact-point phrases: "by X" / "from X" → start_time=end_time.
+# Do not match "before" (undocumented deadline).
+_BY_FROM_EXACT_RE = re.compile(r"\b(?:by|from)\b", re.IGNORECASE)
 
 
 def _opt_str(value: Any) -> Optional[str]:
@@ -29,9 +35,36 @@ def _opt_float(value: Any) -> Optional[float]:
         return None
 
 
+def apply_by_from_exact_contract(
+    temporal: Temporal,
+    *,
+    source_text: Optional[str] = None,
+) -> Temporal:
+    """Enforce Stage 2 contract: ``by X`` / ``from X`` → start_time=end_time=X.
+
+    Repairs intermittent LLM output that places the clock only on ``end_time``.
+    Leaves ``after X`` and unrelated shapes unchanged.
+    """
+    if temporal.start_time or not temporal.end_time:
+        return temporal
+
+    haystacks = (
+        temporal.expression,
+        source_text,
+    )
+    if not any(
+        isinstance(h, str) and _BY_FROM_EXACT_RE.search(h) for h in haystacks
+    ):
+        return temporal
+
+    return replace(temporal, start_time=temporal.end_time)
+
+
 def parse_temporal_dict(
     raw: Optional[Dict[str, Any]],
     confidence: Optional[float] = None,
+    *,
+    source_text: Optional[str] = None,
 ) -> Temporal:
     """Parse a Temporal tool payload into a Temporal dataclass."""
     raw = raw if isinstance(raw, dict) else {}
@@ -66,7 +99,7 @@ def parse_temporal_dict(
             end_time,
         )
 
-    return Temporal(
+    temporal = Temporal(
         expression=expression,
         start_date_expression=start_date_expression,
         start_time_expression=start_time_expression,
@@ -79,11 +112,14 @@ def parse_temporal_dict(
         mode=mode,
         confidence=conf,
     )
+    return apply_by_from_exact_contract(temporal, source_text=source_text)
 
 
 def resolve_temporal_from_tool_input(
     raw: Dict[str, Any],
     confidence: Optional[float] = None,
+    *,
+    source_text: Optional[str] = None,
 ) -> Temporal:
     """Prefer canonical temporal from the tool payload; else empty Temporal."""
     conf = _opt_float(confidence)
@@ -91,12 +127,14 @@ def resolve_temporal_from_tool_input(
         conf = _opt_float(raw.get("confidence"))
 
     temporal_raw = raw.get("temporal") if isinstance(raw.get("temporal"), dict) else {}
-    return parse_temporal_dict(temporal_raw, conf)
+    return parse_temporal_dict(temporal_raw, conf, source_text=source_text)
 
 
 def materialize_temporal_ownership(
     raw: Dict[str, Any],
     confidence: Optional[float] = None,
+    *,
+    source_text: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any], Optional[Dict[str, Any]]]:
     """
     Own temporal understanding in Temporal; project legacy compatibility fields.
@@ -105,7 +143,9 @@ def materialize_temporal_ownership(
         (temporal_dict, legacy_facts_fragment, time_constraint)
         legacy_facts_fragment has dates/times/date_time_pairs only.
     """
-    temporal = resolve_temporal_from_tool_input(raw, confidence=confidence)
+    temporal = resolve_temporal_from_tool_input(
+        raw, confidence=confidence, source_text=source_text
+    )
     legacy = project_legacy_from_temporal(temporal)
     facts_fragment = {
         "dates": legacy["dates"],

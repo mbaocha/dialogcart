@@ -13,6 +13,26 @@ Request body (POST /resolve):
                 "examples": [str]             # optional Haiku prompt hints only
             }
         },
+        "entity_schema": {                  # optional — schema-driven CREATE business entities
+            "version": 1,
+            "fields": [
+                {
+                    "name": str,
+                    "type": "catalog" | "enum" | "text",
+                    "description": str,
+                    "role": "bookable_item" | "staff",  # optional; catalog mapping hint
+                    "catalog": {str: str},    # required for catalog — phrase → id
+                    "values": [str]           # required for enum
+                }
+            ]
+        },
+        # When entity_schema is present, declared fields are preserved on facts.
+        # Each catalog field resolves independently against its own catalog.
+        # bookable_item still emits facts.service_id + service_candidates for Core.
+        # When entity_schema is present, for identical normalized (case-insensitive)
+        # lookup keys: entity_schema.catalog > tenant_context.aliases (legacy flat merge).
+        # Prompt text preserves original catalog phrase labels; resolve uses
+        # lowercased keys. Compiled once in the pipeline; CREATE does not recompile.
         "conversation_context": {           # optional — omit for stateless behaviour
             "last_intent": str,             # intent from the previous turn
             "last_search_query": str,       # search_query from the previous turn
@@ -44,7 +64,10 @@ Response contract (mirrors luma /resolve):
         "date_constraint": {...} | null,    # only when date mode is flexible
         "search_query": str | null,         # only for RAG intents
         "off_topic_query": str | null,      # only for OFF_TOPIC (canonical question)
+        "answerable": bool | null,          # only for OFF_TOPIC (Core digression evidence)
+        "answer": str | null,               # only for OFF_TOPIC (brief evidence answer)
         "operation": str | null,            # structured interaction subtype (e.g. browse_next)
+        "declined_entities": [str, ...],    # schema field names explicitly declined (optional)
         "temporal": {...} | null,           # additive Stage2 canonical temporal (unused by Core yet)
         "turn": {"understanding": "UNDERSTOOD" | "UNRECOGNIZED_INPUT"}
     }
@@ -64,6 +87,7 @@ load_dotenv(Path(__file__).parent / ".env")
 from flask import Flask, jsonify, request
 
 from .pipeline import NLUPipeline
+from .stages.stage2.entity_schema import EntitySchemaValidationError
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger(__name__)
@@ -80,11 +104,24 @@ def resolve():
     test_now = body.get("test_now")
     timezone = body.get("timezone", "UTC")
     conversation_context = body.get("conversation_context") or None
+    # Absent key and explicit null both mean legacy path (no schema).
+    entity_schema = body.get("entity_schema", None)
 
-    result = _pipeline.run(
-        text, tenant_context, now=test_now, timezone=timezone,
-        conversation_context=conversation_context,
-    )
+    try:
+        result = _pipeline.run(
+            text,
+            tenant_context,
+            now=test_now,
+            timezone=timezone,
+            conversation_context=conversation_context,
+            entity_schema=entity_schema,
+        )
+    except EntitySchemaValidationError as exc:
+        logger.warning("entity_schema validation failed: %s", exc)
+        return jsonify({
+            "error": "entity_schema_invalid",
+            "message": str(exc),
+        }), 400
 
     response = {
         "intent": result.intent,
@@ -98,10 +135,16 @@ def resolve():
         response["search_query"] = result.search_query
     if result.off_topic_query is not None:
         response["off_topic_query"] = result.off_topic_query
+    if result.answerable is not None:
+        response["answerable"] = result.answerable
+    if result.answer is not None:
+        response["answer"] = result.answer
     if result.service_candidates:
         response["service_candidates"] = result.service_candidates
     if result.operation is not None:
         response["operation"] = result.operation
+    if result.declined_entities:
+        response["declined_entities"] = list(result.declined_entities)
     if result.temporal is not None:
         response["temporal"] = result.temporal
     if result.understanding:
@@ -124,4 +167,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

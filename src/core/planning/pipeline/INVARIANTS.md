@@ -19,3 +19,4 @@ and `MACRO_PHASES.md`.
 13. **NLU failure is an admission boundary** — handled before Attach/Decision, never as a Decision writer.
 14. **One-way dependency flow** — orchestration may call algorithms/policy/facts; those modules must not re-enter orchestration.
 15. **`plan.action` is execution-only** — conversation phase is expressed by `status` / `stage` / `awaiting`, never inferred from `action`.
+16. **No dead READY terminal** — illegal: `status=READY` + `action=None` + non-empty `missing_slots` without an explicit planner presentation outcome (`availability_reshow`, cache-satisfiable browse, `recovery_presentation`). After action selection, Stage 08 must reconcile to `NEEDS_CLARIFICATION` (with `awaiting` from `ask_next`), keep a presentation outcome, or keep an execution action.

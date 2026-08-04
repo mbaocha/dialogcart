@@ -69,7 +69,7 @@ class TestExtractAvailabilityBrowse:
         merged = {
             "intent": {"name": "CREATE_APPOINTMENT"},
             "_raw_luma_response": {"intent": {"name": "AVAILABILITY"}},
-            "_source_text": "show me additional times",
+            "_source_text": "show more",
         }
         session = {
             "last_execution_result": {
@@ -83,7 +83,7 @@ class TestExtractAvailabilityBrowse:
     def test_resolve_does_not_infer_without_cached_availability(self):
         merged = {
             "_raw_luma_response": {"intent": {"name": "AVAILABILITY"}},
-            "_source_text": "show more times",
+            "_source_text": "show more",
         }
         assert resolve_availability_browse(merged, {}) is None
 
@@ -92,7 +92,7 @@ class TestExtractAvailabilityBrowse:
         merged = {
             "intent": {"name": "CREATE_APPOINTMENT"},
             "_raw_luma_response": {"intent": {"name": "CREATE_APPOINTMENT"}},
-            "_source_text": "show more times",
+            "_source_text": "show more",
         }
         session = {
             "intent_name": "CREATE_APPOINTMENT",
@@ -108,7 +108,7 @@ class TestExtractAvailabilityBrowse:
         merged = {
             "intent": {"name": "CREATE_APPOINTMENT"},
             "_raw_luma_response": {"intent": {"name": "CREATE_APPOINTMENT"}},
-            "_source_text": "show more times",
+            "_source_text": "show more",
         }
         session = {"intent_name": "CREATE_APPOINTMENT"}
         assert resolve_availability_browse(merged, session) is None
@@ -117,9 +117,15 @@ class TestExtractAvailabilityBrowse:
     @pytest.mark.parametrize(
         "text,expected",
         [
-            ("show me additional times", "next"),
-            ("show more times", "next"),
-            ("earlier times", "previous"),
+            ("show more", "next"),
+            ("more", "next"),
+            ("next", "next"),
+            ("previous", "previous"),
+            ("show previous", "previous"),
+            ("back", "previous"),
+            ("next day", None),
+            ("previous day", None),
+            ("later date", None),
             ("book premium", None),
         ],
     )
@@ -129,6 +135,7 @@ class TestExtractAvailabilityBrowse:
             assert inferred is None
         else:
             assert inferred is not None and inferred["direction"] == expected
+            assert inferred.get("axis_hint") == "any"
 
 
 class TestMergeAvailabilityBrowse:
@@ -150,8 +157,9 @@ class TestMergeAvailabilityBrowse:
         }
 
     def test_merge_attaches_transient_browse_signal(self):
+        # Post–Stage 01 shape: durable planning intent + browse via operation.
         luma = {
-            "intent": {"name": "AVAILABILITY"},
+            "intent": {"name": "CREATE_APPOINTMENT"},
             "operation": "browse_next",
             "slots": {},
         }
@@ -163,7 +171,7 @@ class TestMergeAvailabilityBrowse:
         presented_before = dict(session["presented_availability"])
         slots_before = dict(session["slots"])
         luma = {
-            "intent": {"name": "AVAILABILITY"},
+            "intent": {"name": "CREATE_APPOINTMENT"},
             "operation": "browse_previous",
             "slots": {},
         }

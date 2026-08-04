@@ -1,0 +1,97 @@
+{
+  "key": {
+    "conversation_context": {
+      "last_date_proposal": {
+        "mode": "single_day",
+        "start": "2026-07-09"
+      },
+      "last_intent": "CREATE_APPOINTMENT",
+      "last_search_query": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "9am"
+        },
+        {
+          "role": "assistant",
+          "text": "Unfortunately, 9:00 AM isn't available for Premium Haircut on July 9th. Here are the open times:\n\n- 3:00 PM\n- 4:00 PM\n- 5:00 PM\n\nWhich would work best for you?"
+        }
+      ],
+      "resolved_service_id": "premium haircut",
+      "turns": [
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "book haircut"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "premium"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "actually July 9"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "show more times"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "9am"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": "beauty_and_wellness.haircut",
+        "premium haircut": "beauty_and_wellness.haircut"
+      },
+      "booking_mode": "service"
+    },
+    "text": "5pm",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service_id": "premium haircut",
+      "times": [
+        "17:00"
+      ]
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CREATE_APPOINTMENT"
+    },
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": "17:00",
+      "mode": "none",
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": "17:00",
+      "start_time_expression": null
+    },
+    "time_constraint": {
+      "end": "17:00",
+      "label": null,
+      "mode": "exact",
+      "start": "17:00"
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

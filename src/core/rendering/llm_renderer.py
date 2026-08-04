@@ -5,10 +5,10 @@ Takes a render_instruction and facts (from handlers, availability, recovery, and
 other rendering callers) and produces user-facing text via Claude.
 
 Callers own the instruction and facts; this module owns wording only.
-Business context is extracted from facts["structured_context"] when present.
+Authoritative business knowledge comes from facts["structured_context"] when
+present. Retrieved FAQ chunks are supporting evidence only.
 
-Uses the shared rendering LLM client (``core.rendering.llm_client``) — same client
-as ``answer_off_topic``.
+Uses the shared rendering LLM client (``core.rendering.llm_client``).
 """
 
 import json
@@ -23,6 +23,27 @@ logger = logging.getLogger(__name__)
 _FALLBACK_TEXT = "I'm unable to respond right now. Please try again."
 _MAX_TOKENS = 512
 
+# Conversational principles for answers drawn from Business Knowledge.
+# Does not alter structured_context — guidance only; the model owns presentation.
+_BUSINESS_KNOWLEDGE_PRESENTATION = (
+    "When answering from Business Knowledge, sound like an experienced "
+    "front-desk colleague helping a customer in person.\n"
+    "- Introduce the business naturally when it helps orientation, then present "
+    "offerings so the customer can compare options and decide.\n"
+    "- Surface decision-useful details when relevant — such as what each option "
+    "is, what it costs, how long it takes, and when you are open — woven into "
+    "clear, readable language rather than raw data dumps.\n"
+    "- Prefer continuing the conversation here: invite the next useful step "
+    "(for example choosing or booking something) instead of sending the "
+    "customer elsewhere.\n"
+    "- Share phone numbers, emails, or contact instructions only when the "
+    "Current user request explicitly asks for contact information.\n"
+    "- Never encourage calling or contacting the business when you can keep "
+    "helping in this chat.\n"
+    "Choose structure and wording that fit the vertical and the question; "
+    "do not follow a fixed template."
+)
+
 
 @dataclass
 class LlmRenderRequest:
@@ -32,20 +53,20 @@ class LlmRenderRequest:
     user_request: Optional[str] = None
 
 
+def _format_structured_data(value: Any) -> str:
+    """Render arbitrary structured data as indented JSON (stable, key-preserving)."""
+    return json.dumps(value, default=str, ensure_ascii=False, indent=2)
+
+
 def _build_system_prompt(structured_context: Dict[str, Any]) -> str:
-    business_name = structured_context.get("business_name") or "this business"
-    lines = [f"You are a helpful assistant for {business_name}."]
-
-    about = structured_context.get("business_about")
-    if about:
-        lines.append(about)
-
-    phone = structured_context.get("business_phone")
-    if phone:
-        lines.append(f"Contact phone: {phone}")
-
-    lines.append(
-        "Respond naturally and concisely. "
+    del structured_context  # identity/knowledge live in the user message sections
+    lines = [
+        "You are a helpful assistant for this business.",
+        "Respond naturally and concisely.",
+        "Business Knowledge is authoritative business information.",
+        "Supporting Evidence provides additional retrieved context.",
+        "If Business Knowledge and Supporting Evidence conflict, Business Knowledge wins.",
+        "Do not invent business facts absent from Business Knowledge and Supporting Evidence.",
         "Only use information from the provided context. "
         "Do not invent details beyond the provided context.\n"
         "When a Facts section is supplied, it contains the response to the user's latest request. "
@@ -61,14 +82,15 @@ def _build_system_prompt(structured_context: Dict[str, Any]) -> str:
         "Do not add generic closing questions (for example "
         "\"Is there anything else I can assist you with?\").\n"
         "Produce only the direct answer and, when supplied, the natural workflow resume.\n"
-        "The Conversation, Current user request, Facts, Resume, Evidence, Availability, "
-        "Recovery, and any other supplied sections are internal instructions for you only.\n"
+        "The Conversation, Current user request, Facts, Resume, Business Knowledge, "
+        "Supporting Evidence, Availability, Recovery, and any other supplied sections "
+        "are internal instructions for you only.\n"
         "Never mention, describe, compare, reconcile, or explain those internal sections.\n"
         "Never tell the user that supplied facts are relevant or irrelevant to the conversation.\n"
         "Never mention context mismatches.\n"
         "Never explain why you answered a question.\n"
-        "Never describe your reasoning process."
-    )
+        "Never describe your reasoning process.",
+    ]
     return "\n".join(lines)
 
 
@@ -92,20 +114,29 @@ def _build_user_message(request: LlmRenderRequest) -> str:
     if isinstance(user_request, str) and user_request.strip():
         parts.append(f"Current user request:\n{user_request.strip()}")
 
-    # World-knowledge facts from answer_off_topic (not business RAG).
+    # World-knowledge facts from Stage-2 OFF_TOPIC evidence (not business RAG).
     answer = request.facts.get("answer")
     if isinstance(answer, str) and answer.strip():
         parts.append(f"Facts:\n- {answer.strip()}")
 
-    # Retrieved chunks (top 3) — business FAQ / RAG
+    # Authoritative org facts — full structured_context, no field allowlist.
+    structured_context = request.facts.get("structured_context")
+    if isinstance(structured_context, dict) and structured_context:
+        parts.append(
+            "Business Knowledge (Authoritative):\n"
+            + _format_structured_data(structured_context)
+        )
+        parts.append(_BUSINESS_KNOWLEDGE_PRESENTATION)
+
+    # Retrieved chunks — supporting FAQ/RAG evidence only (not merged into knowledge).
     chunks = request.facts.get("chunks") or []
     evidence_lines = [
         f"- {c.get('content', '').strip()}"
         for c in chunks[:3]
-        if (c.get("content") or "").strip()
+        if isinstance(c, dict) and (c.get("content") or "").strip()
     ]
     if evidence_lines:
-        parts.append("Evidence:\n" + "\n".join(evidence_lines))
+        parts.append("Supporting Evidence:\n" + "\n".join(evidence_lines))
 
     resume = request.facts.get("resume_instruction")
     if isinstance(resume, str) and resume.strip():
@@ -172,9 +203,96 @@ def render_llm(request: LlmRenderRequest) -> str:
     Call Claude to produce user-facing text from a render request.
 
     Returns a safe fallback string on any failure — never raises.
+
+    Browse-status and TIME_MATCH_MISMATCH requests are resolved deterministically
+    so exhaustion / unavailable-time wording cannot collapse into a generic
+    availability list from conversation history or facts alone.
     """
+    facts = request.facts if isinstance(request.facts, dict) else {}
+    browse_status = facts.get("browse_status")
+    if isinstance(browse_status, str) and browse_status.strip():
+        from core.rendering.availability_renderer import resolve_browse_status_text
+
+        return resolve_browse_status_text(
+            browse_status=browse_status,
+            direction=str(facts.get("direction") or "next"),
+            browse_hints=(
+                facts.get("browse_hints")
+                if isinstance(facts.get("browse_hints"), dict)
+                else None
+            ),
+            search_date=(
+                str(facts["search_date"])
+                if facts.get("search_date") is not None
+                else None
+            ),
+            recovery_actions=(
+                facts.get("recovery_actions")
+                if isinstance(facts.get("recovery_actions"), list)
+                else None
+            ),
+        )
+
+    # Unavailable presented-time clarification: keep wording deterministic so a
+    # generic availability list cannot replace the mismatch explanation.
+    time_resolution = facts.get("time_resolution")
+    if isinstance(time_resolution, dict):
+        outcome = time_resolution.get("outcome") or time_resolution.get("status")
+        if outcome in ("TIME_MATCH_MISMATCH", "no_match"):
+            from core.rendering.availability_renderer import resolve_time_mismatch_text
+
+            availability = facts.get("availability")
+            availability = availability if isinstance(availability, dict) else {}
+            return resolve_time_mismatch_text(
+                requested_time=(
+                    str(time_resolution["requested_time"])
+                    if time_resolution.get("requested_time") is not None
+                    else None
+                ),
+                times=(
+                    list(availability.get("times") or [])
+                    if isinstance(availability.get("times"), list)
+                    else None
+                ),
+                alternatives=(
+                    list(time_resolution.get("alternatives") or [])
+                    if isinstance(time_resolution.get("alternatives"), list)
+                    else None
+                ),
+                mismatch_location=(
+                    str(time_resolution["mismatch_location"])
+                    if time_resolution.get("mismatch_location") is not None
+                    else None
+                ),
+                search_date=(
+                    str(availability["date"])
+                    if availability.get("date") is not None
+                    else (
+                        str(availability["search_date"])
+                        if availability.get("search_date") is not None
+                        else None
+                    )
+                ),
+                browse_hints=(
+                    availability.get("browse_hints")
+                    if isinstance(availability.get("browse_hints"), dict)
+                    else None
+                ),
+                recovery_actions=(
+                    time_resolution.get("recovery_actions")
+                    if isinstance(time_resolution.get("recovery_actions"), list)
+                    else (
+                        availability.get("recovery_actions")
+                        if isinstance(availability.get("recovery_actions"), list)
+                        else None
+                    )
+                ),
+            )
+
     try:
         sc = request.facts.get("structured_context") or {}
+        if not isinstance(sc, dict):
+            sc = {}
         system_prompt = _build_system_prompt(sc)
         user_message = _build_user_message(request)
 

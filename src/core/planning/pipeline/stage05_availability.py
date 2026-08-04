@@ -10,6 +10,7 @@ from core.planning.pipeline.types import AvailabilityDecision, SlotTurnState, Wo
 from core.workflows.availability.fingerprint import (
     build_availability_fingerprint_slots,
     compute_availability_fingerprint,
+    slots_match_availability_fingerprint_for_readiness,
 )
 
 
@@ -77,10 +78,15 @@ def resolve_availability(
         else None
     )
 
-    fingerprint_matched = bool(
-        stored_fingerprint
-        and current_fingerprint
-        and stored_fingerprint == current_fingerprint
+    fingerprint_matched = slots_match_availability_fingerprint_for_readiness(
+        fingerprint_slots,
+        stored_fingerprint,
+        intent_name=intent_name,
+        session_state=(
+            None
+            if payload.get("_revision_invalidated_availability")
+            else session_state
+        ),
     )
     continuation_bypass = bool(
         confirm_booking_continuation

@@ -103,12 +103,14 @@ def test_resolved_flow_calls_booking_client():
 
 
 def test_partial_flow_returns_template_key():
-    """Test that partial booking (clarification) returns template_key."""
+    """Partial booking with service only is READY to SEARCH (executable_with)."""
     luma_response = {
         "success": True,
         "intent": {
             "name": "CREATE_APPOINTMENT"
         },  # CREATE_BOOKING is not durable - use CREATE_APPOINTMENT
+        "facts": {"service_id": "haircut"},
+        "slots": {"service_id": "haircut"},
         "needs_clarification": True,
         "clarification": {"reason": "MISSING_TIME", "data": {}},
         "booking": {
@@ -133,9 +135,11 @@ def test_partial_flow_returns_template_key():
 
     assert result["success"] is True
     plan = result["result"]
-    assert plan["status"] == "NEEDS_CLARIFICATION"
-    # template_key may not be present in planning result
-    # assert plan.get("template_key") == "hotel.ask_time"
+    # executable_with=[service_id] → READY + SEARCH_AVAILABILITY (not NEEDS_CLARIFICATION)
+    assert plan["status"] == "READY"
+    assert plan.get("action") == "SEARCH_AVAILABILITY"
+    missing = plan.get("missing_slots") or []
+    assert "time" in missing or "date" in missing
 
 
 def test_contract_violation_returns_error_structure():

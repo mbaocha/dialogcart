@@ -9,7 +9,12 @@ from typing import Any, Dict, List, Literal, Optional, TypedDict
 
 
 class AvailabilityCache(TypedDict, total=False):
-    """Trusted result of the last successful availability search."""
+    """Trusted result of the last successful availability search.
+
+    Execution state only: provider offers, fingerprint, and optional search_date
+    metadata. Presentation-policy classifications (span, end date) are derived
+    at shape time from planning criteria — never persisted here.
+    """
 
     type: str
     status: str
@@ -20,7 +25,8 @@ class AvailabilityCache(TypedDict, total=False):
 
 
 BrowseDirection = Literal["next", "previous"]
-BrowseAxisHint = Literal["any", "time", "date"]
+# Page movement only. Date-axis browse is removed; dates belong to SEARCH criteria.
+BrowseAxisHint = Literal["any", "time"]
 
 
 class BrowseIntent(TypedDict, total=False):
@@ -35,12 +41,10 @@ class BrowseHints(TypedDict, total=False):
 
     has_more_times: bool
     has_previous_times: bool
-    has_next_date: bool
-    has_previous_date: bool
     has_more_any: bool
     has_previous_any: bool
-    suggested_next: Optional[Literal["show more", "next day"]]
-    suggested_previous: Optional[Literal["go back", "previous day"]]
+    suggested_next: Optional[Literal["next", "show more"]]
+    suggested_previous: Optional[Literal["previous", "back"]]
     # Legacy fields retained for older session/tests readers.
     more_count: int
     total_unique: int
@@ -57,6 +61,7 @@ class PresentedAvailability(TypedDict, total=False):
     fingerprint: Optional[str]
     browse_hints: BrowseHints
     browse_status: Optional[str]
+    recovery_actions: List[Dict[str, Any]]
 
 
 SelectionStatus = Literal["matched", "ambiguous", "not_found", "criteria_changed"]

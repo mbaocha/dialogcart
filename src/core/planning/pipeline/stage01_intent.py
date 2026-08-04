@@ -22,7 +22,7 @@ from core.planning.policy.handler_router import resolve_handler
 
 from core.planning.luma_facts_adapter import facts_to_slots
 
-from core.policy.intent_policy import get_intent_durable
+from core.policy.intent_policy import get_intent_durable, is_intent_plannable
 
 from core.session.confirmation_gate import (
     ConfirmationGateTurn,
@@ -237,11 +237,27 @@ def reconcile_intent(
 
                     is_durable = True
 
-
+                # Cold-start AVAILABILITY / CHECK_AVAILABILITY: NLU may emit an
+                # ephemeral exploratory intent. Planning must never own ephemeral
+                # intent_name — redirect onto durable CREATE_APPOINTMENT while
+                # preserving raw_luma_intent / turn_operation for the turn.
+                _EPHEMERAL_AVAILABILITY = frozenset(
+                    {"AVAILABILITY", "CHECK_AVAILABILITY"}
+                )
+                if (
+                    not is_durable
+                    and planning_intent in _EPHEMERAL_AVAILABILITY
+                ):
+                    planning_intent = "CREATE_APPOINTMENT"
+                    is_durable = True
 
                 if not is_durable:
 
                     facts_obj = luma_response.get("facts", {})
+
+                    schema = luma_response.get("_entity_schema")
+                    if not isinstance(schema, dict):
+                        schema = None
 
                     slots = (
 
@@ -252,6 +268,8 @@ def reconcile_intent(
                             intent_name=planning_intent,
 
                             source_text=source_text,
+
+                            entity_schema=schema,
 
                         )
 
@@ -281,6 +299,7 @@ def reconcile_intent(
 
                     handler = resolve_handler(planning_intent)
                     has_handler = handler is not None
+                    is_off_topic = planning_intent == "OFF_TOPIC"
 
                     turn_operation = derive_turn_operation(
 
@@ -299,6 +318,32 @@ def reconcile_intent(
                         planning_intent=planning_intent or "",
                     )
 
+                    if is_off_topic:
+                        non_durable_status = "OFF_TOPIC"
+                        handler_delegated = False
+                        handler_name = None
+                    elif has_handler:
+                        non_durable_status = "HANDLER_DELEGATED"
+                        handler_delegated = True
+                        handler_name = handler
+                    elif is_intent_plannable(planning_intent):
+                        # Non-durable but plannable (not availability — those are
+                        # redirected to CREATE_APPOINTMENT above): continue so
+                        # missing slots can be clarified without session ownership.
+                        decision = IntentDecision(
+                            planning_intent=planning_intent,
+                            raw_luma_intent=raw_luma_intent,
+                            turn_operation=turn_operation,
+                            session_reset_occurred=session_reset_occurred,
+                            confirm_booking_continuation=confirm_booking_continuation,
+                            gate_action=gate_action,
+                        )
+                        return decision, session_state
+                    else:
+                        non_durable_status = "NON_DURABLE_INTENT"
+                        handler_delegated = False
+                        handler_name = None
+
                     decision = IntentDecision(
 
                         planning_intent=planning_intent,
@@ -313,19 +358,28 @@ def reconcile_intent(
 
                         gate_action=gate_action,
 
-                        handler_delegated=has_handler,
+                        handler_delegated=handler_delegated,
 
-                        handler_name=handler,
+                        handler_name=handler_name,
 
-                        non_durable_status=(
-
-                            "HANDLER_DELEGATED" if has_handler else "NON_DURABLE_INTENT"
-
-                        ),
+                        non_durable_status=non_durable_status,
 
                         delegated_search_query=luma_response.get("search_query"),
 
-                        delegated_off_topic_query=luma_response.get("off_topic_query"),
+                        off_topic_query=luma_response.get("off_topic_query"),
+
+                        off_topic_answerable=(
+                            luma_response.get("answerable")
+                            if isinstance(luma_response.get("answerable"), bool)
+                            else None
+                        ),
+
+                        off_topic_answer=(
+                            luma_response.get("answer")
+                            if isinstance(luma_response.get("answer"), str)
+                            and str(luma_response.get("answer")).strip()
+                            else None
+                        ),
 
                         delegated_slots=slots,
 

@@ -19,7 +19,7 @@ def _turn1_session():
     return {
         "intent_name": "CREATE_APPOINTMENT",
         "status": "NEEDS_CLARIFICATION",
-        "missing_slots": ["date", "service_id", "time"],
+        "missing_slots": ["service_id", "date", "time"],
         "service_candidates": ["premium haircut", "flexi haircut + prunning"],
         "slots": {},
     }

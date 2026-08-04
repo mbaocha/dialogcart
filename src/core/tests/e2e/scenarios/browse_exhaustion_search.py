@@ -7,17 +7,16 @@ SEARCH_AVAILABILITY.
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from core.tests.e2e.framework.confirmation_interruption import (
-    availability_date_change_script,
-)
 from core.tests.e2e.framework.conversation import (
     Expect,
+    FIRST_AVAILABLE_DATE,
     ORG_ID,
     PREMIUM_SERVICE,
     Scenario,
     Turn,
+    _normalize_explicit_search_date,
     _presentation_page_index,
     _resolve_search_date,
     _response_indicates_no_more_times,
@@ -26,7 +25,6 @@ from core.tests.e2e.framework.conversation import (
     extract_presented_times,
 )
 from core.workflows.availability.fingerprint import compute_availability_fingerprint
-from core.tests.e2e.framework.scripted_temporal import single_day_temporal
 
 SCENARIOS: List[Scenario] = []
 _STATE: Dict[str, Any] = {}
@@ -39,45 +37,6 @@ def _register(scenario: Scenario) -> Scenario:
     SCENARIOS.append(scenario)
     return scenario
 
-
-def browse_exhaustion_search_scripts() -> Dict[str, Any]:
-    return {
-        "book me a haircut": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "needs_clarification": True,
-            "missing_slots": ["service_id"],
-            "service_candidates": [
-                {"text": PREMIUM_SERVICE},
-                {"text": "flexi haircut + prunning"},
-            ],
-        },
-        "premium": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {
-                "service_id": PREMIUM_SERVICE,
-                "slots": {"service_id": PREMIUM_SERVICE},
-            },
-            "slots": {"service_id": PREMIUM_SERVICE},
-            "temporal": single_day_temporal(JULY_20),
-            "missing_slots": ["time"],
-        },
-        "are there more times for july 20?": {
-            "success": True,
-            "intent": {"name": "AVAILABILITY"},
-            "operation": "browse_next",
-            "facts": {
-                "service_id": PREMIUM_SERVICE,
-                "slots": {"service_id": PREMIUM_SERVICE},
-            },
-            "slots": {"service_id": PREMIUM_SERVICE},
-            "missing_slots": ["time"],
-        },
-        "show dates for july 21": availability_date_change_script(JULY_21),
-    }
-
-
 def _slot_dates(starts: List[str]) -> List[str]:
     return [s[:10] for s in starts if isinstance(s, str) and len(s) >= 10]
 
@@ -87,6 +46,16 @@ def _session_fingerprint(session: Dict[str, Any]) -> Any:
     if isinstance(availability, dict) and availability.get("fingerprint") is not None:
         return availability.get("fingerprint")
     return session.get("availability_fingerprint")
+
+
+def _presented_search_date(session: Dict[str, Any]) -> Optional[str]:
+    presented = session.get("presented_availability")
+    if isinstance(presented, dict) and presented.get("search_date"):
+        return _resolve_search_date(str(presented.get("search_date")))
+    cache = session.get("last_execution_result")
+    if isinstance(cache, dict) and cache.get("search_date"):
+        return _resolve_search_date(str(cache.get("search_date")))
+    return None
 
 
 def _assert_first_search_july_20(conv, booking, availability) -> None:
@@ -99,10 +68,10 @@ def _assert_first_search_july_20(conv, booking, availability) -> None:
     )
     call = availability.get_service_availability.call_args
     kwargs = call.kwargs if call else {}
-    searched = _resolve_search_date(kwargs.get("date"))
+    requested = _normalize_explicit_search_date(kwargs.get("date"))
     conv._assert(
-        searched == JULY_20,
-        f"turn {conv.turn}: expected search date {JULY_20!r}, got {searched!r}",
+        requested == JULY_20,
+        f"turn {conv.turn}: expected explicit search date {JULY_20!r}, got {requested!r}",
     )
 
     sess = conv.session() or {}
@@ -113,6 +82,11 @@ def _assert_first_search_july_20(conv, booking, availability) -> None:
             date == JULY_20,
             f"turn {conv.turn}: presented slot date {date!r} must be {JULY_20}",
         )
+    presented_date = _presented_search_date(sess)
+    conv._assert(
+        presented_date == JULY_20,
+        f"turn {conv.turn}: presented.search_date expected {JULY_20}, got {presented_date!r}",
+    )
     conv._assert(
         _presentation_page_index(sess) == 0,
         f"turn {conv.turn}: expected page_index 0 after first search",
@@ -135,6 +109,159 @@ def _assert_first_search_july_20(conv, booking, availability) -> None:
     _STATE.clear()
     _STATE["search_count"] = call_count
     _STATE["fingerprint"] = fp
+    _STATE["presented"] = list(presented)
+    _STATE["search_date"] = JULY_20
+
+
+def _assert_undated_first_available_search(conv, booking, availability) -> None:
+    """Production parity: date=None → backend day → presented.search_date from offers."""
+    assert_no_booking_execution(conv, booking)
+    call_count = availability.get_service_availability.call_count
+    conv._assert(
+        call_count >= 1,
+        f"turn {conv.turn}: expected SEARCH_AVAILABILITY, got call_count={call_count}",
+    )
+    call = availability.get_service_availability.call_args
+    kwargs = call.kwargs if call else {}
+    requested = kwargs.get("date")
+    conv._assert(
+        _normalize_explicit_search_date(requested) is None,
+        f"turn {conv.turn}: undated search must omit date (got {requested!r})",
+    )
+
+    sess = conv.session() or {}
+    date_proposal = sess.get("date_proposal")
+    proposal_start = (
+        date_proposal.get("start")
+        if isinstance(date_proposal, dict)
+        else None
+    )
+    conv._assert(
+        not proposal_start,
+        f"turn {conv.turn}: undated search must not invent date_proposal, "
+        f"got {date_proposal!r}",
+    )
+
+    presented_date = _presented_search_date(sess)
+    conv._assert(
+        presented_date == FIRST_AVAILABLE_DATE,
+        (
+            f"turn {conv.turn}: presented.search_date must equal backend first-"
+            f"available day {FIRST_AVAILABLE_DATE!r}, got {presented_date!r}"
+        ),
+    )
+
+    presented = extract_presented_times(conv.last_body, sess)
+    conv._assert(bool(presented), f"turn {conv.turn}: expected presented offers")
+    for date in _slot_dates(presented):
+        conv._assert(
+            date == FIRST_AVAILABLE_DATE,
+            (
+                f"turn {conv.turn}: offer date {date!r} must match "
+                f"presented.search_date {FIRST_AVAILABLE_DATE!r}"
+            ),
+        )
+    conv._assert(
+        _presentation_page_index(sess) == 0,
+        f"turn {conv.turn}: expected page_index 0 after first search",
+    )
+
+    fp = _session_fingerprint(sess)
+    expected_fp = compute_availability_fingerprint(
+        {
+            "organization_id": ORG_ID,
+            "service_id": PREMIUM_SERVICE,
+        }
+    )
+    conv._assert(bool(fp), f"turn {conv.turn}: expected undated search fingerprint")
+    conv._assert(
+        fp == expected_fp,
+        f"turn {conv.turn}: undated fingerprint mismatch: {fp!r} != {expected_fp!r}",
+    )
+
+    _STATE.clear()
+    _STATE["search_count"] = call_count
+    _STATE["fingerprint"] = fp
+    _STATE["presented"] = list(presented)
+    _STATE["search_date"] = FIRST_AVAILABLE_DATE
+
+
+def _assert_browse_more_over_cache(conv, booking, availability) -> None:
+    """``Are there more times?`` after undated search is browse — never SEARCH.
+
+    With a small cached result set the first browse_next often exhausts; the last
+    successful presentation window must still be shown. Fingerprint and day stay
+    on the undated first-available search.
+    """
+    assert_no_booking_execution(conv, booking)
+    baseline = _STATE.get("search_count", 0)
+    call_count = availability.get_service_availability.call_count
+    conv._assert(
+        call_count == baseline,
+        (
+            f"turn {conv.turn}: browse must not SEARCH_AVAILABILITY "
+            f"(baseline={baseline}, got={call_count})"
+        ),
+    )
+
+    sess = conv.session() or {}
+    expected_day = _STATE.get("search_date") or FIRST_AVAILABLE_DATE
+    presented = extract_presented_times(conv.last_body, sess)
+    conv._assert(
+        bool(presented),
+        f"turn {conv.turn}: browse must still present availability, got {presented!r}",
+    )
+    for date in _slot_dates(presented):
+        conv._assert(
+            date == expected_day,
+            (
+                f"turn {conv.turn}: presented offer date {date!r} must remain "
+                f"{expected_day!r}"
+            ),
+        )
+    presented_date = _presented_search_date(sess)
+    conv._assert(
+        presented_date == expected_day,
+        (
+            f"turn {conv.turn}: presented.search_date must remain {expected_day!r}, "
+            f"got {presented_date!r}"
+        ),
+    )
+    conv._assert(
+        _session_fingerprint(sess) == _STATE.get("fingerprint"),
+        f"turn {conv.turn}: fingerprint must not change on browse",
+    )
+
+    text = _response_text(conv.last_body or {})
+    conv._assert(
+        bool(text.strip()),
+        f"turn {conv.turn}: expected browse response text, got {text!r}",
+    )
+
+    pagination = (conv.outcome or {}).get("availability_pagination") or (
+        conv.last_body or {}
+    ).get("availability_pagination") or {}
+    page_index = _presentation_page_index(sess)
+    if isinstance(pagination, dict) and pagination.get("exhausted") is True:
+        conv._assert(
+            pagination.get("direction") == "next",
+            f"turn {conv.turn}: exhausted browse direction must be next, got {pagination!r}",
+        )
+        conv._assert(
+            _response_indicates_no_more_times(text),
+            f"turn {conv.turn}: expected no-more-times wording, got {text!r}",
+        )
+    else:
+        prior = _STATE.get("presented") or []
+        conv._assert(
+            page_index >= 1 or (prior and presented != prior),
+            (
+                f"turn {conv.turn}: expected browse to advance the presentation "
+                f"window (page_index={page_index!r}, prior={prior!r}, "
+                f"presented={presented!r}, pagination={pagination!r})"
+            ),
+        )
+
     _STATE["presented"] = list(presented)
 
 
@@ -168,12 +295,24 @@ def _assert_browse_exhausted_no_search(conv, booking, availability) -> None:
     )
 
     sess = conv.session() or {}
+    expected_day = _STATE.get("search_date") or JULY_20
     presented = extract_presented_times(conv.last_body, sess)
     for date in _slot_dates(presented):
         conv._assert(
-            date == JULY_20,
-            f"turn {conv.turn}: exhausted browse must keep July 20 window, got {date!r}",
+            date == expected_day,
+            (
+                f"turn {conv.turn}: exhausted browse must keep {expected_day} window, "
+                f"got {date!r}"
+            ),
         )
+    presented_date = _presented_search_date(sess)
+    conv._assert(
+        presented_date == expected_day,
+        (
+            f"turn {conv.turn}: presented.search_date must remain {expected_day}, "
+            f"got {presented_date!r}"
+        ),
+    )
     conv._assert(
         _session_fingerprint(sess) == _STATE.get("fingerprint"),
         f"turn {conv.turn}: fingerprint must not change on exhausted browse",
@@ -194,7 +333,7 @@ def _assert_july_21_search_not_poisoned(conv, booking, availability) -> None:
 
     call = availability.get_service_availability.call_args
     kwargs = call.kwargs if call else {}
-    searched = _resolve_search_date(kwargs.get("date"))
+    searched = _normalize_explicit_search_date(kwargs.get("date"))
     conv._assert(
         searched == JULY_21,
         f"turn {conv.turn}: expected search date {JULY_21!r}, got {searched!r}",
@@ -278,7 +417,9 @@ _register(
     Scenario(
         "browse exhaustion then July 21 search",
         Turn(
-            "Book me a haircut",
+            # Date must be stated on turn 1 so recorded NLU carries July 20
+            # through service clarification (same contract as confirmation_interruption).
+            "Book me a haircut on july 20",
             Expect(
                 response_status="NEEDS_CLARIFICATION",
                 intent="CREATE_APPOINTMENT",
@@ -316,5 +457,49 @@ _register(
         fixture="scripted_browse_exhaustion_search",
         tags=["browse", "availability", "regression", "discovery"],
         id="browse-exhaustion-must-not-poison-subsequent-search",
+    )
+)
+
+
+_register(
+    Scenario(
+        "undated search uses backend first-available day then browse exhausts",
+        Turn(
+            "Book me haircut",
+            Expect(
+                response_status="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+            ),
+        ),
+        Turn(
+            "Premium",
+            Expect(
+                action="SEARCH_AVAILABILITY",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution_type="availability",
+                has_availability_slots=True,
+            ),
+            after=_assert_undated_first_available_search,
+        ),
+        Turn(
+            # Browse next over trusted cache — never SEARCH_AVAILABILITY.
+            "Are there more times?",
+            Expect(
+                action=None,
+                intent="CREATE_APPOINTMENT",
+            ),
+            after=_assert_browse_more_over_cache,
+        ),
+        Turn(
+            "Are there more times?",
+            Expect(
+                action=None,
+                intent="CREATE_APPOINTMENT",
+            ),
+            after=_assert_browse_exhausted_no_search,
+        ),
+        fixture="scripted_browse_exhaustion_search",
+        tags=["browse", "availability", "regression", "discovery", "undated"],
+        id="undated-first-available-then-browse-exhaustion",
     )
 )

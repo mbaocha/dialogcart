@@ -188,61 +188,10 @@ def _format_search_query_intents() -> str:
 
 
 def _format_conversation_context(ctx: Dict[str, Any]) -> str:
-    """Format conversation_context into a prompt block. Returns empty string when ctx is empty or has no useful data."""
-    if not ctx:
-        return ""
-    has_data = (
-        ctx.get("last_intent")
-        or ctx.get("last_search_query")
-        or (ctx.get("turns") or [])
-    )
-    if not has_data:
-        return ""
+    """Delegate to the shared Stage1/Stage2 conversation context formatter."""
+    from ..stages.shared.context import format_conversation_context
 
-    lines = [
-        "════════════════════════════════════════",
-        "CONVERSATION CONTEXT",
-        "════════════════════════════════════════",
-    ]
-    last_intent = ctx.get("last_intent")
-    last_sq = ctx.get("last_search_query")
-    last_dp = ctx.get("last_date_proposal")
-    if last_intent:
-        lines.append(f"Last intent: {last_intent}")
-    if last_sq:
-        lines.append(f'Last search query: "{last_sq}"')
-    if isinstance(last_dp, dict) and last_dp.get("start"):
-        lines.append(f"Last date proposal: {last_dp.get('start')}")
-    active_booking = ctx.get("active_booking_intent")
-    if active_booking and active_booking != last_intent:
-        lines.append(f"Active booking intent (durable session): {active_booking}")
-
-    turns = (ctx.get("turns") or [])[-3:]
-    if turns:
-        lines.append("")
-        lines.append("Prior turns (oldest first):")
-        for t in turns:
-            lines.append(f"  User: {t.get('user', '')}")
-            asst = t.get("assistant", "")
-            if asst:
-                lines.append(f"  Assistant: {asst}")
-            meta = f"  → intent={t.get('intent', '')}"
-            if t.get("search_query"):
-                meta += f', search_query="{t["search_query"]}"'
-            lines.append(meta)
-
-    lines += [
-        "",
-        "Context rules:",
-        "- Resolve follow-up references ('it', 'that', 'how long') using prior turns and last_search_query.",
-        "- For RAG intents, merge/refine search_query with the prior topic:",
-        '  last="cancellation policy" + "and for group bookings?" → "cancellation policy group bookings"',
-        '  last="deep tissue massage" + "how long is it?" → "deep tissue massage duration"',
-        "- Do NOT invent booking slots (dates, times, services) on FAQ detours.",
-        "- Slot-fill continuation (see STEP 1): bare date/time fragments after a booking intent",
-        "  continue that booking intent — not UNKNOWN, not CORRECTION.",
-    ]
-    return "\n".join(lines)
+    return format_conversation_context(ctx if isinstance(ctx, dict) else {})
 
 
 def _format_booking_mode_section(booking_mode: str) -> str:

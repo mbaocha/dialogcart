@@ -342,6 +342,11 @@ def _finalize_effective_slots_and_trace(
         durable_slots_for_persist,
         effective_intent,
         apply_domain_filter=ctx.apply_domain_filter,
+        entity_schema=(
+            merged.get("_entity_schema")
+            if isinstance(merged.get("_entity_schema"), dict)
+            else None
+        ),
     )
     merged["_effective_collected_slots"] = effective_collected_slots
 
@@ -477,7 +482,15 @@ def _promote_and_bind(
         from core.session.confirmation_gate import get_confirmation_state
         from core.session.invalidation import InvalidationTrigger, apply_invalidation
 
-        revision = detect_booking_revision(merged, session_state)
+        revision = detect_booking_revision(
+            merged,
+            session_state,
+            entity_schema=(
+                merged.get("_entity_schema")
+                if isinstance(merged.get("_entity_schema"), dict)
+                else None
+            ),
+        )
         skip_bind_after_criteria_revision = False
         if revision.any:
             current_turn_promoted_slots = dict(promoted_slots)
@@ -495,6 +508,13 @@ def _promote_and_bind(
                 for key in ("service_id", "_canonical_service_id"):
                     if current_turn_promoted_slots.get(key) is not None:
                         invalidated_slots[key] = current_turn_promoted_slots[key]
+            if revision.criteria:
+                for change in revision.changes:
+                    if change.field in ("service", "date", "time"):
+                        continue
+                    value = current_turn_promoted_slots.get(change.field)
+                    if value is not None:
+                        invalidated_slots[change.field] = value
             if revision.date:
                 # New date often arrives only as date_proposal. Do not restore the
                 # pre-revision session date that additive merge preserved.
@@ -514,24 +534,25 @@ def _promote_and_bind(
                         invalidated_slots[key] = value
             merged["slots"] = invalidated_slots
             promoted_slots = merged["slots"]
-            if revision.service or revision.date:
+            if revision.invalidates_availability:
                 # Genuine mid-flow replacements only (detect_booking_revision
                 # excludes first acquisition / same-value restatement). Carried
                 # time proposals would rebind against stale presented offers.
                 if not merged.get("_current_turn_has_time"):
                     merged.pop("time_constraint", None)
                     merged.pop("time_proposal", None)
-                # Service-only revision keeps the active search date_proposal so
-                # the new service is searched on the same day (e.g. Flexi on
-                # July 22 after Premium booked that day). Date revisions replace
-                # the proposal via current-turn merge — do not pop here.
+                # Service/staff criteria revision keeps the active search
+                # date_proposal so the new criteria are searched on the same day.
+                # Date revisions replace the proposal via current-turn merge.
                 merged["_revision_invalidated_availability"] = True
                 skip_bind_after_criteria_revision = True
             logger.info(
-                "[BOOKING_CONFIRMATION] Applied revision service=%s date=%s time=%s",
+                "[BOOKING_CONFIRMATION] Applied revision service=%s date=%s "
+                "time=%s criteria=%s",
                 revision.service,
                 revision.date,
                 revision.time,
+                revision.criteria,
             )
 
         from core.planning.pipeline.requests import is_availability_turn_operation
@@ -602,10 +623,16 @@ def _promote_and_bind(
                 )
 
     # STEP 4.1.5: Apply domain slot filtering BEFORE required-slot computation
+    entity_schema = (
+        merged.get("_entity_schema")
+        if isinstance(merged.get("_entity_schema"), dict)
+        else None
+    )
     domain_filtered_slots = filter_slots_by_domain(
         promoted_slots,
         effective_intent,
         apply_domain_filter=ctx.apply_domain_filter,
+        entity_schema=entity_schema,
     )
 
     from core.planning.temporal_proposal import (
@@ -749,7 +776,6 @@ def _handle_informational_turn_and_effective_intent(
 
     turn_meta = merged.get("turn") if isinstance(merged.get("turn"), dict) else {}
     understanding = turn_meta.get("understanding") or merged.get("understanding")
-    is_unrecognized_input = understanding == "UNRECOGNIZED_INPUT"
     has_durable_booking = bool(
         session_state
         and isinstance(session_state, dict)
@@ -767,24 +793,31 @@ def _handle_informational_turn_and_effective_intent(
     )
 
     from core.planning.booking_revision import has_actionable_booking_facts
+    from core.planning.planning_evidence import require_planning_evidence
 
     has_actionable_this_turn = current_turn_has_new_slots or has_actionable_booking_facts(
         merged, session_state
     )
 
+    # Read-only: Stage 02 stamps planning evidence before merge. Never recompute.
+    has_planning_evidence = require_planning_evidence(merged)
+
     is_modify_intent = merged_intent_name in ("MODIFY_BOOKING", "MODIFY_RESERVATION")
-    # Unrecognized utterances contribute no booking facts and must not drop
-    # previously resolved proposals/slots. Preserve session booking state.
+    # Preserve only unrecognized turns with no structured planning evidence.
+    # UNDERSTOOD + no evidence must not restore session over intentional drops.
     preserve_booking_state = (
         has_durable_booking
         and not is_modify_intent
-        and (is_unrecognized_input or (has_active_planning and not has_actionable_this_turn))
+        and understanding == "UNRECOGNIZED_INPUT"
+        and not has_planning_evidence
     )
     if preserve_booking_state:
         logger.info(
             f"[INFORMATIONAL_TURN] Detected informational turn: "
             f"luma_intent={merged_intent_name}, session_intent={session_intent_name}, "
-            f"has_new_slots=False understanding={understanding!r}"
+            f"has_planning_evidence=False understanding={understanding!r} "
+            f"has_active_planning={bool(has_active_planning)} "
+            f"has_actionable={bool(has_actionable_this_turn)}"
         )
 
         if session_state and isinstance(session_state, dict):
@@ -1470,6 +1503,11 @@ def _extract_raw_luma_slots(ctx: _MergeContext) -> Dict[str, Any]:
             facts_obj,
             intent_name=effective_intent_for_promotion,
             source_text=merged.get("_source_text"),
+            entity_schema=(
+                merged.get("_entity_schema")
+                if isinstance(merged.get("_entity_schema"), dict)
+                else None
+            ),
         )
         if isinstance(facts_obj, dict)
         else {}

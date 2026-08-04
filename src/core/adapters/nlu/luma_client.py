@@ -48,6 +48,8 @@ class LumaClient:
         timezone: str = "UTC",
         tenant_context: Optional[Dict[str, Any]] = None,
         conversation_context: Optional[Dict[str, Any]] = None,
+        test_now: Optional[str] = None,
+        entity_schema: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Call Luma /resolve endpoint for semantic understanding.
@@ -59,6 +61,10 @@ class LumaClient:
             timezone: Timezone (optional, default: "UTC")
             tenant_context: Optional tenant context with aliases (optional)
             conversation_context: Optional prior-turn context for follow-up resolution (optional)
+            test_now: Optional ISO datetime for deterministic NLU relative dates.
+                When omitted, ``LUMA_TEST_NOW`` env is used if set. When both are
+                absent, ``test_now`` is omitted from the body (production wall clock).
+            entity_schema: Optional derived business-entity schema for extraction.
 
         Returns:
             Luma response dictionary with intent and extracted entities
@@ -68,7 +74,7 @@ class LumaClient:
         """
         url = f"{self.base_url}/resolve"
 
-        payload = {
+        payload: Dict[str, Any] = {
             "user_id": user_id,
             "text": text,
             "domain": domain,
@@ -78,6 +84,15 @@ class LumaClient:
             payload["tenant_context"] = tenant_context
         if conversation_context:
             payload["conversation_context"] = conversation_context
+        if entity_schema:
+            payload["entity_schema"] = entity_schema
+
+        resolved_test_now = (test_now or "").strip() or None
+        if not resolved_test_now:
+            env_now = os.getenv("LUMA_TEST_NOW", "").strip()
+            resolved_test_now = env_now or None
+        if resolved_test_now:
+            payload["test_now"] = resolved_test_now
 
         try:
             response = self._client.post(url, json=payload)

@@ -16,6 +16,7 @@ _PERSISTABLE_STATUSES = {
     "success",
     "succeeded",
     "HANDLER_DELEGATED",
+    "OFF_TOPIC",
 }
 
 

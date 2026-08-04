@@ -180,31 +180,23 @@ def test_time_already_in_slots():
 
 
 def test_time_normalized_not_in_missing_slots():
-    """
-    Test that exact mode time_constraint satisfies time requirement (removes from missing_slots).
-
-    NOTE: Time is only derived to slots["time"] for exact mode in specific paths.
-    However, exact mode time_constraint should satisfy the time requirement,
-    removing "time" from missing_slots even if not derived to slots.
-    """
-    # Mock Luma response where time_constraint exists with exact mode
+    """Exact Temporal start_time satisfies the time requirement (not in missing_slots)."""
     luma_response = {
         "success": True,
         "intent": {"name": "CREATE_APPOINTMENT"},
+        "facts": {"service_id": "haircut"},
         "slots": {
             "service_id": "haircut",
-            "date": "2025-12-20",
-            # time is NOT in slots initially
         },
-        # time_constraint must be at top level, not in context
-        # (code expects luma_response.get("time_constraint"), not context.time_constraint)
-        "time_constraint": {"start": "15:00", "mode": "exact"},
-        "context": {"time_mode": "exact"},
+        "temporal": {
+            "start_date": "2025-12-20",
+            "start_time": "15:00",
+            "mode": "single_day",
+            "confidence": 1.0,
+        },
         "needs_clarification": False,
-        "booking": {"services": [{"text": "haircut"}]},
     }
 
-    # Process response
     decision = process_luma_response(
         luma_response, "service", "test_user", organization_id=1
     )
@@ -212,17 +204,8 @@ def test_time_normalized_not_in_missing_slots():
     facts = decision.get("facts", {})
     slots = facts.get("slots", {})
     missing_slots = facts.get("missing_slots", [])
-    context = facts.get("context", {})
 
-    # NOTE: time_constraint is processed and may not be preserved in context
-    # The code extracts time_constraint from top-level luma_response, processes it,
-    # and may only preserve time_mode in context (not the full time_constraint dict)
-    # The important thing is that exact mode time_constraint satisfies the time requirement
-
-    # Exact mode time_constraint should satisfy time requirement
-    # Time may or may not be in slots (depends on code path), but missing_slots should not include "time"
-    # because exact mode satisfies the time requirement
     assert "time" not in missing_slots, (
-        f"Expected 'time' NOT in missing_slots (exact mode satisfies time), "
+        f"Expected 'time' NOT in missing_slots (exact Temporal start_time), "
         f"but got missing_slots={missing_slots}, slots.keys()={list(slots.keys())}"
     )

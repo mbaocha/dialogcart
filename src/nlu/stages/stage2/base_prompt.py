@@ -7,6 +7,8 @@ Extracted from nlu/slm/extractor.py so each group imports only what's relevant.
 from typing import Any, Dict, List, Optional
 
 from ...registry.intent_groups import ALL_INTENTS, RAG_INTENTS, format_intent_registry
+from ..shared.confirm_dialog_act import confirm_action_dialog_act_section
+from ..shared.reject_dialog_act import reject_action_dialog_act_section
 
 
 def date_rules(now: str) -> str:
@@ -108,7 +110,12 @@ Examples:
   "book massage tomorrow afternoon"
     → start_date_expression="tomorrow", start_date=<ISO>, start_time_expression="afternoon", mode=single_day
   "at 3pm"
-    → start_time="15:00" only, mode=none"""
+    → start_time="15:00" only, mode=none
+  "book haircut tomorrow by 12pm"
+    → start_date_expression="tomorrow", start_date=<ISO>, start_time="12:00",
+      end_time="12:00", expression="tomorrow by 12pm", mode=single_day
+  "from 3pm"
+    → start_time="15:00", end_time="15:00", mode=none"""
 
 
 def booking_id_rules(tenant_context: Optional[Dict[str, Any]] = None) -> str:
@@ -159,27 +166,91 @@ For all other intents, search_query must be null."""
 
 
 def intent_validation_section(candidate_intent: str) -> str:
-    """Compact intent list for Stage 2 validation / re-routing."""
-    unclear_rule = (
-        "If still unclear with no active booking context, keep "
-        f"{candidate_intent}."
-    )
-    if candidate_intent == "UNKNOWN":
-        unclear_rule = (
-            "If still unclear and there is NO active booking context in "
-            "CONVERSATION CONTEXT, keep UNKNOWN."
-        )
-    return f"""════════════════════════════════════════
-INTENT VALIDATION
-════════════════════════════════════════
-Stage 1 classified this message as: {candidate_intent}
+    """Shared Stage 2 Intent Validation Contract (all groups).
 
-You are the final authority on intent. If after seeing the full slot context
-you determine a different intent is correct, set validated_intent accordingly.
-{unclear_rule}
+    Stage 1 supplies a proposal only. Stage 2 is the semantic authority:
+    accept the proposal when utterance + conversation context support it;
+    otherwise emit the supported validated_intent. Groups must not redefine
+    this authority — they extract slots for the validated intent.
+    """
+    return f"""════════════════════════════════════════
+INTENT VALIDATION (Stage 2 contract — all groups)
+════════════════════════════════════════
+Stage 1 proposal (prior only — NOT the truth): {candidate_intent}
+
+HARD CONSTRAINT: If CONVERSATION CONTEXT has no assistant confirmation ask,
+validated_intent must not be CONFIRM_ACTION (keep CREATE_* / informational intents).
+
+You are the semantic authority for this turn. Independently validate the proposal
+using ONLY:
+  - the current user utterance
+  - CONVERSATION CONTEXT (including Immediately preceding assistant when present)
+
+Decision rule:
+  1. If the utterance + context SUPPORT the Stage 1 proposal → set
+     validated_intent to that proposal.
+  2. If they do NOT support it → set validated_intent to the intent that IS
+     supported (any intent in the registry below). Do NOT keep the proposal
+     merely because Stage 1 suggested it. Do NOT preserve an unsupported
+     candidate to stay in the current extraction group.
+  3. Conversational answer: when Immediately preceding assistant asked for or
+     offered a finite set of values, and the user replies with one of those
+     values (or an unambiguous reference), set validated_intent to the
+     booking/workflow intent that answer advances — not a FAQ digression and
+     not UNKNOWN. Questions about state, correctness, saved/applied changes, or
+     consequences are not authorizing answers — never CONFIRM_ACTION for those.
+  4. If the utterance is truly not understood (gibberish / indeterminate) and
+     there is no active booking context → UNKNOWN.
+  5. If the utterance is not understood but CONVERSATION CONTEXT shows an
+     active booking intent and no competing act → continue that booking intent
+     (in-flow), not UNKNOWN.
+  6. CONFIRM_ACTION only when context shows a pending confirmation ask (see
+     CONFIRM_ACTION dialog act). If context is empty/absent, CONFIRM_ACTION is
+     invalid — keep CREATE_* for bare "book it" / "reserve it" / "schedule it".
+     Never promote informational intents to CONFIRM_ACTION without that ask.
+  7. REJECT_ACTION when context shows a pending confirmation ask and the user
+     refuses/dismisses that proposal (see REJECT_ACTION dialog act). Do not emit
+     CANCEL_BOOKING for "cancel that" / "never mind" under a pending confirm ask.
+
+{confirm_action_dialog_act_section()}
+{reject_action_dialog_act_section()}
+CORRECTION vs INFORMATIONAL CLARIFICATION (applies to every group):
+CORRECTION means the user explicitly replaces, changes, retracts, or corrects
+information that participates in the current workflow or proposed action
+(service, date, time, staff, resource, registration, engine type, room, etc.).
+  Keep / choose CORRECTION only when a workflow slot or selection is being changed.
+  Examples → CORRECTION:
+    "Actually make it 10am."
+    "Change it to diesel."
+    "Use Premium Full Service instead."
+    "No, my registration is AB12CDE."
+    "I meant tomorrow, not Friday."
+    "Switch the stylist to Sarah."
+
+An active booking alone is NOT evidence of CORRECTION.
+Cue words alone ("thought", "meant", "wrong", "actually", "instead") do NOT
+decide the intent — interpret WHAT is being corrected.
+
+Do NOT use CORRECTION when the user questions an explanation, disputes a price
+or policy, states that their understanding differs, asks whether previously
+given information is correct, or challenges how a fee, deposit, refund,
+duration, inclusion, or condition works. Those are informational:
+  → QUOTE / PAYMENT / PAYMENT_STATUS / GENERAL_INQUIRY / DETAILS (by subject).
+  Examples → informational (NOT CORRECTION), even if Stage 1 proposed CORRECTION:
+    "I thought the fee came off the final price."
+    "I thought breakfast was included."
+    "I thought the deposit was refundable."
+    "I thought it only took 30 minutes."
+    "Are you sure the total is £105?"
+    "That doesn't sound right; shouldn't I have £85 left to pay?"
+    "I thought it's £95 and if I pay £10 reservation then I'll have £85 left."
+
+validated_intent is a semantic decision. Extraction below must follow
+validated_intent (a later Stage 3 pass may re-extract if the group changes).
 
 Supported intents:
 {format_intent_registry()}"""
+
 
 
 # ── Shared tool schema components ────────────────────────────────────────────
@@ -235,7 +306,11 @@ def _temporal_schema() -> dict:
             },
             "start_time": {
                 **nullable_str,
-                "description": "HH:MM 24h exact start time, else null.",
+                "description": (
+                    "HH:MM 24h exact start time, else null. "
+                    "For 'at X', 'by X', and 'from X' set start_time=X "
+                    "(and for 'by X'/'from X' also end_time=X)."
+                ),
             },
             "end_date": {
                 **nullable_str,
@@ -243,7 +318,12 @@ def _temporal_schema() -> dict:
             },
             "end_time": {
                 **nullable_str,
-                "description": "HH:MM 24h exact end time when distinct, else null.",
+                "description": (
+                    "HH:MM 24h exact end time, else null. "
+                    "For 'by X'/'from X' set end_time=start_time=X (exact point). "
+                    "For 'after X' set end_time=23:59. "
+                    "Do not use end_time alone for 'by X'."
+                ),
             },
             "mode": {
                 "type": ["string", "null"],
@@ -280,10 +360,23 @@ def _facts_schema(include: list) -> dict:
     }
 
 
+def declined_entities_rules() -> str:
+    """Prompt rules for top-level declined_entities (dialogue preference acts)."""
+    return """── DECLINED ENTITIES ───────────────────────────────────────────────────────
+If the user explicitly declines to choose a value for one of the declared business
+entities (for example "no preference", "any", "either", "I don't mind", or similar
+expressions), include that entity's field name in declined_entities.
+Leave the corresponding facts.<entity> value null.
+Do not invent catalog values.
+declined_entities must be an empty array when the user does not decline any entity.
+Null on a fact still means not mentioned / not selected — never use null alone to mean declined."""
+
+
 def build_tool(
     name: str,
     description: str,
     facts_fields: Optional[List[str]] = None,
+    facts_schema: Optional[Dict[str, Any]] = None,
     include_time_constraint: bool = False,
     include_search_query: bool = False,
     include_off_topic_query: bool = False,
@@ -291,8 +384,13 @@ def build_tool(
     include_service_candidates: bool = False,
     include_operation: bool = False,
     include_temporal: bool = False,
+    include_declined_entities: bool = False,
 ) -> dict:
-    """Build a Stage 2 tool schema for a specific group."""
+    """Build a Stage 2 tool schema for a specific group.
+
+    ``facts_schema`` — optional full JSON-schema object for ``facts`` (schema-driven).
+    When omitted, ``facts_fields`` selects entries from ``_NON_TEMPORAL_FACT_FIELDS``.
+    """
     facts_fields = list(facts_fields or [])
     # Temporal-first groups must not ask the LLM for legacy date/time bags.
     temporal_legacy = {"dates", "times", "date_time_pairs"}
@@ -307,8 +405,14 @@ def build_tool(
             "type": ["string", "null"],
             "enum": ALL_INTENTS + [None],
             "description": (
-                "Override Stage 1's intent if you determine a different one is correct. "
-                "null to accept Stage 1's classification."
+                "Semantic decision for this turn. Accept Stage 1's proposal only when "
+                "utterance + conversation context support it; otherwise set the "
+                "supported intent. CONFIRM_ACTION only if context shows a pending "
+                "confirmation ask — never for cold-start 'book it'/'reserve it'/"
+                "'schedule it', and never for state/correctness/meta questions. "
+                "CORRECTION only when a workflow slot/selection is being changed — "
+                "not when disputing prices, policies, or explanations. "
+                "Prefer an explicit intent over null."
             ),
         }
         required.append("validated_intent")
@@ -323,7 +427,10 @@ def build_tool(
         props["temporal"] = _temporal_schema()
         required.append("temporal")
 
-    if facts_fields:
+    if facts_schema is not None:
+        props["facts"] = facts_schema
+        required.append("facts")
+    elif facts_fields:
         props["facts"] = _facts_schema(facts_fields)
         required.append("facts")
 
@@ -362,6 +469,23 @@ def build_tool(
             ),
         }
         required.append("off_topic_query")
+        props["answerable"] = {
+            "type": ["boolean", "null"],
+            "description": (
+                "OFF_TOPIC only: true when a brief safe response is appropriate; "
+                "false when unanswerable. Null for all non-OFF_TOPIC intents."
+            ),
+        }
+        required.append("answerable")
+        props["answer"] = {
+            "type": ["string", "null"],
+            "description": (
+                "OFF_TOPIC only: brief response (typically 1–2 sentences) when "
+                "answerable; null when not answerable or for non-OFF_TOPIC intents. "
+                "No greetings, redirects, or business pitch."
+            ),
+        }
+        required.append("answer")
 
     if include_service_candidates:
         props["service_candidates"] = {
@@ -381,10 +505,24 @@ def build_tool(
             "enum": ["browse_next", "browse_previous", None],
             "description": (
                 "Set when the user is navigating previously presented availability "
-                "(browse_next or browse_previous). Null for new availability searches."
+                "(browse_next or browse_previous), including when they repeat the "
+                "same browse request after an exhaustion / no-more-times reply. "
+                "Null for new availability searches."
             ),
         }
         required.append("operation")
+
+    if include_declined_entities:
+        props["declined_entities"] = {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": (
+                "Schema field names for declared business entities the user explicitly "
+                "declined to choose (no preference / any / either / I don't mind). "
+                "Empty when none declined. Corresponding facts.<name> must remain null."
+            ),
+        }
+        required.append("declined_entities")
 
     return {
         "name": name,

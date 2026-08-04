@@ -7,14 +7,12 @@ import pytest
 from core.session.session_manager import clear_session
 from core.tests.e2e.framework.conversation import ORG_ID
 from core.tests.e2e.framework.fixtures import (
-    SCRIPTED_FIXTURE_PARAMS,
-    build_scripted_bundle,
+    E2E_FIXTURE_PARAMS,
+    build_recorded_bundle,
+    live_luma,
 )
 from core.tests.e2e.framework.runner import run_bundle
-from core.tests.e2e.scenarios.confirmation_interruption import (
-    SCENARIOS,
-    confirmation_interruption_scripts,
-)
+from core.tests.e2e.scenarios.confirmation_interruption import SCENARIOS
 
 
 @pytest.fixture(autouse=True)
@@ -67,13 +65,18 @@ def _deterministic_availability_llm(monkeypatch):
     )
 
 
-@pytest.mark.parametrize("scenario", SCENARIOS, ids=[s.pytest_id() for s in SCENARIOS])
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        pytest.param(s, id=s.pytest_id(), marks=[live_luma])
+        for s in SCENARIOS
+    ],
+)
 def test_confirmation_interruption_scenario(scenario, api_client, monkeypatch):
-    params = dict(SCRIPTED_FIXTURE_PARAMS.get(scenario.fixture) or {})
-    conv, booking, availability, user_id = build_scripted_bundle(
+    params = dict(E2E_FIXTURE_PARAMS.get(scenario.fixture) or {})
+    conv, booking, availability, user_id = build_recorded_bundle(
         api_client,
         monkeypatch,
-        extra_scripts=confirmation_interruption_scripts(),
         **params,
     )
     try:

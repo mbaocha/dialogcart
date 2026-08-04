@@ -214,14 +214,37 @@ def assert_turn_expectations(
         if not isinstance(actual_missing, list):
             actual_missing = []
 
-        # Compare as sets for order-insensitive match
+        # Compare as sets for membership; order must follow planning.required_slots.
         if set(actual_missing) != set(expected_missing):
             return f"Turn {turn_index + 1} missing_slots mismatch: expected {expected_missing}, got {actual_missing}"
 
-        # INVARIANT: Verify missing_slots is sorted (planner returns sorted list)
-        # This ensures deterministic behavior while order doesn't matter for comparison
-        if actual_missing != sorted(actual_missing):
-            return f"Turn {turn_index + 1} missing_slots not sorted: got {actual_missing} (should be sorted for determinism)"
+        intent_for_order = outcome.get("intent_name") or outcome.get("intent")
+        if intent_for_order and len(actual_missing) > 0:
+            try:
+                from core.planning.planner.missing_slots import (
+                    derive_ask_next,
+                    get_planning_required_slots_for_intent,
+                )
+
+                required = get_planning_required_slots_for_intent(str(intent_for_order))
+                expected_order = [s for s in required if s in set(actual_missing)]
+                extras = [s for s in actual_missing if s not in set(required)]
+                if actual_missing != expected_order + extras:
+                    return (
+                        f"Turn {turn_index + 1} missing_slots not in policy order: "
+                        f"got {actual_missing}, expected {expected_order + extras}"
+                    )
+                ask_next = outcome.get("ask_next")
+                if ask_next is None:
+                    ask_next = outcome.get("facts", {}).get("ask_next")
+                expected_ask = derive_ask_next(actual_missing)
+                if ask_next is not None and ask_next != expected_ask:
+                    return (
+                        f"Turn {turn_index + 1} ask_next mismatch: "
+                        f"expected {expected_ask!r}, got {ask_next!r}"
+                    )
+            except Exception:
+                pass
 
     # Assert slots (partial match only)
     # Tests assert outcome.slots directly (not nested in facts)

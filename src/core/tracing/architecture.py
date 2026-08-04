@@ -312,6 +312,8 @@ def emit_phase1_architecture_traces(
             selected_rule = None
             if plan.get("status") == "HANDLER_DELEGATED":
                 selected_rule = "handler_delegation"
+            elif plan.get("status") == "OFF_TOPIC":
+                selected_rule = "off_topic_digression"
             emit_architecture_final_decision_trace(
                 decision_plan,
                 depends_on=final_depends or None,

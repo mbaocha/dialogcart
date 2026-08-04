@@ -43,6 +43,47 @@ class TimeResolutionEvidence:
     """When True, also apply confirmation_state / missing_slots finalization."""
 
 
+def _composed_planning_incomplete(plan: Dict[str, Any]) -> bool:
+    """True when composed planning missing_slots still need clarification."""
+    missing = plan.get("missing_slots")
+    return isinstance(missing, list) and bool(missing)
+
+
+def _ask_next_from_plan(plan: Dict[str, Any]) -> Optional[str]:
+    ask_next = plan.get("ask_next")
+    if isinstance(ask_next, str) and ask_next.strip():
+        return ask_next.strip()
+    missing = plan.get("missing_slots")
+    if isinstance(missing, list) and missing:
+        from core.planning.planner.missing_slots import derive_ask_next
+
+        return derive_ask_next(list(missing))
+    return None
+
+
+def _prune_missing_slots_filled_by_bind(
+    plan: Dict[str, Any],
+    bound_slots: Dict[str, Any],
+) -> None:
+    """Drop missing_slots that the exact-time bind has now satisfied."""
+    missing = plan.get("missing_slots")
+    if not isinstance(missing, list) or not missing:
+        return
+    present = {
+        key
+        for key, value in bound_slots.items()
+        if value is not None and value != ""
+    }
+    plan_slots = plan.get("slots")
+    if isinstance(plan_slots, dict):
+        for key, value in plan_slots.items():
+            if value is not None and value != "":
+                present.add(key)
+    pruned = [slot for slot in missing if slot not in present]
+    if pruned != list(missing):
+        _sync_plan_missing_slots(plan, pruned)
+
+
 def finalize_decision_after_time_resolution(
     plan: Dict[str, Any],
     *,
@@ -53,8 +94,22 @@ def finalize_decision_after_time_resolution(
     Mutates ``plan`` in place and returns it.
     """
     outcome = evidence.outcome
+    # Confirmation presentation requires composed planning completeness.
+    enter_confirmation = evidence.enter_confirmation
     if outcome == TIME_MATCH_EXACT:
-        _finalize_exact(plan, evidence)
+        bind_result = evidence.bind_result or {}
+        bound_slots = bind_result.get("slots")
+        if isinstance(bound_slots, dict):
+            _prune_missing_slots_filled_by_bind(plan, bound_slots)
+        if enter_confirmation:
+            enter_confirmation = not _composed_planning_incomplete(plan)
+
+    if outcome == TIME_MATCH_EXACT:
+        _finalize_exact(
+            plan,
+            evidence,
+            enter_confirmation=enter_confirmation,
+        )
     elif outcome == TIME_MATCH_MISMATCH:
         _finalize_mismatch(plan, evidence)
     else:
@@ -64,9 +119,9 @@ def finalize_decision_after_time_resolution(
         TIME_MATCH_EXACT,
         TIME_MATCH_MISMATCH,
     ):
-        # Exact + availability browse: presentation stays READY/AVAILABILITY;
-        # do not enter pending confirmation.
-        if outcome == TIME_MATCH_EXACT and not evidence.enter_confirmation:
+        # Exact + incomplete requiredness / availability browse: do not enter
+        # pending confirmation or clear missing_slots.
+        if outcome == TIME_MATCH_EXACT and not enter_confirmation:
             pass
         else:
             _finalize_confirmation_transition(plan, time_match=outcome)
@@ -74,7 +129,12 @@ def finalize_decision_after_time_resolution(
     return plan
 
 
-def _finalize_exact(plan: Dict[str, Any], evidence: TimeResolutionEvidence) -> None:
+def _finalize_exact(
+    plan: Dict[str, Any],
+    evidence: TimeResolutionEvidence,
+    *,
+    enter_confirmation: bool,
+) -> None:
     bind_result = evidence.bind_result or {}
     bound_slots = bind_result.get("slots")
     resolved_range = bind_result.get("resolved_datetime_range")
@@ -82,13 +142,27 @@ def _finalize_exact(plan: Dict[str, Any], evidence: TimeResolutionEvidence) -> N
         return
 
     time_resolution = evidence.time_resolution
-    if evidence.enter_confirmation:
+    if enter_confirmation:
         _patch_plan_container(
             plan,
             status="AWAITING_CONFIRMATION",
             stage="CONFIRM",
             action=None,
             awaiting="USER_CONFIRMATION",
+            time_match_outcome=TIME_MATCH_EXACT,
+            time_resolution=time_resolution,
+            bound_slots=bound_slots,
+            resolved_range=resolved_range,
+        )
+    elif _composed_planning_incomplete(plan):
+        # Bind the selected time but continue required-slot clarification.
+        ask_next = _ask_next_from_plan(plan)
+        _patch_plan_container(
+            plan,
+            status="NEEDS_CLARIFICATION",
+            stage="AVAILABILITY",
+            action=None,
+            awaiting=ask_next,
             time_match_outcome=TIME_MATCH_EXACT,
             time_resolution=time_resolution,
             bound_slots=bound_slots,
@@ -152,13 +226,19 @@ def _finalize_mismatch(plan: Dict[str, Any], evidence: TimeResolutionEvidence) -
 
 def _sync_plan_missing_slots(plan: Dict[str, Any], missing_slots: list) -> None:
     plan["missing_slots"] = list(missing_slots)
+    from core.planning.planner.missing_slots import derive_ask_next
+
+    ask_next = derive_ask_next(list(missing_slots))
+    plan["ask_next"] = ask_next
     decision = plan.get("_decision")
     if not isinstance(decision, dict):
         return
     decision["missing_slots"] = list(missing_slots)
+    decision["ask_next"] = ask_next
     facts = decision.get("facts")
     if isinstance(facts, dict):
         facts["missing_slots"] = list(missing_slots)
+        facts["ask_next"] = ask_next
 
 
 def _finalize_confirmation_transition(plan: Dict[str, Any], *, time_match: str) -> None:
@@ -172,26 +252,46 @@ def _finalize_confirmation_transition(plan: Dict[str, Any], *, time_match: str) 
         plan["_merged_luma_response"] = merged
 
     if time_match == TIME_MATCH_EXACT:
-        previous_conf = get_confirmation_state(merged) or get_confirmation_state(plan)
-        _sync_plan_missing_slots(plan, [])
-        set_confirmation_state(merged, "pending")
-        set_confirmation_state(plan, "pending")
-        try:
-            from core.tracing.confirmation import emit_confirmation_enter_pending_trace
-
-            emit_confirmation_enter_pending_trace(
-                entered=True,
-                previous_state=previous_conf,
-                missing_slots=[],
-                availability_resolved=True,
-                time_selection_ready=True,
+        if _composed_planning_incomplete(plan):
+            # Never clear missing_slots or enter pending while required remain.
+            ask_next = _ask_next_from_plan(plan)
+            if plan.get("status") != "NEEDS_CLARIFICATION":
+                plan["status"] = "NEEDS_CLARIFICATION"
+            if ask_next and not plan.get("awaiting"):
+                plan["awaiting"] = ask_next
+            if plan.get("action") is not None:
+                plan["action"] = None
+            logger.info(
+                "[BOOKING_CONFIRMATION] Exact match with incomplete requiredness — "
+                "skip confirmation; ask_next=%s missing=%s",
+                ask_next,
+                plan.get("missing_slots"),
             )
-        except ImportError:
-            pass
-        logger.info(
-            "[BOOKING_CONFIRMATION] Decision finalization exact match — "
-            "confirmation_state=pending"
-        )
+        else:
+            previous_conf = get_confirmation_state(merged) or get_confirmation_state(
+                plan
+            )
+            _sync_plan_missing_slots(plan, [])
+            set_confirmation_state(merged, "pending")
+            set_confirmation_state(plan, "pending")
+            try:
+                from core.tracing.confirmation import (
+                    emit_confirmation_enter_pending_trace,
+                )
+
+                emit_confirmation_enter_pending_trace(
+                    entered=True,
+                    previous_state=previous_conf,
+                    missing_slots=[],
+                    availability_resolved=True,
+                    time_selection_ready=True,
+                )
+            except ImportError:
+                pass
+            logger.info(
+                "[BOOKING_CONFIRMATION] Decision finalization exact match — "
+                "confirmation_state=pending"
+            )
     else:
         consume_confirmation_state(merged, reason="time_match_mismatch")
         consume_confirmation_state(plan, reason="time_match_mismatch")

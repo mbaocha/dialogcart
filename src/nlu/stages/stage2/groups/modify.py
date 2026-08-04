@@ -42,13 +42,13 @@ def _system_prompt(
 ) -> str:
     ctx_block = format_conversation_context(conversation_context or {})
     ctx_section = f"\n{ctx_block}\n" if ctx_block else ""
-    return f"""You are a slot extractor for a booking platform.
-Extract modification slots from the user message.
+    return f"""{intent_validation_section(candidate_intent)}
+
+── EXTRACTION (MODIFY) ─────────────────────────────────────────────────────
+Extract modification slots for validated_intent only.
 
 Current date/time (tenant-local): {now}
 {ctx_section}
-{intent_validation_section(candidate_intent)}
-
 Modification requires booking_id (to identify the booking) plus new date/time.
 If the user has not provided a booking_id yet, extract what date/time changes they want.
 
@@ -88,18 +88,23 @@ class ModifyGroupExtractor:
 
         for block in response.content:
             if block.type == "tool_use" and block.name == "extract_modify_slots":
-                return _merge(block.input, candidate_intent)
+                return _merge(block.input, candidate_intent, text=text)
 
         logger.warning("ModifyGroupExtractor: no tool_use block for text=%r", text)
         return _empty(candidate_intent)
 
 
-def _merge(raw: Dict[str, Any], candidate_intent: str) -> Dict[str, Any]:
+def _merge(
+    raw: Dict[str, Any],
+    candidate_intent: str,
+    *,
+    text: str = "",
+) -> Dict[str, Any]:
     validated = raw.get("validated_intent") or candidate_intent
     confidence = float(raw.get("confidence", 0.8))
     facts = raw.get("facts") or {}
     temporal, temporal_facts, time_constraint = materialize_temporal_ownership(
-        raw, confidence=confidence
+        raw, confidence=confidence, source_text=text
     )
     return {
         "intent": validated,

@@ -7,7 +7,7 @@ Computes effective collected slots from Luma/session inputs for merge and planni
 import json
 import logging
 import os
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from core.session.durable_intents import (
     filter_slots_for_intent,
@@ -23,6 +23,7 @@ def _compute_effective_collected_slots_internal(
     effective_intent: str,
     *,
     apply_domain_filter: bool = True,
+    entity_schema: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Compute effective collected slots from promoted slots.
@@ -37,6 +38,7 @@ def _compute_effective_collected_slots_internal(
     Args:
         promoted_slots: Promoted slots (after promotion rules applied)
         effective_intent: Intent name for determining required slots
+        entity_schema: Optional active entity schema for business-slot allowlisting
 
     Returns:
         Dictionary of effective collected slots (slots that satisfy required slots)
@@ -50,13 +52,18 @@ def _compute_effective_collected_slots_internal(
         promoted_slots,
         effective_intent,
         apply_domain_filter=apply_domain_filter,
+        entity_schema=entity_schema,
     )
 
     # Slots are treated as an unordered, additive map
     # No special routing needed - users can provide missing slots in any order
     effective_slots_for_filtering = domain_filtered_slots
 
-    required_slots_set = set(get_planning_required_slots_for_intent(effective_intent))
+    required_slots_set = set(
+        get_planning_required_slots_for_intent(
+            effective_intent, entity_schema=entity_schema
+        )
+    )
 
     if debug_persistence_enabled():
         print(
@@ -152,6 +159,11 @@ def _compute_effective_collected_slots(
             facts_obj,
             intent_name=intent_name,
             source_text=luma_response.get("_source_text"),
+            entity_schema=(
+                luma_response.get("_entity_schema")
+                if isinstance(luma_response.get("_entity_schema"), dict)
+                else None
+            ),
         )
         if isinstance(facts_obj, dict)
         else {}
@@ -233,7 +245,14 @@ def _compute_effective_collected_slots(
     # Compute effective collected slots (for backward compatibility, not used for missing_slots)
     # No session on first turn - planner handles missing_slots computation
     effective_collected_slots = _compute_effective_collected_slots_internal(
-        promoted_slots, intent_name, apply_domain_filter=apply_domain_filter
+        promoted_slots,
+        intent_name,
+        apply_domain_filter=apply_domain_filter,
+        entity_schema=(
+            luma_response.get("_entity_schema")
+            if isinstance(luma_response.get("_entity_schema"), dict)
+            else None
+        ),
     )
 
     # TRACE 2: After modification context detection (both paths)

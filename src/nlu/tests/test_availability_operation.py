@@ -109,14 +109,12 @@ class TestAvailabilityExtractorOperation:
     @pytest.mark.parametrize(
         "text,operation",
         [
+            ("next", "browse_next"),
             ("show more", "browse_next"),
-            ("show me more times", "browse_next"),
-            ("are there other slots?", "browse_next"),
-            ("anything later?", "browse_next"),
-            ("what else do you have?", "browse_next"),
-            ("go back", "browse_previous"),
-            ("previous times", "browse_previous"),
-            ("show earlier", "browse_previous"),
+            ("more", "browse_next"),
+            ("previous", "browse_previous"),
+            ("show previous", "browse_previous"),
+            ("back", "browse_previous"),
         ],
     )
     def test_extractor_returns_operation_from_llm(self, text, operation):

@@ -1,4 +1,8 @@
-"""Transient availability browse signals from structured Luma operations."""
+"""Transient availability browse signals from structured Luma operations.
+
+Browse is pure page movement inside a criteria-shaped presentation result set.
+Date changes belong to SEARCH_AVAILABILITY — never Browse.
+"""
 
 from __future__ import annotations
 
@@ -12,52 +16,21 @@ logger = logging.getLogger(__name__)
 _BROWSE_OPERATIONS = {
     "browse_next": ("next", "any"),
     "browse_previous": ("previous", "any"),
-    "browse_next_day": ("next", "date"),
-    "browse_previous_day": ("previous", "date"),
-    "browse_next_times": ("next", "time"),
-    "browse_previous_times": ("previous", "time"),
+    # Legacy synonyms still map to page movement only (no date axis).
+    "browse_next_times": ("next", "any"),
+    "browse_previous_times": ("previous", "any"),
 }
 
-# Most specific phrases first.
-_DATE_NEXT_PHRASES = (
-    "next day",
-    "next available day",
-    "following day",
-    "another day",
-)
-_DATE_PREV_PHRASES = (
-    "previous day",
-    "prev day",
-    "earlier day",
-)
-_TIME_NEXT_PHRASES = (
-    "more times",
-    "more time",
-    "additional times",
-    "additional time",
-    "later times",
-    "later time",
-)
-_TIME_PREV_PHRASES = (
-    "earlier times",
-    "earlier time",
-    "previous time",
-    "previous page",
-)
+# Deliberately small alias set. Date phrases are NOT browse.
 _ANY_NEXT_PHRASES = (
     "show more",
-    "show me additional",
-    "other time",
-    "other times",
-    "next time",
-    "next page",
-    "see more",
-    "any more",
-    "what else",
+    "more",
+    "next",
 )
 _ANY_PREV_PHRASES = (
-    "go back",
-    "before that",
+    "show previous",
+    "previous",
+    "back",
 )
 
 
@@ -103,7 +76,7 @@ def _browse_from_availability_browse_field(
     if direction not in ("next", "previous"):
         return None
     axis = browse_field.get("axis_hint") or browse_field.get("axis")
-    if axis not in ("any", "time", "date", None):
+    if axis not in ("any", "time", None):
         axis = "any"
     return _intent(str(direction), axis or "any")
 
@@ -177,34 +150,47 @@ def _allows_browse_text_fallback(
     return _session_has_durable_booking_intent(session_state)
 
 
+def _exact_phrase_match(lowered: str, phrase: str) -> bool:
+    """True when *phrase* is the whole utterance or a clear token sequence."""
+    text = " ".join(lowered.split())
+    target = " ".join(phrase.split())
+    if text == target:
+        return True
+    # Allow light punctuation wrappers: "next." / "show more!"
+    stripped = text.strip(".,!? ")
+    return stripped == target
+
+
 def infer_browse_direction_from_text(text: str) -> Optional[BrowseIntent]:
-    """Infer BrowseIntent from user text when NLU omits structured operation."""
+    """Infer BrowseIntent from a small alias set when NLU omits structured operation.
+
+    Date navigation phrases (next day, previous day, later date, …) are never browse.
+    """
     lowered = (text or "").lower().strip()
     if not lowered:
         return None
 
-    for phrase in _DATE_PREV_PHRASES:
-        if phrase in lowered:
-            return _intent("previous", "date")
-    for phrase in _DATE_NEXT_PHRASES:
-        if phrase in lowered:
-            return _intent("next", "date")
-    for phrase in _TIME_PREV_PHRASES:
-        if phrase in lowered:
-            return _intent("previous", "time")
-    for phrase in _TIME_NEXT_PHRASES:
-        if phrase in lowered:
-            return _intent("next", "time")
+    # Reject date-axis language explicitly — these are SEARCH semantics.
+    date_axis_markers = (
+        "next day",
+        "previous day",
+        "prev day",
+        "following day",
+        "another day",
+        "later date",
+        "earlier date",
+        "next available day",
+        "earlier day",
+    )
+    if any(marker in lowered for marker in date_axis_markers):
+        return None
+
     for phrase in _ANY_PREV_PHRASES:
-        if phrase in lowered:
+        if _exact_phrase_match(lowered, phrase):
             return _intent("previous", "any")
     for phrase in _ANY_NEXT_PHRASES:
-        if phrase in lowered:
+        if _exact_phrase_match(lowered, phrase):
             return _intent("next", "any")
-    if "additional" in lowered and any(
-        token in lowered for token in ("time", "times", "slot", "show")
-    ):
-        return _intent("next", "time")
     return None
 
 
@@ -216,17 +202,12 @@ def resolve_browse_intent(
     if not isinstance(merged, dict):
         return None
 
+    # Absolute date / changed temporal criterion → SEARCH ownership, not browse.
+    if merged.get("_current_turn_has_date") and merged.get("_current_turn_date"):
+        return None
+
     browse = extract_availability_browse(merged)
     if browse:
-        # Structured NLU often only supplies direction; refine axis from text when present.
-        if (browse.get("axis_hint") or "any") == "any":
-            source_text = merged.get("_source_text") or ""
-            inferred = infer_browse_direction_from_text(str(source_text))
-            if inferred and inferred.get("axis_hint") in ("time", "date"):
-                browse = {
-                    "direction": browse.get("direction") or inferred.get("direction"),
-                    "axis_hint": inferred.get("axis_hint"),
-                }
         try:
             from core.tracing.browse import emit_browse_resolve_trace
 
@@ -249,10 +230,9 @@ def resolve_browse_intent(
     inferred = infer_browse_direction_from_text(str(source_text))
     if inferred:
         logger.info(
-            "[AVAILABILITY_BROWSE] inferred direction=%s axis=%s from cached availability "
+            "[AVAILABILITY_BROWSE] inferred direction=%s from cached availability "
             "and user text (luma_intent=%s session_intent=%s)",
             inferred.get("direction"),
-            inferred.get("axis_hint"),
             _luma_intent_name(merged) or None,
             _session_intent_name(session_state) if isinstance(session_state, dict) else None,
         )
@@ -276,6 +256,48 @@ def resolve_browse_intent(
 resolve_availability_browse = resolve_browse_intent
 
 
+def cache_satisfiable_browse_request(
+    merged: Optional[Dict[str, Any]],
+    session_state: Optional[Dict[str, Any]] = None,
+) -> Optional[BrowseIntent]:
+    """Return BrowseIntent when page movement can use the trusted presentation set.
+
+    Planner uses this to suppress ``SEARCH_AVAILABILITY`` only for structured
+    ``browse_next`` / ``browse_previous`` (or the small alias set) when a trusted
+    cache exists. Absolute dates and temporal criterion changes are never
+    cache-satisfiable browse — they require SEARCH.
+    """
+    if not _has_cached_availability(session_state):
+        return None
+    if isinstance(merged, dict):
+        try:
+            from core.planning.temporal_proposal import build_selection_user_facts
+            from core.workflows.availability.selection import search_criteria_changed
+
+            entity_schema = (
+                merged.get("_entity_schema")
+                if isinstance(merged.get("_entity_schema"), dict)
+                else None
+            )
+            if search_criteria_changed(
+                user_facts=build_selection_user_facts(merged),
+                session_state=session_state,
+                entity_schema=entity_schema,
+            ):
+                return None
+        except ImportError:
+            pass
+
+        # Explicit absolute date this turn → SEARCH, not browse suppress.
+        if merged.get("_current_turn_has_date") and merged.get("_current_turn_date"):
+            return None
+
+    browse = resolve_browse_intent(merged, session_state)
+    if not browse:
+        return None
+    return browse
+
+
 def apply_availability_browse_signal(
     merged: Dict[str, Any],
     luma_response: Dict[str, Any],
@@ -288,14 +310,6 @@ def apply_availability_browse_signal(
     """
     browse = extract_availability_browse(luma_response)
     if browse:
-        # Prefer text-refined axis when structured signal is direction-only.
-        source_text = merged.get("_source_text") or luma_response.get("_source_text") or ""
-        inferred = infer_browse_direction_from_text(str(source_text))
-        if inferred and inferred.get("axis_hint") in ("time", "date"):
-            browse = {
-                "direction": browse.get("direction") or inferred.get("direction"),
-                "axis_hint": inferred.get("axis_hint"),
-            }
         merged["availability_browse"] = browse
         logger.info(
             "[AVAILABILITY_BROWSE] detected direction=%s axis=%s",

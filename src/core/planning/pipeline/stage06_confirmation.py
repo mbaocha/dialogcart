@@ -65,6 +65,34 @@ from core.session.invalidation import InvalidationTrigger, apply_invalidation
 logger = logging.getLogger(__name__)
 
 
+def _turn_understanding(payload: Dict[str, Any]) -> Optional[str]:
+    turn = payload.get("turn")
+    if isinstance(turn, dict):
+        value = turn.get("understanding")
+        if isinstance(value, str) and value:
+            return value
+    return None
+
+
+def _non_superseding_unrecognized_pending(
+    payload: Dict[str, Any],
+    confirmation_state: Optional[str],
+) -> bool:
+    """True when ANOTHER_REQUEST must not consume pending confirmation.
+
+    Unrecognized input with no current-turn planning evidence is not workflow
+    supersession — preserve authorization so recovery can re-ask.
+    """
+    if confirmation_state != "pending":
+        return False
+    if _turn_understanding(payload) != "UNRECOGNIZED_INPUT":
+        return False
+    from core.planning.planning_evidence import require_planning_evidence
+
+    if require_planning_evidence(payload):
+        return False
+    return True
+
 
 _SESSION_AVAILABILITY_KEYS = (
 
@@ -548,43 +576,44 @@ def resolve_confirmation(
 
     elif gate_action == ConfirmationGateTurn.ANOTHER_REQUEST:
 
-        # Confirmation authorizes a specific bound selection. Any other request
+        # Confirmation authorizes a specific bound selection. Genuine supersession
+        # (revision, availability change, durable workflow progress) consumes that
+        # authorization. Unrecognized no-evidence turns are not supersession —
+        # keep pending so recovery can re-ask.
 
-        # consumes that authorization. Availability refinements clear the prior
-
-        # time binding; a same-turn exact time rebind keeps the new selection and
-
-        # may re-enter pending confirmation below.
-
-        consume_confirmation_state(payload, reason="confirmation_superseded")
-
-        if isinstance(session_state, dict):
-
-            consume_confirmation_state(
-
-                session_state, reason="confirmation_superseded"
-
-            )
-
-        confirmation_state = None
-
-        same_turn_time_rebind = _same_turn_time_rebind(working_turn, turn_operation)
-
-        if same_turn_time_rebind:
-
-            slots_adjusted = False
-
+        if _non_superseding_unrecognized_pending(payload, confirmation_state):
+            same_turn_time_rebind = False
         else:
 
-            bound_datetime_clear = _clear_bound_time_selection(
+            consume_confirmation_state(payload, reason="confirmation_superseded")
 
-                working_turn,
+            if isinstance(session_state, dict):
 
-                preserve_current_turn_time=False,
+                consume_confirmation_state(
 
-            )
+                    session_state, reason="confirmation_superseded"
 
-            slots_adjusted = True
+                )
+
+            confirmation_state = None
+
+            same_turn_time_rebind = _same_turn_time_rebind(working_turn, turn_operation)
+
+            if same_turn_time_rebind:
+
+                slots_adjusted = False
+
+            else:
+
+                bound_datetime_clear = _clear_bound_time_selection(
+
+                    working_turn,
+
+                    preserve_current_turn_time=False,
+
+                )
+
+                slots_adjusted = True
 
     else:
 

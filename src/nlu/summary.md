@@ -23,13 +23,14 @@ It is a **semantic understanding** service. It is not a planner, session store, 
 
 | Decision | Where |
 |----------|--------|
-| Intent label for this utterance | Stage 1 (`stages/stage1/`), optionally Stage 2 `validated_intent` |
-| Which Stage 2 extractor group runs | `registry/intent_groups.py` → `stages/stage2/dispatcher.py` |
-| Fact extraction from **current** text | Stage 2 group extractors |
+| Intent label for this utterance | Stage 1 proposes; **Stage 2 `validated_intent` is authoritative** |
+| Which Stage 2 extractor group runs | `registry/intent_groups.py` → `stages/stage2/dispatcher.py` (Stage 3 re-runs on group change) |
+| Fact extraction from **current** text | Stage 2 group extractors (after validation) |
 | Service alias / ambiguity resolution | `pipeline.py` + `catalog.py` |
 | Calendar binding of named dates to ISO | `calendar/calendar_binder.py` (after extraction) |
 | Availability browse subtype (`browse_next` / `browse_previous`) | Stage 2 availability group → `operation` |
-| Whether correction language vs bare slot-fill vs modify language | Stage 1 classification rules |
+| Whether correction language vs bare slot-fill vs modify / FAQ digression | Stage 2 Intent Validation Contract (`intent_validation_section`) |
+| Whether `CORRECTION` is a workflow-state change vs informational disagreement | Stage 2 Intent Validation Contract (`CORRECTION` vs informational clarification) |
 
 ### Decisions intentionally deferred to Core
 

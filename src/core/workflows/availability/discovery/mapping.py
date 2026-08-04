@@ -118,9 +118,10 @@ def to_availability_browse_intent(
     if direction is not None:
         availability["direction"] = direction
     axis = intent.get("axis_hint")
-    if axis in (None, "any", "time", "date"):
+    if axis in (None, "any", "time"):
         availability["axis_hint"] = axis
     elif axis is not None:
+        # Former date-axis browse collapses to page movement.
         availability["axis_hint"] = "any"
     return availability  # type: ignore[return-value]
 

@@ -103,12 +103,17 @@ def derive_clarification_reason_from_missing_slots(missing: List[str]) -> str:
         return "MISSING_START_DATE"
     if missing_set == {"end_date"}:
         return "MISSING_END_DATE"
+    if missing_set == {"service_id"}:
+        return "MISSING_SERVICE"
     if missing_set == {"time"}:
         return "MISSING_TIME"
     if missing_set == {"date"}:
         return "MISSING_DATE"
     if "time" in missing_set:
         return "MISSING_TIME"
+    # Single non-platform business slot → generic clarification (schema-driven ask).
+    if len(missing_set) == 1:
+        return "NEEDS_CLARIFICATION"
     return "NEEDS_CLARIFICATION"
 
 
@@ -157,6 +162,11 @@ def _build_decision_dict(
         "booking": decision_plan.booking,
         "service_candidates": decision_plan.service_candidates,
     }
+    ask_next = plan.get("ask_next")
+    if ask_next is None and isinstance(decision_plan.facts, dict):
+        ask_next = decision_plan.facts.get("ask_next")
+    if ask_next is not None:
+        decision["ask_next"] = ask_next
     if decision_plan.action_name:
         decision["action_name"] = decision_plan.action_name
     if decision_plan.candidate_evidence:
@@ -294,6 +304,19 @@ def assemble_planning_outcome(
         "stage": plan.get("stage"),
         "action": plan.get("action"),
         "missing_slots": missing_slots,
+        "ask_next": plan.get("ask_next") or decision_plan.facts.get("ask_next"),
+        "promptable_slots": list(
+            plan.get("promptable_slots")
+            or decision_plan.facts.get("promptable_slots")
+            or getattr(slot_state, "promptable_slots", [])
+            or []
+        ),
+        "declined_slots": list(
+            plan.get("declined_slots")
+            or decision_plan.facts.get("declined_slots")
+            or getattr(slot_state, "declined_slots", [])
+            or []
+        ),
         "slots": outcome_slots,
         "status": plan_status,
         "executable_actions": plan.get("executable_actions", []),
@@ -314,12 +337,31 @@ def assemble_planning_outcome(
         )
     if plan.get("availability_reshow"):
         populated_plan["availability_reshow"] = True
+    # Availability criteria identity for SEARCH fingerprint / request adapter.
+    entity_schema = plan.get("_entity_schema")
+    if not isinstance(entity_schema, dict) and isinstance(decision_plan.facts, dict):
+        entity_schema = decision_plan.facts.get("_entity_schema")
+    if isinstance(entity_schema, dict):
+        populated_plan["_entity_schema"] = entity_schema
 
     outcome_facts = {
         **decision_plan.facts,
         "missing_slots": missing_slots,
+        "ask_next": populated_plan.get("ask_next"),
+        "promptable_slots": populated_plan.get("promptable_slots"),
+        "declined_slots": populated_plan.get("declined_slots"),
         "slots": outcome_slots,
     }
+    from core.planning.planning_evidence import (
+        planning_evidence_outcome_key,
+        planning_evidence_payload_key,
+        require_planning_evidence,
+    )
+
+    _evidence = require_planning_evidence(working_turn.payload, populated_plan)
+    outcome_facts[planning_evidence_outcome_key()] = _evidence
+    populated_plan[planning_evidence_outcome_key()] = _evidence
+    populated_plan[planning_evidence_payload_key()] = _evidence
 
     if slot_state.needs_clarification and plan_status == "NEEDS_CLARIFICATION":
         clarify = build_clarify_outcome(
@@ -338,6 +380,9 @@ def assemble_planning_outcome(
             "stage": plan.get("stage"),
             "action": plan.get("action"),
             "missing_slots": missing_slots,
+            "ask_next": populated_plan.get("ask_next"),
+            "promptable_slots": populated_plan.get("promptable_slots"),
+            "declined_slots": populated_plan.get("declined_slots"),
             "slots": outcome_slots,
             "plan": populated_plan,
         }
@@ -368,6 +413,9 @@ def assemble_planning_outcome(
         "stage": plan.get("stage"),
         "action": plan.get("action"),
         "missing_slots": missing_slots,
+        "ask_next": populated_plan.get("ask_next"),
+        "promptable_slots": populated_plan.get("promptable_slots"),
+        "declined_slots": populated_plan.get("declined_slots"),
         "slots": outcome_slots,
         "status": plan_status,
         "plan": populated_plan,
@@ -486,7 +534,7 @@ def assemble_handler_delegated_outcome(
     working_turn: Optional[WorkingTurn] = None,
     luma_response: Optional[Dict[str, Any]] = None,
 ) -> PlanningOutcome:
-    """Render envelope for handler-delegation Decision (no new decisions)."""
+    """Envelope for non-durable Decision early exit (OFF_TOPIC or RAG HANDLER_DELEGATED)."""
     plan = dict(decision_plan.plan) if isinstance(decision_plan.plan, dict) else {}
     facts = decision_plan.facts if isinstance(decision_plan.facts, dict) else {}
     slots = dict(facts.get("slots") or {})
@@ -506,8 +554,17 @@ def assemble_handler_delegated_outcome(
             "status": "HANDLER_DELEGATED",
             "active_handler": plan.get("active_handler"),
             "search_query": plan.get("search_query"),
+        }
+    elif status == "OFF_TOPIC":
+        outcome = {
+            **base_outcome,
+            "status": "OFF_TOPIC",
             "off_topic_query": plan.get("off_topic_query"),
         }
+        if plan.get("answerable") is not None:
+            outcome["answerable"] = plan.get("answerable")
+        if plan.get("answer") is not None:
+            outcome["answer"] = plan.get("answer")
     else:
         outcome = {**base_outcome, "status": status}
 

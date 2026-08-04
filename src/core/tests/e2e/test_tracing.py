@@ -14,11 +14,16 @@ from core.adapters.nlu import LumaClient
 from core.api.compat import handle_message as real_handle_message
 from core.session.session_manager import clear_session
 from core.planning.time_resolution import TIME_MATCH_EXACT
-from core.tests.e2e.framework.fixtures import TARGET_DATE
+from datetime import timedelta
+
+from core.tests.e2e.framework.conversation import FROZEN_TIME
 from core.tests.e2e.framework.trace_helpers import (
     maybe_print_decision_trace,
     stash_decision_trace_from_body,
 )
+
+# Relative "tomorrow" against the shared E2E clock (not TARGET_DATE = frozen+2).
+_TOMORROW = (FROZEN_TIME + timedelta(days=1)).strftime("%Y-%m-%d")
 from core.tracing.availability import AVAILABILITY_REQUEST_ID, AVAILABILITY_RESPONSE_ID
 from core.tracing.facts import FACTS_DERIVE_ALL_ID
 from core.tracing.fingerprint import FINGERPRINT_TRUST_ID
@@ -273,7 +278,7 @@ def test_forensic_trace_records_availability_and_time_resolution(
     avail_req = _trace_record(trace, AVAILABILITY_REQUEST_ID)
     assert avail_req["facts"]["time_constraint"] is None
     assert avail_req["facts"].get("service_id") is not None
-    assert avail_req["facts"].get("date") == TARGET_DATE
+    assert avail_req["facts"].get("date") == _TOMORROW
 
     avail_resp = _trace_record(trace, AVAILABILITY_RESPONSE_ID)
     assert avail_resp["facts"].get("available_slot_count") is not None

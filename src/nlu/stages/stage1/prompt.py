@@ -9,6 +9,8 @@ Token budget target: ~500 tokens (vs ~1,800 for the combined extractor).
 from typing import Any, Dict, Optional
 
 from ...registry.intent_groups import ALL_INTENTS, format_intent_registry
+from ..shared.confirm_dialog_act import confirm_action_dialog_act_section
+from ..shared.reject_dialog_act import reject_action_dialog_act_section
 from ..shared.context import format_conversation_context
 
 _TOOL = {
@@ -66,15 +68,56 @@ or off-topic digression:
 Do NOT apply without CONVERSATION CONTEXT (cold start).
 Explicit booking verb in the utterance → classify normally, not slot-fill.
 
+CONVERSATIONAL ANSWER (assistant just requested or offered values):
+When Immediately preceding assistant asked for or offered a finite set of values
+(service, engine type, room, staff, membership, date/time choice, etc.), AND the
+user replies with one of those values or an unambiguous reference to one
+("the first one", "premium", "that one", "the deluxe room"):
+→ Interpret the reply as answering that prompt (NOT UNKNOWN, NOT a fresh FAQ).
+  Prefer the booking / workflow intent that the answer advances:
+  - selecting a bookable service / starting a timed booking → CREATE_APPOINTMENT
+  - selecting accommodation → CREATE_RESERVATION
+  - answering a slot while last_intent/active_booking_intent is already a booking
+    intent → keep that booking intent (same as slot-fill continuation)
+  Do not invent values the user did not say. Entity extraction is Stage 2.
+Examples (pattern — not intent-specific names):
+  Assistant asked "Which service would you like?" + offered list
+    + "Executive Oil Change"     → CREATE_APPOINTMENT
+  Assistant asked "Which service would you like?"
+    + "the first one" / "Premium" / "that one" → CREATE_APPOINTMENT
+  Assistant asked "Which engine type?" + "Petrol"           → CREATE_APPOINTMENT
+    (when prior context is an active booking / slot ask)
+  Assistant asked "Which room?" + "Deluxe" / "the deluxe room" → CREATE_RESERVATION
+  Assistant asked "Which stylist?" + "Sarah"                → CREATE_APPOINTMENT
+  Assistant asked "Which membership?" + "Gold"              → CREATE_APPOINTMENT
+Cold-start bare names without a preceding assistant ask still follow COLD-START rules.
+
+AVAILABILITY BROWSE (overrides slot-fill continuation):
+When the user is navigating previously presented times — "next", "show more",
+"more", "previous", "show previous", "back", or equivalent "are there more times"
+phrasing — classify as AVAILABILITY even if last_intent is CREATE_APPOINTMENT.
+This remains AVAILABILITY after the assistant said there are no more times /
+browse is exhausted: repeating the same browse request is still AVAILABILITY
+browse, not unrecognized in-flow gibberish and not a new booking verb.
+  last_intent=CREATE_APPOINTMENT + "show more"              → AVAILABILITY
+  last_intent=CREATE_APPOINTMENT + "Are there more times?"  → AVAILABILITY
+  (even when prior assistant said "no more available times") → AVAILABILITY
+
 CORRECTION (active booking context only):
 When context shows an active booking intent AND user replaces/corrects a slot
 ("actually X", "make it X instead", "wait I meant X"):
 → CORRECTION
 
+{confirm_action_dialog_act_section()}
+{reject_action_dialog_act_section()}
 BOOKING VERB RULE:
 An explicit booking verb (book, schedule, reserve, cancel, modify, change, reschedule) is
 sufficient to classify the intent — even when the service is generic or unspecified.
 Service resolution is Stage 2's responsibility. Never return UNKNOWN when a booking verb is present.
+Exception (pending proposal only): when CONVERSATION CONTEXT shows a pending proposed
+action awaiting confirmation, short authorize-the-proposal imperatives ("book it",
+"reserve it", "schedule it") are CONFIRM_ACTION per the dialog-act rule above — not
+CREATE_*. Cold start / no pending proposal is unchanged.
 
 GENERAL_INQUIRY vs OFF_TOPIC vs UNKNOWN:
   GENERAL_INQUIRY — business-scoped FAQ (hours, location, policies, payments, store info).
@@ -91,6 +134,7 @@ COLD-START examples (no CONVERSATION CONTEXT):
   "haircut tomorrow"               → UNKNOWN  (no booking verb)
   "friday"                         → UNKNOWN  (bare weekday, no context)
   "book haircut at 10am"           → CREATE_APPOINTMENT
+  "book it"                        → CREATE_APPOINTMENT  (no pending proposal → not CONFIRM_ACTION)
   "i want to book a service"       → CREATE_APPOINTMENT  (booking verb present; service unspecified)
   "book something for friday"      → CREATE_APPOINTMENT  (booking verb present; service unspecified)
   "i'd like to make a reservation" → CREATE_RESERVATION  (booking verb present)

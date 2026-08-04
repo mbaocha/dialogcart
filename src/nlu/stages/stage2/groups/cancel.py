@@ -33,13 +33,13 @@ def _system_prompt(
 ) -> str:
     ctx_block = format_conversation_context(conversation_context or {})
     ctx_section = f"\n{ctx_block}\n" if ctx_block else ""
-    return f"""You are a slot extractor for a booking platform.
-Extract cancellation slots from the user message.
+    return f"""{intent_validation_section(candidate_intent)}
+
+── EXTRACTION (CANCEL) ─────────────────────────────────────────────────────
+Extract cancellation slots for validated_intent only.
 
 Current date/time: {now}
 {ctx_section}
-{intent_validation_section(candidate_intent)}
-
 Cancellation requires only a booking_id.
 If no booking_id is provided, leave it null — the pipeline will ask the user for it.
 

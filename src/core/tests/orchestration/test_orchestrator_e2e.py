@@ -242,6 +242,8 @@ class MockLumaClientForTests(LumaClient):
         timezone: str = "UTC",
         tenant_context: Optional[Dict[str, Any]] = None,
         conversation_context: Optional[Dict[str, Any]] = None,
+        entity_schema: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         """
         Override resolve to inject test aliases into tenant_context.
@@ -259,6 +261,8 @@ class MockLumaClientForTests(LumaClient):
             timezone,
             tenant_context,
             conversation_context=conversation_context,
+            entity_schema=entity_schema,
+            **kwargs,
         )
 
 

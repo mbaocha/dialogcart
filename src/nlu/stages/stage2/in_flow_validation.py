@@ -16,4 +16,13 @@ or off-topic digression:
   last_intent=CREATE_APPOINTMENT + "9am"       → validated_intent=CREATE_APPOINTMENT
   last_intent=CREATE_APPOINTMENT + "aaaa"      → validated_intent=CREATE_APPOINTMENT, empty facts
   last_intent=CREATE_APPOINTMENT + "tell me a joke" → validated_intent=OFF_TOPIC
+
+AVAILABILITY BROWSE EXCEPTION (overrides in-flow continuation):
+When the user is navigating previously presented times ("next", "show more",
+"more", "previous", "show previous", "back", or equivalent more-times phrasing),
+including after an assistant exhaustion / no-more-times reply:
+→ validated_intent = AVAILABILITY and set operation = browse_next or browse_previous.
+  Do NOT treat as unrecognized in-flow gibberish.
+  Do NOT leave operation null for these utterances.
+
 Do NOT invent booking slots the user did not mention."""

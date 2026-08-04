@@ -1,0 +1,58 @@
+# Business Category Configuration
+#
+# Each business category owns its business schema (entities) and declares which
+# platform booking workflow it uses (booking_domain).
+#
+# Lookup key: business_category (e.g. beauty_salon, car_service, hotel)
+# Workflow key: booking_domain (service | reservation)
+#
+# Catalog phrase→id values are never stored here — they are projected at
+# request time from CatalogCache using each entity's `catalog` collection key.
+
+beauty_salon:
+  booking_domain: service
+  entities:
+    - name: service
+      type: catalog
+      role: bookable_item
+      description: The requested service.
+      catalog: services
+
+car_service:
+  booking_domain: service
+  entities:
+    - name: service
+      type: catalog
+      role: bookable_item
+      required: true
+      description: Vehicle service requested.
+      catalog: services
+    - name: engine_type
+      type: enum
+      required: true
+      availability_criteria: true
+      description: Vehicle engine type.
+      values:
+        - petrol
+        - diesel
+        - hybrid
+        - ev
+    - name: registration_number
+      type: text
+      required: true
+      description: Vehicle registration number.
+    - name: staff
+      type: catalog
+      role: staff
+      required: false
+      description: Preferred mechanic.
+      catalog: staff
+
+hotel:
+  booking_domain: reservation
+  entities:
+    - name: room_type
+      type: catalog
+      role: bookable_item
+      description: The requested room type.
+      catalog: room_types

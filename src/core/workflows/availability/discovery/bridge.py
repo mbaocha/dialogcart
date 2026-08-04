@@ -94,6 +94,9 @@ def present_via_discovery(
     *,
     page_size: int = DEFAULT_MAX_TIMES,
     search_date: Optional[str] = None,
+    slots: Optional[Dict[str, Any]] = None,
+    date_proposal: Optional[Dict[str, Any]] = None,
+    fingerprint_slots: Optional[Dict[str, Any]] = None,
 ) -> PresentedAvailability:
     """Build the initial presented window via Discovery Navigator."""
     trusted = cache_to_trusted(cache)
@@ -102,6 +105,10 @@ def present_via_discovery(
     policy = AvailabilityNavigationPolicy(
         page_size=page_size,
         search_date=search_date or cache.get("search_date"),
+        cache_template=cache,
+        slots=slots,
+        date_proposal=date_proposal,
+        fingerprint_slots=fingerprint_slots,
     )
     window = Navigator(policy).present(trusted)
     return window_to_presented(window)
@@ -113,6 +120,9 @@ def browse_via_discovery(
     browse_intent: BrowseIntent,
     *,
     page_size: int = DEFAULT_MAX_TIMES,
+    slots: Optional[Dict[str, Any]] = None,
+    date_proposal: Optional[Dict[str, Any]] = None,
+    fingerprint_slots: Optional[Dict[str, Any]] = None,
 ) -> BrowseProjection:
     """Advance presentation via Discovery Navigator.
 
@@ -128,6 +138,10 @@ def browse_via_discovery(
     policy = AvailabilityNavigationPolicy(
         page_size=page_size,
         search_date=cache.get("search_date"),
+        cache_template=cache,
+        slots=slots,
+        date_proposal=date_proposal,
+        fingerprint_slots=fingerprint_slots,
     )
     navigator = Navigator(policy)
     next_window = navigator.browse(
@@ -274,7 +288,6 @@ def resolve_via_discovery(
     bind_result = None
     item = result.get("item")
     if result.get("status") == "matched" and isinstance(item, dict):
-        user_time_norm = _normalize_user_time(user_time_raw)
         parsed = _parse_offer_start_parts(item.get("starts_at") or item.get("start"))
         if not parsed:
             return SelectionResolution(
@@ -284,7 +297,7 @@ def resolve_via_discovery(
                 reason_code="parse_failed",
                 bind_result=None,
             )
-        offer_date, _ = parsed
+        offer_date, offer_time = parsed
         execution_result = None
         if isinstance(cache, dict):
             execution_result = {
@@ -293,11 +306,12 @@ def resolve_via_discovery(
                 "slots": cache.get("slots"),
                 "search_date": cache.get("search_date"),
             }
+        # Canonical time comes from the bound presented offer, not NLU's clock.
         bind_result = _create_bind_result(
             slots=slots,
             offer=item,
             offer_date=offer_date,
-            user_time_norm=user_time_norm or "",
+            user_time_norm=offer_time,
             execution_result=execution_result,
         )
         if not bind_result:

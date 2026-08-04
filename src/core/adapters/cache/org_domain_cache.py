@@ -1,32 +1,41 @@
 """
 Orchestration Layer - Organization Domain Cache
 
-TTL-based cache for organization domain mappings.
+TTL-based cache for organization → business category → booking domain.
 
-- Fetches org details once to derive domain (service vs reservation).
-- Caches per org_id with long TTL (default 6 hours).
+Resolution path (exactly one):
+  Organization.businessCategoryId
+    → business_category (schema owner)
+    → booking_domain (from business schema; workflow owner)
+
+- Fetches org details once; caches per org_id (default TTL 6 hours).
 - No per-message refresh; explicit refresh only.
-
-This module provides context derivation through caching of organization
-domain data. It is owned by the orchestration layer as it supports
-context building for conversation orchestration.
 """
 
 import json
 import os
 import time
-from typing import Dict, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
 from core.adapters.clients.organization_client import OrganizationClient
 from core.adapters.errors import UpstreamError
+from core.config.business_category_loader import get_booking_domain, is_configured_category
 
 REDIS_ENV_VAR = "REDIS_URL"
 DEFAULT_TTL_SECONDS = 6 * 60 * 60  # 6 hours
 
-# Explicit domain mapping by businessCategoryId
-# TODO: Update these sets to match real category IDs when available.
-SERVICE_CATEGORY_IDS = {1, "beauty_and_wellness"}
-RESERVATION_CATEGORY_IDS = {2, "lodging", "hotel", "hospitality"}
+# Map organization businessCategoryId (int or string alias) → business_category key.
+BUSINESS_CATEGORY_IDS: Dict[Any, str] = {
+    1: "beauty_salon",
+    "beauty_and_wellness": "beauty_salon",
+    "beauty_salon": "beauty_salon",
+    3: "car_service",
+    "car_service": "car_service",
+    2: "hotel",
+    "lodging": "hotel",
+    "hotel": "hotel",
+    "hospitality": "hotel",
+}
 
 
 class OrgDomainCache:
@@ -80,22 +89,39 @@ class OrgDomainCache:
         except Exception:
             pass
 
-    def _derive_domain(self, business_category_id: int) -> str:
-        if business_category_id in SERVICE_CATEGORY_IDS:
-            return "service"
-        if business_category_id in RESERVATION_CATEGORY_IDS:
-            return "reservation"
-        raise UpstreamError(
-            f"Unsupported businessCategoryId={business_category_id}; cannot derive domain"
-        )
+    def _resolve_business_category(self, business_category_id: Any) -> str:
+        category = BUSINESS_CATEGORY_IDS.get(business_category_id)
+        if not category or not is_configured_category(category):
+            raise UpstreamError(
+                f"Unsupported businessCategoryId={business_category_id}; "
+                f"cannot resolve business_category"
+            )
+        booking_domain = get_booking_domain(category)
+        if not booking_domain:
+            raise UpstreamError(
+                f"business_category={category!r} missing valid booking_domain"
+            )
+        return category
 
-    def get_domain(
-        self, org_id: int, org_client: OrganizationClient, force_refresh: bool = False
-    ) -> Tuple[str, int]:
+    def resolve(
+        self,
+        org_id: int,
+        org_client: OrganizationClient,
+        force_refresh: bool = False,
+    ) -> Tuple[str, str, Any]:
+        """Return (business_category, booking_domain, business_category_id)."""
         if not force_refresh:
             cached = self._redis_get(org_id) or self._mem_get(org_id)
             if cached:
-                return cached["domain"], cached["businessCategoryId"]
+                category = cached.get("business_category")
+                booking_domain = cached.get("booking_domain") or cached.get("domain")
+                cat_id = cached.get("businessCategoryId")
+                if (
+                    isinstance(category, str)
+                    and isinstance(booking_domain, str)
+                    and cat_id is not None
+                ):
+                    return category, booking_domain, cat_id
 
         details = org_client.get_details(org_id)
         data = details.get("data") if isinstance(details, dict) else None
@@ -112,11 +138,29 @@ class OrgDomainCache:
         if business_category_id is None:
             raise UpstreamError("businessCategoryId missing in organization details")
 
-        domain = self._derive_domain(business_category_id)
-        value = {"domain": domain, "businessCategoryId": business_category_id}
+        business_category = self._resolve_business_category(business_category_id)
+        booking_domain = get_booking_domain(business_category)
+        assert booking_domain is not None  # validated in _resolve_business_category
+
+        value = {
+            "business_category": business_category,
+            "booking_domain": booking_domain,
+            # Legacy cache key used by older readers / tests.
+            "domain": booking_domain,
+            "businessCategoryId": business_category_id,
+        }
         self._mem_set(org_id, value)
         self._redis_set(org_id, value)
-        return domain, business_category_id
+        return business_category, booking_domain, business_category_id
+
+    def get_domain(
+        self, org_id: int, org_client: OrganizationClient, force_refresh: bool = False
+    ) -> Tuple[str, Any]:
+        """Return (booking_domain, business_category_id) for workflow/catalog callers."""
+        _category, booking_domain, business_category_id = self.resolve(
+            org_id, org_client, force_refresh=force_refresh
+        )
+        return booking_domain, business_category_id
 
     def clear(self, org_id: Optional[int] = None) -> None:
         if org_id is None:

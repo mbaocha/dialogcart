@@ -19,18 +19,25 @@ def _apply_field_aware_invalidation(
     working_turn: WorkingTurn,
     revision,
 ) -> None:
-    """Clear stale booking fields after a detected service/date/time revision.
+    """Clear stale booking fields after a detected search-criteria revision.
 
     Planning owns field-aware invalidation. Confirmation gate only consumes
     authorization; it must not branch on which booking field changed.
     """
     payload = working_turn.payload
-    current_slots = dict(
-        payload.get("_effective_collected_slots")
-        or working_turn.effective_collected_slots
-        or payload.get("slots")
-        or {}
-    )
+    # Prefer full turn slots so optional search-criteria keys (e.g. staff_id)
+    # survive restore after invalidation. ``_effective_collected_slots`` only
+    # retains required planning keys and would drop optional criteria.
+    current_slots = dict(payload.get("slots") or {})
+    for src in (
+        working_turn.effective_collected_slots,
+        payload.get("_effective_collected_slots"),
+    ):
+        if not isinstance(src, dict):
+            continue
+        for key, value in src.items():
+            if key not in current_slots and value is not None:
+                current_slots[key] = value
     apply_invalidation(
         payload,
         InvalidationTrigger.BOOKING_REVISION,
@@ -43,6 +50,16 @@ def _apply_field_aware_invalidation(
         for key in ("service_id", "_canonical_service_id"):
             if current_slots.get(key) is not None:
                 invalidated_slots[key] = current_slots[key]
+
+    if revision.criteria:
+        for change in revision.changes:
+            if change.field in ("service", "date", "time"):
+                continue
+            value = current_slots.get(change.field)
+            if value is None:
+                value = change.to_value
+            if value is not None:
+                invalidated_slots[change.field] = value
 
     if revision.date:
         # New date often arrives only as date_proposal. Restore durable date
@@ -64,7 +81,7 @@ def _apply_field_aware_invalidation(
     payload["_effective_collected_slots"] = invalidated_slots
     working_turn.effective_collected_slots = invalidated_slots
 
-    if revision.service or revision.date:
+    if revision.invalidates_availability:
         # Genuine mid-flow replacements only (first acquisition is not a
         # revision). Stale time proposals would rebind against the old presented
         # offers and undo availability invalidation.
@@ -80,9 +97,9 @@ def _apply_field_aware_invalidation(
                 temporal["start_time_expression"] = None
                 temporal["end_time_expression"] = None
                 payload["temporal"] = temporal
-        # Service-only revision must keep the active search date_proposal so the
-        # new service is searched on the same day. Date revisions arrive as a
-        # current-turn proposal and replace the prior value without popping here.
+        # Service/staff criteria revision must keep the active search date_proposal
+        # so the new criteria are searched on the same day. Date revisions arrive
+        # as a current-turn proposal and replace the prior value without popping.
         payload["_revision_invalidated_availability"] = True
         payload.pop("resolved_datetime_range", None)
 
@@ -91,7 +108,15 @@ def apply_revision_policy(
     working_turn: WorkingTurn,
     session_state: Optional[Dict[str, Any]],
 ) -> RevisionResult:
-    revision = detect_booking_revision(working_turn.payload, session_state)
+    payload = working_turn.payload
+    entity_schema = (
+        payload.get("_entity_schema")
+        if isinstance(payload.get("_entity_schema"), dict)
+        else None
+    )
+    revision = detect_booking_revision(
+        payload, session_state, entity_schema=entity_schema
+    )
     revision_summary = None
     if revision.any:
         parts = []
@@ -102,7 +127,7 @@ def apply_revision_policy(
             working_turn.payload["_revision_summary"] = revision_summary
         # Time-only revisions are owned by merge bind/rebind. Re-clearing time
         # here would undo a successful offered-time bind on the same turn.
-        # Service/date criteria changes must invalidate availability here.
-        if revision.service or revision.date:
+        # Search-criteria changes must invalidate availability here.
+        if revision.invalidates_availability:
             _apply_field_aware_invalidation(working_turn, revision)
     return RevisionResult(revision=revision, revision_summary=revision_summary)

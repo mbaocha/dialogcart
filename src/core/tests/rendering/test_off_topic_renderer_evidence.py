@@ -21,6 +21,8 @@ def test_system_prompt_treats_sections_as_private_working_memory():
     assert "Conversation" in prompt
     assert "Facts" in prompt
     assert "Resume" in prompt
+    assert "Business Knowledge" in prompt
+    assert "Supporting Evidence" in prompt
     assert "Always answer using Facts first" in prompt
     assert "Treat Recent conversation only as background" in prompt
     assert "Do not mention that the request is off-topic" in prompt

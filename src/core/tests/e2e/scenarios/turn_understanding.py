@@ -15,13 +15,10 @@ from core.tests.e2e.framework.conversation import (
     PREMIUM_SERVICE,
     Scenario,
     Turn,
+    _normalize_explicit_search_date,
     _response_text,
     assert_no_booking_execution,
     extract_presented_times,
-)
-from core.tests.e2e.framework.scripted_temporal import (
-    exact_time_temporal,
-    single_day_temporal,
 )
 from core.tests.e2e.framework.turn_understanding import (
     assert_understanding_everywhere,
@@ -71,117 +68,195 @@ def _assert_understanding(expected: str, *, require_result: bool = True):
 
     return _hook
 
-
-def turn_understanding_scripts() -> Dict[str, Any]:
-    """Stage-2-shaped scripts; understanding is derived by the aware client."""
-    return {
-        "book haircut on july 21": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "needs_clarification": True,
-            "missing_slots": ["service_id", "time"],
-            "service_candidates": [
-                {"text": PREMIUM_SERVICE},
-                {"text": "flexi haircut + prunning"},
-            ],
-            "facts": {},
-            "service_term": None,
-            "temporal": single_day_temporal(JULY_21),
-        },
-        "premium": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {
-                "service_id": PREMIUM_SERVICE,
-                "slots": {"service_id": PREMIUM_SERVICE},
-            },
-            "slots": {"service_id": PREMIUM_SERVICE},
-            "service_term": "premium",
-            "missing_slots": ["time"],
-            "temporal": {"mode": "none", "confidence": 1.0},
-        },
-        # Gibberish: no utterance evidence. Production NLU returns UNKNOWN;
-        # in-flow Core recovers durable session intent. Sticky resolved_service_id
-        # must not flip understanding to UNDERSTOOD after service ambiguity reuse.
-        "aaa": {
-            "success": True,
-            "intent": {"name": "UNKNOWN"},
-            "facts": {
-                "dates": [],
-                "times": [],
-                "date_time_pairs": [],
-                "service_id": None,
-                "booking_id": None,
-            },
-            "service_term": None,
-            "operation": None,
-            "temporal": {"mode": "none", "confidence": 0.0},
-            "missing_slots": [],
-        },
-        "flexi": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {
-                "service_id": FLEXI_SERVICE,
-                "slots": {"service_id": FLEXI_SERVICE},
-            },
-            "slots": {"service_id": FLEXI_SERVICE},
-            "service_term": "flexi",
-            "missing_slots": ["time"],
-            "needs_clarification": False,
-            "temporal": {"mode": "none", "confidence": 1.0},
-        },
-        "2pm": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {},
-            "service_term": None,
-            "temporal": exact_time_temporal("14:00"),
-            "missing_slots": [],
-        },
-        "july 22": {
-            "success": True,
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "facts": {},
-            "service_term": None,
-            "temporal": single_day_temporal(JULY_22),
-            "missing_slots": ["time"],
-            "needs_clarification": False,
-        },
-        "show more": {
-            "success": True,
-            "intent": {"name": "AVAILABILITY"},
-            "operation": "browse_next",
-            "facts": {
-                "service_id": PREMIUM_SERVICE,
-                "slots": {"service_id": PREMIUM_SERVICE},
-            },
-            "slots": {"service_id": PREMIUM_SERVICE},
-            "service_term": None,
-            "missing_slots": ["time"],
-        },
-        "cancel booking 12345": {
-            "success": True,
-            "intent": {"name": "CANCEL_BOOKING"},
-            "facts": {
-                "booking_id": "12345",
-                "dates": [],
-                "times": [],
-                "date_time_pairs": [],
-                "service_id": None,
-            },
-            "service_term": None,
-            "temporal": {"mode": "none", "confidence": 1.0},
-        },
-    }
-
-
 def _capture_availability_baseline(conv, _booking, availability) -> None:
     sess = conv.session() or {}
     _STATE["search_count"] = availability.get_service_availability.call_count
     _STATE["fingerprint"] = session_fingerprint(sess)
     _STATE["presented_times"] = extract_presented_times(conv.last_body or {}, sess)
     _STATE["service_id"] = session_service_id(sess)
+
+
+def _presented_search_date(session: Dict[str, Any]) -> Any:
+    presented = session.get("presented_availability")
+    if isinstance(presented, dict) and presented.get("search_date"):
+        return str(presented.get("search_date")).split("T")[0].split(" ")[0]
+    last = session.get("last_execution_result")
+    if isinstance(last, dict) and last.get("search_date"):
+        return str(last.get("search_date")).split("T")[0].split(" ")[0]
+    return None
+
+
+def _assert_undated_first_availability(conv, booking, availability) -> None:
+    """Undated exploratory SEARCH presents a concrete backend-selected day."""
+    assert_understanding_everywhere(conv, _luma(conv), _UNDERSTOOD)
+    assert_no_booking_execution(conv, booking)
+    assert_availability_rendered(conv)
+
+    call_count = availability.get_service_availability.call_count
+    conv._assert(
+        call_count >= 1,
+        f"turn {conv.turn}: expected SEARCH_AVAILABILITY, got call_count={call_count}",
+    )
+    call = availability.get_service_availability.call_args
+    kwargs = call.kwargs if call else {}
+    requested = _normalize_explicit_search_date(kwargs.get("date"))
+    conv._assert(
+        requested is None,
+        f"turn {conv.turn}: undated search must omit date, got {requested!r}",
+    )
+
+    sess = conv.session() or {}
+    presented_date = _presented_search_date(sess)
+    conv._assert(
+        bool(presented_date),
+        f"turn {conv.turn}: expected concrete presented.search_date after undated search",
+    )
+    presented = extract_presented_times(conv.last_body or {}, sess)
+    conv._assert(
+        bool(presented),
+        f"turn {conv.turn}: expected presented availability times, got {presented!r}",
+    )
+    conv._assert(
+        session_service_id(sess) == PREMIUM_SERVICE,
+        (
+            f"turn {conv.turn}: service_id must be {PREMIUM_SERVICE!r}, "
+            f"got {session_service_id(sess)!r}"
+        ),
+    )
+    fp = session_fingerprint(sess)
+    conv._assert(bool(fp), f"turn {conv.turn}: expected availability fingerprint")
+
+    _STATE.clear()
+    _STATE["search_count"] = call_count
+    _STATE["fingerprint"] = fp
+    _STATE["presented_times"] = presented
+    _STATE["search_date"] = presented_date
+    _STATE["service_id"] = PREMIUM_SERVICE
+
+
+def _assert_unrecognized_after_undated_availability(conv, booking, availability) -> None:
+    """Unrecognized after undated search must recover — never silently re-SEARCH."""
+    assert_understanding_everywhere(conv, _luma(conv), _UNRECOGNIZED)
+    assert_no_booking_execution(conv, booking)
+    assert_no_search_since(conv, availability, _STATE.get("search_count", 0))
+
+    action = conv.plan.get("action")
+    if action is None:
+        action = (conv.outcome or {}).get("action")
+    conv._assert(
+        action in (None, "", False),
+        f"turn {conv.turn}: expected action=None (no re-SEARCH), got {action!r}",
+    )
+    status = (conv.plan or {}).get("status") or (conv.outcome or {}).get("status")
+    conv._assert(
+        status == "READY",
+        (
+            f"turn {conv.turn}: expected READY recovery presentation after "
+            f"unrecognized reply with open slots, got {status!r}"
+        ),
+    )
+    # Observable recovery vs reshow discriminator (action_branch not on HTTP plan).
+    plan = conv.plan or {}
+    conv._assert(
+        plan.get("availability_reshow") not in (True,),
+        (
+            f"turn {conv.turn}: recovery presentation must not set "
+            f"availability_reshow, got {plan.get('availability_reshow')!r}"
+        ),
+    )
+
+    sess = conv.session() or {}
+    conv._assert(
+        session_service_id(sess) == PREMIUM_SERVICE,
+        (
+            f"turn {conv.turn}: service_id must remain {PREMIUM_SERVICE!r}, "
+            f"got {session_service_id(sess)!r}"
+        ),
+    )
+    presented_date = _presented_search_date(sess)
+    conv._assert(
+        presented_date == _STATE.get("search_date"),
+        (
+            f"turn {conv.turn}: effective availability date must stay "
+            f"{_STATE.get('search_date')!r}, got {presented_date!r}"
+        ),
+    )
+    fp = session_fingerprint(sess)
+    conv._assert(
+        fp == _STATE.get("fingerprint"),
+        (
+            f"turn {conv.turn}: availability fingerprint must remain stable, "
+            f"got {fp!r} vs {_STATE.get('fingerprint')!r}"
+        ),
+    )
+    presented = extract_presented_times(conv.last_body or {}, sess)
+    baseline_times = _STATE.get("presented_times")
+    if baseline_times:
+        # Response may be recovery/clarify text — presented times stay in session.
+        sess_presented = extract_presented_times({}, sess)
+        conv._assert(
+            sess_presented == baseline_times or presented == baseline_times,
+            (
+                f"turn {conv.turn}: presented availability must remain, "
+                f"got response={presented!r} session={sess_presented!r} "
+                f"vs {baseline_times!r}"
+            ),
+        )
+    else:
+        conv._assert(
+            bool(extract_presented_times({}, sess) or presented),
+            f"turn {conv.turn}: presented availability must remain available",
+        )
+
+    text = _response_text(conv.last_body or {})
+    lowered = text.lower()
+    conv._assert(
+        bool(text.strip()),
+        f"turn {conv.turn}: expected recovery response text, got {text!r}",
+    )
+    conv._assert(
+        "understand" in lowered
+        or "didn't" in lowered
+        or "did not" in lowered
+        or "catch" in lowered,
+        f"turn {conv.turn}: must acknowledge unrecognized input, got {text!r}",
+    )
+    # Must not be a bare availability reshow that skips the acknowledgment.
+    conv._assert(
+        not (
+            lowered.strip().startswith("here are the available times")
+            and "understand" not in lowered
+            and "didn't" not in lowered
+            and "did not" not in lowered
+            and "catch" not in lowered
+        ),
+        (
+            f"turn {conv.turn}: availability reshow must not suppress recovery "
+            f"acknowledgment, got {text!r}"
+        ),
+    )
+    conv._assert(
+        "time" in lowered
+        or "available" in lowered
+        or "booking" in lowered
+        or "appointment" in lowered
+        or "continue" in lowered
+        or "works best" in lowered
+        or "show more" in lowered
+        or "next" in lowered
+        or "previous" in lowered
+        or "which" in lowered
+        or "choose" in lowered,
+        (
+            f"turn {conv.turn}: after acknowledgment must guide back to existing "
+            f"availability / time selection, got {text!r}"
+        ),
+    )
+    for phrase in _CONFIRMATION_PHRASES:
+        conv._assert(
+            phrase not in text,
+            f"turn {conv.turn}: confirmation phrase {phrase!r} must not appear",
+        )
 
 
 def _assert_recovery_asks_for_time(conv, booking, availability) -> None:
@@ -213,6 +288,8 @@ def _assert_recovery_asks_for_time(conv, booking, availability) -> None:
         ),
     )
     presented = extract_presented_times(conv.last_body or {}, sess)
+    if not presented:
+        presented = extract_presented_times({}, sess)
     conv._assert(
         presented == _STATE.get("presented_times"),
         (
@@ -240,6 +317,12 @@ def _assert_recovery_asks_for_time(conv, booking, availability) -> None:
 
 
 def _assert_premium_repeat_understood(conv, booking, availability) -> None:
+    """Sticky same-service restatement after availability: still waiting on time.
+
+    Repeated service is not a booking revision and not an attempt to answer
+    ask_next=time. Stage 08 therefore clarifies for the outstanding ask (time)
+    rather than READY+action=None (former dead planner state) or recovery.
+    """
     assert_understanding_everywhere(conv, _luma(conv), _UNDERSTOOD)
     assert_no_booking_execution(conv, booking)
     assert_no_search_since(conv, availability, _STATE.get("search_count", 0))
@@ -247,6 +330,44 @@ def _assert_premium_repeat_understood(conv, booking, availability) -> None:
     conv._assert(
         session_service_id(sess) == PREMIUM_SERVICE,
         f"turn {conv.turn}: service_id expected {PREMIUM_SERVICE!r}",
+    )
+    plan = conv.plan or {}
+    outcome = conv.outcome or {}
+    status = plan.get("status") or outcome.get("status")
+    conv._assert(
+        status == "NEEDS_CLARIFICATION",
+        (
+            f"turn {conv.turn}: repeated service leaves ask_next=time open → "
+            f"NEEDS_CLARIFICATION (not READY dead state), got {status!r}"
+        ),
+    )
+    action = plan.get("action") if "action" in plan else outcome.get("action")
+    conv._assert(
+        action in (None, "", False),
+        f"turn {conv.turn}: must not SEARCH or execute, got action={action!r}",
+    )
+    missing = (
+        plan.get("missing_slots")
+        or outcome.get("missing_slots")
+        or sess.get("missing_slots")
+        or []
+    )
+    if not isinstance(missing, list):
+        missing = []
+    conv._assert(
+        "time" in missing,
+        (
+            f"turn {conv.turn}: outstanding ask remains time after service "
+            f"restatement, got missing_slots={missing!r}"
+        ),
+    )
+    awaiting = plan.get("awaiting") or outcome.get("awaiting") or sess.get("awaiting")
+    conv._assert(
+        awaiting in ("time", None, ""),
+        (
+            f"turn {conv.turn}: planner should await time (or leave awaiting unset "
+            f"with missing time), got awaiting={awaiting!r}"
+        ),
     )
     text = _response_text(conv.last_body or {})
     lowered = text.lower()
@@ -349,12 +470,9 @@ def _assert_browse_next(conv, booking, availability) -> None:
 
 
 def _assert_confirmation_unrecognized(conv, booking, availability) -> None:
-    """Gibberish during confirmation must be UNRECOGNIZED and must not commit.
+    """Gibberish under open confirmation: no commit; pending preserved; re-ask."""
+    from core.tests.e2e.framework.conversation import assert_confirmation_pending
 
-    Note: CREATE_APPOINTMENT continuation currently supersedes confirmation via
-    ANOTHER_REQUEST (planner READY). Understanding + no-commit are the hard
-    contracts for this suite; confirmation stickiness is asserted when present.
-    """
     assert_understanding_everywhere(
         conv, _luma(conv), _UNRECOGNIZED, require_result=False
     )
@@ -368,31 +486,30 @@ def _assert_confirmation_unrecognized(conv, booking, availability) -> None:
     assert not booking.create_booking.called
     assert_no_search_since(conv, availability, _STATE.get("search_count", 0))
 
-    sess = conv.session() or {}
-    confirmation = sess.get("confirmation_state")
     status = conv.outcome.get("status")
+    conv._assert(
+        status == "AWAITING_CONFIRMATION",
+        f"turn {conv.turn}: expected AWAITING_CONFIRMATION, got {status!r}",
+    )
+    assert_confirmation_pending(conv)
+
     text = _response_text(conv.last_body or {})
     lowered = text.lower()
-
-    if confirmation == "pending" or status == "AWAITING_CONFIRMATION":
-        conv._assert(
-            bool(text.strip()),
-            f"turn {conv.turn}: expected recovery text during confirmation, got {text!r}",
-        )
-        conv._assert(
-            "understand" in lowered or "yes" in lowered or "confirm" in lowered
-            or "didn't" in lowered or "did not" in lowered,
-            f"turn {conv.turn}: expected confirmation recovery guidance, got {text!r}",
-        )
-        return
-
-    # Confirmation superseded: still must not commit, and must not invent success.
     conv._assert(
-        status in ("READY", "AWAITING_CONFIRMATION", "NEEDS_CLARIFICATION"),
-        f"turn {conv.turn}: unexpected status after unrecognized confirmation input: {status!r}",
+        bool(text.strip()),
+        f"turn {conv.turn}: expected recovery text during confirmation, got {text!r}",
     )
     conv._assert(
-        "booked" not in lowered and "confirmed" not in lowered,
+        "understand" in lowered
+        or "yes" in lowered
+        or "confirm" in lowered
+        or "go ahead" in lowered
+        or "didn't" in lowered
+        or "did not" in lowered,
+        f"turn {conv.turn}: expected confirmation recovery guidance, got {text!r}",
+    )
+    conv._assert(
+        "booked" not in lowered,
         f"turn {conv.turn}: must not claim booking succeeded, got {text!r}",
     )
 
@@ -605,13 +722,54 @@ _register(
 
 _register(
     Scenario(
+        "Unrecognized after undated first availability does not re-search",
+        Turn(
+            "book me a premium haircut",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                response_text_present=True,
+            ),
+            after=_assert_undated_first_availability,
+        ),
+        Turn(
+            "oooo",
+            Expect(
+                planner="READY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                action=None,
+                missing_slots=["time"],
+                response_text_present=True,
+            ),
+            after=_assert_unrecognized_after_undated_availability,
+        ),
+        fixture="scripted_turn_understanding",
+        tags=["understanding", "recovery", "fingerprint", "regression", "undated"],
+        id="unrecognized-after-undated-first-availability-does-not-research",
+    )
+)
+
+
+_register(
+    Scenario(
         "Service explicitly repeated remains understood",
         *_common_setup_turns(after_premium=_after_premium_capture_and_understood),
         Turn(
             "premium",
             Expect(
-                planner="READY",
+                # Same-value service restatement is not a revision and does not
+                # answer ask_next=time → Stage 08 clarifies (not dead READY).
+                planner="NEEDS_CLARIFICATION",
                 intent="CREATE_APPOINTMENT",
+                action=None,
+                missing_slots=["time"],
                 session_slots={"service_id": PREMIUM_SERVICE},
                 date_proposal=JULY_21,
             ),

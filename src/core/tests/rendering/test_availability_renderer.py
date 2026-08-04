@@ -317,13 +317,180 @@ def test_browse_status_render_keeps_history_for_same_date_continuation():
     req = build_availability_browse_status_render_request(
         {"facts": {"slots": {"service_id": "premium haircut"}}},
         direction="next",
-        browse_status="no_more_times_for_date",
-        browse_hints={"has_next_date": False},
+        browse_status="exhausted",
+        browse_hints={},
+        search_date="2026-07-20",
         conversation_history=history,
     )
     assert len(req.conversation_history) == 2
     assert "july 20" in req.conversation_history[1]["text"].lower()
-    assert "no additional times" in req.render_instruction.lower()
+    instruction = req.render_instruction.lower()
+    assert "nothing further" in instruction or "no more times" in instruction
+    assert "next day" not in instruction
+
+
+def test_resolve_browse_status_text_scoped_to_search_date():
+    from core.rendering.availability_renderer import resolve_browse_status_text
+
+    text = resolve_browse_status_text(
+        browse_status="exhausted",
+        direction="next",
+        search_date="2026-07-24",
+        browse_hints={
+            "has_previous_any": True,
+            "has_more_any": False,
+            "suggested_previous": "previous",
+            "suggested_next": None,
+        },
+    )
+    assert "no more times for july 24" in text.lower()
+    assert "previous" in text.lower()
+    assert "another date" in text.lower()
+    assert "`next`" not in text.lower()
+    assert "next day" not in text.lower()
+
+
+def test_browse_guidance_clause_first_middle_last_pages():
+    from core.rendering.availability_renderer import (
+        _browse_guidance_clause,
+        browse_navigation_hint_text,
+    )
+
+    first = browse_navigation_hint_text(
+        {
+            "has_more_any": True,
+            "has_previous_any": False,
+            "suggested_next": "next",
+            "suggested_previous": None,
+        }
+    )
+    assert first is not None
+    assert "`next`" in first
+    assert "previous" not in first.lower()
+    assert "`next`" in _browse_guidance_clause(
+        {
+            "has_more_any": True,
+            "has_previous_any": False,
+            "suggested_next": "next",
+            "suggested_previous": None,
+        }
+    )
+
+    middle = browse_navigation_hint_text(
+        {
+            "has_more_any": True,
+            "has_previous_any": True,
+            "suggested_next": "next",
+            "suggested_previous": "previous",
+        }
+    )
+    assert middle is not None
+    assert "`next`" in middle and "`previous`" in middle
+
+    last = browse_navigation_hint_text(
+        {
+            "has_more_any": False,
+            "has_previous_any": True,
+            "suggested_next": None,
+            "suggested_previous": "previous",
+        }
+    )
+    assert last is not None
+    assert "`previous`" in last
+    assert "`next`" not in last
+
+
+def test_resolve_browse_status_text_previous_boundary_advertises_next():
+    from core.rendering.availability_renderer import resolve_browse_status_text
+
+    text = resolve_browse_status_text(
+        browse_status="exhausted",
+        direction="previous",
+        search_date="2026-07-24",
+        browse_hints={
+            "has_previous_any": False,
+            "has_more_any": True,
+            "suggested_previous": None,
+            "suggested_next": "next",
+        },
+    )
+    assert "earlier" in text.lower()
+    assert "`next`" in text.lower()
+    assert "`previous`" not in text.lower()
+    assert "another date" in text.lower()
+
+
+def test_resolve_browse_status_text_previous_boundary_without_next():
+    from core.rendering.availability_renderer import resolve_browse_status_text
+
+    text = resolve_browse_status_text(
+        browse_status="exhausted",
+        direction="previous",
+        search_date="2026-07-24",
+        browse_hints={
+            "has_previous_any": False,
+            "has_more_any": False,
+            "suggested_previous": None,
+            "suggested_next": None,
+        },
+    )
+    assert "earlier" in text.lower()
+    assert "`next`" not in text.lower()
+    assert "`previous`" not in text.lower()
+    assert "another date" in text.lower()
+
+
+def test_resolve_time_mismatch_text_earlier_page_advertises_previous():
+    from core.rendering.availability_renderer import resolve_time_mismatch_text
+
+    text = resolve_time_mismatch_text(
+        requested_time="09:00",
+        mismatch_location="EARLIER_PAGE",
+        recovery_actions=[
+            {"type": "browse_previous"},
+            {"type": "choose_visible_option"},
+        ],
+    )
+    assert "earlier page" in text.lower()
+    assert "`previous`" in text
+    assert "`next`" not in text
+    assert "currently shown" in text.lower() or "times above" in text.lower()
+
+
+def test_resolve_time_mismatch_text_later_page_advertises_next():
+    from core.rendering.availability_renderer import resolve_time_mismatch_text
+
+    text = resolve_time_mismatch_text(
+        requested_time="17:00",
+        mismatch_location="LATER_PAGE",
+        recovery_actions=[
+            {"type": "browse_next"},
+            {"type": "choose_visible_option"},
+        ],
+    )
+    assert "later page" in text.lower()
+    assert "`next`" in text
+    assert "`previous`" not in text
+
+
+def test_resolve_time_mismatch_text_not_in_cache_no_page_claim():
+    from core.rendering.availability_renderer import resolve_time_mismatch_text
+
+    text = resolve_time_mismatch_text(
+        requested_time="20:00",
+        mismatch_location="NOT_IN_CACHE",
+        search_date="2026-07-28",
+        recovery_actions=[
+            {"type": "choose_visible_option"},
+            {"type": "choose_another_date"},
+        ],
+    )
+    assert "isn't available for july 28" in text.lower()
+    assert "another date" in text.lower()
+    assert "earlier page" not in text.lower()
+    assert "later page" not in text.lower()
+    assert "`next`" not in text
+    assert "`previous`" not in text
 
 
 def test_fresh_search_drops_stale_confirmation_and_time_selection_history():
@@ -353,7 +520,7 @@ def test_fresh_search_drops_stale_confirmation_and_time_selection_history():
         "times": ["09:00", "10:00"],
         "more_count": 0,
         "total_unique": 2,
-        "browse_hints": {"suggested_next": "show more"},
+        "browse_hints": {"suggested_next": "next"},
     }
     history = [
         {"role": "user", "text": "Book me a haircut"},
@@ -454,10 +621,162 @@ def test_browse_continuation_not_treated_as_fresh_search_history_reset():
     req = build_availability_browse_status_render_request(
         {"facts": {"slots": {"service_id": "premium haircut"}}},
         direction="next",
-        browse_status="no_more_times_for_date",
-        browse_hints={"has_next_date": True, "suggested_next": "next day"},
+        browse_status="exhausted",
+        browse_hints={"suggested_next": "next"},
+        search_date="2026-07-22",
         conversation_history=history,
     )
     assert len(req.conversation_history) == 3
     assert "july 22" in req.conversation_history[0]["text"].lower()
     assert "go ahead" in req.conversation_history[2]["text"].lower()
+    assert "next day" not in req.render_instruction.lower()
+
+
+def test_inject_rendering_text_mismatch_without_organization_id(monkeypatch):
+    """Unavailable-time clarification must render with no org_id on session/slots."""
+    from core.planning.time_resolution import TIME_MATCH_MISMATCH
+    from core.rendering import response_renderer as rr
+
+    monkeypatch.setattr(
+        rr,
+        "render_llm",
+        lambda request: (
+            "5:00 PM isn’t available. Available times: 1:30 PM and 2:00 PM. "
+            "Which works for you?"
+        ),
+    )
+
+    session = {
+        "intent_name": "CREATE_APPOINTMENT",
+        "slots": {"service_id": "premium haircut"},
+        "missing_slots": [],
+        "last_execution_result": {
+            "type": "availability",
+            "status": "success",
+            "slots": [
+                {
+                    "starts_at": "2026-07-22T13:30:00.000Z",
+                    "ends_at": "2026-07-22T14:00:00.000Z",
+                },
+                {
+                    "starts_at": "2026-07-22T14:00:00.000Z",
+                    "ends_at": "2026-07-22T14:30:00.000Z",
+                },
+            ],
+            "search_date": "2026-07-22",
+        },
+        "presented_availability": {
+            "search_date": "2026-07-22",
+            "slots": [
+                {
+                    "starts_at": "2026-07-22T13:30:00.000Z",
+                    "ends_at": "2026-07-22T14:00:00.000Z",
+                },
+                {
+                    "starts_at": "2026-07-22T14:00:00.000Z",
+                    "ends_at": "2026-07-22T14:30:00.000Z",
+                },
+            ],
+            "times": ["1:30 PM", "2:00 PM"],
+            "more_count": 0,
+            "total_unique": 2,
+        },
+        "messages": [],
+    }
+    assert "organization_id" not in session
+    assert "organization_id" not in session["slots"]
+
+    decision = {
+        "intent_name": "CREATE_APPOINTMENT",
+        "time_match_outcome": TIME_MATCH_MISMATCH,
+        "awaiting": "TIME_SELECTION",
+        "plan": {
+            "status": "NEEDS_CLARIFICATION",
+            "awaiting": "TIME_SELECTION",
+            "time_match_outcome": TIME_MATCH_MISMATCH,
+            "action": None,
+        },
+        "facts": {
+            "missing_slots": [],
+            "slots": {"service_id": "premium haircut"},
+            "time_match_outcome": TIME_MATCH_MISMATCH,
+            "time_resolution": {
+                "outcome": TIME_MATCH_MISMATCH,
+                "requested_time": "17:00",
+                "alternatives": [
+                    "2026-07-22T13:30:00.000Z",
+                    "2026-07-22T14:00:00.000Z",
+                ],
+            },
+        },
+        "time_resolution": {
+            "outcome": TIME_MATCH_MISMATCH,
+            "requested_time": "17:00",
+            "alternatives": [
+                "2026-07-22T13:30:00.000Z",
+                "2026-07-22T14:00:00.000Z",
+            ],
+        },
+    }
+    result: dict = {"outcome": {"status": "NEEDS_CLARIFICATION", "missing_slots": []}}
+    rr._inject_rendering_text(result, decision, session_state=session)
+
+    text = result.get("text") or ""
+    assert text.strip(), "mismatch clarification must not produce empty text"
+    assert "available" in text.lower() or "1:30" in text or "2:00" in text
+    assert "organization_id" not in session["slots"]
+    # Booking slots unchanged by rendering
+    assert session["slots"] == {"service_id": "premium haircut"}
+
+
+def test_inject_rendering_text_mismatch_fallback_when_llm_empty(monkeypatch):
+    """Mismatch path must use deterministic fallback instead of missing-slots silence."""
+    from core.planning.time_resolution import TIME_MATCH_MISMATCH
+    from core.rendering import response_renderer as rr
+
+    monkeypatch.setattr(rr, "render_llm", lambda _request: None)
+
+    session = {
+        "slots": {"service_id": "premium haircut"},
+        "last_execution_result": {
+            "type": "availability",
+            "status": "success",
+            "slots": [
+                {
+                    "starts_at": "2026-07-22T13:30:00.000Z",
+                    "ends_at": "2026-07-22T14:00:00.000Z",
+                },
+            ],
+            "search_date": "2026-07-22",
+        },
+        "presented_availability": {
+            "search_date": "2026-07-22",
+            "slots": [
+                {
+                    "starts_at": "2026-07-22T13:30:00.000Z",
+                    "ends_at": "2026-07-22T14:00:00.000Z",
+                },
+            ],
+            "times": ["1:30 PM"],
+            "more_count": 0,
+            "total_unique": 1,
+        },
+        "messages": [],
+    }
+    decision = {
+        "time_match_outcome": TIME_MATCH_MISMATCH,
+        "awaiting": "TIME_SELECTION",
+        "plan": {"awaiting": "TIME_SELECTION", "time_match_outcome": TIME_MATCH_MISMATCH},
+        "facts": {"missing_slots": []},
+        "time_resolution": {
+            "outcome": TIME_MATCH_MISMATCH,
+            "requested_time": "17:00",
+            "alternatives": ["2026-07-22T13:30:00.000Z"],
+        },
+    }
+    result: dict = {}
+    rr._inject_rendering_text(result, decision, session_state=session)
+    text = result.get("text") or ""
+    assert text.strip()
+    assert "isn't available" in text
+    assert "1:30" in text

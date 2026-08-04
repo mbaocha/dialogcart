@@ -121,6 +121,7 @@ class AvailabilityWorkflow:
         )
         from core.workflows.availability.presentation import (
             presentation_meta_from_presented,
+            resolve_criteria_span,
         )
 
         availability = execution_result.get("availability")
@@ -141,6 +142,15 @@ class AvailabilityWorkflow:
             session_state,
             context=plan.get("execution_proposal_context"),
         )
+        entity_schema = None
+        plan_facts = plan.get("facts")
+        if isinstance(plan_facts, dict) and isinstance(
+            plan_facts.get("_entity_schema"), dict
+        ):
+            entity_schema = plan_facts.get("_entity_schema")
+        elif isinstance(plan.get("_entity_schema"), dict):
+            entity_schema = plan.get("_entity_schema")
+
         fingerprint_slots = build_availability_fingerprint_slots(
             slots,
             intent_name=plan_intent_name,
@@ -151,9 +161,12 @@ class AvailabilityWorkflow:
             temporal=plan.get("temporal")
             if isinstance(plan.get("temporal"), dict)
             else None,
+            entity_schema=entity_schema,
         )
         availability_fingerprint = compute_availability_fingerprint(
-            fingerprint_slots, intent_name=plan_intent_name
+            fingerprint_slots,
+            intent_name=plan_intent_name,
+            entity_schema=entity_schema,
         )
 
         if availability_fingerprint:
@@ -175,9 +188,22 @@ class AvailabilityWorkflow:
             if isinstance(_dp_start, str) and _dp_start:
                 search_date = _dp_start.split("T")[0].split(" ")[0]
 
+        # After an availability-affecting revision, only current-turn explicit
+        # time may rematch. Stale session proposals must not auto-confirm.
+        _proposal_ctx = plan.get("execution_proposal_context")
+        if not isinstance(_proposal_ctx, dict):
+            _proposal_ctx = {}
+        _criteria_invalidated = bool(_proposal_ctx.get("availability_invalidated"))
+        _current_turn_time = bool(
+            _proposal_ctx.get("current_turn_has_explicit_time")
+        )
+        _time_proposal_for_match = _exec_proposals.get("time_proposal")
+        if _criteria_invalidated and not _current_turn_time:
+            _time_proposal_for_match = None
+
         _resolution_payload = resolve_time_after_availability(
             offers=offers,
-            time_proposal=_exec_proposals.get("time_proposal"),
+            time_proposal=_time_proposal_for_match,
             date_proposal=_exec_proposals.get("date_proposal"),
             search_date=search_date,
             slots=slots,
@@ -213,19 +239,24 @@ class AvailabilityWorkflow:
                 finalize_decision_after_time_resolution,
             )
 
+            # Criteria revision without current-turn time: present offers only.
+            enter_confirmation = not availability_op and not (
+                _criteria_invalidated and not _current_turn_time
+            )
             finalize_decision_after_time_resolution(
                 plan,
                 evidence=TimeResolutionEvidence(
                     outcome=TIME_MATCH_EXACT,
                     time_resolution=_time_resolution,
                     bind_result=_bind_result,
-                    enter_confirmation=not availability_op,
-                    apply_confirmation_transition=not availability_op,
+                    enter_confirmation=enter_confirmation,
+                    apply_confirmation_transition=enter_confirmation,
                 ),
             )
-            workflow_result["resolved_datetime_range"] = _bind_result.get(
-                "resolved_datetime_range"
-            )
+            if enter_confirmation:
+                workflow_result["resolved_datetime_range"] = _bind_result.get(
+                    "resolved_datetime_range"
+                )
         elif _resolution_outcome == TIME_MATCH_MISMATCH and isinstance(
             _time_resolution, dict
         ):
@@ -239,7 +270,7 @@ class AvailabilityWorkflow:
                 evidence=TimeResolutionEvidence(
                     outcome=TIME_MATCH_MISMATCH,
                     time_resolution=_time_resolution,
-                    time_proposal=_exec_proposals.get("time_proposal"),
+                    time_proposal=_time_proposal_for_match,
                     apply_confirmation_transition=True,
                 ),
             )
@@ -265,6 +296,16 @@ class AvailabilityWorkflow:
             # Keep identity aligned with the fingerprint already computed above.
             fingerprint_criteria.setdefault("service_id", slots.get("service_id"))
 
+        _, span_start, _ = resolve_criteria_span(
+            slots=slots,
+            date_proposal=_exec_proposals.get("date_proposal"),
+            fingerprint_slots=fingerprint_slots,
+            search_date=search_date or last_execution_payload.get("search_date"),
+        )
+        # search_date is execution metadata on the trusted cache; span is not persisted.
+        if span_start:
+            last_execution_payload["search_date"] = span_start
+
         def _execute_search(_criteria: Dict[str, Any]) -> list:
             return list(offers)
 
@@ -286,6 +327,9 @@ class AvailabilityWorkflow:
         presented_payload = present_via_discovery(
             discovery_cache,
             search_date=resolved_search_date,
+            slots=slots,
+            date_proposal=_exec_proposals.get("date_proposal"),
+            fingerprint_slots=fingerprint_slots,
         )
         presentation_payload = presentation_meta_from_presented(presented_payload)
         workflow_result.update(

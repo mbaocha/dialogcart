@@ -39,7 +39,8 @@ This file exists to minimize repository exploration. Read this first. Read only 
 | `core/planning/planner/turn_planner.py:plan_turn()` | NLU → session merge → plan, called by plan_message |
 | `nlu/pipeline.py:NLUPipeline.run()` | Production NLU pipeline entry |
 | `nlu/api.py` | Production NLU HTTP service (`/resolve`, default port 9002) |
-| `run.py` | Starts `nlu.api` with fixed `LUMA_TEST_NOW` for deterministic testing |
+| `run.py` | Starts `nlu.api` with `LUMA_TEST_NOW` from `core.tests.harness.test_clock` (E2E/NLU test bootstrap only) |
+| `core/tests/harness/test_clock.py` | Canonical `TEST_NOW` / `FROZEN_TIME` for E2E + NLU test bootstrap |
 | `luma/pipeline.py:LumaPipeline.run()` | Legacy NLU pipeline (not production) |
 | `luma/api.py` | Legacy NLU service API (not production) |
 

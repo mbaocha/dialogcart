@@ -1,6 +1,6 @@
 """Domain-specific slot manipulation for session merge and effective-slot computation."""
 
-from typing import Any, Dict, FrozenSet, Set
+from typing import Any, Dict, FrozenSet, Mapping, Optional, Set
 
 # Shared durable slots valid in both service and reservation domains.
 SHARED_DOMAIN_SLOTS: FrozenSet[str] = frozenset(
@@ -50,6 +50,7 @@ def filter_slots_by_domain(
     intent_name: str,
     *,
     apply_domain_filter: bool = True,
+    entity_schema: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Filter slots to only include those valid for the intent's domain.
@@ -61,6 +62,7 @@ def filter_slots_by_domain(
     - date/time from service must NOT leak into reservation
     - start_date/end_date from reservation must NOT leak into service
     - Generic 'date' must NOT satisfy start_date/end_date for CREATE_RESERVATION
+    - Active entity_schema promotable keys are also retained (business facts)
 
     This must be called BEFORE computing effective_collected_slots to prevent
     cross-domain slot leakage. Callers decide explicitly via apply_domain_filter;
@@ -70,6 +72,8 @@ def filter_slots_by_domain(
         slots: Slots dictionary to filter
         intent_name: Intent name to determine domain
         apply_domain_filter: When False, return a copy of all slots unchanged
+        entity_schema: Optional active entity schema; declared business keys
+            (and resolved catalog id keys) are allowlisted alongside domain slots
 
     Returns:
         Filtered slots dictionary (domain-valid slots plus internal passthrough keys)
@@ -91,6 +95,13 @@ def filter_slots_by_domain(
     if valid_slots is None:
         # Unknown intent - keep all slots (let other filters handle it)
         return slots.copy()
+
+    if entity_schema is not None:
+        from core.adapters.nlu.entity_schema_builder import (
+            promotable_slot_keys_from_entity_schema,
+        )
+
+        valid_slots |= set(promotable_slot_keys_from_entity_schema(entity_schema))
 
     # Filter slots to only valid ones for domain
     filtered = {}

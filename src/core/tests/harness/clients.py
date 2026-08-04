@@ -127,6 +127,8 @@ class ScriptedLumaClient(LumaClient):  # noqa: N801
         timezone: str = "UTC",
         tenant_context: Optional[Dict[str, Any]] = None,
         conversation_context: Optional[Dict[str, Any]] = None,
+        entity_schema: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         self.last_text = text
         key = self.normalize_key(text)
@@ -142,6 +144,8 @@ class ScriptedLumaClient(LumaClient):  # noqa: N801
                 timezone,
                 tenant_context,
                 conversation_context=conversation_context,
+                entity_schema=entity_schema,
+                **kwargs,
             )
             self.last_response = response
             return response
@@ -153,6 +157,8 @@ class ScriptedLumaClient(LumaClient):  # noqa: N801
                 timezone,
                 tenant_context,
                 conversation_context=conversation_context,
+                entity_schema=entity_schema,
+                **kwargs,
             )
             self.last_response = response
             return response
@@ -182,6 +188,8 @@ class NluServiceResolutionScriptedLumaClient(ScriptedLumaClient):  # noqa: N801
         timezone: str = "UTC",
         tenant_context: Optional[Dict[str, Any]] = None,
         conversation_context: Optional[Dict[str, Any]] = None,
+        entity_schema: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         response = super().resolve(
             user_id,
@@ -190,6 +198,8 @@ class NluServiceResolutionScriptedLumaClient(ScriptedLumaClient):  # noqa: N801
             timezone,
             tenant_context,
             conversation_context=conversation_context,
+            entity_schema=entity_schema,
+            **kwargs,
         )
         intent = response.get("intent") or {}
         intent_name = intent.get("name") if isinstance(intent, dict) else intent
@@ -240,6 +250,9 @@ class TestLumaClient(LumaClient):  # noqa: N801
         timezone: str = "UTC",
         tenant_context: Optional[Dict[str, Any]] = None,
         conversation_context: Optional[Dict[str, Any]] = None,
+        test_now: Optional[str] = None,
+        entity_schema: Optional[Dict[str, Any]] = None,
+        **kwargs: Any,
     ) -> Dict[str, Any]:
         if self.test_aliases:
             if tenant_context is None:
@@ -253,6 +266,9 @@ class TestLumaClient(LumaClient):  # noqa: N801
             timezone,
             tenant_context,
             conversation_context=conversation_context,
+            test_now=test_now,
+            entity_schema=entity_schema,
+            **kwargs,
         )
         self.last_response = response
         return response
@@ -261,32 +277,64 @@ class TestLumaClient(LumaClient):  # noqa: N801
 class TestCatalogClient(CatalogClient):  # noqa: N801
     __test__ = False
 
-    """CatalogClient that returns catalog entries derived from test aliases."""
+    """CatalogClient that returns catalog entries derived from test aliases.
+
+    ``test_aliases`` maps display name → id for the primary bookable collection
+    (services or room_types). Optional ``collections`` supplies additional
+    named collections (e.g. ``{"staff": {"John": 201}}``) without hardcoding
+    verticals in the cache layer.
+    """
 
     def __init__(
-        self, test_aliases: Optional[Dict[str, str]] = None, domain: str = "service"
+        self,
+        test_aliases: Optional[Dict[str, str]] = None,
+        domain: str = "service",
+        collections: Optional[Dict[str, Dict[str, Any]]] = None,
+        business_category_id: Any = None,
     ):
         super().__init__()
         self.test_aliases = test_aliases or {}
         self.domain = domain
+        self.collections = collections or {}
+        if business_category_id is not None:
+            self.business_category_id = business_category_id
+        else:
+            self.business_category_id = 1 if domain == "service" else 2
+
+    def _items_from_phrase_map(
+        self, phrase_map: Dict[str, Any], *, duration: Optional[int] = None
+    ) -> list:
+        items = []
+        for alias_name, canonical_key in phrase_map.items():
+            entry: Dict[str, Any] = {
+                "name": alias_name,
+                "canonical": canonical_key,
+                "service_family_id": canonical_key,
+                "is_active": True,
+            }
+            try:
+                entry["id"] = int(canonical_key)
+            except (TypeError, ValueError):
+                entry["id"] = canonical_key
+            if duration is not None:
+                entry["duration"] = duration
+            items.append(entry)
+        return items
 
     def get_services(self, organization_id: int) -> Dict[str, Any]:
-        services = []
-        for alias_name, canonical_key in self.test_aliases.items():
-            services.append(
-                {
-                    "name": alias_name,
-                    "canonical": canonical_key,
-                    "service_family_id": canonical_key,
-                    "is_active": True,
-                    "duration": 60,
-                }
-            )
-        return {
+        services = self._items_from_phrase_map(self.test_aliases, duration=60)
+        payload: Dict[str, Any] = {
             "catalog_last_updated_at": "2026-01-01T00:00:00Z",
-            "business_category_id": 1,
+            "business_category_id": self.business_category_id,
             "services": services,
         }
+        for collection_name, phrase_map in self.collections.items():
+            if collection_name == "services":
+                continue
+            if not isinstance(phrase_map, dict):
+                continue
+            payload[collection_name] = self._items_from_phrase_map(phrase_map)
+        return payload
 
     def get_reservation(self, organization_id: int) -> Dict[str, Any]:
         rooms = []
@@ -299,12 +347,19 @@ class TestCatalogClient(CatalogClient):  # noqa: N801
                     "is_active": True,
                 }
             )
-        return {
+        payload: Dict[str, Any] = {
             "catalog_last_updated_at": "2026-01-01T00:00:00Z",
-            "business_category_id": 2,
+            "business_category_id": self.business_category_id,
             "room_types": rooms,
             "extras": [],
         }
+        for collection_name, phrase_map in self.collections.items():
+            if collection_name in ("room_types", "extras"):
+                continue
+            if not isinstance(phrase_map, dict):
+                continue
+            payload[collection_name] = self._items_from_phrase_map(phrase_map)
+        return payload
 
 
 def stub_catalog_client(

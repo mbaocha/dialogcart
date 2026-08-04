@@ -8,23 +8,29 @@ No dialog logic, no execution - only planning.
 from typing import Any, Dict, List, Optional, Set
 
 
-def _get_required_slots_from_unified_policy(intent_name: str) -> List[str]:
+def _get_required_slots_from_unified_policy(
+    intent_name: str,
+    *,
+    entity_schema: Optional[Dict[str, Any]] = None,
+) -> List[str]:
     """
-    Get required slots from unified intent_policy.yaml with fallback to legacy.
-
-    This function provides a migration path from legacy planning configs
-    to the unified intent_policy.yaml.
+    Get effective required slots (platform + business schema) for planning.
 
     Args:
         intent_name: Intent name (uppercase, e.g., "CREATE_APPOINTMENT")
+        entity_schema: Optional active entity schema for business requiredness
 
     Returns:
         List of required slot names, or empty list if not found in unified policy.
     """
     try:
-        from core.policy.intent_policy import get_planning_required_slots
+        from core.planning.planner.missing_slots import (
+            get_planning_required_slots_for_intent,
+        )
 
-        return get_planning_required_slots(intent_name)
+        return get_planning_required_slots_for_intent(
+            intent_name, entity_schema=entity_schema
+        )
     except (ImportError, Exception):
         # If unified policy module doesn't exist or fails, return empty list
         # This allows fallback to legacy policy
@@ -69,7 +75,11 @@ def load_planning_policy(config_path: Optional[str] = None) -> Dict[str, Any]:
 
 
 def plan_intent(
-    intent: str, slots: Dict[str, Any], policy: Dict[str, Any]
+    intent: str,
+    slots: Dict[str, Any],
+    policy: Dict[str, Any],
+    *,
+    entity_schema: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Plan intent execution based on collected slots and policy.
@@ -81,6 +91,8 @@ def plan_intent(
         intent: Intent name (e.g., "CREATE_APPOINTMENT", "MODIFY_BOOKING")
         slots: Dictionary of collected slot values (e.g., {"service_id": "123", "date": "2024-01-01"})
         policy: Intent planning policy dictionary (from load_planning_policy)
+        entity_schema: Optional active entity schema; required business slots are
+            composed into the effective required list by the required-slot provider
 
     Returns:
         Dictionary with:
@@ -114,8 +126,10 @@ def plan_intent(
         }
 
     # Extract policy fields from unified policy (intent_policy.yaml)
-    # All planning data MUST come from intent_policy.yaml - no fallback
-    required_slots = _get_required_slots_from_unified_policy(intent_upper)
+    # Effective required list comes from the composing provider (platform + schema).
+    required_slots = _get_required_slots_from_unified_policy(
+        intent_upper, entity_schema=entity_schema
+    )
     if not required_slots:
         # If unified policy doesn't have required_slots, this is an error
         # Return empty plan (intent not supported)
@@ -146,8 +160,12 @@ def plan_intent(
     ]
     collected_set = set(collected_slots)
 
-    # Determine missing required slots
-    missing_slots = sorted(list(required_set - collected_set))
+    # Determine missing required slots in policy order (conversational ask priority).
+    missing_slots = [
+        slot_name
+        for slot_name in required_slots
+        if slot_name not in collected_set
+    ]
 
     # Determine executable actions based on executable_with subsets
     executable_actions = []

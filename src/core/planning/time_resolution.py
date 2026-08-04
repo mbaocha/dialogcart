@@ -26,6 +26,11 @@ TIME_MATCH_EXACT = "TIME_MATCH_EXACT"
 TIME_MATCH_MISMATCH = "TIME_MATCH_MISMATCH"
 TIME_MATCH_NOT_APPLICABLE = "TIME_MATCH_NOT_APPLICABLE"
 
+# Structured mismatch locations (wording only; selection still uses presented page).
+MISMATCH_LOCATION_EARLIER_PAGE = "EARLIER_PAGE"
+MISMATCH_LOCATION_LATER_PAGE = "LATER_PAGE"
+MISMATCH_LOCATION_NOT_IN_CACHE = "NOT_IN_CACHE"
+
 _UNSET = object()
 
 TimeResolutionStatus = str
@@ -291,8 +296,44 @@ def apply_post_bind_time_resolution(
         return payload
 
     if outcome == TIME_MATCH_MISMATCH:
+        from core.workflows.availability.presentation import (
+            SELECTION_MISMATCH_EARLIER_PAGE,
+            SELECTION_MISMATCH_LATER_PAGE,
+            SELECTION_MISMATCH_NOT_IN_CACHE,
+            classify_selection_mismatch_location,
+        )
+
+        location = classify_selection_mismatch_location(
+            cache=cache,
+            presented=presented if isinstance(presented, dict) else None,
+            requested_time=str(resolution.get("requested_time") or ""),
+            search_date=search_date,
+        )
+        if location in (
+            SELECTION_MISMATCH_EARLIER_PAGE,
+            SELECTION_MISMATCH_LATER_PAGE,
+            SELECTION_MISMATCH_NOT_IN_CACHE,
+        ):
+            from core.planning.recovery_actions import (
+                recovery_actions_for_selection_mismatch,
+            )
+
+            resolution = dict(resolution)
+            resolution["mismatch_location"] = location
+            browse_hints = None
+            if isinstance(presented, dict) and isinstance(
+                presented.get("browse_hints"), dict
+            ):
+                browse_hints = presented.get("browse_hints")
+            resolution["recovery_actions"] = recovery_actions_for_selection_mismatch(
+                mismatch_location=location,
+                browse_hints=browse_hints,
+            )
+        merged["time_resolution"] = resolution
         merged["time_match_outcome"] = TIME_MATCH_MISMATCH
-        return payload
+        enriched = dict(payload)
+        enriched["time_resolution"] = resolution
+        return enriched
 
     return None
 
@@ -301,50 +342,79 @@ def build_execution_result_for_time_resolution_render(
     session_state: Optional[Dict[str, Any]],
     *,
     time_resolution: Optional[Dict[str, Any]] = None,
+    service_name: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
-    """Build a canonical synthetic availability artifact for mismatch rendering."""
+    """Build a lightweight availability artifact for mismatch rendering.
+
+    Rendering only needs slots, search_date, and time_resolution evidence.
+    Does not require organization_id or a normalized commerce execution result.
+    """
     if not isinstance(session_state, dict):
         return None
-    from core.workflows.availability.presentation import availability_cache_from_session
+    from core.workflows.availability.presentation import (
+        availability_cache_from_session,
+        presented_availability_from_session,
+    )
 
     cache = availability_cache_from_session(session_state)
-    if cache is None:
-        return None
-    resolution = time_resolution or (
-        cache.get("time_resolution")
-        if isinstance(cache.get("time_resolution"), dict)
-        else None
-    )
+    presented = presented_availability_from_session(session_state)
+
+    resolution = time_resolution
+    if not isinstance(resolution, dict) and isinstance(cache, dict):
+        resolution = (
+            cache.get("time_resolution")
+            if isinstance(cache.get("time_resolution"), dict)
+            else None
+        )
     if not isinstance(resolution, dict):
         return None
     if resolution.get("outcome") != TIME_MATCH_MISMATCH:
         return None
 
-    session_slots = session_state.get("slots")
-    session_slots = dict(session_slots) if isinstance(session_slots, dict) else {}
-    organization_id = session_slots.get("organization_id") or session_state.get(
-        "organization_id"
-    )
-    if organization_id is None:
+    slots: List[Any] = []
+    search_date = None
+    if isinstance(presented, dict):
+        raw_presented = presented.get("slots")
+        if isinstance(raw_presented, list):
+            slots = list(raw_presented)
+        search_date = presented.get("search_date")
+    if not slots and isinstance(cache, dict):
+        raw_cache = cache.get("slots")
+        if isinstance(raw_cache, list):
+            slots = list(raw_cache)
+        if not search_date:
+            search_date = cache.get("search_date")
+    if not slots and cache is None and presented is None:
         return None
-    session_slots["organization_id"] = organization_id
 
-    from core.execution.result import normalize_execution_result
+    resolved_service = service_name
+    if not resolved_service:
+        session_slots = session_state.get("slots")
+        if isinstance(session_slots, dict):
+            resolved_service = session_slots.get("service_id")
+        if not resolved_service:
+            planning = session_state.get("planning")
+            if isinstance(planning, dict):
+                planning_slots = planning.get("slots")
+                if isinstance(planning_slots, dict):
+                    resolved_service = planning_slots.get("service_id")
 
-    return normalize_execution_result(
-        {
-            "action": "SEARCH_AVAILABILITY",
-            "intent_name": session_state.get("intent_name")
-            or session_state.get("intent"),
-            "slots": session_slots,
-        },
-        {
-            "type": "availability",
-            "status": cache.get("status", "success"),
-            "slots": list(cache.get("slots") or []),
-            "time_resolution": resolution,
-        },
-    )
+    availability: Dict[str, Any] = {
+        "slots": slots,
+        "time_resolution": resolution,
+    }
+    if search_date:
+        availability["search_date"] = search_date
+
+    payload: Dict[str, Any] = {
+        "status": "succeeded",
+        "availability": availability,
+        "subject": {"service_name": resolved_service or "your appointment"},
+    }
+    intent = session_state.get("intent_name") or session_state.get("intent")
+    if intent:
+        payload["intent_name"] = intent
+    return payload
 
 
 def _emit_time_resolution_trace(

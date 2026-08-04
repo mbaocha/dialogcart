@@ -78,6 +78,46 @@ def clear_temporal_dates(temporal: Temporal) -> Temporal:
     )
 
 
+def clear_temporal_times(temporal: Temporal) -> Temporal:
+    """Drop time material; keep date fields for date-only utterances."""
+    has_date = bool(
+        temporal.start_date
+        or temporal.start_date_expression
+        or temporal.end_date
+        or temporal.end_date_expression
+    )
+    if not has_date:
+        mode = "none"
+        expression = None
+    else:
+        if temporal.mode in ("single_day", "range", "flexible"):
+            mode = temporal.mode
+        elif temporal.end_date or temporal.end_date_expression:
+            mode = "range"
+        else:
+            mode = "single_day"
+        expression = temporal.start_date_expression or temporal.start_date
+        # Drop clock-only expression left over from a time leak.
+        if temporal.expression and temporal.expression not in (
+            temporal.start_time,
+            temporal.end_time,
+        ):
+            expression = temporal.expression
+    return Temporal(
+        expression=expression,
+        start_date_expression=temporal.start_date_expression,
+        start_time_expression=None,
+        end_date_expression=temporal.end_date_expression,
+        end_time_expression=None,
+        start_date=temporal.start_date,
+        start_time=None,
+        end_date=temporal.end_date,
+        end_time=None,
+        mode=mode,
+        confidence=temporal.confidence,
+    )
+
+
 def infer_date_mode_from_temporal(temporal: Temporal) -> str:
     """Prefer explicit Temporal.mode; else infer for API date_constraint projection."""
     if temporal.mode in ("single_day", "range", "flexible"):

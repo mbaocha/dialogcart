@@ -100,6 +100,41 @@ def _try_pick_from_candidate_list(
     return None
 
 
+def infer_service_term_from_utterance(
+    text: str,
+    aliases: Dict[str, str],
+) -> Optional[str]:
+    """Recover an explicit catalog service mention from the current utterance.
+
+    Used when Stage 2 omits ``service_term`` so sticky ``resolved_service_id``
+    does not replace an utterance-evidenced service (e.g. prior Premium,
+    current \"show availability for flexi\").
+    """
+    if not text or not aliases:
+        return None
+
+    keys = list(aliases.keys())
+    tokens = _tokenize(text)
+    if not tokens:
+        return None
+
+    # Prefer longer windows so \"flexi haircut\" beats a lone ambiguous token.
+    found: List[str] = []
+    for width in range(min(len(tokens), 4), 0, -1):
+        for i in range(len(tokens) - width + 1):
+            phrase = " ".join(tokens[i : i + width])
+            picked = _try_pick_from_candidate_list(phrase, keys)
+            if picked:
+                found.append(picked)
+        if found:
+            break
+
+    unique = list(dict.fromkeys(found))
+    if len(unique) == 1:
+        return unique[0]
+    return None
+
+
 def resolve_service(
     service_term: Optional[str],
     aliases: Dict[str, str],

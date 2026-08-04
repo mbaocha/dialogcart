@@ -120,8 +120,13 @@ def turn_was_interpreted(*, plan: Optional[Dict[str, Any]], outcome: Dict[str, A
     """True when the current turn successfully advanced booking state."""
     if outcome.get("message_applied") is False:
         return False
+    from core.planning.planning_evidence import read_planning_evidence
+
+    if read_planning_evidence(outcome, plan) is True:
+        return True
     understanding = _turn_understanding(plan=plan, outcome=outcome)
     if understanding == "UNRECOGNIZED_INPUT":
+        # Observability label only — without Core planning evidence, not interpreted.
         return False
     if understanding == "UNDERSTOOD":
         # Explicit NLU understanding — still require an interpreted operation for
@@ -162,15 +167,15 @@ def should_render_recovery(
     plan: Optional[Dict[str, Any]] = None,
     availability_client_present: bool = True,
 ) -> bool:
-    """Deterministic gate: unrecognized / no-reply turns need recovery text.
+    """Deterministic gate: no-evidence turns need recovery text.
 
     Fires when planning left no rendered reply and either:
     - status is READY (in-flow no-op / unrecognized), or
-    - status is NEEDS_CLARIFICATION with ``turn.understanding=UNRECOGNIZED_INPUT``
-      (cold-start gibberish — clarification has nothing useful to ask).
+    - status is NEEDS_CLARIFICATION with no Core planning evidence and
+      ``turn.understanding=UNRECOGNIZED_INPUT`` (cold-start gibberish).
 
-    Genuine clarification that already produced text is skipped via the text checks.
-    NEEDS_CLARIFICATION without UNRECOGNIZED_INPUT is left to the clarification path.
+    Promoted schema/platform evidence must suppress recovery even when NLU
+    labelled the turn ``UNRECOGNIZED_INPUT``.
     """
     if not availability_client_present:
         return False
@@ -182,8 +187,17 @@ def should_render_recovery(
     if outcome.get("text"):
         return False
 
+    from core.planning.planning_evidence import read_planning_evidence
+
+    if read_planning_evidence(outcome, plan) is True:
+        return False
+
     status = outcome.get("status")
     understanding = _turn_understanding(plan=plan, outcome=outcome)
+
+    if status == "AWAITING_CONFIRMATION":
+        # Pending confirmation + unrecognized no-evidence — re-ask confirm.
+        return understanding == "UNRECOGNIZED_INPUT"
 
     if status == "NEEDS_CLARIFICATION":
         # Cold-start / act-indeterminate unrecognized input — not slot clarification.
@@ -288,6 +302,18 @@ def _recovery_instruction(context: Dict[str, Any]) -> str:
     awaiting = context.get("awaiting")
     presented = context.get("presented_availability")
 
+    if awaiting == "USER_CONFIRMATION":
+        return (
+            f"Conversation recovery is required (reason={reason}). "
+            "The latest user message could not be understood as an answer to the "
+            "pending booking confirmation. "
+            "Apologise briefly that you did not understand, then ask again whether "
+            "they would like you to go ahead with the booking. "
+            "Do not invent booking details. Do not claim a booking was made. "
+            "Do not execute or imply confirmation. Be natural, warm, and brief "
+            "(1–2 sentences)."
+        )
+
     focus_parts: List[str] = []
     if awaiting:
         focus_parts.append(f"awaiting={awaiting}")
@@ -337,6 +363,9 @@ def build_recovery_render_request(
         "recovery": recovery,
         "structured_context": structured_context or {},
     }
+    # Presented times stay under facts["availability"] as supporting evidence for
+    # wording only. Callers must honour recovery intent before availability list
+    # formatting (acknowledgement first; optional re-offer of known choices).
     presented = recovery.get("presented_availability")
     if isinstance(presented, dict) and presented.get("times"):
         facts["availability"] = {

@@ -5,12 +5,16 @@ Converts Luma fact-only response format to Core slots format.
 
 Temporal dates/times are owned by the canonical Temporal object
 (see ``core.planning.temporal_contract`` / ``temporal_proposal``).
-This adapter only promotes non-temporal facts (service_id, booking_id).
+This adapter promotes platform facts (service_id, booking_id) and
+entity_schema-allowlisted business facts only.
 """
 
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
+from core.adapters.nlu.entity_schema_builder import (
+    promotable_slot_keys_from_entity_schema,
+)
 from core.planning.temporal_contract import (
     get_temporal,
     is_flexible_combined_utterance,
@@ -18,6 +22,9 @@ from core.planning.temporal_contract import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Always eligible for promotion when present and non-null.
+_PLATFORM_FACT_KEYS = frozenset({"service_id", "booking_id"})
 
 
 def merge_promoted_luma_slots(
@@ -58,17 +65,36 @@ def facts_to_slots(
     facts: Dict[str, Any],
     intent_name: Optional[str] = None,
     source_text: Optional[str] = None,
+    *,
+    entity_schema: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Convert Luma facts to Core slots (non-temporal only)."""
+    """Convert Luma facts to Core slots (non-temporal only).
+
+    Promotes:
+    - platform keys ``service_id`` / ``booking_id``
+    - keys allowlisted by the active ``entity_schema`` (declared names +
+      resolved catalog id keys)
+
+    Null / missing values are omitted so merge will not erase durable slots.
+    Undeclared arbitrary fact keys are ignored.
+    """
     del intent_name, source_text
     if not isinstance(facts, dict):
         return {}
 
-    slots = {}
-    if facts.get("service_id") is not None:
-        slots["service_id"] = facts["service_id"]
-    if facts.get("booking_id") is not None:
-        slots["booking_id"] = facts["booking_id"]
+    allow = set(_PLATFORM_FACT_KEYS)
+    allow |= set(promotable_slot_keys_from_entity_schema(entity_schema))
+
+    slots: Dict[str, Any] = {}
+    for key in allow:
+        if key not in facts:
+            continue
+        value = facts.get(key)
+        if value is None:
+            continue
+        if isinstance(value, str) and not value.strip():
+            continue
+        slots[key] = value
 
     if slots:
         logger.info(

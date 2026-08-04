@@ -42,6 +42,28 @@ def test_time_selection_awaiting_resume():
     assert "time" in resume.text.lower()
 
 
+def test_presented_offers_resume_without_awaiting_flag():
+    """Presented availability + missing time ⇒ resume offers, not restart/date ask."""
+    resume = build_resume_instruction(
+        {
+            "intent_name": "CREATE_APPOINTMENT",
+            "missing_slots": ["date", "time"],
+            "slots": {"service_id": "premium haircut"},
+            "presented_availability": {
+                "search_date": "2026-07-03",
+                "times": ["10:00 AM", "11:30 AM", "2:00 PM"],
+            },
+        }
+    )
+    assert resume is not None
+    lowered = resume.text.lower()
+    assert "10:00 am" in lowered
+    assert "11:30 am" in lowered
+    assert "works best" in lowered
+    assert "ask which date" not in lowered
+    assert "restart" in lowered
+
+
 def test_confirmation_pending_resume():
     resume = build_resume_instruction(
         {

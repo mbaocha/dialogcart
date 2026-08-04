@@ -265,7 +265,7 @@ def test_show_more_displays_different_page(pagination_harness):
 
     session = _browse(
         user_id,
-        "show more times",
+        "show more",
         session_store,
         availability_client,
         org_client,
@@ -284,7 +284,7 @@ def test_show_more_with_create_appointment_intent_no_operation(pagination_harnes
     first_page = _presented_starts(session)
 
     result = _run_turn(
-        text="show more times",
+        text="show more",
         user_id=user_id,
         luma_response=_luma_response(
             intent={"name": "CREATE_APPOINTMENT"},
@@ -318,7 +318,7 @@ def test_show_more_never_searches_again(pagination_harness):
     assert searches_after_setup >= 1
 
     result = _run_turn(
-        text="show more times",
+        text="show more",
         user_id=user_id,
         luma_response=_browse_luma_response("browse_next"),
         session_store=session_store,
@@ -390,7 +390,7 @@ def test_no_more_pages_explicit_response_not_repeat():
     )
     session = _browse(
         user_id,
-        "show more times",
+        "show more",
         session_store,
         availability_client,
         org_client,
@@ -399,7 +399,7 @@ def test_no_more_pages_explicit_response_not_repeat():
     assert _page_index(session) == 1
 
     result = _run_turn(
-        text="show more times",
+        text="show more",
         user_id=user_id,
         luma_response=_browse_luma_response("browse_next"),
         session_store=session_store,
@@ -424,7 +424,7 @@ def test_previous_page_returns_earlier_page(pagination_harness):
 
     session = _browse(
         user_id,
-        "show more times",
+        "show more",
         session_store,
         availability_client,
         org_client,
@@ -448,7 +448,7 @@ def test_service_change_resets_pagination(pagination_harness):
     session = _setup_paginated_search(user_id, availability_client, org_client, session_store)
     session = _browse(
         user_id,
-        "show more times",
+        "show more",
         session_store,
         availability_client,
         org_client,
@@ -481,7 +481,7 @@ def test_date_change_resets_pagination(pagination_harness):
     session = _setup_paginated_search(user_id, availability_client, org_client, session_store)
     session = _browse(
         user_id,
-        "show more times",
+        "show more",
         session_store,
         availability_client,
         org_client,
@@ -493,8 +493,13 @@ def test_date_change_resets_pagination(pagination_harness):
         user_id=user_id,
         luma_response=_luma_response(
             intent={"name": "AVAILABILITY"},
-            facts={"dates": ["2026-07-06"], "service_id": SERVICE},
+            facts={"service_id": SERVICE},
             slots={},
+            temporal={
+                "start_date": "2026-07-06",
+                "mode": "single_day",
+                "confidence": 1.0,
+            },
         ),
         session_store=session_store,
         availability_client=availability_client,
@@ -514,7 +519,7 @@ def test_time_selection_binds_only_from_current_page(pagination_harness):
     session = _setup_paginated_search(user_id, availability_client, org_client, session_store)
     session = _browse(
         user_id,
-        "show more times",
+        "show more",
         session_store,
         availability_client,
         org_client,
@@ -551,7 +556,7 @@ def test_time_on_page_two_full_turn_no_search(pagination_harness):
     session = _setup_paginated_search(user_id, availability_client, org_client, session_store)
     session = _browse(
         user_id,
-        "show more times",
+        "show more",
         session_store,
         availability_client,
         org_client,
@@ -591,7 +596,7 @@ def test_time_on_page_two_with_time_proposal_rejects_page_one_slot(pagination_ha
     session = _setup_paginated_search(user_id, availability_client, org_client, session_store)
     session = _browse(
         user_id,
-        "show more times",
+        "show more",
         session_store,
         availability_client,
         org_client,

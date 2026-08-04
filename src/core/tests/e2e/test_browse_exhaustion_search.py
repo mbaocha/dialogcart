@@ -7,14 +7,12 @@ import pytest
 from core.session.session_manager import clear_session
 from core.tests.e2e.framework.conversation import ORG_ID
 from core.tests.e2e.framework.fixtures import (
-    SCRIPTED_FIXTURE_PARAMS,
-    build_scripted_bundle,
+    E2E_FIXTURE_PARAMS,
+    build_recorded_bundle,
+    live_luma,
 )
 from core.tests.e2e.framework.runner import run_bundle
-from core.tests.e2e.scenarios.browse_exhaustion_search import (
-    SCENARIOS,
-    browse_exhaustion_search_scripts,
-)
+from core.tests.e2e.scenarios.browse_exhaustion_search import SCENARIOS
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +31,7 @@ def _deterministic_availability_llm(monkeypatch):
             or availability.get("browse_status")
             or ""
         ).lower()
-        if browse_status in {"exhausted", "no_more_times_for_date"} or "no more" in browse_status:
+        if browse_status in {"exhausted"} or "no more" in browse_status:
             return "There are no more available times to show from your last search."
         date_label = str(availability.get("date") or "").strip()
         if date_label == "2026-07-21":
@@ -58,7 +56,6 @@ def _deterministic_availability_llm(monkeypatch):
             )
         return "Here are the available appointment times. Which would you like?"
 
-    # Cover every import site that may call render_llm for availability text.
     monkeypatch.setattr("core.rendering.llm_renderer.render_llm", _fake_render)
     monkeypatch.setattr(
         "core.rendering.response_renderer.render_llm",
@@ -70,13 +67,18 @@ def _deterministic_availability_llm(monkeypatch):
     )
 
 
-@pytest.mark.parametrize("scenario", SCENARIOS, ids=[s.pytest_id() for s in SCENARIOS])
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        pytest.param(s, id=s.pytest_id(), marks=[live_luma])
+        for s in SCENARIOS
+    ],
+)
 def test_browse_exhaustion_search_scenario(scenario, api_client, monkeypatch):
-    params = dict(SCRIPTED_FIXTURE_PARAMS.get(scenario.fixture) or {})
-    conv, booking, availability, user_id = build_scripted_bundle(
+    params = dict(E2E_FIXTURE_PARAMS.get(scenario.fixture) or {})
+    conv, booking, availability, user_id = build_recorded_bundle(
         api_client,
         monkeypatch,
-        extra_scripts=browse_exhaustion_search_scripts(),
         **params,
     )
     try:

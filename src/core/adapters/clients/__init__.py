@@ -8,9 +8,11 @@ Luma NLU client lives in core.adapters.nlu.
 """
 
 from core.adapters.clients.catalog_client import CatalogClient
+from core.adapters.clients.customer_client import CustomerClient
 from core.adapters.clients.organization_client import OrganizationClient
 
 __all__ = [
     "CatalogClient",
+    "CustomerClient",
     "OrganizationClient",
 ]

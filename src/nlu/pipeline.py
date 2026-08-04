@@ -2,10 +2,12 @@
 NLU Pipeline — two-stage extraction + normalisation + calendar binding.
 
 Stage 1 (intent):   Stage1IntentExtractor — lightweight LLM call, intent + confidence only
+                    (proposal / prior; Stage 2 is semantic authority)
 Stage 2 (slots):    Stage2 dispatcher → per-group slot extractor (LLM, focused prompt)
+                    Shared Intent Validation Contract → validated_intent; then extract.
                     UNKNOWN routes to create; validated_intent may re-route intent.
 Stage 3 (slots):    When validated_intent maps to a different group, re-run that extractor.
-Normalisation:      Rule-based post-processing (date, time, cancel, booking_id, alias)
+Normalisation:      Rule-based post-processing (date, time, booking_id, alias)
 Calendar binding:   ISO-8601 date resolution via calendar_binder
 
 Backward-compat shim: `_slm_extract` delegates to the two-stage path so existing
@@ -18,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from .catalog import resolve_service
+from .catalog import infer_service_term_from_utterance, resolve_service
 from .stages.stage1.extractor import Stage1IntentExtractor
 from .stages.stage2.dispatcher import extract_slots as _stage2_extract
 
@@ -107,12 +109,40 @@ def _text_mentions_date(text: str) -> bool:
 
 
 _FUZZY_TIME_TOKENS = {"morning", "afternoon", "evening", "night"}
+_TIME_PERIOD_TOKENS = _FUZZY_TIME_TOKENS | {"noon", "midnight"}
 
 # Explicit clock-time patterns: "3pm", "3:30 am", "15:00", "9am"
 _EXPLICIT_CLOCK_RE = re.compile(
     r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{2}:\d{2}\b",
     re.IGNORECASE,
 )
+# "at 9", "by 12", "around 3:30", "until 5"
+_PREPOSITIONAL_HOUR_RE = re.compile(
+    r"\b(?:at|by|around|before|after|until|till|from)\s+\d{1,2}(?::\d{2})?\b",
+    re.IGNORECASE,
+)
+_OCLOCK_RE = re.compile(r"\b\d{1,2}\s*o'?clock\b", re.IGNORECASE)
+# Bare hour / HH:MM as the whole utterance (slot-fill: "9", "9:30").
+_BARE_CLOCK_UTTERANCE_RE = re.compile(
+    r"^\s*\d{1,2}(?::\d{2})?\s*$",
+)
+
+
+def _text_mentions_time(text: str) -> bool:
+    """True when the utterance explicitly mentions a clock or time-of-day."""
+    lowered = (text or "").lower()
+    if _EXPLICIT_CLOCK_RE.search(lowered):
+        return True
+    if _PREPOSITIONAL_HOUR_RE.search(lowered):
+        return True
+    if _OCLOCK_RE.search(lowered):
+        return True
+    if _BARE_CLOCK_UTTERANCE_RE.match(lowered):
+        return True
+    words = re.sub(r"[^\w\s]", " ", lowered).split()
+    if any(w in _TIME_PERIOD_TOKENS for w in words):
+        return True
+    return False
 
 
 def _normalize_fuzzy_time(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
@@ -161,36 +191,6 @@ def _normalize_fuzzy_time(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
         found_token,
     )
     return apply_temporal(slm, temporal)
-
-
-_CANCEL_VERB_RE = re.compile(r"\bcancel\b", re.IGNORECASE)
-_CANCEL_NEGATION_RE = re.compile(
-    r"\b(?:don'?t|do not|not|won'?t|can'?t|cannot|please\s+don'?t|please\s+do\s+not)\s+cancel\b",
-    re.IGNORECASE,
-)
-
-
-def _normalize_cancel_intent(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
-    """Force CANCEL_BOOKING when text contains an unambiguous cancel verb.
-
-    Haiku sometimes misclassifies "nevermind cancel" or "actually cancel it" as UNKNOWN
-    or leaves context from a prior CREATE_APPOINTMENT turn.  A regex override is more
-    reliable for these short pivot utterances.
-
-    Negation guard: "don't cancel", "please do not cancel", etc. pass through unchanged.
-    """
-    if not _CANCEL_VERB_RE.search(text):
-        return slm
-    if _CANCEL_NEGATION_RE.search(text):
-        return slm
-    current_intent = slm.get("intent", "UNKNOWN")
-    if current_intent == "CANCEL_BOOKING":
-        return slm
-    logger.debug(
-        "_normalize_cancel_intent: text=%r intent=%r→CANCEL_BOOKING",
-        text, current_intent,
-    )
-    return {**slm, "intent": "CANCEL_BOOKING"}
 
 
 def _tokenize_utterance(text: str) -> List[str]:
@@ -319,6 +319,37 @@ def _strip_unmentioned_dates(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
         temporal.to_dict(),
     )
     return apply_temporal(slm, clear_temporal_dates(temporal))
+
+
+def _strip_unmentioned_times(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove times Haiku inferred from conversation context alone.
+
+    Mirrors _strip_unmentioned_dates: clock / period language must appear in the
+    current utterance. Core owns session time stickiness and availability rematch.
+    """
+    from .temporal.pipeline_sync import (
+        apply_temporal,
+        clear_temporal_times,
+        get_temporal,
+        temporal_has_time_material,
+    )
+
+    if _text_mentions_time(text):
+        return slm
+    temporal = get_temporal(slm)
+    facts = slm.get("facts", {}) or {}
+    if (
+        not temporal_has_time_material(temporal)
+        and not facts.get("times")
+        and not slm.get("time_constraint")
+    ):
+        return slm
+    logger.debug(
+        "Stripping unmentioned times from SLM output for text=%r temporal=%r",
+        text,
+        temporal.to_dict(),
+    )
+    return apply_temporal(slm, clear_temporal_times(temporal))
 
 
 def _apply_booking_mode_intent(
@@ -457,8 +488,13 @@ class PipelineResult:
     date_constraint: Optional[Dict[str, Any]] = None
     service_candidates: List[str] = field(default_factory=list)
     operation: Optional[str] = None
+    # Top-level Stage2 dialogue acts: schema field names explicitly declined.
+    declined_entities: List[str] = field(default_factory=list)
     # Canonical OFF_TOPIC question (Stage2); never used as business FAQ search_query.
     off_topic_query: Optional[str] = None
+    # OFF_TOPIC world-knowledge evidence from Stage2 (Core digression; null for other intents).
+    answerable: Optional[bool] = None
+    answer: Optional[str] = None
     # Additive Stage2 canonical temporal (not consumed by binder/planning yet).
     temporal: Optional[Dict[str, Any]] = None
     # Utterance understanding outcome for this turn (not planner status).
@@ -717,27 +753,48 @@ class NLUPipeline:
         now: str = None,
         timezone: str = "UTC",
         conversation_context: Optional[Dict[str, Any]] = None,
+        entity_schema: Optional[Dict[str, Any]] = None,
     ) -> PipelineResult:
+        from .stages.stage2.entity_schema import (
+            compile_business_entities,
+            effective_tenant_context,
+        )
+
         now = _resolve_now(now)
         from .temporal.resolver import anchor_now, format_prompt_now
 
         local_now = anchor_now(now, timezone)
         prompt_now = format_prompt_now(local_now, timezone)
+
+        # Single compile/validate per request. Downstream receives CompiledBusinessEntities only.
+        compiled = None
+        if entity_schema is not None:
+            compiled = compile_business_entities(entity_schema)
+        # New dict only — never mutate the caller's tenant_context.
+        effective_tc = effective_tenant_context(tenant_context, compiled)
+
         slm = self._slm_extract(
             text,
-            tenant_context,
+            effective_tc,
             prompt_now,
             conversation_context=conversation_context,
+            compiled_entities=compiled,
         )
         slm = _strip_unmentioned_dates(text, slm)
+        slm = _strip_unmentioned_times(text, slm)
         slm = _strip_unmentioned_service(text, slm)
         slm = _normalize_fuzzy_time(text, slm)
-        slm = _normalize_cancel_intent(text, slm)
-        slm = _normalize_booking_id(text, slm, tenant_context)
-        slm = _apply_booking_mode_intent(text, slm, tenant_context)
+        slm = _normalize_booking_id(text, slm, effective_tc)
+        slm = _apply_booking_mode_intent(text, slm, effective_tc)
         slm = self._correct_bare_weekday_dates(text, slm)
         slm = _fix_iso_weekday_mismatch(text, slm, conversation_context)
-        slm = self._resolve_service_ambiguity(slm, tenant_context, conversation_context)
+        slm = self._resolve_service_ambiguity(
+            slm,
+            effective_tc,
+            conversation_context,
+            compiled=compiled,
+            text=text,
+        )
         slm = _resolve_slot_fill_intent(slm, text, conversation_context)
         from .temporal.bare_ordinal import inject_bare_ordinal_expression
 
@@ -747,7 +804,7 @@ class NLUPipeline:
         understanding = derive_turn_understanding(slm, conversation_context)
         result = self._bind_calendar(
             slm,
-            tenant_context,
+            effective_tc,
             now,
             timezone,
             conversation_context,
@@ -805,7 +862,14 @@ class NLUPipeline:
     def _resolve_service_ambiguity(
         self, slm: Dict[str, Any], tenant_context: Dict[str, Any],
         conversation_context: Optional[Dict[str, Any]] = None,
+        compiled: Optional[Any] = None,
+        text: Optional[str] = None,
     ) -> Dict[str, Any]:
+        if compiled is not None:
+            return self._resolve_schema_entities(
+                slm, conversation_context, compiled, text=text
+            )
+
         aliases = tenant_context.get("aliases", {})
         if not aliases:
             return slm
@@ -822,6 +886,13 @@ class NLUPipeline:
             extracted = facts.get("service_id")
             if isinstance(extracted, str) and extracted.strip():
                 service_term = extracted.strip()
+
+        # Explicit catalog mention in the current utterance overrides sticky
+        # prior service when Stage 2 omitted service_term.
+        if not service_term and text:
+            recovered = infer_service_term_from_utterance(text, aliases)
+            if recovered:
+                service_term = recovered
 
         ctx = conversation_context if isinstance(conversation_context, dict) else {}
         awaiting_service_id = "service_id" in ctx.get("missing_slots", [])
@@ -860,14 +931,110 @@ class NLUPipeline:
             "service_candidates": resolved["service_candidates"],
         }
 
+    def _resolve_schema_entities(
+        self,
+        slm: Dict[str, Any],
+        conversation_context: Optional[Dict[str, Any]],
+        compiled: Any,
+        text: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Resolve each catalog entity against only that entity's catalog."""
+        from .stages.stage2.entity_schema import resolved_id_key
+
+        facts = dict(slm.get("facts") or {})
+        ctx = conversation_context if isinstance(conversation_context, dict) else {}
+        awaiting_service_id = "service_id" in ctx.get("missing_slots", [])
+
+        prior_text: Optional[str] = None
+        bookable_candidates: Optional[List[str]] = None
+        resolved_service_id: Optional[str] = None
+        if ctx:
+            cands = ctx.get("service_candidates")
+            if isinstance(cands, list) and cands:
+                bookable_candidates = cands
+            if awaiting_service_id:
+                turns = ctx.get("turns") or []
+                joined = " ".join(t.get("user", "") for t in turns).strip()
+                prior_text = joined or None
+            raw_resolved = ctx.get("resolved_service_id")
+            if isinstance(raw_resolved, str) and raw_resolved:
+                resolved_service_id = raw_resolved
+
+        service_candidates: List[str] = []
+        bookable = compiled.bookable_item_field
+
+        for entity in compiled.fields:
+            if entity.type != "catalog":
+                continue
+
+            phrase = facts.get(entity.name)
+            if isinstance(phrase, str):
+                phrase = phrase.strip() or None
+            else:
+                phrase = None
+
+            id_key = resolved_id_key(entity)
+            is_bookable = bookable is not None and entity.name == bookable.name
+
+            # resolve_service treats alias keys as the resolved service_id values
+            # Core already consumes (display phrases). Per-field catalogs stay isolated.
+            aliases = dict(entity.catalog)
+            if not aliases:
+                facts.setdefault(id_key, None)
+                continue
+
+            if is_bookable and not phrase and text:
+                phrase = infer_service_term_from_utterance(text, aliases)
+
+            candidate_keys = bookable_candidates if is_bookable else None
+            resolved = resolve_service(
+                service_term=phrase,
+                aliases=aliases,
+                prior_text=prior_text if is_bookable else None,
+                awaiting_service_id=awaiting_service_id if is_bookable else False,
+                candidate_keys=candidate_keys,
+                resolved_service_id=resolved_service_id if is_bookable else None,
+            )
+            facts[id_key] = resolved["service_id"]
+            if is_bookable:
+                service_candidates = list(resolved["service_candidates"] or [])
+
+            logger.debug(
+                "_resolve_schema_entities: field=%r phrase=%r → %s=%r candidates=%r",
+                entity.name,
+                phrase,
+                id_key,
+                resolved["service_id"],
+                resolved["service_candidates"] if is_bookable else [],
+            )
+
+        # Ensure platform keys exist even when schema has no bookable catalog field.
+        facts.setdefault("service_id", None)
+        facts.setdefault("booking_id", facts.get("booking_id"))
+
+        out = {
+            **slm,
+            "facts": facts,
+            "service_candidates": service_candidates,
+        }
+        # Keep legacy service_term aligned with bookable phrase for grounding helpers.
+        if bookable is not None:
+            out["service_term"] = facts.get(bookable.name)
+        return out
+
     def _slm_extract(
         self,
         text: str,
         tenant_context: Dict[str, Any],
         now: str,
         conversation_context: Optional[Dict[str, Any]] = None,
+        compiled_entities: Optional[Any] = None,
     ) -> Dict[str, Any]:
-        """Two-stage extraction: Stage 1 classifies intent, Stage 2 extracts slots."""
+        """Two-stage extraction: Stage 1 classifies intent, Stage 2 extracts slots.
+
+        ``compiled_entities`` is ``CompiledBusinessEntities | None`` from
+        ``NLUPipeline.run`` (already validated; CREATE must not recompile).
+        """
         stage1 = self._stage1.classify(text, now, conversation_context)
         intent = stage1.get("intent", "UNKNOWN")
         confidence = stage1.get("confidence", 0.0)
@@ -885,6 +1052,7 @@ class NLUPipeline:
             now=now,
             tenant_context=tenant_context,
             conversation_context=conversation_context,
+            compiled_entities=compiled_entities,
         )
         _facts = result.get("facts") or {}
         logger.info(
@@ -933,8 +1101,22 @@ class NLUPipeline:
         facts = decision.get("facts", {})
         search_query = decision.get("search_query")
         off_topic_query = decision.get("off_topic_query")
+        answerable = decision.get("answerable")
+        answer = decision.get("answer")
         service_candidates = decision.get("service_candidates") or []
         operation = decision.get("operation")
+        raw_declined = decision.get("declined_entities")
+        declined_entities: List[str] = []
+        if isinstance(raw_declined, list):
+            seen = set()
+            for item in raw_declined:
+                if not isinstance(item, str) or not item.strip():
+                    continue
+                name = item.strip()
+                if name in seen:
+                    continue
+                seen.add(name)
+                declined_entities.append(name)
 
         if local_now is None:
             local_now = anchor_now(now, timezone)
@@ -1021,6 +1203,9 @@ class NLUPipeline:
             date_constraint=date_constraint,
             service_candidates=service_candidates,
             operation=operation if isinstance(operation, str) else None,
+            declined_entities=declined_entities,
             off_topic_query=off_topic_query if isinstance(off_topic_query, str) else None,
+            answerable=answerable if isinstance(answerable, bool) else None,
+            answer=answer if isinstance(answer, str) and answer.strip() else None,
             temporal=temporal.to_dict(),
         )

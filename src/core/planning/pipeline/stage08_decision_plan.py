@@ -39,8 +39,16 @@ def _exact_time_match_presenting_confirmation(
     *,
     user_confirmation_satisfied: bool,
     turn_operation: Optional[str] = None,
+    missing_slots: Optional[List[str]] = None,
 ) -> bool:
+    """True when exact time match may present booking confirmation.
+
+    Composed planning completeness is required: non-empty missing_slots must
+    continue clarification instead of confirmation presentation.
+    """
     if _availability_operation_precedes_confirm(turn_operation):
+        return False
+    if missing_slots:
         return False
     return (
         time_match_outcome == TIME_MATCH_EXACT and not user_confirmation_satisfied
@@ -69,6 +77,137 @@ def _derive_stage_from_status(status: str) -> Optional[str]:
     if status == "NEEDS_CLARIFICATION":
         return "AVAILABILITY"
     return None
+
+
+# Planner-owned presentation outcomes that keep READY with action=None.
+_PRESENTATION_ACTION_BRANCHES = frozenset(
+    {
+        "availability_reshow",
+        "cache_satisfiable_browse",
+        "recovery_presentation",
+    }
+)
+
+
+def _current_turn_planning_evidence(payload: Dict[str, Any]) -> bool:
+    """Read stamped Core planning-evidence (never recompute)."""
+    from core.planning.planning_evidence import require_planning_evidence
+
+    return require_planning_evidence(payload)
+
+
+def _turn_understanding_from_payload(payload: Dict[str, Any]) -> Optional[str]:
+    turn = payload.get("turn")
+    if isinstance(turn, dict):
+        value = turn.get("understanding")
+        if isinstance(value, str) and value:
+            return value
+    value = payload.get("understanding")
+    if isinstance(value, str) and value:
+        return value
+    return None
+
+
+def _awaiting_from_ask_next(ask_next: Optional[str]) -> Optional[str]:
+    """Awaiting for unanswered ask_next is the ask_next slot itself.
+
+    Distinct from TIME_SELECTION (reserved for TIME_MATCH_MISMATCH presentation).
+    """
+    if not ask_next:
+        return None
+    return str(ask_next)
+
+
+def _has_planner_presentation(
+    *,
+    action_branch: Optional[str],
+    availability_reshow: bool,
+    availability_browse: Optional[Dict[str, Any]],
+) -> bool:
+    if action_branch in _PRESENTATION_ACTION_BRANCHES:
+        return True
+    if availability_reshow and action_branch == "availability_reshow":
+        return True
+    if isinstance(availability_browse, dict) and availability_browse.get("direction"):
+        return True
+    return False
+
+
+def _reconcile_terminal_decision(
+    *,
+    status: str,
+    action: Optional[str],
+    awaiting: Optional[str],
+    stage: Optional[str],
+    missing_slots: List[str],
+    ask_next: Optional[str],
+    action_branch: Optional[str],
+    availability_reshow: bool,
+    availability_browse: Optional[Dict[str, Any]],
+    has_planning_evidence: bool = False,
+    turn_understanding: Optional[str] = None,
+) -> tuple[str, Optional[str], Optional[str], Optional[str], Optional[str], bool]:
+    """Final Stage 08 ownership: forbid READY + no action + missing without presentation.
+
+    Returns:
+        status, action, awaiting, stage, action_branch, availability_reshow
+    """
+    # Recovery presentation requires UNRECOGNIZED + no planning evidence.
+    # UNDERSTOOD + no evidence continues to clarification demotion below.
+    if (
+        status == "READY"
+        and action is None
+        and missing_slots
+        and not has_planning_evidence
+        and turn_understanding == "UNRECOGNIZED_INPUT"
+        and action_branch not in _PRESENTATION_ACTION_BRANCHES
+    ):
+        action_branch = "recovery_presentation"
+        availability_reshow = False
+        awaiting = _awaiting_from_ask_next(ask_next) or awaiting
+
+    has_presentation = _has_planner_presentation(
+        action_branch=action_branch,
+        availability_reshow=availability_reshow,
+        availability_browse=availability_browse,
+    )
+    if (
+        status == "READY"
+        and action is None
+        and missing_slots
+        and not has_presentation
+    ):
+        status = "NEEDS_CLARIFICATION"
+        awaiting = _awaiting_from_ask_next(ask_next) or awaiting
+        action_branch = "reconcile_unanswered_ask_next"
+        availability_reshow = False
+        if stage is None or stage not in ("AVAILABILITY", "CONFIRM"):
+            stage = _derive_stage_from_status(status)
+    elif (
+        status == "NEEDS_CLARIFICATION"
+        and missing_slots
+        and awaiting is None
+        and ask_next
+    ):
+        awaiting = _awaiting_from_ask_next(ask_next)
+
+    # Invariant: illegal dead terminal state must never leave Decision.
+    if (
+        status == "READY"
+        and action is None
+        and missing_slots
+        and not _has_planner_presentation(
+            action_branch=action_branch,
+            availability_reshow=availability_reshow,
+            availability_browse=availability_browse,
+        )
+    ):
+        raise AssertionError(
+            "Illegal planner terminal state: READY + action=None + missing_slots "
+            f"without presentation (missing={missing_slots!r}, ask_next={ask_next!r})"
+        )
+
+    return status, action, awaiting, stage, action_branch, availability_reshow
 
 
 def _apply_has_datetime_invariant(decision_plan: DecisionPlan) -> None:
@@ -108,6 +247,21 @@ def build_decision_plan_from_evidence(
     intent_name = slot_state.intent_name
     payload = working_turn.payload
     missing_slots = list(slot_state.missing_slots)
+    promptable_slots = list(getattr(slot_state, "promptable_slots", None) or [])
+    declined_slots = list(getattr(slot_state, "declined_slots", None) or [])
+    ask_next = slot_state.ask_next
+    if ask_next is None:
+        from core.planning.planner.missing_slots import derive_ask_next
+
+        ask_next = derive_ask_next(missing_slots, promptable_slots)
+    entity_schema = (
+        payload.get("_entity_schema")
+        if isinstance(payload.get("_entity_schema"), dict)
+        else None
+    )
+    # Stage 04 default ask is a proposal only; Stage 08 may override from the
+    # current progress execution step (see progress_clarification precedence).
+    default_ask_next = ask_next
     effective_slots = dict(slot_state.effective_collected_slots)
     needs_clarification = slot_state.needs_clarification
     availability_resolved = availability.availability_ready
@@ -123,12 +277,18 @@ def build_decision_plan_from_evidence(
         bound_datetime_clear is not None
         and getattr(bound_datetime_clear, "cleared", False)
     )
+    # Stage 06 AVAILABILITY supersession OR Stage 03 criteria revision.
+    # Both must disable session time-proposal reuse for execution.
     availability_invalidated = bool(
-        availability_invalidation is not None
-        and getattr(availability_invalidation, "invalidated", False)
+        (
+            availability_invalidation is not None
+            and getattr(availability_invalidation, "invalidated", False)
+        )
+        or payload.get("_revision_invalidated_availability")
     )
     if availability_invalidated:
-        # Stage 06 typed evidence — same effect as prior payload trust invalidation.
+        # Typed Stage 06 evidence and Stage 03 revision share the same effect:
+        # prior availability trust must not drive this turn's proposals.
         availability_resolved = False
 
     commit_action = get_commit_action(intent_name)
@@ -146,7 +306,16 @@ def build_decision_plan_from_evidence(
         _ea_result = plan_intent(intent_name, effective_slots, _ea_policy)
         executable_actions = _ea_result.get("executable_actions", [])
 
-    if confirmation.availability_reshow:
+    # No current-turn planning evidence with open slots must not auto-reshow
+    # availability; reconciliation owns clarify/recovery precedence.
+    has_planning_evidence = _current_turn_planning_evidence(payload)
+    turn_understanding = _turn_understanding_from_payload(payload)
+    block_auto_reshow = (not has_planning_evidence) and bool(missing_slots)
+    allow_availability_reshow = bool(
+        confirmation.availability_reshow and not block_auto_reshow
+    )
+
+    if allow_availability_reshow:
         status = "READY"
         awaiting = None
         action = None
@@ -164,8 +333,17 @@ def build_decision_plan_from_evidence(
             time_match_outcome,
             user_confirmation_satisfied=user_confirmation_satisfied,
             turn_operation=turn_operation,
+            missing_slots=missing_slots,
         ):
             status = "AWAITING_CONFIRMATION"
+        elif (
+            time_match_outcome == TIME_MATCH_EXACT
+            and missing_slots
+            and not user_confirmation_satisfied
+            and not _availability_operation_precedes_confirm(turn_operation)
+        ):
+            # Exact time bound, but composed required slots remain — clarify.
+            status = "NEEDS_CLARIFICATION"
         elif missing_slots:
             status = "READY" if executable_actions else "NEEDS_CLARIFICATION"
         elif needs_clarification:
@@ -182,6 +360,13 @@ def build_decision_plan_from_evidence(
 
         if time_match_outcome == TIME_MATCH_MISMATCH:
             awaiting = "TIME_SELECTION"
+        elif (
+            time_match_outcome == TIME_MATCH_EXACT
+            and missing_slots
+            and not user_confirmation_satisfied
+            and not _availability_operation_precedes_confirm(turn_operation)
+        ):
+            awaiting = _awaiting_from_ask_next(ask_next)
         elif confirmation.awaiting_user_confirmation and not availability_op:
             awaiting = "USER_CONFIRMATION"
         elif capability.awaiting_capability:
@@ -209,12 +394,8 @@ def build_decision_plan_from_evidence(
                 organization_id=organization_id,
                 confirm_booking_continuation=confirm_booking_continuation,
             )
-            if (
-                availability_invalidation is not None
-                and getattr(availability_invalidation, "invalidated", False)
-            ):
-                # Policy facts still read session cache unless Stage 03 set a
-                # payload flag; apply Stage 06 typed evidence to selector flags.
+            if availability_invalidated:
+                # Stage 06 supersession or Stage 03 criteria revision.
                 flags["availability_ready"] = False
                 flags["availability_resolved"] = False
                 flags["availability_check_required"] = True
@@ -222,15 +403,86 @@ def build_decision_plan_from_evidence(
                 flags["time_selection_ready"] = False
                 flags["time_selection_required"] = intent_name == "CREATE_APPOINTMENT"
             selected_step, candidate_evidence = evaluate_execution_step_candidates(
-                intent_name, effective_slots, flags
+                intent_name,
+                effective_slots,
+                flags,
+                entity_schema=entity_schema,
             )
-            if selected_step:
+
+            from core.planning.planner.progress_clarification import (
+                resolve_progress_ask,
+            )
+
+            # Non-slot awaiting owners (confirmation / capability / time mismatch)
+            # must not be rewritten into slot asks.
+            skip_progress_clarification = status in (
+                "AWAITING_CONFIRMATION",
+                "AWAITING_CAPABILITY",
+            ) or time_match_outcome == TIME_MATCH_MISMATCH
+
+            progress_ask, progress_branch, progress_meta = (default_ask_next, None, None)
+            if not skip_progress_clarification:
+                progress_ask, progress_branch, progress_meta = resolve_progress_ask(
+                    selected_step=selected_step,
+                    candidates=candidate_evidence,
+                    promptable_slots=promptable_slots,
+                    entity_schema=entity_schema,
+                    default_ask_next=default_ask_next,
+                )
+                ask_next = progress_ask
+
+            if progress_branch == "progress_step_clarification":
+                action = None
+                policy_client = None
+                action_branch = progress_branch
+                status = "NEEDS_CLARIFICATION"
+                awaiting = _awaiting_from_ask_next(ask_next)
+                stage = "AVAILABILITY"
+                if isinstance(progress_meta, dict):
+                    payload["_progress_clarification"] = progress_meta
+            elif progress_branch == "promptable_before_step":
+                action = None
+                policy_client = None
+                action_branch = progress_branch
+                if not ask_next and isinstance(progress_meta, dict):
+                    promptables = progress_meta.get("promptables") or []
+                    if promptables:
+                        ask_next = promptables[0]
+                status = "NEEDS_CLARIFICATION"
+                awaiting = _awaiting_from_ask_next(ask_next)
+                stage = "AVAILABILITY"
+                if isinstance(progress_meta, dict):
+                    payload["_progress_clarification"] = progress_meta
+            elif selected_step and not skip_progress_clarification:
                 action = selected_step.get("action")
                 policy_client = selected_step.get("client")
                 action_branch = "policy"
                 stage = _stage_for_execution_action(action, selected_step)
+            elif skip_progress_clarification:
+                # Keep confirmation / capability / time-mismatch owners; do not
+                # attach a progress execution action beside non-slot awaiting.
+                action = None
+                policy_client = None
+                action_branch = "non_slot_awaiting"
             else:
                 action_branch = "no_execution_step"
+
+            # Invariant: cache-satisfiable page browse must never select SEARCH.
+            # Absolute dates / temporal criterion changes always SEARCH.
+            from core.workflows.availability.browse import (
+                cache_satisfiable_browse_request,
+            )
+
+            browse = cache_satisfiable_browse_request(payload, session_state)
+            if action == "SEARCH_AVAILABILITY" and browse:
+                action = None
+                policy_client = None
+                action_branch = "cache_satisfiable_browse"
+                stage = "AVAILABILITY"
+                flags["availability_check_required"] = False
+                flags["availability_ready"] = True
+                flags["availability_resolved"] = True
+                payload["availability_browse"] = browse
 
         if time_match_outcome == TIME_MATCH_MISMATCH:
             action = None
@@ -240,16 +492,78 @@ def build_decision_plan_from_evidence(
             time_match_outcome,
             user_confirmation_satisfied=user_confirmation_satisfied,
             turn_operation=turn_operation,
+            missing_slots=missing_slots,
         ):
             action = None
             action_branch = "time_match_exact"
             stage = "CONFIRM"
+        elif (
+            time_match_outcome == TIME_MATCH_EXACT
+            and missing_slots
+            and not user_confirmation_satisfied
+            and not _availability_operation_precedes_confirm(turn_operation)
+        ):
+            # Preserve bound time; do not re-SEARCH or present confirmation.
+            action = None
+            policy_client = None
+            action_branch = "exact_time_incomplete_required"
+            status = "NEEDS_CLARIFICATION"
+            awaiting = _awaiting_from_ask_next(ask_next) or awaiting
+            stage = "AVAILABILITY"
 
         if stage is None:
             if availability_op and status == "READY":
                 stage = "AVAILABILITY"
+            elif intent_name == "UNKNOWN":
+                # Cold-start / unrecognized: keep stage unset so recovery stays
+                # intent-neutral (do not inherit booking AVAILABILITY context).
+                stage = None
             else:
                 stage = _derive_stage_from_status(status)
+
+    browse_on_payload = payload.get("availability_browse")
+    if not isinstance(browse_on_payload, dict):
+        browse_on_payload = None
+
+    (
+        status,
+        action,
+        awaiting,
+        stage,
+        action_branch,
+        allow_availability_reshow,
+    ) = _reconcile_terminal_decision(
+        status=status,
+        action=action,
+        awaiting=awaiting,
+        stage=stage,
+        missing_slots=missing_slots,
+        ask_next=ask_next,
+        action_branch=action_branch,
+        availability_reshow=allow_availability_reshow,
+        availability_browse=browse_on_payload,
+        has_planning_evidence=has_planning_evidence,
+        turn_understanding=turn_understanding,
+    )
+
+    # Promptable-only clarification (required complete, optional offer open).
+    if (
+        status == "READY"
+        and action is None
+        and not missing_slots
+        and promptable_slots
+        and ask_next in promptable_slots
+        and not _has_planner_presentation(
+            action_branch=action_branch,
+            availability_reshow=allow_availability_reshow,
+            availability_browse=browse_on_payload,
+        )
+    ):
+        status = "NEEDS_CLARIFICATION"
+        awaiting = _awaiting_from_ask_next(ask_next) or awaiting
+        action_branch = action_branch or "promptable_optional"
+        if stage is None:
+            stage = "AVAILABILITY"
 
     allowed_actions: List[str] = []
     blocked_actions: List[str] = []
@@ -295,6 +609,9 @@ def build_decision_plan_from_evidence(
         "awaiting": awaiting,
         "executable_actions": executable_actions,
         "missing_slots": missing_slots,
+        "ask_next": ask_next,
+        "promptable_slots": list(promptable_slots),
+        "declined_slots": list(declined_slots),
     }
     current_turn_has_explicit_time = bool(payload.get("_current_turn_has_time"))
     current_turn_time_proposal = (
@@ -321,6 +638,10 @@ def build_decision_plan_from_evidence(
         "bound_datetime_cleared": bound_datetime_cleared,
     }
     plan["execution_proposal_context"] = proposal_resolution_context
+    # Carry Stage 03 flag onto the Decision plan so execution proposal resolution
+    # sees criteria invalidation even if _merged_luma_response is absent.
+    if payload.get("_revision_invalidated_availability"):
+        plan["_revision_invalidated_availability"] = True
     if time_match_outcome:
         plan["time_match_outcome"] = time_match_outcome
     if isinstance(time_resolution, dict):
@@ -329,8 +650,10 @@ def build_decision_plan_from_evidence(
         plan["active_capability"] = active_capability
     if turn_operation and turn_operation != "NONE":
         plan["turn_operation"] = turn_operation
-    if confirmation.availability_reshow:
+    if allow_availability_reshow:
         plan["availability_reshow"] = True
+    if isinstance(browse_on_payload, dict) and browse_on_payload.get("direction"):
+        plan["availability_browse"] = browse_on_payload
 
     existing_facts = payload.get("facts", {})
     if not isinstance(existing_facts, dict):
@@ -348,8 +671,15 @@ def build_decision_plan_from_evidence(
         **existing_facts,
         "slots": slots,
         "missing_slots": missing_slots,
+        "ask_next": ask_next,
+        "promptable_slots": list(promptable_slots),
+        "declined_slots": list(declined_slots),
         "context": effective_context,
     }
+    if entity_schema is not None:
+        facts["_entity_schema"] = entity_schema
+        # Execution/workflow read the Decision plan dict (not DecisionPlan.facts).
+        plan["_entity_schema"] = entity_schema
     for key in ("date_proposal", "time_proposal", "time_match_outcome", "time_resolution"):
         if payload.get(key) is not None:
             facts[key] = payload[key]
@@ -447,6 +777,7 @@ def _emit_plan_trace(
             executable_actions=executable_actions,
             availability_resolved=availability_resolved,
             stage_from_action=action_branch == "policy",
+            action_branch=action_branch,
         )
     except ImportError:
         pass

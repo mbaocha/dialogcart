@@ -127,14 +127,14 @@ def test_awaiting_slot_with_multiple_missing_slots():
     Test that awaiting_slot prioritization works with multiple missing slots.
 
     Scenario:
-    - missing_slots = ["date", "service_id", "time"]
+    - missing_slots = ["service_id", "date", "time"] (policy order)
     - awaiting_slot = "time"
 
     Expected:
     - result[0] == "time"
-    - Remaining slots preserve order: ["date", "service_id"]
+    - Remaining slots preserve order: ["service_id", "date"]
     """
-    missing_slots = ["date", "service_id", "time"]
+    missing_slots = ["service_id", "date", "time"]
     session_state = {"awaiting_slot": "time", "intent_name": "CREATE_APPOINTMENT"}
 
     result = _prioritize_awaiting_slot(missing_slots, session_state)
@@ -146,9 +146,9 @@ def test_awaiting_slot_with_multiple_missing_slots():
         "time",
     }, f"Expected all slots, got {set(result)}"
     assert result[1:] == [
-        "date",
         "service_id",
-    ], f"Expected ['date', 'service_id'], got {result[1:]}"
+        "date",
+    ], f"Expected ['service_id', 'date'], got {result[1:]}"
 
 
 def test_awaiting_slot_with_none_session_state():

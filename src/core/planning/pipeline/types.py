@@ -24,7 +24,10 @@ class IntentDecision:
     handler_name: Optional[str] = None
     non_durable_status: Optional[str] = None
     delegated_search_query: Optional[str] = None
-    delegated_off_topic_query: Optional[str] = None
+    # Opaque OFF_TOPIC evidence from NLU — planner must not interpret answer semantics.
+    off_topic_query: Optional[str] = None
+    off_topic_answerable: Optional[bool] = None
+    off_topic_answer: Optional[str] = None
     delegated_slots: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -57,6 +60,9 @@ class SlotTurnState:
     missing_slots: List[str]
     effective_collected_slots: Dict[str, Any]
     base_status: str
+    ask_next: Optional[str] = None
+    promptable_slots: List[str] = field(default_factory=list)
+    declined_slots: List[str] = field(default_factory=list)
     needs_clarification: bool = False
     clarification_reason: Optional[str] = None
     clarification_data: Optional[Dict[str, Any]] = None

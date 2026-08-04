@@ -68,6 +68,144 @@ def filter_slots_to_search_date(raw_slots: Any, search_date: str) -> List[Dict[s
     return filtered
 
 
+def resolve_criteria_span(
+    *,
+    slots: Optional[Dict[str, Any]] = None,
+    date_proposal: Optional[Dict[str, Any]] = None,
+    fingerprint_slots: Optional[Dict[str, Any]] = None,
+    search_date: Optional[str] = None,
+) -> Tuple[str, Optional[str], Optional[str]]:
+    """Derive presentation span from search criteria (not provider surplus).
+
+    Returns ``(criteria_span, search_date, search_end_date)`` where
+    ``criteria_span`` is ``\"single_day\"`` or ``\"multi_day\"``.
+    """
+    criteria = fingerprint_slots if isinstance(fingerprint_slots, dict) else {}
+    plan_slots = slots if isinstance(slots, dict) else {}
+    proposal = date_proposal if isinstance(date_proposal, dict) else {}
+
+    def _norm(raw: Any) -> Optional[str]:
+        return normalize_search_date(raw) if isinstance(raw, str) else None
+
+    date_range = plan_slots.get("date_range") or criteria.get("date_range")
+    if isinstance(date_range, dict):
+        start = _norm(date_range.get("start") or date_range.get("start_date"))
+        end = _norm(date_range.get("end") or date_range.get("end_date"))
+        if start and end and end != start:
+            return "multi_day", start, end
+        if start:
+            return "single_day", start, start
+
+    start_date = _norm(
+        plan_slots.get("start_date")
+        or criteria.get("start_date")
+        or proposal.get("start")
+    )
+    end_date = _norm(
+        plan_slots.get("end_date")
+        or criteria.get("end_date")
+        or proposal.get("end")
+    )
+    if start_date and end_date and end_date != start_date:
+        return "multi_day", start_date, end_date
+
+    mode = str(proposal.get("mode") or "").strip().lower()
+    if mode in ("range", "flexible"):
+        start = start_date or _norm(search_date)
+        end = end_date or start
+        if start and end and end != start:
+            return "multi_day", start, end
+        # Explicit multi-day mode without a distinct end still spans dates.
+        return "multi_day", start, end
+
+    single = _norm(
+        plan_slots.get("date")
+        or criteria.get("date")
+        or start_date
+        or proposal.get("start")
+        or search_date
+    )
+    if single or mode == "single_day":
+        day = single or start_date
+        if day:
+            return "single_day", day, day
+
+    # Undated exploratory search — criteria intentionally span provider dates.
+    return "multi_day", _norm(search_date), None
+
+
+def criteria_is_single_day(
+    *,
+    slots: Optional[Dict[str, Any]] = None,
+    date_proposal: Optional[Dict[str, Any]] = None,
+    fingerprint_slots: Optional[Dict[str, Any]] = None,
+    search_date: Optional[str] = None,
+) -> bool:
+    """True when canonical search criteria constrain presentation to one day."""
+    span, _, _ = resolve_criteria_span(
+        slots=slots,
+        date_proposal=date_proposal,
+        fingerprint_slots=fingerprint_slots,
+        search_date=search_date,
+    )
+    return span == "single_day"
+
+
+def search_criteria_from_session(
+    session_state: Optional[Dict[str, Any]],
+) -> tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Read canonical planning search criteria from session for presentation shaping."""
+    if not isinstance(session_state, dict):
+        return {}, None
+    slots: Dict[str, Any] = {}
+    top_slots = session_state.get("slots")
+    if isinstance(top_slots, dict):
+        slots.update(top_slots)
+    planning = session_state.get("planning")
+    if isinstance(planning, dict):
+        planning_slots = planning.get("slots")
+        if isinstance(planning_slots, dict):
+            slots = {**planning_slots, **slots}
+        proposals = planning.get("proposals")
+        if isinstance(proposals, dict) and isinstance(proposals.get("date"), dict):
+            return slots, proposals.get("date")
+    date_proposal = session_state.get("date_proposal")
+    if isinstance(date_proposal, dict):
+        return slots, date_proposal
+    return slots, None
+
+
+def presentation_slots_from_cache(
+    cache: AvailabilityCache,
+    *,
+    slots: Optional[Dict[str, Any]] = None,
+    date_proposal: Optional[Dict[str, Any]] = None,
+    fingerprint_slots: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """Shape the presentation result set from cache using search criteria.
+
+    Keeps the full provider response in ``cache[\"slots\"]``. Single-day criteria
+    expose only that day's offers to pagination; multi-day / exploratory criteria
+    keep all qualifying dates. Span is derived from planning criteria — never
+    from persisted cache presentation flags or provider surplus.
+    """
+    raw = cache.get("slots") or []
+    if not isinstance(raw, list):
+        return []
+    span, start, _end = resolve_criteria_span(
+        slots=slots,
+        date_proposal=date_proposal,
+        fingerprint_slots=fingerprint_slots,
+        search_date=None,
+    )
+    if span != "single_day":
+        return list(raw)
+    day = start
+    if not day:
+        return list(raw)
+    return filter_slots_to_search_date(raw, day)
+
+
 def format_display_time(iso_start: str) -> str:
     """Format ISO datetime to a short time label."""
     raw = iso_start.replace("Z", "+00:00")
@@ -250,8 +388,6 @@ def _browse_hints_for_cursor(view: _AvailabilityView, cursor: _Cursor) -> Browse
         return {
             "has_more_times": False,
             "has_previous_times": False,
-            "has_next_date": False,
-            "has_previous_date": False,
             "has_more_any": False,
             "has_previous_any": False,
             "suggested_next": None,
@@ -264,30 +400,20 @@ def _browse_hints_for_cursor(view: _AvailabilityView, cursor: _Cursor) -> Browse
     pages = _pages_in_group(group, clamped.page_size)
     has_more_times = clamped.page_index + 1 < pages
     has_previous_times = clamped.page_index > 0
-    has_next_date = clamped.group_index + 1 < len(view.groups)
-    has_previous_date = clamped.group_index > 0
-    has_more_any = has_more_times or has_next_date
-    has_previous_any = has_previous_times or has_previous_date
+    # Multi-day criteria result sets may contain further date groups; that is
+    # page movement inside the criteria-shaped set, not date-axis browse.
+    has_later_group = clamped.group_index + 1 < len(view.groups)
+    has_earlier_group = clamped.group_index > 0
+    has_more_any = has_more_times or has_later_group
+    has_previous_any = has_previous_times or has_earlier_group
 
-    suggested_next: Optional[str] = None
-    if has_more_times:
-        suggested_next = "show more"
-    elif has_next_date:
-        suggested_next = "next day"
-
-    suggested_previous: Optional[str] = None
-    if has_previous_times or has_previous_date:
-        if has_previous_times:
-            suggested_previous = "go back"
-        else:
-            suggested_previous = "previous day"
+    suggested_next: Optional[str] = "next" if has_more_any else None
+    suggested_previous: Optional[str] = "previous" if has_previous_any else None
 
     more_count = max(0, len(group.slots) - (clamped.page_index + 1) * clamped.page_size)
     return {
         "has_more_times": has_more_times,
         "has_previous_times": has_previous_times,
-        "has_next_date": has_next_date,
-        "has_previous_date": has_previous_date,
         "has_more_any": has_more_any,
         "has_previous_any": has_previous_any,
         "suggested_next": suggested_next,  # type: ignore[typeddict-item]
@@ -306,13 +432,17 @@ def _project_presented(
 ) -> PresentedAvailability:
     clamped = _clamp_cursor(view, cursor) or _Cursor(0, 0, view.page_size)
     page_slots, times, date_label, more_count, total = _window_for_cursor(view, clamped)
+    browse_hints = _browse_hints_for_cursor(view, clamped)
+    from core.planning.recovery_actions import recovery_actions_for_browse_window
+
     presented: PresentedAvailability = {
         "search_date": date_label,
         "slots": page_slots,
         "times": times,
         "more_count": more_count,
         "total_unique": total,
-        "browse_hints": _browse_hints_for_cursor(view, clamped),
+        "browse_hints": browse_hints,
+        "recovery_actions": recovery_actions_for_browse_window(browse_hints),  # type: ignore[misc]
         _CURSOR_KEY: _encode_cursor(clamped),  # type: ignore[misc]
     }
     if fingerprint:
@@ -343,11 +473,27 @@ def build_initial_presentation(
     *,
     page_size: int = DEFAULT_MAX_TIMES,
     search_date: Optional[str] = None,
+    slots: Optional[Dict[str, Any]] = None,
+    date_proposal: Optional[Dict[str, Any]] = None,
+    fingerprint_slots: Optional[Dict[str, Any]] = None,
 ) -> PresentedAvailability:
-    """Build the first visible window from a trusted AvailabilityCache."""
-    slots = cache.get("slots") or []
-    view = _build_availability_view(slots, page_size=page_size)
+    """Build the first visible window from a criteria-shaped result set."""
+    shaped = presentation_slots_from_cache(
+        cache,
+        slots=slots,
+        date_proposal=date_proposal,
+        fingerprint_slots=fingerprint_slots,
+    )
+    view = _build_availability_view(shaped, page_size=page_size)
     preferred = search_date or cache.get("search_date")
+    if not preferred and slots:
+        span, start, _ = resolve_criteria_span(
+            slots=slots,
+            date_proposal=date_proposal,
+            fingerprint_slots=fingerprint_slots,
+        )
+        if span == "single_day":
+            preferred = start
     cursor = _initial_cursor(view, search_date=preferred)
     return _project_presented(
         view, cursor, fingerprint=cache.get("fingerprint")
@@ -361,53 +507,30 @@ def project_presentation_to_date(
     current_presentation: Optional[PresentedAvailability] = None,
     page_size: Optional[int] = None,
 ) -> BrowseProjection:
-    """Project the first page of a named date when it exists in the trusted cache.
+    """Legacy date jump — retained only for discovery bridge compatibility.
 
-    Does not invent empty date groups. On miss, preserves the prior window and
-    returns ``target_date_not_in_cache``.
+    Absolute date requests must flow through SEARCH_AVAILABILITY, not browse.
+    Always preserves the current window and reports ``target_date_not_in_cache``.
     """
-    resolved_page_size = page_size or DEFAULT_MAX_TIMES
-    if isinstance(current_presentation, dict):
-        raw_cursor = current_presentation.get(_CURSOR_KEY)
-        if isinstance(raw_cursor, dict) and raw_cursor.get("page_size"):
-            try:
-                resolved_page_size = int(raw_cursor["page_size"])
-            except (TypeError, ValueError):
-                pass
-
-    slots = cache.get("slots") or []
-    view = _build_availability_view(slots, page_size=resolved_page_size)
-    normalized = normalize_search_date(target_date)
-
-    def _preserve(reason: str) -> BrowseProjection:
-        if isinstance(current_presentation, dict) and isinstance(
-            current_presentation.get("slots"), list
-        ):
-            presented = dict(current_presentation)
-            presented["browse_status"] = reason
-            return {"presented": presented, "moved": False, "reason_code": reason}
-        cursor = _cursor_from_presented(view, current_presentation)
-        presented = _project_presented(
-            view, cursor, fingerprint=cache.get("fingerprint"), browse_status=reason
-        )
-        return {"presented": presented, "moved": False, "reason_code": reason}
-
-    if not normalized or not view.groups:
-        return _preserve("target_date_not_in_cache")
-
-    for gi, group in enumerate(view.groups):
-        if group.date == normalized:
-            presented = _project_presented(
-                view,
-                _Cursor(gi, 0, resolved_page_size),
-                fingerprint=cache.get("fingerprint"),
-            )
-            return {
-                "presented": presented,
-                "moved": True,
-                "reason_code": "date_projected",
-            }
-    return _preserve("target_date_not_in_cache")
+    _ = cache, target_date, page_size
+    if isinstance(current_presentation, dict) and isinstance(
+        current_presentation.get("slots"), list
+    ):
+        presented = dict(current_presentation)
+        presented["browse_status"] = "target_date_not_in_cache"
+        return {
+            "presented": presented,
+            "moved": False,
+            "reason_code": "target_date_not_in_cache",
+        }
+    empty: PresentedAvailability = {
+        "slots": [],
+        "times": [],
+        "more_count": 0,
+        "total_unique": 0,
+        "browse_status": "target_date_not_in_cache",
+    }
+    return {"presented": empty, "moved": False, "reason_code": "target_date_not_in_cache"}
 
 
 def cache_contains_date(cache: AvailabilityCache, target_date: str) -> bool:
@@ -425,9 +548,21 @@ def advance_presentation(
     browse_intent: BrowseIntent,
     *,
     page_size: Optional[int] = None,
+    slots: Optional[Dict[str, Any]] = None,
+    date_proposal: Optional[Dict[str, Any]] = None,
+    fingerprint_slots: Optional[Dict[str, Any]] = None,
 ) -> BrowseProjection:
-    """Advance the presentation window according to BrowseIntent."""
-    slots = cache.get("slots") or []
+    """Advance the page cursor inside the criteria-shaped presentation result set.
+
+    Never changes search criteria. Single-day searches cannot paginate into
+    provider surplus dates outside the requested day.
+    """
+    shaped = presentation_slots_from_cache(
+        cache,
+        slots=slots,
+        date_proposal=date_proposal,
+        fingerprint_slots=fingerprint_slots,
+    )
     resolved_page_size = page_size or DEFAULT_MAX_TIMES
     if isinstance(current_presentation, dict):
         raw_cursor = current_presentation.get(_CURSOR_KEY)
@@ -437,7 +572,7 @@ def advance_presentation(
             except (TypeError, ValueError):
                 pass
 
-    view = _build_availability_view(slots, page_size=resolved_page_size)
+    view = _build_availability_view(shaped, page_size=resolved_page_size)
     if not view.groups:
         empty = _project_presented(view, _Cursor(0, 0, resolved_page_size))
         empty["browse_status"] = "exhausted"
@@ -461,6 +596,9 @@ def advance_presentation(
             # Refresh public hints from the preserved cursor when possible.
             hints = _browse_hints_for_cursor(view, cursor)
             presented["browse_hints"] = hints
+            from core.planning.recovery_actions import recovery_actions_for_browse_window
+
+            presented["recovery_actions"] = recovery_actions_for_browse_window(hints)
             return {"presented": presented, "moved": False, "reason_code": reason}
         presented = _project_presented(
             view,
@@ -485,14 +623,8 @@ def advance_presentation(
                 return _move(
                     _Cursor(cursor.group_index, cursor.page_index + 1, cursor.page_size)
                 )
-            return _stay("no_more_times_for_date")
-        if axis == "date":
-            if cursor.group_index + 1 < len(view.groups):
-                return _move(
-                    _Cursor(cursor.group_index + 1, 0, cursor.page_size)
-                )
-            return _stay("no_next_date")
-        # any: times then next date
+            return _stay("exhausted")
+        # Page through the criteria-shaped set (times, then later groups when multi-day).
         if cursor.page_index + 1 < pages:
             return _move(
                 _Cursor(cursor.group_index, cursor.page_index + 1, cursor.page_size)
@@ -507,13 +639,7 @@ def advance_presentation(
                 return _move(
                     _Cursor(cursor.group_index, cursor.page_index - 1, cursor.page_size)
                 )
-            return _stay("no_previous_times_for_date")
-        if axis == "date":
-            if cursor.group_index > 0:
-                # Date-axis always opens the first page of the target date.
-                return _move(_Cursor(cursor.group_index - 1, 0, cursor.page_size))
-            return _stay("no_previous_date")
-        # any: previous time page, else final page of previous date
+            return _stay("exhausted")
         if cursor.page_index > 0:
             return _move(
                 _Cursor(cursor.group_index, cursor.page_index - 1, cursor.page_size)
@@ -569,8 +695,17 @@ def build_presented_availability(
     search_date: Optional[str] = None,
     fingerprint: Optional[str] = None,
 ) -> PresentedAvailability:
-    """Build the selectable availability payload shown to the user."""
-    view = _build_availability_view(raw_slots, page_size=max_times)
+    """Build the selectable availability payload shown to the user.
+
+    When ``search_date`` is provided, the presentation result set is shaped to
+    that single day (provider surplus on other days is excluded from paging).
+    """
+    shaped = (
+        filter_slots_to_search_date(raw_slots, search_date)
+        if search_date
+        else raw_slots
+    )
+    view = _build_availability_view(shaped, page_size=max_times)
     cursor = _initial_cursor(view, search_date=search_date)
     return _project_presented(view, cursor, fingerprint=fingerprint)
 
@@ -584,7 +719,12 @@ def build_presented_availability_page(
     fingerprint: Optional[str] = None,
 ) -> PresentedAvailability:
     """Build presented_availability for a page slice within one date group."""
-    view = _build_availability_view(raw_slots, page_size=page_size)
+    shaped = (
+        filter_slots_to_search_date(raw_slots, search_date)
+        if search_date
+        else raw_slots
+    )
+    view = _build_availability_view(shaped, page_size=page_size)
     cursor = _initial_cursor(view, search_date=search_date)
     cursor = _Cursor(cursor.group_index, max(0, int(page_index)), page_size)
     return _project_presented(view, cursor, fingerprint=fingerprint)
@@ -612,14 +752,14 @@ def build_availability_presentation(
     group = view.groups[clamped.group_index]
     pages = _pages_in_group(group, page_size)
     has_next_times = clamped.page_index + 1 < pages
-    has_next_date = clamped.group_index + 1 < len(view.groups)
+    has_later_group = clamped.group_index + 1 < len(view.groups)
     has_previous_times = clamped.page_index > 0
-    has_previous_date = clamped.group_index > 0
+    has_earlier_group = clamped.group_index > 0
     return {
         "page_index": clamped.page_index,
         "page_size": page_size,
-        "has_next": has_next_times or has_next_date,
-        "has_previous": has_previous_times or has_previous_date,
+        "has_next": has_next_times or has_later_group,
+        "has_previous": has_previous_times or has_earlier_group,
     }
 
 
@@ -666,6 +806,114 @@ def presentation_meta_from_presented(
         "has_next": bool(hints.get("has_more_any")),
         "has_previous": bool(hints.get("has_previous_any")),
     }
+
+
+# ---------------------------------------------------------------------------
+# Selection mismatch location (explanation only; does not change bind rules)
+# ---------------------------------------------------------------------------
+
+SELECTION_MISMATCH_CURRENT_PAGE = "CURRENT_PAGE"
+SELECTION_MISMATCH_EARLIER_PAGE = "EARLIER_PAGE"
+SELECTION_MISMATCH_LATER_PAGE = "LATER_PAGE"
+SELECTION_MISMATCH_NOT_IN_CACHE = "NOT_IN_CACHE"
+
+
+def _parse_start_date_time(start: str) -> Optional[Tuple[str, str]]:
+    """Parse an ISO start into (YYYY-MM-DD, HH:MM)."""
+    raw = str(start).replace("Z", "+00:00")
+    try:
+        parsed = datetime.fromisoformat(raw)
+    except (ValueError, TypeError):
+        return None
+    return parsed.date().isoformat(), f"{parsed.hour:02d}:{parsed.minute:02d}"
+
+
+def classify_selection_mismatch_location(
+    *,
+    cache: Optional[AvailabilityCache],
+    presented: Optional[PresentedAvailability],
+    requested_time: str,
+    search_date: Optional[str] = None,
+) -> str:
+    """Locate a normalized ``HH:MM`` relative to the current presented window.
+
+    Uses the ordered trusted cache and the existing presented cursor/window.
+    Does not change selection eligibility — classification is for wording only.
+    """
+    requested = str(requested_time or "").strip()
+    if not requested or not isinstance(cache, dict):
+        return SELECTION_MISMATCH_NOT_IN_CACHE
+
+    raw_slots = cache.get("slots")
+    if not isinstance(raw_slots, list) or not raw_slots:
+        return SELECTION_MISMATCH_NOT_IN_CACHE
+
+    page_size = DEFAULT_MAX_TIMES
+    if isinstance(presented, dict):
+        raw_cursor = presented.get(_CURSOR_KEY)
+        if isinstance(raw_cursor, dict) and raw_cursor.get("page_size") is not None:
+            try:
+                page_size = int(raw_cursor["page_size"])
+            except (TypeError, ValueError):
+                pass
+
+    view = _build_availability_view(raw_slots, page_size=page_size)
+    if not view.groups:
+        return SELECTION_MISMATCH_NOT_IN_CACHE
+
+    cursor = _cursor_from_presented(view, presented)
+    page_slots, _times, window_date, _more, _total = _window_for_cursor(view, cursor)
+    window_starts = {
+        start for start in (_slot_start_iso(slot) for slot in page_slots) if start
+    }
+
+    expected_date = normalize_search_date(search_date)
+    if not expected_date and isinstance(presented, dict):
+        expected_date = normalize_search_date(presented.get("search_date"))
+    if not expected_date:
+        expected_date = window_date
+
+    ordered_starts: List[str] = []
+    for group in view.groups:
+        for slot in group.slots:
+            start = _slot_start_iso(slot)
+            if start:
+                ordered_starts.append(start)
+
+    matches: List[str] = []
+    for start in ordered_starts:
+        parts = _parse_start_date_time(start)
+        if not parts:
+            continue
+        offer_date, offer_time = parts
+        if offer_time != requested:
+            continue
+        if expected_date and offer_date != expected_date:
+            continue
+        matches.append(start)
+
+    if not matches:
+        return SELECTION_MISMATCH_NOT_IN_CACHE
+
+    for start in matches:
+        if start in window_starts:
+            return SELECTION_MISMATCH_CURRENT_PAGE
+
+    if not window_starts:
+        return SELECTION_MISMATCH_NOT_IN_CACHE
+
+    window_ordered = [s for s in ordered_starts if s in window_starts]
+    if not window_ordered:
+        return SELECTION_MISMATCH_NOT_IN_CACHE
+
+    match = matches[0]
+    first_visible = window_ordered[0]
+    last_visible = window_ordered[-1]
+    if match < first_visible:
+        return SELECTION_MISMATCH_EARLIER_PAGE
+    if match > last_visible:
+        return SELECTION_MISMATCH_LATER_PAGE
+    return SELECTION_MISMATCH_NOT_IN_CACHE
 
 
 # ---------------------------------------------------------------------------
@@ -757,21 +1005,30 @@ def ensure_presented_availability(
     if presented is not None and isinstance(presented.get("slots"), list) and presented.get("slots"):
         return presented
 
-    slots = raw_slots
+    criteria_slots, criteria_date_proposal = search_criteria_from_session(session_state)
+    offer_slots = raw_slots
     date = search_date
     fp = fingerprint
-    if slots is None:
+    if offer_slots is None:
         cache = availability_cache_from_session(session_state)
         if cache is None:
             return presented  # may be empty window
         return present_via_discovery(
-            cache, search_date=date or cache.get("search_date")
+            cache,
+            search_date=date or cache.get("search_date"),
+            slots=criteria_slots,
+            date_proposal=criteria_date_proposal,
         )
     cache: AvailabilityCache = {
-        "slots": list(slots) if isinstance(slots, list) else [],
+        "slots": list(offer_slots) if isinstance(offer_slots, list) else [],
         "fingerprint": fp,
         "search_date": date,
         "type": "availability",
         "status": "ok",
     }
-    return present_via_discovery(cache, search_date=date)
+    return present_via_discovery(
+        cache,
+        search_date=date,
+        slots=criteria_slots,
+        date_proposal=criteria_date_proposal,
+    )

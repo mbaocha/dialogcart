@@ -34,7 +34,7 @@ def _enable_trace(monkeypatch):
 
 
 def _sample_trace() -> dict:
-    TurnTrace.begin(user_id="u1", text="show more times")
+    TurnTrace.begin(user_id="u1", text="show more")
     evidence_id = emit_evidence(
         "SESSION_SNAPSHOT",
         subsystem="session",

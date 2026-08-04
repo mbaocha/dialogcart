@@ -229,8 +229,12 @@ def test_explicit_top_level_clear_wins_over_legacy_nested_value():
 def test_detect_time_only_revision():
     revision = detect_booking_revision(
         {
-            "facts": {"times": ["11:00"]},
-            "time_constraint": {"mode": "exact", "start": "11:00", "end": "11:00"},
+            "facts": {"service_id": "premium haircut"},
+            "temporal": {
+                "start_time": "11:00",
+                "mode": "single_day",
+                "confidence": 1.0,
+            },
         },
         _pending_session(),
     )

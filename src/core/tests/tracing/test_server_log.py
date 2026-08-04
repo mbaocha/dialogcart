@@ -14,7 +14,7 @@ def test_compact_session_snapshot_strips_org_catalog():
         "missing_slots": ["date"],
         "slots": {"service_id": "premium haircut"},
         "facts": {
-            "dates": ["2026-01-14"],
+            "dates": ["2026-07-02"],
             "org": {"success": True, "data": {"catalog": {"services": [{"id": 1}]}}},
         },
     }
@@ -22,7 +22,7 @@ def test_compact_session_snapshot_strips_org_catalog():
     assert compact is not None
     assert compact["intent_name"] == "CREATE_APPOINTMENT"
     assert compact["slots"] == {"service_id": "premium haircut"}
-    assert compact["facts"] == {"dates": ["2026-01-14"]}
+    assert compact["facts"] == {"dates": ["2026-07-02"]}
     assert "org" not in compact["facts"]
 
 

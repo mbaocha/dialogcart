@@ -116,3 +116,50 @@ def test_confirm_continuation_matches_without_time_in_fingerprint():
         },
         stored,
     )
+
+
+def test_normalize_time_dotted_and_colon_equivalence():
+    from core.workflows.availability.fingerprint import _normalize_time_for_fingerprint
+
+    assert _normalize_time_for_fingerprint("1.30") == "01:30"
+    assert _normalize_time_for_fingerprint("1:30") == "01:30"
+    assert _normalize_time_for_fingerprint("1.30") == _normalize_time_for_fingerprint(
+        "1:30"
+    )
+    assert _normalize_time_for_fingerprint("10.15") == "10:15"
+    assert _normalize_time_for_fingerprint("10:15") == "10:15"
+
+
+def test_normalize_time_dotted_with_meridiem():
+    from core.workflows.availability.fingerprint import _normalize_time_for_fingerprint
+
+    assert _normalize_time_for_fingerprint("1.30pm") == "13:30"
+    assert _normalize_time_for_fingerprint("1:30pm") == "13:30"
+    assert _normalize_time_for_fingerprint("1.30 pm") == "13:30"
+    assert _normalize_time_for_fingerprint("5.45pm") == "17:45"
+    assert _normalize_time_for_fingerprint("5.45am") == "05:45"
+    assert _normalize_time_for_fingerprint("12.00pm") == "12:00"
+    assert _normalize_time_for_fingerprint("12.00am") == "00:00"
+
+
+def test_normalize_time_legacy_forms_unchanged():
+    from core.workflows.availability.fingerprint import _normalize_time_for_fingerprint
+
+    assert _normalize_time_for_fingerprint("5pm") == "17:00"
+    assert _normalize_time_for_fingerprint("9am") == "09:00"
+    assert _normalize_time_for_fingerprint("14:00") == "14:00"
+    assert _normalize_time_for_fingerprint("9") == "09:00"
+
+
+def test_normalize_time_invalid_returns_none_not_raw():
+    from core.workflows.availability.fingerprint import _normalize_time_for_fingerprint
+
+    assert _normalize_time_for_fingerprint("5.xyz") is None
+    assert _normalize_time_for_fingerprint("xxxxx") is None
+    assert _normalize_time_for_fingerprint("not-a-time") is None
+    assert _normalize_time_for_fingerprint("25:00") is None
+    assert _normalize_time_for_fingerprint("1.99") is None
+    assert _normalize_time_for_fingerprint("") is None
+    assert _normalize_time_for_fingerprint(None) is None
+    # Must never echo the raw unrecognized string (truthy-but-invalid trap).
+    assert _normalize_time_for_fingerprint("5.xyz") != "5.xyz"

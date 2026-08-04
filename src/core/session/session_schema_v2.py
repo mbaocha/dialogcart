@@ -9,6 +9,8 @@ Ownership (durable fields):
 - Booking contains only successfully committed backend identifiers.
 - SessionProjector owns durable writes (via ``SessionProjectorV2``).
 - Confirmation gate owns ``confirmation_state``.
+- API ingress owns resolve-or-create timing for tenant ``customer_id``; session
+  persists the canonical commerce ``customers.id`` once resolved.
 - API owns persisted ``conversation.history``.
 - Capabilities produce ``capability`` artifacts; projector persists minimal continuation state.
 - Rendering owns no durable fields.
@@ -49,6 +51,8 @@ _EMPTY_SESSION_V2: Dict[str, Any] = {
         "slots": {},
         "bound_datetime": None,
         "missing_slots": [],
+        "ask_next": None,
+        "declined_slots": [],
         "retry": {
             "slot_attempts": {},
             "last_filled_slot": None,
@@ -84,6 +88,7 @@ _EMPTY_SESSION_V2: Dict[str, Any] = {
         },
     },
     "confirmation_state": None,
+    "customer_id": None,
     "capability": {
         "active": None,
         "results": {},
@@ -144,6 +149,8 @@ def validate_session_v2_sections(session: Mapping[str, Any]) -> None:
         raise TypeError("planning.context must be a dict")
     if not isinstance(planning.get("missing_slots"), list):
         raise TypeError("planning.missing_slots must be a list")
+    if not isinstance(planning.get("declined_slots"), list):
+        raise TypeError("planning.declined_slots must be a list")
 
     booking = session.get("booking")
     if not isinstance(booking, dict):
@@ -206,6 +213,14 @@ def normalize_session_to_v2(session: Optional[Mapping[str, Any]]) -> Dict[str, A
     planning["missing_slots"] = _pick_list(
         working.get("missing_slots"),
         nested_planning.get("missing_slots"),
+    )
+    planning["ask_next"] = _pick_scalar(
+        working.get("ask_next"),
+        nested_planning.get("ask_next"),
+    )
+    planning["declined_slots"] = _pick_list(
+        working.get("declined_slots"),
+        nested_planning.get("declined_slots"),
     )
 
     nested_retry = (
@@ -366,6 +381,7 @@ def normalize_session_to_v2(session: Optional[Mapping[str, Any]]) -> Dict[str, A
     }
 
     v2["confirmation_state"] = _resolve_confirmation_state(working)
+    v2["customer_id"] = _pick_scalar(working.get("customer_id"))
 
     capability["active"] = _pick_scalar(
         working.get("active_capability"),
@@ -417,6 +433,8 @@ def hydrate_v1_compat_shims(v2_session: Mapping[str, Any]) -> Dict[str, Any]:
     working["status"] = planning.get("status")
 
     working["missing_slots"] = list(planning.get("missing_slots") or [])
+    working["ask_next"] = planning.get("ask_next")
+    working["declined_slots"] = list(planning.get("declined_slots") or [])
     retry = planning.get("retry") or {}
     working["slot_attempts"] = copy.deepcopy(retry.get("slot_attempts") or {})
     working["last_filled_slot"] = retry.get("last_filled_slot")
@@ -473,6 +491,7 @@ def hydrate_v1_compat_shims(v2_session: Mapping[str, Any]) -> Dict[str, Any]:
         }
 
     working["confirmation_state"] = v2.get("confirmation_state")
+    working["customer_id"] = v2.get("customer_id")
 
     if capability.get("active") is not None:
         working["active_capability"] = capability.get("active")

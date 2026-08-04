@@ -46,9 +46,14 @@ class RagAdapter(IntentHandler):
 
         return HandlerResponse(
             render_instruction=(
-                f"Answer the user's question '{query}' using the provided evidence. "
-                "If no relevant evidence is available, use the business context to help. "
-                "Be concise and direct."
+                f"Answer the user's question '{query}' using Business Knowledge "
+                "and Supporting Evidence. "
+                "If no relevant Supporting Evidence is available, use Business Knowledge. "
+                "Respond like a knowledgeable front-desk colleague: help the customer "
+                "understand and compare options, include decision-useful details when "
+                "relevant, and naturally invite the next step in this conversation. "
+                "Share contact details only if they explicitly asked for them. "
+                "Do not encourage calling the business when you can continue helping here."
             ),
             facts={
                 "query": query,

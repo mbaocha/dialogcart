@@ -36,7 +36,6 @@ from core.tracing.reason_codes import (
 PLANNER_EVIDENCE_MISSING_SLOTS_ID = "evidence.planning.missing_slots"
 PLANNER_EVIDENCE_POLICY_STEPS_ID = "evidence.policy.steps"
 PLANNER_EVIDENCE_BUSINESS_FACTS_ID = "evidence.facts.business"
-PLANNER_EVIDENCE_BROWSE_SIGNAL_ID = "evidence.browse.signal"
 
 PLANNER_STATUS_ID = "decision.planner.status"
 PLANNER_CLARIFICATION_ID = "decision.planner.clarification"
@@ -105,6 +104,41 @@ def _extract_browse_operation(luma_response: Mapping[str, Any]) -> Optional[str]
     return None
 
 
+_PRESENTATION_READY_BRANCHES = frozenset(
+    {
+        "availability_reshow",
+        "cache_satisfiable_browse",
+        "recovery_presentation",
+    }
+)
+
+
+def _final_status_trace(
+    *,
+    status: str,
+    action: Optional[str],
+    action_branch: Optional[str],
+    missing_slots: Sequence[str],
+) -> Tuple[str, str]:
+    """Reason code/text for the finalized Stage 08 plan status."""
+    if status == "NEEDS_CLARIFICATION":
+        return CLARIFICATION_REQUIRED, "NEEDS_CLARIFICATION"
+    if status == "AWAITING_CONFIRMATION":
+        return CONFIRMATION_REQUIRED, "AWAITING_CONFIRMATION"
+    if status == "AWAITING_CAPABILITY":
+        return STATUS_AWAITING_CAPABILITY, "AWAITING_CAPABILITY"
+    if status == "READY":
+        if action:
+            return STATUS_READY, "READY_EXECUTION"
+        if action_branch in _PRESENTATION_READY_BRANCHES:
+            return STATUS_READY, "READY_PRESENTATION"
+        if missing_slots:
+            # Should be unreachable after Stage 08 reconciliation.
+            return STATUS_READY, "READY_PRESENTATION"
+        return STATUS_READY, "READY"
+    return STATUS_READY, f"Plan status is {status}"
+
+
 def _status_branch_candidates(
     *,
     intent_name: str,
@@ -113,8 +147,15 @@ def _status_branch_candidates(
     confirmation_state: Optional[str],
     active_capability: Optional[str],
     executable_actions: Sequence[str],
+    selected_action: Optional[str] = None,
+    action_branch: Optional[str] = None,
 ) -> Tuple[List[Candidate], str, str, str]:
-    """Return status candidates, winner status, reason_code, reason_text."""
+    """Return status candidates, winner status, reason_code, reason_text.
+
+    Heuristic candidates for forensic comparison. The emit path overrides the
+    winner with Stage 08 ``plan.status`` when it differs so plan and trace share
+    one authoritative status.
+    """
     candidates: List[Candidate] = []
 
     def _add(
@@ -149,7 +190,8 @@ def _status_branch_candidates(
         )
 
     if missing_slots:
-        if executable_actions:
+        presentation_ready = action_branch in _PRESENTATION_READY_BRANCHES
+        if executable_actions or presentation_ready or selected_action:
             _add(
                 "MISSING_SLOTS_EXECUTABLE",
                 True,
@@ -264,6 +306,7 @@ def emit_planner_decision_graph(
     stage_from_action: bool,
     selected_step: Optional[Mapping[str, Any]],
     step_candidates: Sequence[Mapping[str, Any]],
+    action_branch: Optional[str] = None,
 ) -> None:
     """Emit the planner routing decision graph for the current turn."""
     if TurnTrace.current() is None:
@@ -346,16 +389,16 @@ def emit_planner_decision_graph(
     if facts_evidence:
         evidence_ids.append(facts_evidence)
 
+    # Browse owns ``evidence.browse.signal`` (emit_browse_resolve_trace). Planner
+    # only depends on that record when present — never re-emits the same id.
     if browse_operation:
-        browse_evidence = emit_evidence(
-            "BROWSE_SIGNAL",
-            subsystem="planning",
-            facts={"operation": browse_operation},
-            node_id=PLANNER_EVIDENCE_BROWSE_SIGNAL_ID,
-            source="luma_response",
-            observed_at_stage="planning",
-        )
-        if browse_evidence:
+        try:
+            from core.tracing.browse import BROWSE_EVIDENCE_SIGNAL_ID
+        except ImportError:
+            BROWSE_EVIDENCE_SIGNAL_ID = "evidence.browse.signal"
+        trace = TurnTrace.current()
+        if trace is not None and trace.has_record(BROWSE_EVIDENCE_SIGNAL_ID):
+            browse_evidence = BROWSE_EVIDENCE_SIGNAL_ID
             evidence_ids.append(browse_evidence)
 
     evaluated_keys = (
@@ -376,6 +419,12 @@ def emit_planner_decision_graph(
         evaluated_keys=evaluated_keys,
     )
 
+    plan_action = plan.get("action")
+    selected_action = (
+        str(plan_action)
+        if isinstance(plan_action, str) and plan_action.strip()
+        else None
+    )
     status_candidates, status_winner, status_code, status_text = (
         _status_branch_candidates(
             intent_name=intent_name,
@@ -384,8 +433,38 @@ def emit_planner_decision_graph(
             confirmation_state=confirmation_state,
             active_capability=active_capability,
             executable_actions=executable_actions,
+            selected_action=selected_action,
+            action_branch=action_branch,
         )
     )
+    # Stage 08 ``plan.status`` is the single authority. Trace must not invent a
+    # second winner that disagrees with the finalized Decision plan.
+    final_status = plan.get("status")
+    if isinstance(final_status, str) and final_status.strip():
+        status_winner = final_status
+        status_code, status_text = _final_status_trace(
+            status=final_status,
+            action=selected_action if selected_action is not None else plan.get("action"),
+            action_branch=action_branch,
+            missing_slots=missing_slots,
+        )
+    elif status_winner == "NEEDS_CLARIFICATION":
+        status_code = CLARIFICATION_REQUIRED
+        status_text = "NEEDS_CLARIFICATION"
+    elif status_winner == "AWAITING_CONFIRMATION":
+        status_code = CONFIRMATION_REQUIRED
+        status_text = "AWAITING_CONFIRMATION"
+    elif status_winner == "AWAITING_CAPABILITY":
+        status_code = STATUS_AWAITING_CAPABILITY
+        status_text = "AWAITING_CAPABILITY"
+    else:
+        status_code, status_text = _final_status_trace(
+            status=str(status_winner),
+            action=selected_action,
+            action_branch=action_branch,
+            missing_slots=missing_slots,
+        )
+
     status_id = decide(
         "PLAN_STATUS",
         subsystem="planning",
@@ -403,6 +482,9 @@ def emit_planner_decision_graph(
             "confirmation_state": confirmation_state,
             "active_capability": active_capability,
             "executable_actions": list(executable_actions),
+            "selected_action": selected_action,
+            "action_branch": action_branch,
+            "plan_status": final_status,
         },
         inputs_ignored=ignored_inputs,
     )
@@ -619,12 +701,18 @@ def emit_planner_decision_graph_from_plan_builder(
     executable_actions: Sequence[str],
     availability_resolved: bool,
     stage_from_action: bool,
+    action_branch: Optional[str] = None,
 ) -> None:
     """Evaluate policy candidates and emit the planner graph."""
     selected_step, step_candidates = evaluate_execution_step_candidates(
         intent_name,
         dict(effective_slots),
         dict(flags),
+        entity_schema=(
+            luma_response.get("_entity_schema")
+            if isinstance(luma_response.get("_entity_schema"), dict)
+            else None
+        ),
     )
     emit_planner_decision_graph(
         intent_name=intent_name,
@@ -641,4 +729,5 @@ def emit_planner_decision_graph_from_plan_builder(
         stage_from_action=stage_from_action,
         selected_step=selected_step,
         step_candidates=step_candidates,
+        action_branch=action_branch,
     )

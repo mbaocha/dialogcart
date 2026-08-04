@@ -6,7 +6,7 @@ Maps intent names to handler names using intent_handlers.yaml.
 Usage:
     from core.planning.policy.handler_router import resolve_handler
     handler = resolve_handler("GENERAL_INQUIRY")  # -> "rag"
-    handler = resolve_handler("OFF_TOPIC")  # -> "off_topic"
+    handler = resolve_handler("OFF_TOPIC")  # -> None (Core digression)
     handler = resolve_handler("CREATE_APPOINTMENT")  # -> None
 """
 import logging

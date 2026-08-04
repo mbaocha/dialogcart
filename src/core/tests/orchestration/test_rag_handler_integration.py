@@ -52,11 +52,14 @@ _FAQ_DATA = {
 }
 
 
-def _rag_luma_mock(search_query: str = "return policies") -> Mock:
+def _rag_luma_mock(
+    search_query: str = "return policies",
+    intent_name: str = "GENERAL_INQUIRY",
+) -> Mock:
     mock = Mock(spec=LumaClient)
     mock.resolve.return_value = {
         "success": True,
-        "intent": {"name": "GENERAL_INQUIRY", "confidence": 0.95},
+        "intent": {"name": intent_name, "confidence": 0.95},
         "facts": {
             "dates": [],
             "times": [],
@@ -83,22 +86,42 @@ class TestRagHandlerIntegration:
     """End-to-end tests for the RAG / HANDLER_DELEGATED flow."""
 
     def setup_method(self):
+        from core.planning.policy.handler_router import reload_handlers
         from extensions.handlers.bootstrap import register_default_handlers
+
+        reload_handlers()
         register_default_handlers()
-        for uid in ("test-rag-t1", "test-rag-t1b", "test-rag-t2", "test-rag-t3",
-                    "test-rag-noid"):
+        for uid in (
+            "test-rag-t1",
+            "test-rag-t1b",
+            "test-rag-t2",
+            "test-rag-t3",
+            "test-rag-noid",
+            "test-rag-pay",
+            "test-rag-mid",
+        ):
             clear_session(1, uid)
 
     # ------------------------------------------------------------------
     # Turn 1 — HANDLER_DELEGATED outcome from orchestrator
     # ------------------------------------------------------------------
 
-    def test_turn1_outcome_is_handler_delegated(self):
-        """GENERAL_INQUIRY → outcome.status == HANDLER_DELEGATED with routing fields."""
+    @pytest.mark.parametrize(
+        "intent_name,text,search_query",
+        [
+            ("GENERAL_INQUIRY", "what are your return policies?", "return policies"),
+            ("PAYMENT", "I want to pay", "payment"),
+            ("PAYMENT_STATUS", "why is it 105?", "pricing total 105"),
+        ],
+    )
+    def test_turn1_outcome_is_handler_delegated(self, intent_name, text, search_query):
+        """Informational + payment intents → HANDLER_DELEGATED via rag."""
         result = handle_message(
-            text="what are your return policies?",
+            text=text,
             user_id="test-rag-t1",
-            luma_client=_rag_luma_mock(),
+            luma_client=_rag_luma_mock(
+                search_query=search_query, intent_name=intent_name
+            ),
             organization_client=_org_mock(),
             catalog_client=_catalog(),
             organization_id=1,
@@ -106,8 +129,8 @@ class TestRagHandlerIntegration:
         outcome = result.get("outcome", {})
         assert outcome.get("status") == "HANDLER_DELEGATED"
         assert outcome.get("active_handler") == "rag"
-        assert outcome.get("search_query") == "return policies"
-        assert outcome.get("intent_name") == "GENERAL_INQUIRY"
+        assert outcome.get("search_query") == search_query
+        assert outcome.get("intent_name") == intent_name
 
     def test_turn1_handler_returns_render_instruction_and_facts(self):
         """HandlerRunner returns render_instruction + raw facts (not rendered text)."""
@@ -241,3 +264,145 @@ class TestRagHandlerIntegration:
         assert status in ("NEEDS_CLARIFICATION", "READY", "NON_DURABLE_INTENT"), (
             f"Unexpected booking outcome status: {status!r}"
         )
+
+    def test_mid_booking_payment_status_delegates_and_preserves_session(self):
+        """Book → service → PAYMENT_STATUS digression preserves booking, resumes via rag."""
+        from core.session.session_manager import get_session
+        from core.tests.harness.clients import ScriptedLumaClient
+
+        premium = "premium haircut"
+        scripts = {
+            "book haircut": {
+                "success": True,
+                "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
+                "facts": {
+                    "dates": [],
+                    "times": [],
+                    "date_time_pairs": [],
+                    "service_id": None,
+                    "booking_id": None,
+                },
+                "needs_clarification": True,
+                "missing_slots": ["service_id", "date", "time"],
+                "service_candidates": [{"text": premium}, {"text": "flexi haircut"}],
+                "turn": {"understanding": "UNDERSTOOD"},
+            },
+            "premium": {
+                "success": True,
+                "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
+                "facts": {
+                    "service_id": premium,
+                    "slots": {"service_id": premium},
+                    "dates": [],
+                    "times": [],
+                    "date_time_pairs": [],
+                    "booking_id": None,
+                },
+                "slots": {"service_id": premium},
+                "service_term": "premium",
+                "missing_slots": ["date", "time"],
+                "turn": {"understanding": "UNDERSTOOD"},
+            },
+            "how much does it cost?": {
+                "success": True,
+                "intent": {"name": "QUOTE", "confidence": 0.95},
+                "facts": {
+                    "dates": [],
+                    "times": [],
+                    "date_time_pairs": [],
+                    "service_id": None,
+                    "booking_id": None,
+                },
+                "search_query": "haircut cost",
+                "turn": {"understanding": "UNDERSTOOD"},
+            },
+            "explain reservation fee": {
+                "success": True,
+                "intent": {"name": "GENERAL_INQUIRY", "confidence": 0.95},
+                "facts": {
+                    "dates": [],
+                    "times": [],
+                    "date_time_pairs": [],
+                    "service_id": None,
+                    "booking_id": None,
+                },
+                "search_query": "reservation fee",
+                "turn": {"understanding": "UNDERSTOOD"},
+            },
+            "why is it 105?": {
+                "success": True,
+                "intent": {"name": "PAYMENT_STATUS", "confidence": 0.95},
+                "facts": {
+                    "dates": [],
+                    "times": [],
+                    "date_time_pairs": [],
+                    "service_id": None,
+                    "booking_id": None,
+                },
+                "search_query": "why total 105",
+                "turn": {"understanding": "UNDERSTOOD"},
+            },
+        }
+        luma = ScriptedLumaClient(scripts)
+        user_id = "test-rag-mid"
+
+        handle_message(
+            text="Book haircut",
+            user_id=user_id,
+            luma_client=luma,
+            organization_client=_org_mock(),
+            catalog_client=_catalog(),
+            organization_id=1,
+        )
+        handle_message(
+            text="Premium",
+            user_id=user_id,
+            luma_client=luma,
+            organization_client=_org_mock(),
+            catalog_client=_catalog(),
+            organization_id=1,
+        )
+
+        before = get_session(1, user_id) or {}
+        before_slots = dict(before.get("slots") or {})
+        before_intent = before.get("intent_name")
+        planning = before.get("planning") if isinstance(before.get("planning"), dict) else {}
+        before_planning_slots = dict(planning.get("slots") or {})
+
+        with patch("extensions.handlers.adapters.rag.FaqClient") as MockFaqClient:
+            MockFaqClient.return_value.retrieve.return_value = _FAQ_DATA
+            for text, intent_name, search_query in (
+                ("How much does it cost?", "QUOTE", "haircut cost"),
+                ("Explain reservation fee", "GENERAL_INQUIRY", "reservation fee"),
+                ("Why is it 105?", "PAYMENT_STATUS", "why total 105"),
+            ):
+                result = handle_message(
+                    text=text,
+                    user_id=user_id,
+                    luma_client=luma,
+                    organization_client=_org_mock(),
+                    catalog_client=_catalog(),
+                    organization_id=1,
+                )
+                outcome = result.get("outcome", {})
+                assert outcome.get("status") == "HANDLER_DELEGATED", text
+                assert outcome.get("active_handler") == "rag", text
+                assert outcome.get("intent_name") == intent_name, text
+                assert outcome.get("search_query") == search_query, text
+
+                after = get_session(1, user_id) or {}
+                assert after.get("intent_name") == before_intent, text
+                assert dict(after.get("slots") or {}) == before_slots, text
+                after_planning = (
+                    after.get("planning")
+                    if isinstance(after.get("planning"), dict)
+                    else {}
+                )
+                assert dict(after_planning.get("slots") or {}) == before_planning_slots, text
+                service = (after.get("slots") or {}).get("service_id") or (
+                    after_planning.get("slots") or {}
+                ).get("service_id")
+                if before_slots.get("service_id") or before_planning_slots.get(
+                    "service_id"
+                ):
+                    assert service == premium, text

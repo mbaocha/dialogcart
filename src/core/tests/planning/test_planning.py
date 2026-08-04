@@ -352,28 +352,57 @@ def assert_turn_expectations(
         if not isinstance(actual_missing, list):
             actual_missing = []
 
-        # Compare as sets for order-insensitive match
+        # Compare as sets for membership; order must follow planning.required_slots.
         if set(actual_missing) != set(expected_missing):
             return f"Turn {turn_index + 1} missing_slots mismatch: expected {expected_missing}, got {actual_missing}"
 
-        # INVARIANT: Verify missing_slots is sorted (planner returns sorted list)
-        # This ensures deterministic behavior while order doesn't matter for comparison
-        # Exception: If awaiting_slot is present and matches actual_missing[0], allow it at index 0
-        # and verify the rest (actual_missing[1:]) is sorted
-        if len(actual_missing) > 0:
-            awaiting_slot = None
-            if session_state and isinstance(session_state, dict):
-                awaiting_slot = session_state.get("awaiting_slot")
+        # INVARIANT: missing_slots preserve policy order; ask_next is first missing.
+        intent_for_order = (
+            normalized.get("intent")
+            or normalized.get("intent_name")
+            or (expected.get("intent") if isinstance(expected, dict) else None)
+        )
+        if intent_for_order and len(actual_missing) > 0:
+            try:
+                from core.planning.planner.missing_slots import (
+                    derive_ask_next,
+                    get_planning_required_slots_for_intent,
+                )
 
-            if awaiting_slot is not None and actual_missing[0] == awaiting_slot:
-                # awaiting_slot is at index 0 - verify the rest is sorted
-                remaining = actual_missing[1:]
-                if remaining != sorted(remaining):
-                    return f"Turn {turn_index + 1} missing_slots not sorted after awaiting_slot: got {actual_missing} (awaiting_slot='{awaiting_slot}' at index 0, rest should be sorted)"
-            else:
-                # No awaiting_slot or it's not at index 0 - verify entire list is sorted
-                if actual_missing != sorted(actual_missing):
-                    return f"Turn {turn_index + 1} missing_slots not sorted: got {actual_missing} (should be sorted for determinism)"
+                required = get_planning_required_slots_for_intent(str(intent_for_order))
+                awaiting_slot = None
+                if session_state and isinstance(session_state, dict):
+                    awaiting_slot = session_state.get("awaiting_slot")
+
+                if awaiting_slot is not None and actual_missing[0] == awaiting_slot:
+                    remaining = actual_missing[1:]
+                    expected_remaining = [s for s in required if s in remaining]
+                    extras = [s for s in remaining if s not in set(required)]
+                    if remaining != expected_remaining + extras:
+                        return (
+                            f"Turn {turn_index + 1} missing_slots not in policy order "
+                            f"after awaiting_slot: got {actual_missing}"
+                        )
+                else:
+                    expected_order = [s for s in required if s in set(actual_missing)]
+                    extras = [s for s in actual_missing if s not in set(required)]
+                    if actual_missing != expected_order + extras:
+                        return (
+                            f"Turn {turn_index + 1} missing_slots not in policy order: "
+                            f"got {actual_missing}, expected {expected_order + extras}"
+                        )
+
+                ask_next = normalized.get("ask_next")
+                if ask_next is None and isinstance(normalized.get("facts"), dict):
+                    ask_next = normalized["facts"].get("ask_next")
+                expected_ask = derive_ask_next(actual_missing)
+                if ask_next is not None and ask_next != expected_ask:
+                    return (
+                        f"Turn {turn_index + 1} ask_next mismatch: "
+                        f"expected {expected_ask!r}, got {ask_next!r}"
+                    )
+            except Exception:
+                pass
 
     # Assert slots (partial match only)
     # INVARIANT: Slots can be provided in any order - all slots are additive

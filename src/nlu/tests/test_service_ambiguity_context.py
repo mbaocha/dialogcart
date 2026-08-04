@@ -35,7 +35,7 @@ _PRIOR_PREMIUM = {"user": "i want premium", "intent": "CREATE_APPOINTMENT", "sea
 _PRIOR_HAIRCUT = {"user": "i want a haircut", "intent": "CREATE_APPOINTMENT", "search_query": None}
 
 
-def _resolve(service_term, conversation_context):
+def _resolve(service_term, conversation_context, text=None):
     """Exercise _resolve_service_ambiguity directly with a Phase-2-shaped SLM."""
     pipeline = NLUPipeline()
     slm = {
@@ -44,7 +44,9 @@ def _resolve(service_term, conversation_context):
         "service_candidates": [],
         "service_term": service_term,
     }
-    result = pipeline._resolve_service_ambiguity(slm, _TENANT_CONTEXT, conversation_context)
+    result = pipeline._resolve_service_ambiguity(
+        slm, _TENANT_CONTEXT, conversation_context, text=text
+    )
     return result["facts"].get("service_id"), result.get("service_candidates", [])
 
 
@@ -169,6 +171,60 @@ class TestServiceAmbiguityContext:
         }
         result = pipeline._resolve_service_ambiguity(slm, _TENANT_CONTEXT, ctx)
         assert result["facts"].get("service_id") == "flexi haircut + prunning"
+        assert result.get("service_candidates") == []
+
+    def test_J_utterance_flexi_overrides_sticky_premium_when_term_omitted(self):
+        """Prior Premium + 'show availability for Flexi' must emit Flexi service_id."""
+        ctx = {
+            "last_intent": "CREATE_APPOINTMENT",
+            "missing_slots": ["date", "time"],
+            "resolved_service_id": "premium haircut",
+            "turns": [
+                {"user": "book me a haircut", "intent": "CREATE_APPOINTMENT"},
+                {"user": "premium", "intent": "CREATE_APPOINTMENT"},
+            ],
+        }
+        pipeline = NLUPipeline()
+        slm = {
+            "intent": "AVAILABILITY",
+            "facts": {"service_id": None},
+            "service_candidates": [],
+            "service_term": None,
+        }
+        result = pipeline._resolve_service_ambiguity(
+            slm,
+            _TENANT_CONTEXT,
+            ctx,
+            text="show availability for Flexi",
+        )
+        assert result["facts"].get("service_id") == "flexi haircut + prunning"
+        assert result.get("service_candidates") == []
+
+    def test_J_bare_show_availability_may_keep_sticky_premium(self):
+        """Prior Premium + 'show availability' (no service mention) may remain Premium."""
+        ctx = {
+            "last_intent": "CREATE_APPOINTMENT",
+            "missing_slots": ["date", "time"],
+            "resolved_service_id": "premium haircut",
+            "turns": [
+                {"user": "book me a haircut", "intent": "CREATE_APPOINTMENT"},
+                {"user": "premium", "intent": "CREATE_APPOINTMENT"},
+            ],
+        }
+        pipeline = NLUPipeline()
+        slm = {
+            "intent": "AVAILABILITY",
+            "facts": {"service_id": None},
+            "service_candidates": [],
+            "service_term": None,
+        }
+        result = pipeline._resolve_service_ambiguity(
+            slm,
+            _TENANT_CONTEXT,
+            ctx,
+            text="show availability",
+        )
+        assert result["facts"].get("service_id") == "premium haircut"
         assert result.get("service_candidates") == []
 
     def test_H_resolved_service_id_strips_context_leaked_term_on_12pm(self):

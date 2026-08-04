@@ -37,7 +37,7 @@ def test_availability_request_provenance_in_reasoning_text():
         subsystem="execution",
         facts={
             "service_id": 18,
-            "date": "2026-01-14",
+            "date": "2026-07-02",
             "field_provenance": {
                 "service_id": {
                     "value": 18,
@@ -45,7 +45,7 @@ def test_availability_request_provenance_in_reasoning_text():
                     "consumer": "AvailabilityClient",
                 },
                 "date": {
-                    "value": "2026-01-14",
+                    "value": "2026-07-02",
                     "source": "session.date_proposal",
                     "reason": "explicit user temporal constraint",
                 },
@@ -126,7 +126,7 @@ def test_fingerprint_provenance_surfaces_in_key_values():
         "FINGERPRINT_SLOTS",
         subsystem="orchestration",
         facts={
-            "criteria_slots": {"service_id": 18, "date": "2026-01-15"},
+            "criteria_slots": {"service_id": 18, "date": "2026-07-03"},
             "criteria_slot_keys": ["date", "service_id"],
         },
         node_id="evidence.fingerprint.slots",

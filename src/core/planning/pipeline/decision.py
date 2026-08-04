@@ -152,10 +152,12 @@ def decide(decision_input: DecisionInput) -> DecisionPlan:
 
 
 def decide_handler_delegation(intent_decision: IntentDecision) -> DecisionPlan:
-    """Decision for non-durable / handler-delegated Attach early exit."""
+    """Decision for non-durable early exit: OFF_TOPIC digression or RAG HANDLER_DELEGATED."""
     intent_name = intent_decision.planning_intent or ""
     slots = dict(intent_decision.delegated_slots or {})
-    if intent_decision.handler_delegated:
+    if intent_decision.non_durable_status == "OFF_TOPIC" or intent_name == "OFF_TOPIC":
+        status = "OFF_TOPIC"
+    elif intent_decision.handler_delegated:
         status = "HANDLER_DELEGATED"
     else:
         status = intent_decision.non_durable_status or "NON_DURABLE_INTENT"
@@ -169,10 +171,17 @@ def decide_handler_delegation(intent_decision: IntentDecision) -> DecisionPlan:
         "blocked_actions": [],
         "executable_actions": [],
     }
-    if intent_decision.handler_delegated:
+    if status == "HANDLER_DELEGATED":
         plan["active_handler"] = intent_decision.handler_name
         plan["search_query"] = intent_decision.delegated_search_query
-        plan["off_topic_query"] = intent_decision.delegated_off_topic_query
+    if status == "OFF_TOPIC":
+        plan["off_topic_query"] = intent_decision.off_topic_query
+        # Opaque OFF_TOPIC evidence — forwarded unchanged for the render path.
+        # Wire keys match NLU (answerable / answer).
+        if intent_decision.off_topic_answerable is not None:
+            plan["answerable"] = intent_decision.off_topic_answerable
+        if intent_decision.off_topic_answer is not None:
+            plan["answer"] = intent_decision.off_topic_answer
     return DecisionPlan(
         plan=plan,
         facts={"slots": slots, "missing_slots": []},

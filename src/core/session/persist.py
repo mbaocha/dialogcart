@@ -465,6 +465,77 @@ def build_session_state_from_outcome(
     if previous_session_state and isinstance(previous_session_state, dict):
         awaiting_slot = previous_session_state.get("awaiting_slot")
 
+    # Promptable preference declines (never fake a staff_id)
+    from core.planning.planner.promptable import normalize_declined_slots
+
+    declined_slots = []
+    if previous_session_state and isinstance(previous_session_state, dict):
+        declined_slots = normalize_declined_slots(
+            previous_session_state.get("declined_slots")
+        )
+        planning_prev = previous_session_state.get("planning")
+        if not declined_slots and isinstance(planning_prev, dict):
+            declined_slots = normalize_declined_slots(
+                planning_prev.get("declined_slots")
+            )
+    outcome_declined = normalize_declined_slots(
+        (outcome or {}).get("declined_slots")
+        if isinstance(outcome, dict)
+        else None
+    )
+    if not outcome_declined and isinstance(outcome, dict):
+        plan_obj = outcome.get("plan")
+        if isinstance(plan_obj, dict):
+            outcome_declined = normalize_declined_slots(plan_obj.get("declined_slots"))
+        facts_obj = outcome.get("facts")
+        if not outcome_declined and isinstance(facts_obj, dict):
+            outcome_declined = normalize_declined_slots(facts_obj.get("declined_slots"))
+    if outcome_declined:
+        declined_slots = outcome_declined
+
+    # Clear declines when the user later selects that preference
+    if isinstance(slots, dict):
+        declined_slots = [
+            key
+            for key in declined_slots
+            if slots.get(key) is None or slots.get(key) == ""
+        ]
+
+    # Reset preference declines after a successful booking commit.
+    if outcome_status == "EXECUTED" and isinstance(slots, dict) and slots.get("booking_id"):
+        declined_slots = []
+
+    ask_next_to_persist = None
+    if isinstance(outcome, dict):
+        ask_next_to_persist = outcome.get("ask_next")
+        if not ask_next_to_persist:
+            plan_obj = outcome.get("plan")
+            if isinstance(plan_obj, dict):
+                ask_next_to_persist = plan_obj.get("ask_next")
+        if not ask_next_to_persist:
+            facts_obj = outcome.get("facts")
+            if isinstance(facts_obj, dict):
+                ask_next_to_persist = facts_obj.get("ask_next")
+    if isinstance(ask_next_to_persist, str) and ask_next_to_persist.strip():
+        ask_next_to_persist = ask_next_to_persist.strip()
+        awaiting_slot = ask_next_to_persist
+    else:
+        ask_next_to_persist = None
+
+    promptable_from_outcome: list = []
+    if isinstance(outcome, dict):
+        raw_promptable = outcome.get("promptable_slots")
+        if not isinstance(raw_promptable, list):
+            plan_obj = outcome.get("plan")
+            if isinstance(plan_obj, dict):
+                raw_promptable = plan_obj.get("promptable_slots")
+        if not isinstance(raw_promptable, list):
+            facts_obj = outcome.get("facts")
+            if isinstance(facts_obj, dict):
+                raw_promptable = facts_obj.get("promptable_slots")
+        if isinstance(raw_promptable, list):
+            promptable_from_outcome = [str(s) for s in raw_promptable if s]
+
     # Handle slot_attempts persistence (optional, backward compatible)
     # session_state["slot_attempts"] is the ONLY source of truth (set by orchestrator)
     # Read slot_attempts ONLY from previous_session_state (never from outcome.facts)
@@ -549,9 +620,16 @@ def build_session_state_from_outcome(
                 source_used = "outcome.facts"
 
         # Check 4: missing_slots_to_persist (slot is no longer missing)
+        # Promptable optionals are not in missing_slots — keep awaiting while still promptable.
         if not slot_filled and awaiting_slot not in missing_slots_to_persist:
-            slot_filled = True
-            source_used = "missing_slots_to_persist (no longer missing)"
+            if awaiting_slot in promptable_from_outcome or awaiting_slot in declined_slots:
+                if awaiting_slot in declined_slots:
+                    slot_filled = True
+                    source_used = "declined_slots"
+                # else: still awaiting a promptable answer — preserve
+            else:
+                slot_filled = True
+                source_used = "missing_slots_to_persist (no longer missing)"
 
         # Clear awaiting_slot if filled from any source
         if slot_filled:
@@ -629,6 +707,8 @@ def build_session_state_from_outcome(
             "status": status,
             "active_capability": active_capability,  # optional passthrough
             "awaiting_slot": awaiting_slot,
+            "ask_next": ask_next_to_persist,
+            "declined_slots": list(declined_slots),
             "slot_attempts": slot_attempts,
             "last_filled_slot": last_filled_slot,
         }
@@ -662,6 +742,8 @@ def build_session_state_from_outcome(
             "status": status,
             "active_capability": active_capability,  # optional passthrough
             "awaiting_slot": awaiting_slot,
+            "ask_next": ask_next_to_persist,
+            "declined_slots": [],
             "slot_attempts": slot_attempts,
             "last_filled_slot": last_filled_slot,
         }
@@ -736,6 +818,12 @@ def build_session_state_from_outcome(
         merged_luma_response,
         previous_session_state,
     )
+
+    # Preserve tenant-scoped commerce customer_id across turns (ingress-owned).
+    if previous_session_state and isinstance(previous_session_state, dict):
+        previous_customer_id = previous_session_state.get("customer_id")
+        if previous_customer_id is not None:
+            session_state["customer_id"] = previous_customer_id
 
     # Before persisting session
     # CRITICAL: Use user_id parameter, not from session_state (session_state is being built, not previous session)

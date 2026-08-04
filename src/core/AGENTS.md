@@ -94,22 +94,21 @@ The production owner of each conversational turn within Core is **ConversationEn
 - Domain modules read cache and presentation via the availability presentation session adapter—not by storage-field name.
 - Slot selection is hybrid: ambiguous or presentation-anchored choices resolve against the current presented availability only (never cache fallthrough); explicit complete current-turn choices may resolve against the trusted availability cache when they uniquely identify one offer; slots absent from that cache must not bind.
 - Current-turn explicit date/time provenance (`_current_turn_has_date` / `_current_turn_has_time`) distinguishes utterance facts from carried session proposals; session date alone must not activate cache selection.
-- Date-only current-turn dates project the first page of that date when present in cache; missing dates return `target_date_not_in_cache` without inventing empty groups.
 - Browse exhaustion preserves the last successful `PresentedAvailability` as the ambiguous-selection window.
 - Presentation is a view over cached search used for discovery and disambiguation; it does not own booking truth.
 - The availability renderer formats prepared `PresentedAvailability` only; it does not derive presentation windows from raw slots.
 - Browsing availability must **never** execute `SEARCH_AVAILABILITY`.
 - Only search-parameter changes may invalidate cache and require a new search.
-- Search parameters: service, date, duration, resource, location.
+- Search parameters: service, date, date range, duration, resource, location, and other availability criteria.
+- **SEARCH_AVAILABILITY** owns all search constraints. **Browse** owns only page-cursor movement inside the presentation result set shaped by those criteria.
+- Single-day search criteria shape the presentation result set to that day even when the provider returns surplus dates; pagination must not spill into off-criteria days.
+- Explicit multi-day / exploratory criteria may retain multiple dates in the presentation result set; pagination may traverse that criteria-shaped set.
 - Presentation state must not modify booking slots, proposals, fingerprints, or other durable state.
 - Pagination is presentation state only.
-- Availability browsing is unified across times and dates within the trusted cache: general browse advances remaining times on the current date before moving to the next date with availability; time-axis browse stays on the current date; date-axis browse jumps to the first page of another available date.
-- Browse intent is `direction` plus optional `axis_hint` (`any` | `time` | `date`); cursor and grouping stay private to the availability presentation component.
 - NLU emits `AVAILABILITY` with `operation: browse_next | browse_previous | null`.
-- Core may refine axis from deterministic phrase fallbacks (for example `more times`, `next day`, `go back`) without requiring NLU schema changes.
+- Browse aliases are deliberately small (`next` / `show more` / `more`, `previous` / `show previous` / `back`). Date phrases (`next day`, `previous day`, absolute dates) are SEARCH semantics — never Browse.
 - Core owns the browse execution decision; browsing never executes `SEARCH_AVAILABILITY`.
-- NLU classifies intent and operation; Core owns the execution decision.
-- Core may reuse cache, paginate/browse presentation, or execute `SEARCH_AVAILABILITY`.
+- Core may reuse cache, paginate presentation, or execute `SEARCH_AVAILABILITY`.
 - NLU never instructs Core to search.
 
 Reference: [`AVAILABILITY_INTERACTION_CONTRACT.md`](orchestration/contracts/AVAILABILITY_INTERACTION_CONTRACT.md)

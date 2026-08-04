@@ -124,6 +124,8 @@ class CatalogCache:
         if domain == "service":
             payload_raw = catalog_client.get_services(org_id) or {}
             payload = payload_raw.get("data", payload_raw) or {}
+            # Pass through every list collection from the payload (services, staff, …).
+            # Schema-driven projection selects which keys are used downstream.
             combined = {
                 "catalog_last_updated_at": payload.get("catalog_last_updated_at"),
                 "services": payload.get("services", []),
@@ -131,6 +133,9 @@ class CatalogCache:
                 "extras": [],
                 "fetched_at": _utc_now_iso(),
             }
+            for key, value in payload.items():
+                if isinstance(value, list) and key not in combined:
+                    combined[key] = value
         else:
             payload_raw = catalog_client.get_reservation(org_id) or {}
             payload = payload_raw.get("data", payload_raw) or {}
@@ -143,6 +148,10 @@ class CatalogCache:
                 "extras": payload.get("extras", []),
                 "fetched_at": _utc_now_iso(),
             }
+            for key, value in payload.items():
+                if isinstance(value, list) and key not in ("room_types", "extras"):
+                    if key not in combined:
+                        combined[key] = value
 
         self.set_cached(org_id, domain, combined)
         return combined

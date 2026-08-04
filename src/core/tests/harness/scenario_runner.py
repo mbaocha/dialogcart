@@ -154,12 +154,12 @@ def _persist_session_for_next_turn(
     """Mirror session fields required for multi-turn execution flows."""
     previous_session = session_store.get_session(organization_id, user_id)
     if (
-        normalized.get("status") == "HANDLER_DELEGATED"
+        normalized.get("status") in ("HANDLER_DELEGATED", "OFF_TOPIC")
         and previous_session
         and booking_intent
         and is_durable_intent(booking_intent)
     ):
-        # Informational detour: durable booking session must survive unchanged
+        # Digression: durable booking session must survive unchanged
         session_store.save_session(organization_id, user_id, previous_session)
         return
 
@@ -368,12 +368,15 @@ def run_multi_turn_scenario(
 
         if (
             current_intent
-            and normalized.get("status") != "HANDLER_DELEGATED"
+            and normalized.get("status") not in ("HANDLER_DELEGATED", "OFF_TOPIC")
             and is_durable_intent(current_intent)
         ):
             booking_intent = current_intent
 
-        if current_intent and normalized.get("status") != "HANDLER_DELEGATED":
+        if current_intent and normalized.get("status") not in (
+            "HANDLER_DELEGATED",
+            "OFF_TOPIC",
+        ):
             previous_intent = current_intent
 
         if turn_idx < len(turns):

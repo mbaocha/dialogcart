@@ -79,7 +79,7 @@ def test_decision_trace_explains_show_more_pagination(traced_pagination_harness)
     searches_before = availability_client.get_service_availability.call_count
 
     result = _run_turn(
-        text="show more times",
+        text="show more",
         user_id=user_id,
         luma_response=_browse_luma_response("browse_next"),
         session_store=session_store,
@@ -121,11 +121,11 @@ def test_decision_trace_explains_exhausted_pagination(traced_pagination_harness)
         session_store,
         slot_hours=tuple(range(9, 14)),
     )
-    _browse(user_id, "show more times", session_store, availability_client, org_client)
+    _browse(user_id, "show more", session_store, availability_client, org_client)
     searches_before = availability_client.get_service_availability.call_count
 
     result = _run_turn(
-        text="show more times",
+        text="show more",
         user_id=user_id,
         luma_response=_browse_luma_response("browse_next"),
         session_store=session_store,
@@ -157,7 +157,7 @@ def test_decision_trace_explains_exhausted_pagination(traced_pagination_harness)
 def test_decision_trace_explains_page_two_time_binding(traced_pagination_harness):
     user_id, session_store, availability_client, org_client = traced_pagination_harness
     _setup_paginated_search(user_id, availability_client, org_client, session_store)
-    _browse(user_id, "show more times", session_store, availability_client, org_client)
+    _browse(user_id, "show more", session_store, availability_client, org_client)
 
     result_9am = _run_turn(
         text="9am",

@@ -130,6 +130,7 @@ def run_planning_pipeline(
     derived_domain: str,
     timezone: str = "UTC",
     tenant_context: Optional[Dict[str, Any]] = None,
+    entity_schema: Optional[Dict[str, Any]] = None,
     session_state: Optional[Dict[str, Any]] = None,
     luma_client: Optional[LumaClient] = None,
     organization_client: Any = None,
@@ -147,6 +148,7 @@ def run_planning_pipeline(
         derived_domain=derived_domain,
         timezone=timezone,
         tenant_context=tenant_context,
+        entity_schema=entity_schema,
         session_state=session_state,
         luma_client=luma_client,
     )
@@ -174,6 +176,9 @@ def run_planning_pipeline(
         )
 
     luma_response = nlu_result.luma_response or {}
+    if entity_schema is not None:
+        # Request-scoped allowlist for fact→slot promotion (not persisted).
+        luma_response = {**luma_response, "_entity_schema": entity_schema}
     original_session_state = session_state
 
     intent_decision, session_state = reconcile_intent(
@@ -211,6 +216,7 @@ def run_planning_pipeline(
         source_text=text,
         tenant_context=tenant_context,
         apply_domain_filter=apply_domain_filter,
+        entity_schema=entity_schema,
     )
     _hydrate_org_facts(working_turn.payload, organization_id, organization_client)
 

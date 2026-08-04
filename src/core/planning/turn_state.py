@@ -241,7 +241,19 @@ def _apply_modify_booking_issues_override(
     if "booking_id" not in issues_missing_slots:
         issues_missing_slots.append("booking_id")
 
-    result = sorted(set(issues_missing_slots))
+    missing_set = set(issues_missing_slots)
+    try:
+        from core.planning.planner.missing_slots import (
+            get_planning_required_slots_for_intent,
+        )
+
+        required = get_planning_required_slots_for_intent(intent_name)
+    except Exception:
+        required = ["booking_id", "date"]
+    result = [slot for slot in required if slot in missing_set]
+    for slot in issues_missing_slots:
+        if slot not in result:
+            result.append(slot)
     logger.info(
         "[FINALIZE_TURN_STATE] MODIFY_BOOKING derived missing_slots from issues: %s",
         result,
@@ -252,7 +264,7 @@ def _apply_modify_booking_issues_override(
 def _prioritize_awaiting_slot(
     missing_slots: List[str], awaiting_slot: Optional[str]
 ) -> List[str]:
-    """Move awaiting_slot to index 0 when present in missing_slots (presentation order)."""
+    """Pin awaiting_slot at index 0 when still missing (overrides default ask_next)."""
     if awaiting_slot is None or awaiting_slot not in missing_slots:
         return missing_slots
     reordered = [s for s in missing_slots if s != awaiting_slot]
@@ -299,6 +311,11 @@ def finalize_turn_state(
     policy = _get_planning_policy()
     durable_slots = dict(merged_session_slots or {})
     slots_for_planning = _slots_for_planning(durable_slots)
+    entity_schema = (
+        pc.get("entity_schema")
+        if isinstance(pc.get("entity_schema"), dict)
+        else None
+    )
 
     planning_slots = expand_slots_for_planning(
         slots_for_planning,
@@ -308,7 +325,9 @@ def finalize_turn_state(
         intent_name=intent_name,
         temporal=pc.get("temporal"),
     )
-    plan = plan_intent(intent_name, planning_slots, policy)
+    plan = plan_intent(
+        intent_name, planning_slots, policy, entity_schema=entity_schema
+    )
 
     collected_slot_names = set(plan["collected_slots"])
     missing_slots = list(plan["missing_slots"])
@@ -349,7 +368,9 @@ def finalize_turn_state(
         )
 
     try:
-        required_slots = get_planning_required_slots_for_intent(intent_name)
+        required_slots = get_planning_required_slots_for_intent(
+            intent_name, entity_schema=entity_schema
+        )
     except Exception:
         required_slots = []
 

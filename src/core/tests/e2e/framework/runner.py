@@ -16,12 +16,17 @@ def run_scenario(
     availability_client: Any = None,
 ) -> BookingConversation:
     """Drive every turn: before hooks → send → Expect → after hooks."""
+    from core.tests.e2e.framework.conversation import attach_commit_customer_identity
+
     ctx = {
         "conv": conv,
         "booking_client": booking_client,
         "availability_client": availability_client,
         "scenario": scenario,
     }
+
+    if getattr(scenario, "requires_customer_identity", False):
+        attach_commit_customer_identity(conv)
 
     if scenario.before is not None:
         _call_hook(scenario.before, ctx)

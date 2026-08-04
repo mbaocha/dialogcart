@@ -65,6 +65,9 @@
       "start_date_expression": null,
       "start_time": null,
       "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
     }
   }
 }

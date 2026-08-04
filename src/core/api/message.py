@@ -7,15 +7,16 @@ Production flow:
     POST /api/message
         ↓  trace setup (optional)
         ↓  load session → _raw_session (unfiltered)
+        ↓  resolve-or-create tenant customer → session.customer_id
         ↓  filter session_state only for capability context
     ConversationEngine.process_turn(_raw_session)
-        ↓  plan → browse short-circuit → eligibility → execution → rendering
+        ↓  plan → OFF_TOPIC render / browse short-circuit → eligibility → execution → rendering
         → result { success, outcome, plan?, text, ... }
     post_message()
         ↓  capability boundary (only if outcome.status == AWAITING_CAPABILITY)
             → early return if still pending (no persist)
             → else merge facts and continue
-        ↓  handler boundary (only if HANDLER_DELEGATED)
+        ↓  handler boundary (only if HANDLER_DELEGATED — extension RAG)
         ↓  SessionProjector + save_session (selected statuses)
         → MessageResponse
 
@@ -45,6 +46,8 @@ from pydantic import BaseModel, Field
 # Import app module which loads .env files
 import core.app  # noqa: F401
 from core.api.capability_boundary import apply_capability_to_result
+from core.adapters.customer_resolver import resolve_tenant_customer
+from core.adapters.clients.customer_client import CustomerClient
 from core.adapters.errors import ContractViolation, UpstreamError
 from core.execution.clients.availability_client import AvailabilityClient
 from core.execution.clients.booking_client import BookingClient
@@ -57,6 +60,7 @@ from core.rendering.llm_renderer import LlmRenderRequest, render_llm
 # Module-level execution clients — core owns these; callers pass text only.
 _availability_client = AvailabilityClient()
 _booking_client = BookingClient()
+_customer_client = CustomerClient()
 
 # Production orchestration engine — single instance, reused across requests.
 _engine = ConversationEngine()
@@ -96,6 +100,9 @@ class MessageRequest(BaseModel):
     timezone: Optional[str] = "UTC"
     organization_id: int = Field(..., gt=0)
     customer_id: Optional[int] = Field(default=None, gt=0)
+    customer_phone: Optional[str] = None
+    customer_email: Optional[str] = None
+    customer_name: Optional[str] = None
     transaction_id: Optional[str] = None  # Optional per-request tracing ID
 
 
@@ -214,6 +221,20 @@ async def post_message(request: MessageRequest, http_request: Request):
         # Keep the unfiltered session so HANDLER_DELEGATED can preserve booking state
         _raw_session = working_session
 
+        # Resolve or create tenant customer at ingress (never invent at booking dispatch).
+        # Chat user_id is a session key only — not a commerce customer primary key.
+        resolved_customer_id = resolve_tenant_customer(
+            organization_id=request.organization_id,
+            customer_client=_customer_client,
+            session=_raw_session if isinstance(_raw_session, dict) else None,
+            customer_id=request.customer_id,
+            phone=request.customer_phone,
+            email=request.customer_email,
+            name=request.customer_name,
+        )
+        if resolved_customer_id is not None and isinstance(_raw_session, dict):
+            _raw_session["customer_id"] = resolved_customer_id
+
         if not decision_trace_enabled:
             logger.info(
                 "[session] load",
@@ -247,7 +268,7 @@ async def post_message(request: MessageRequest, http_request: Request):
             availability_client=_availability_client,
             booking_client=_booking_client,
             organization_id=request.organization_id,
-            customer_id=request.customer_id,
+            customer_id=resolved_customer_id,
             timezone=request.timezone,
             transaction_id=transaction_id,
         )
@@ -316,7 +337,6 @@ async def post_message(request: MessageRequest, http_request: Request):
                 "user_text": request.text,
                 "intent_name": outcome.get("intent_name"),
                 "search_query": outcome.get("search_query"),
-                "off_topic_query": outcome.get("off_topic_query"),
                 "slots": outcome.get("slots", {}),
                 "session_slots": (_raw_session.get("slots", {}) if _raw_session else {}),
                 "session": _raw_session or {},
@@ -324,19 +344,19 @@ async def post_message(request: MessageRequest, http_request: Request):
             handler_result = _handler_runner.handle(handler_name, context)
 
             # Render via LLM — extension owns the instruction, core executes it.
+            # Resume uses the same workflow_resume mechanism as OFF_TOPIC.
             if handler_result.render_instruction:
-                conversation_history = (_raw_session or {}).get("messages", [])
-                render_facts = dict(handler_result.facts or {})
-                # Workflow owns resume step; handlers must not invent booking questions.
-                if handler_name == "off_topic":
-                    from core.rendering.workflow_resume import build_resume_instruction
+                from core.rendering.workflow_resume import attach_resume_to_handler_render
 
-                    resume = build_resume_instruction(_raw_session)
-                    if resume and resume.text:
-                        render_facts["resume_instruction"] = resume.text
+                conversation_history = (_raw_session or {}).get("messages", [])
+                render_instruction, render_facts = attach_resume_to_handler_render(
+                    handler_result.render_instruction,
+                    session_state=_raw_session or {},
+                    facts=dict(handler_result.facts or {}),
+                )
                 rendered_text = render_llm(
                     LlmRenderRequest(
-                        render_instruction=handler_result.render_instruction,
+                        render_instruction=render_instruction,
                         facts=render_facts,
                         conversation_history=conversation_history,
                         user_request=request.text,
@@ -385,6 +405,7 @@ async def post_message(request: MessageRequest, http_request: Request):
                     "success",
                     "succeeded",
                     "HANDLER_DELEGATED",
+                    "OFF_TOPIC",
                 ):
                     assistant_text = result.get("text") or outcome.get("text")
                     conversation_messages = [

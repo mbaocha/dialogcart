@@ -1,4 +1,9 @@
-"""Pytest fixtures and scripted NLU bundles for E2E conversation tests."""
+"""Pytest fixtures for E2E conversation tests (RecordingLumaClient only).
+
+E2E replays real production ``/resolve`` responses via
+:class:`RecordingLumaClient`. Handwritten NLU payloads are not used.
+Availability clients remain mocked with deterministic slot layouts.
+"""
 
 from __future__ import annotations
 
@@ -17,23 +22,18 @@ from core.execution.clients.availability_client import AvailabilityClient
 from core.api.compat import handle_message as real_handle_message
 from core.session.session_manager import clear_session
 from core.tests.e2e.framework.conversation import (
-    FLEXI_SERVICE,
     FROZEN_TIME,
     HAIRCUT_CATALOG,
     ORG_ID,
-    PREMIUM_SERVICE,
     BookingConversation,
+    _offer_date_for_availability_request,
     _resolve_search_date,
     create_empty_availability_client,
     create_multi_slot_availability_client,
     create_paginated_availability_client,
     create_slot_availability_client,
 )
-from core.tests.e2e.framework.scripted_temporal import (
-    exact_time_temporal,
-    single_day_temporal,
-)
-from core.tests.harness.clients import ScriptedLumaClient, TestCatalogClient, TestLumaClient
+from core.tests.harness.clients import TestCatalogClient, TestLumaClient
 from core.tests.harness.recording_luma_client import RecordingLumaClient
 from core.tests.harness.mock_clients import (
     create_mock_booking_client,
@@ -46,7 +46,7 @@ TARGET_DATE = _resolve_search_date(None)
 
 LIVE_LUMA_SKIP_REASON = "Live Luma unavailable"
 
-# Marker for tests that intentionally call the real NLU ``/resolve`` endpoint.
+# Marker for tests that may call live NLU on RecordingLumaClient cache miss.
 # Skip behaviour is applied by ``_skip_if_live_luma_unavailable`` (autouse).
 live_luma = pytest.mark.live_luma
 # Backward-compatible alias — prefer ``live_luma``.
@@ -112,34 +112,28 @@ def _skip_if_live_luma_unavailable(request):
         pytest.skip(LIVE_LUMA_SKIP_REASON)
 
 
-SCRIPTED_FIXTURE_PARAMS: Dict[str, Dict[str, Any]] = {
+# Availability layouts for RecordingLumaClient E2E bundles (no NLU payloads).
+E2E_FIXTURE_PARAMS: Dict[str, Dict[str, Any]] = {
     "scripted": {},
     "scripted_empty": {"empty": True},
     "scripted_mismatch": {
         "fixed_slots": [
-            {"start": f"{TARGET_DATE}T09:00:00Z",
-                "end": f"{TARGET_DATE}T09:30:00Z"},
-            {"start": f"{TARGET_DATE}T09:30:00Z",
-                "end": f"{TARGET_DATE}T10:00:00Z"},
+            {"start": f"{TARGET_DATE}T09:00:00Z", "end": f"{TARGET_DATE}T09:30:00Z"},
+            {"start": f"{TARGET_DATE}T09:30:00Z", "end": f"{TARGET_DATE}T10:00:00Z"},
         ]
     },
     "scripted_mismatch_pick": {
         "fixed_slots": [
-            {"start": f"{TARGET_DATE}T09:00:00Z",
-                "end": f"{TARGET_DATE}T09:30:00Z"},
-            {"start": f"{TARGET_DATE}T09:30:00Z",
-                "end": f"{TARGET_DATE}T10:00:00Z"},
+            {"start": f"{TARGET_DATE}T09:00:00Z", "end": f"{TARGET_DATE}T09:30:00Z"},
+            {"start": f"{TARGET_DATE}T09:30:00Z", "end": f"{TARGET_DATE}T10:00:00Z"},
         ],
-        "include_time_pick_script": True,
     },
     "scripted_confirm": {
         "start_hours": (9, 10, 11, 12),
     },
-    # 10:00 + 11:00 only — 12:00 is unavailable for post-bind mismatch flows.
     "scripted_unavailable_time": {
         "start_hours": (10, 11),
     },
-    # Deterministic service / date revision while confirmation is pending.
     "scripted_service_revision": {
         "start_hours": (10, 11),
     },
@@ -149,138 +143,84 @@ SCRIPTED_FIXTURE_PARAMS: Dict[str, Dict[str, Any]] = {
     "scripted_confirmation_interruption": {
         "start_hours": (10, 11),
     },
-    # 09:00+ for availability-supersedes-confirmation regressions (9am bind).
     "scripted_availability_supersession": {
         "start_hours": (9, 10, 11),
     },
-    # 09:00 / 09:30 / 10:00 on the requested search date (date-rewritten).
     "scripted_confirmation_time_revision": {
         "fixed_slots": [
-            {"start": f"{TARGET_DATE}T09:00:00Z",
-                "end": f"{TARGET_DATE}T09:30:00Z"},
-            {"start": f"{TARGET_DATE}T09:30:00Z",
-                "end": f"{TARGET_DATE}T10:00:00Z"},
-            {"start": f"{TARGET_DATE}T10:00:00Z",
-                "end": f"{TARGET_DATE}T10:30:00Z"},
+            {"start": f"{TARGET_DATE}T09:00:00Z", "end": f"{TARGET_DATE}T09:30:00Z"},
+            {"start": f"{TARGET_DATE}T09:30:00Z", "end": f"{TARGET_DATE}T10:00:00Z"},
+            {"start": f"{TARGET_DATE}T10:00:00Z", "end": f"{TARGET_DATE}T10:30:00Z"},
         ],
     },
-    # July 23 book → 9:30am confirm → interrupt with July 24 search.
     "scripted_july_confirm_date_shift": {
         "fixed_slots": [
-            {"start": f"{TARGET_DATE}T09:00:00Z",
-                "end": f"{TARGET_DATE}T09:30:00Z"},
-            {"start": f"{TARGET_DATE}T09:30:00Z",
-                "end": f"{TARGET_DATE}T10:00:00Z"},
-            {"start": f"{TARGET_DATE}T10:00:00Z",
-                "end": f"{TARGET_DATE}T10:30:00Z"},
-            {"start": f"{TARGET_DATE}T11:00:00Z",
-                "end": f"{TARGET_DATE}T11:30:00Z"},
+            {"start": f"{TARGET_DATE}T09:00:00Z", "end": f"{TARGET_DATE}T09:30:00Z"},
+            {"start": f"{TARGET_DATE}T09:30:00Z", "end": f"{TARGET_DATE}T10:00:00Z"},
+            {"start": f"{TARGET_DATE}T10:00:00Z", "end": f"{TARGET_DATE}T10:30:00Z"},
+            {"start": f"{TARGET_DATE}T11:00:00Z", "end": f"{TARGET_DATE}T11:30:00Z"},
         ],
     },
-    # Premium then Flexi availability revision (NLU service post-process path).
     "scripted_availability_service_revision": {
         "start_hours": (10, 11),
-        "apply_nlu_service_resolution": True,
     },
-    # ≤6 slots so first browse_next exhausts immediately (no second page).
     "scripted_browse_exhaustion_search": {
         "start_hours": (10, 11),
     },
-    # Dense hours for browse + 14:00 bind in turn.understanding regressions.
     "scripted_turn_understanding": {
         "start_hours": (9, 10, 11, 12, 13, 14, 15, 16),
     },
     "scripted_off_topic": {
         "start_hours": (9, 10, 11, 12, 13, 14, 15, 16),
     },
+    # Afternoon offers (13:30+) for post-availability time selection.
+    "scripted_dotted_time_selection": {
+        "fixed_slots": [
+            {"start": f"{TARGET_DATE}T13:30:00Z", "end": f"{TARGET_DATE}T14:00:00Z"},
+            {"start": f"{TARGET_DATE}T14:00:00Z", "end": f"{TARGET_DATE}T14:30:00Z"},
+            {"start": f"{TARGET_DATE}T14:30:00Z", "end": f"{TARGET_DATE}T15:00:00Z"},
+            {"start": f"{TARGET_DATE}T15:00:00Z", "end": f"{TARGET_DATE}T15:30:00Z"},
+            {"start": f"{TARGET_DATE}T15:30:00Z", "end": f"{TARGET_DATE}T16:00:00Z"},
+            {"start": f"{TARGET_DATE}T16:00:00Z", "end": f"{TARGET_DATE}T16:30:00Z"},
+        ],
+    },
+    # Multi-day provider surplus for single-day search shaping / date-revision tests.
+    "scripted_multi_day_july23": {
+        "absolute_slots": [
+            {
+                "start": "2026-07-23T09:00:00Z",
+                "end": "2026-07-23T09:30:00Z",
+                "available": True,
+            },
+            {
+                "start": "2026-07-23T10:00:00Z",
+                "end": "2026-07-23T10:30:00Z",
+                "available": True,
+            },
+            {
+                "start": "2026-07-24T09:00:00Z",
+                "end": "2026-07-24T09:30:00Z",
+                "available": True,
+            },
+            {
+                "start": "2026-07-24T10:00:00Z",
+                "end": "2026-07-24T10:30:00Z",
+                "available": True,
+            },
+        ],
+    },
 }
 
-
-def _service_disambiguation_script() -> Dict[str, Any]:
-    return {
-        "success": True,
-        "intent": {"name": "CREATE_APPOINTMENT"},
-        "needs_clarification": True,
-        "missing_slots": ["service_id"],
-        "service_candidates": [
-            {"text": PREMIUM_SERVICE},
-            {"text": "flexi haircut + prunning"},
-        ],
-    }
-
-
-def _temporal_turn_script(*, times: List[str]) -> Dict[str, Any]:
-    script = _service_disambiguation_script()
-    script["facts"] = {}
-    script["temporal"] = single_day_temporal(TARGET_DATE, start_time=times[0])
-    return script
-
-
-def _premium_turn_script() -> Dict[str, Any]:
-    return {
-        "success": True,
-        "intent": {"name": "CREATE_APPOINTMENT"},
-        "facts": {
-            "service_id": PREMIUM_SERVICE,
-            "slots": {"service_id": PREMIUM_SERVICE},
-        },
-        "slots": {"service_id": PREMIUM_SERVICE},
-        "missing_slots": ["time"],
-    }
-
-
-def _confirm_action_script() -> Dict[str, Any]:
-    return {
-        "success": True,
-        "intent": {"name": "CONFIRM_ACTION"},
-    }
-
-
-def _time_selection_script(time_value: str) -> Dict[str, Any]:
-    return {
-        "success": True,
-        "intent": {"name": "CREATE_APPOINTMENT"},
-        "facts": {},
-        "temporal": exact_time_temporal(time_value),
-    }
-
-
-def _service_revision_script(service_id: str) -> Dict[str, Any]:
-    """Luma payload that reliably triggers detect_booking_revision(service=True)."""
-    return {
-        "success": True,
-        "intent": {"name": "CREATE_APPOINTMENT"},
-        "facts": {
-            "service_id": service_id,
-            "slots": {"service_id": service_id},
-        },
-        "slots": {"service_id": service_id},
-        "missing_slots": [],
-        "needs_clarification": False,
-    }
-
-
-def _date_revision_script(date_value: str) -> Dict[str, Any]:
-    """Luma payload that reliably triggers detect_booking_revision(date=True)."""
-    return {
-        "success": True,
-        "intent": {"name": "CREATE_APPOINTMENT"},
-        "facts": {
-            "service_id": PREMIUM_SERVICE,
-        },
-        "temporal": single_day_temporal(date_value),
-        "slots": {},
-        "missing_slots": [],
-        "needs_clarification": False,
-    }
+# Backward-compatible alias (fixture keys still used by scenario modules).
+SCRIPTED_FIXTURE_PARAMS = E2E_FIXTURE_PARAMS
 
 
 def _fixed_slots_availability_client(slots: List[Dict[str, Any]]) -> Mock:
-    """Return template slots rewritten onto the requested search date."""
+    """Return template slots rewritten onto the requested or first-available day."""
     mock_client = Mock(spec=AvailabilityClient)
 
     def get_service_availability(**kwargs):
-        date = _resolve_search_date(kwargs.get("date"))
+        date = _offer_date_for_availability_request(kwargs.get("date"))
         rewritten: List[Dict[str, Any]] = []
         for slot in slots:
             if not isinstance(slot, dict):
@@ -292,6 +232,17 @@ def _fixed_slots_availability_client(slots: List[Dict[str, Any]]) -> Mock:
                     new_slot[key] = date + val[10:]
             rewritten.append(new_slot)
         return {"slots": rewritten}
+
+    mock_client.get_service_availability.side_effect = get_service_availability
+    return mock_client
+
+
+def _absolute_slots_availability_client(slots: List[Dict[str, Any]]) -> Mock:
+    """Return multi-day slots with calendar dates preserved (browse date-axis)."""
+    mock_client = Mock(spec=AvailabilityClient)
+
+    def get_service_availability(**_kwargs):
+        return {"slots": [dict(slot) for slot in slots if isinstance(slot, dict)]}
 
     mock_client.get_service_availability.side_effect = get_service_availability
     return mock_client
@@ -331,63 +282,18 @@ def instrument_availability_tracing(mock_client: Mock) -> Mock:
     return mock_client
 
 
-def build_scripted_bundle(
-    api_client,
-    monkeypatch,
+def _availability_client_from_params(
     *,
     empty: bool = False,
     fixed_slots: Optional[List[Dict[str, Any]]] = None,
+    absolute_slots: Optional[List[Dict[str, Any]]] = None,
     start_hours: tuple[int, ...] = (9, 10),
-    include_time_pick_script: bool = False,
     trace_availability: bool = False,
-    extra_scripts: Optional[Dict[str, Any]] = None,
-    apply_nlu_service_resolution: bool = False,
-) -> Tuple[BookingConversation, Any, Any, str]:
-    user_id = f"e2e-scripted-{uuid.uuid4().hex[:10]}"
-    clear_session(ORG_ID, user_id)
-    reset_booking_counter()
-    setup_test_org_domain("service")
-    catalog_cache._mem_cache.pop((ORG_ID, "service"), None)
-
-    scripts = {
-        "book haircut": _service_disambiguation_script(),
-        "book me a haircut": _service_disambiguation_script(),
-        "book haircut tomorrow by 9am": _temporal_turn_script(times=["09:00"]),
-        "book haircut tomorrow by 12pm": _temporal_turn_script(times=["12:00"]),
-        "book me haircut tomorrow by 12pm": _temporal_turn_script(times=["12:00"]),
-        "book haircut tomorrow at 10am": _temporal_turn_script(times=["10:00"]),
-        "book haircut tomorrow at 9:15am": _temporal_turn_script(times=["09:15"]),
-        "premium": _premium_turn_script(),
-        "10am": _time_selection_script("10:00"),
-        "12pm": _time_selection_script("12:00"),
-        "rather book flexi haircut": _service_revision_script(FLEXI_SERVICE),
-        "actually july 11": _date_revision_script("2026-07-11"),
-        "yes": _confirm_action_script(),
-        # Stage-2 AVAILABILITY shape: facts.service_id set, service_term absent.
-        "show availability for flexi": {
-            "success": True,
-            "intent": {"name": "AVAILABILITY"},
-            "facts": {"service_id": FLEXI_SERVICE},
-        },
-    }
-    if extra_scripts:
-        scripts.update(extra_scripts)
-    if include_time_pick_script:
-        scripts["9:30am"] = _time_selection_script("09:30")
-
-    if apply_nlu_service_resolution:
-        from core.tests.harness.clients import NluServiceResolutionScriptedLumaClient
-
-        luma_client = NluServiceResolutionScriptedLumaClient(scripts)
-    else:
-        luma_client = ScriptedLumaClient(scripts)
-    catalog_client = TestCatalogClient(
-        test_aliases=HAIRCUT_CATALOG, domain="service")
-    org_client = create_mock_organization_client(business_category_id=1)
-    booking_client = create_mock_booking_client()
-
+) -> Any:
     if empty:
         availability_client = create_empty_availability_client()
+    elif absolute_slots is not None:
+        availability_client = _absolute_slots_availability_client(absolute_slots)
     elif fixed_slots is not None:
         availability_client = _fixed_slots_availability_client(fixed_slots)
     else:
@@ -396,27 +302,53 @@ def build_scripted_bundle(
     if trace_availability:
         availability_client = instrument_availability_tracing(
             availability_client)
+    return availability_client
 
-    monkeypatch.setattr(message_api, "_booking_client", booking_client)
-    monkeypatch.setattr(message_api, "_availability_client",
-                        availability_client)
 
-    def handle_message_with_test_deps(**kwargs):
-        kwargs.setdefault("luma_client", luma_client)
-        kwargs.setdefault("organization_client", org_client)
-        kwargs.setdefault("catalog_client", catalog_client)
-        kwargs.setdefault("frozen_time", FROZEN_TIME)
-        return real_handle_message(**kwargs)
+def build_recorded_bundle(
+    api_client,
+    monkeypatch,
+    *,
+    empty: bool = False,
+    fixed_slots: Optional[List[Dict[str, Any]]] = None,
+    absolute_slots: Optional[List[Dict[str, Any]]] = None,
+    start_hours: tuple[int, ...] = (9, 10),
+    trace_availability: bool = False,
+    **_ignored: Any,
+) -> Tuple[BookingConversation, Any, Any, str]:
+    """E2E booking bundle: RecordingLumaClient + configurable availability.
 
-    monkeypatch.setattr(
-        message_api._engine, "process_turn", handle_message_with_test_deps
+    ``**_ignored`` accepts legacy fixture keys (``nlu``, ``extra_scripts``, …)
+    so call sites can splat ``E2E_FIXTURE_PARAMS`` without crashing; those keys
+    are ignored — NLU is always recorded ``/resolve`` replay.
+    """
+    user_id = f"e2e-recorded-{uuid.uuid4().hex[:10]}"
+    clear_session(ORG_ID, user_id)
+    reset_booking_counter()
+    setup_test_org_domain("service")
+    catalog_cache._mem_cache.pop((ORG_ID, "service"), None)
+
+    availability_client = _availability_client_from_params(
+        empty=empty,
+        fixed_slots=fixed_slots,
+        absolute_slots=absolute_slots,
+        start_hours=start_hours,
+        trace_availability=trace_availability,
+    )
+    booking_client, availability_client, luma_client = _wire_booking_deps(
+        monkeypatch, availability_client=availability_client
     )
     conv = BookingConversation(api_client, user_id)
+    conv.luma_client = luma_client
     return conv, booking_client, availability_client, user_id
 
 
+# Backward-compatible name used by older test modules.
+build_scripted_bundle = build_recorded_bundle
+
+
 def _wire_booking_deps(monkeypatch, *, availability_client):
-    # Live NLU path: record/replay production /resolve bodies for determinism.
+    """Wire RecordingLumaClient + catalog/org/booking mocks into the engine."""
     luma_client = RecordingLumaClient(
         TestLumaClient(test_aliases=HAIRCUT_CATALOG)
     )
@@ -424,10 +356,12 @@ def _wire_booking_deps(monkeypatch, *, availability_client):
         test_aliases=HAIRCUT_CATALOG, domain="service")
     org_client = create_mock_organization_client(business_category_id=1)
     booking_client = create_mock_booking_client()
+    customer_client = _FakeE2ECustomerClient()
 
     monkeypatch.setattr(message_api, "_booking_client", booking_client)
     monkeypatch.setattr(message_api, "_availability_client",
                         availability_client)
+    monkeypatch.setattr(message_api, "_customer_client", customer_client)
 
     def handle_message_with_test_deps(**kwargs):
         kwargs.setdefault("luma_client", luma_client)
@@ -439,12 +373,45 @@ def _wire_booking_deps(monkeypatch, *, availability_client):
     monkeypatch.setattr(
         message_api._engine, "process_turn", handle_message_with_test_deps
     )
-    return booking_client, availability_client
+    monkeypatch.setattr(message_api, "_e2e_luma_client", luma_client, raising=False)
+    return booking_client, availability_client, luma_client
+
+
+class _FakeE2ECustomerClient:
+    """Org-scoped resolve-or-create stand-in for E2E (no live commerce)."""
+
+    def __init__(self) -> None:
+        self._next_id = 91001
+        self._by_contact: Dict[tuple, int] = {}
+        self._org_ids: Dict[int, int] = {}
+
+    def upsert(
+        self,
+        *,
+        organization_id: int,
+        name: str,
+        phone: Optional[str] = None,
+        email: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        key = (int(organization_id), phone or "", email or "")
+        existing = self._by_contact.get(key)
+        if existing is not None:
+            return {"id": existing, "name": name, "phone": phone, "email": email}
+        customer_id = self._next_id
+        self._next_id += 1
+        self._by_contact[key] = customer_id
+        self._org_ids[customer_id] = int(organization_id)
+        return {"id": customer_id, "name": name, "phone": phone, "email": email}
+
+    def belongs_to_organization(
+        self, customer_id: int, organization_id: int
+    ) -> bool:
+        return self._org_ids.get(int(customer_id)) == int(organization_id)
 
 
 @pytest.fixture
 def booking_conversation(api_client, monkeypatch, require_live_luma):
-    """Live-Luma orchestration with mocked booking/availability clients."""
+    """RecordingLumaClient orchestration with mocked booking/availability."""
     user_id = f"e2e-create-appt-{uuid.uuid4().hex[:10]}"
     clear_session(ORG_ID, user_id)
     reset_booking_counter()
@@ -452,17 +419,18 @@ def booking_conversation(api_client, monkeypatch, require_live_luma):
     catalog_cache._mem_cache.pop((ORG_ID, "service"), None)
 
     availability_client = create_multi_slot_availability_client()
-    booking_client, availability_client = _wire_booking_deps(
+    booking_client, availability_client, luma_client = _wire_booking_deps(
         monkeypatch, availability_client=availability_client
     )
     conv = BookingConversation(api_client, user_id)
+    conv.luma_client = luma_client
     yield conv, booking_client, availability_client
     clear_session(ORG_ID, user_id)
 
 
 @pytest.fixture
 def paginated_booking_conversation(api_client, monkeypatch, require_live_luma):
-    """Nine-slot paginated availability for live-Luma browse/pagination tests."""
+    """Nine-slot paginated availability for browse/pagination E2E."""
     user_id = f"e2e-paginate-appt-{uuid.uuid4().hex[:10]}"
     clear_session(ORG_ID, user_id)
     reset_booking_counter()
@@ -470,19 +438,24 @@ def paginated_booking_conversation(api_client, monkeypatch, require_live_luma):
     catalog_cache._mem_cache.pop((ORG_ID, "service"), None)
 
     availability_client = create_paginated_availability_client()
-    booking_client, availability_client = _wire_booking_deps(
+    booking_client, availability_client, luma_client = _wire_booking_deps(
         monkeypatch, availability_client=availability_client
     )
     conv = BookingConversation(api_client, user_id)
+    conv.luma_client = luma_client
     yield conv, booking_client, availability_client
     clear_session(ORG_ID, user_id)
 
 
 @pytest.fixture
-def traced_scripted_conversation(api_client, monkeypatch):
-    """Scripted NLU with availability tracing for forensic validation."""
-    conv, booking_client, availability_client, user_id = build_scripted_bundle(
+def traced_recorded_conversation(api_client, monkeypatch, require_live_luma):
+    """RecordingLumaClient with availability tracing for forensic validation."""
+    conv, booking_client, availability_client, user_id = build_recorded_bundle(
         api_client, monkeypatch, trace_availability=True
     )
     yield conv, booking_client, availability_client
     clear_session(ORG_ID, user_id)
+
+
+# Backward-compatible alias.
+traced_scripted_conversation = traced_recorded_conversation

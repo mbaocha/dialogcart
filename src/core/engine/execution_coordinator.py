@@ -13,6 +13,25 @@ from typing import Any, Dict, Optional
 logger = logging.getLogger(__name__)
 
 
+def _rollback_confirmed_on_identity_block(
+    *,
+    session_state: Optional[Dict[str, Any]],
+    plan: Dict[str, Any],
+) -> None:
+    """Force confirmation back to pending when commit is blocked before side effects."""
+    from core.session.confirmation_gate import set_confirmation_state
+
+    set_confirmation_state(plan, "pending")
+    if isinstance(session_state, dict):
+        set_confirmation_state(session_state, "pending")
+    merged = plan.get("_merged_luma_response")
+    if isinstance(merged, dict):
+        set_confirmation_state(merged, "pending")
+    decision = plan.get("_decision")
+    if isinstance(decision, dict):
+        set_confirmation_state(decision, "pending")
+
+
 @dataclass
 class ExecutionGateResult:
     """Outcome of eligibility + preparation (before tool dispatch)."""
@@ -202,15 +221,15 @@ class ExecutionCoordinator:
             )
         slots["organization_id"] = organization_id
 
-        customer_id = kwargs.get("customer_id")
+        from core.adapters.customer_resolver import coerce_positive_customer_id
+
+        customer_id = coerce_positive_customer_id(kwargs.get("customer_id"))
+        if customer_id is None and isinstance(session_state, dict):
+            customer_id = coerce_positive_customer_id(session_state.get("customer_id"))
+        if customer_id is None:
+            customer_id = coerce_positive_customer_id(slots.get("customer_id"))
         if customer_id is not None:
-            try:
-                customer_id = int(customer_id)
-            except (TypeError, ValueError):
-                logger.warning("Ignoring invalid customer_id=%r", customer_id)
-                customer_id = None
-            if customer_id is not None and customer_id > 0:
-                slots["customer_id"] = customer_id
+            slots["customer_id"] = customer_id
 
         if action == "SEARCH_AVAILABILITY":
             from core.planning.temporal_proposal import (
@@ -305,6 +324,39 @@ class ExecutionCoordinator:
                         f"start={resolved_datetime_range.get('start')}, "
                         f"end={resolved_datetime_range.get('end')}"
                     )
+
+        if action in ("CONFIRM_APPOINTMENT", "CREATE_BOOKING_HOLD"):
+            if coerce_positive_customer_id(slots.get("customer_id")) is None:
+                logger.info(
+                    "Blocking %s: tenant customer_id is unresolved",
+                    action,
+                )
+                blocked_plan = dict(plan)
+                blocked_plan["status"] = "NEEDS_CLARIFICATION"
+                blocked_plan["slots"] = slots
+                # YES may have written confirmation_state=confirmed before this
+                # pre-commit gate. Do not persist a false confirmed durable state
+                # when identity blocks side effects — roll back to pending so the
+                # booking remains resumable and requires a fresh YES after identity.
+                _rollback_confirmed_on_identity_block(
+                    session_state=session_state,
+                    plan=blocked_plan,
+                )
+                response = build_planning_response_from_plan(blocked_plan)
+                response["text"] = (
+                    "Before I can confirm that, I need a phone number or email "
+                    "so we can attach the booking to your account."
+                )
+                if isinstance(response.get("outcome"), dict):
+                    response["outcome"]["text"] = response["text"]
+                return ExecutionGateResult(
+                    path="skipped",
+                    response=response,
+                    plan=blocked_plan,
+                    plan_status=blocked_plan.get("status"),
+                    plan_action=plan_action,
+                    can_execute=False,
+                )
 
         return ExecutionGateResult(
             path="ready",

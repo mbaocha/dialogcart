@@ -1,11 +1,27 @@
 """Tests for resolve_service list-pick behaviour (candidate_keys)."""
-from nlu.catalog import resolve_service
+from nlu.catalog import infer_service_term_from_utterance, resolve_service
 
 _ALIASES = {
     "premium haircut": "beauty.premium",
     "flexi haircut + prunning": "beauty.flexi",
     "premium spa treatment": "beauty.spa",
 }
+
+
+def test_infer_flexi_from_availability_utterance():
+    assert (
+        infer_service_term_from_utterance(
+            "show availability for flexi",
+            _ALIASES,
+        )
+        == "flexi haircut + prunning"
+    )
+
+
+def test_infer_none_when_no_service_token():
+    assert (
+        infer_service_term_from_utterance("show availability", _ALIASES) is None
+    )
 
 
 def test_premium_picks_uniquely_from_haircut_candidates():

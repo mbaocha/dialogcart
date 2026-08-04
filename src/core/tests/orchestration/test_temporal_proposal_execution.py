@@ -317,6 +317,111 @@ class TestTryBindOfferedTimeSelection:
         assert result["slots"]["time"] == "09:00"
 
 
+    def test_clock_face_binds_presented_pm_when_nlu_emits_am(self):
+        """Bare 1.30 → NLU 01:30 binds unique presented 13:30 (canonical offer time)."""
+        slots = [
+            {
+                "starts_at": "2026-07-03T13:30:00Z",
+                "ends_at": "2026-07-03T14:00:00Z",
+            },
+            {
+                "starts_at": "2026-07-03T14:00:00Z",
+                "ends_at": "2026-07-03T14:30:00Z",
+            },
+        ]
+        cache, presented = _cache_and_presented(slots, search_date="2026-07-03")
+        session = {
+            "last_execution_result": cache,
+            "presented_availability": presented,
+        }
+        result = try_bind_offered_time_selection(
+            {"service_id": "premium haircut"},
+            session,
+            time_proposal={"mode": "exact", "value": "01:30"},
+            temporal={
+                "expression": "1.30",
+                "start_time": "01:30",
+                "mode": "none",
+            },
+            user_facts={"time": "01:30", "time_from_current_turn": True},
+        )
+        assert result is not None
+        assert result["slots"]["date"] == "2026-07-03"
+        assert result["slots"]["time"] == "13:30"
+        assert result["resolved_datetime_range"]["start"] == "2026-07-03T13:30:00Z"
+
+    def test_explicit_am_does_not_clock_face_to_pm(self):
+        """Explicit 1.30am must not bind a presented 13:30-only window."""
+        slots = [
+            {
+                "starts_at": "2026-07-03T13:30:00Z",
+                "ends_at": "2026-07-03T14:00:00Z",
+            },
+        ]
+        cache, presented = _cache_and_presented(slots, search_date="2026-07-03")
+        session = {
+            "last_execution_result": cache,
+            "presented_availability": presented,
+        }
+        assert (
+            try_bind_offered_time_selection(
+                {"service_id": "premium haircut"},
+                session,
+                time_proposal={"mode": "exact", "value": "01:30"},
+                temporal={
+                    "expression": "1.30am",
+                    "start_time": "01:30",
+                    "mode": "none",
+                },
+                user_facts={"time": "01:30", "time_from_current_turn": True},
+            )
+            is None
+        )
+
+    def test_clock_face_ambiguous_when_multiple_face_matches(self):
+        """Two presented offers sharing a clock face → do not guess."""
+        slots = [
+            {
+                "starts_at": "2026-07-03T13:30:00Z",
+                "ends_at": "2026-07-03T14:00:00Z",
+                "staff": "Alex",
+            },
+            {
+                "starts_at": "2026-07-03T13:30:00Z",
+                "ends_at": "2026-07-03T14:00:00Z",
+                "staff": "Blake",
+            },
+        ]
+        cache = {
+            "type": "availability",
+            "status": "success",
+            "slots": list(slots),
+            "search_date": "2026-07-03",
+        }
+        # Keep both same-face offers in the presented window (no navigator dedupe).
+        presented = {
+            "search_date": "2026-07-03",
+            "slots": list(slots),
+            "times": ["1:30 PM", "1:30 PM"],
+            "more_count": 0,
+            "total_unique": 2,
+        }
+        session = {
+            "last_execution_result": cache,
+            "presented_availability": presented,
+        }
+        assert (
+            try_bind_offered_time_selection(
+                {"service_id": "premium haircut"},
+                session,
+                time_proposal={"mode": "exact", "value": "01:30"},
+                temporal={"expression": "1.30", "start_time": "01:30", "mode": "none"},
+                user_facts={"time": "01:30", "time_from_current_turn": True},
+            )
+            is None
+        )
+
+
 class TestGetCachedAvailabilityOffers:
     def test_prefers_presented_availability(self):
         session = {
@@ -503,6 +608,35 @@ class TestResolveExecutionProposals:
         result = resolve_execution_proposals({}, session, context=context)
 
         assert result["date_proposal"]["start"] == "2026-07-21"
+        assert result["time_proposal"] is None
+
+    def test_availability_invalidated_alone_blocks_session_time_reuse(self):
+        """Stage 08 criteria invalidation must suppress session time even when
+        session_time_proposal_reuse_allowed was left true (defense in depth)."""
+        context = {
+            "current_turn_time_proposal": None,
+            "current_turn_temporal": None,
+            "current_turn_has_explicit_time": False,
+            "session_time_proposal_reuse_allowed": True,
+            "confirmation_continuation": False,
+            "availability_invalidated": True,
+            "bound_datetime_cleared": False,
+        }
+        session = {
+            "date_proposal": {"mode": "single_day", "start": "2026-07-24"},
+            "time_proposal": {"mode": "exact", "value": "09:00"},
+            "last_execution_result": {
+                "type": "availability",
+                "status": "success",
+                "slots": [{"starts_at": "2026-07-24T09:00:00Z"}],
+            },
+        }
+
+        result = resolve_execution_proposals({}, session, context=context)
+
+        assert result["time_proposal"] is None
+        # Session date may be suppressed when prior search is established;
+        # absence of stale time is the invariant under test.
         assert result["time_proposal"] is None
 
     def test_current_turn_time_wins_when_session_reuse_is_suppressed(self):

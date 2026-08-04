@@ -17,7 +17,11 @@ from .resolver import (
     resolve_temporal,
 )
 from .bare_ordinal import inject_bare_ordinal_expression
-from .stage2_output import materialize_temporal_ownership, parse_temporal_dict
+from .stage2_output import (
+    apply_by_from_exact_contract,
+    materialize_temporal_ownership,
+    parse_temporal_dict,
+)
 
 __all__ = [
     "CLOSED_RELATIVE_VOCABULARY",
@@ -25,6 +29,7 @@ __all__ = [
     "Temporal",
     "anchor_now",
     "apply_bare_ordinal_revision",
+    "apply_by_from_exact_contract",
     "apply_temporal",
     "build_temporal_from_stage2",
     "format_prompt_now",
