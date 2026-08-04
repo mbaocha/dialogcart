@@ -9,6 +9,10 @@ from core.planning.pipeline.requests import (
     AttachedRequest,
     is_availability_turn_operation,
 )
+from core.planning.pipeline.clarification_readiness import (
+    awaiting_from_ask_next,
+    build_clarification_readiness_evidence,
+)
 from core.planning.pipeline.execution_readiness import (
     build_execution_readiness_evidence,
 )
@@ -90,35 +94,6 @@ _PRESENTATION_ACTION_BRANCHES = frozenset(
 )
 
 
-def _current_turn_planning_evidence(payload: Dict[str, Any]) -> bool:
-    """Read stamped Core planning-evidence (never recompute)."""
-    from core.planning.planning_evidence import require_planning_evidence
-
-    return require_planning_evidence(payload)
-
-
-def _turn_understanding_from_payload(payload: Dict[str, Any]) -> Optional[str]:
-    turn = payload.get("turn")
-    if isinstance(turn, dict):
-        value = turn.get("understanding")
-        if isinstance(value, str) and value:
-            return value
-    value = payload.get("understanding")
-    if isinstance(value, str) and value:
-        return value
-    return None
-
-
-def _awaiting_from_ask_next(ask_next: Optional[str]) -> Optional[str]:
-    """Awaiting for unanswered ask_next is the ask_next slot itself.
-
-    Distinct from TIME_SELECTION (reserved for TIME_MATCH_MISMATCH presentation).
-    """
-    if not ask_next:
-        return None
-    return str(ask_next)
-
-
 def _has_planner_presentation(
     *,
     action_branch: Optional[str],
@@ -165,7 +140,7 @@ def _reconcile_terminal_decision(
     ):
         action_branch = "recovery_presentation"
         availability_reshow = False
-        awaiting = _awaiting_from_ask_next(ask_next) or awaiting
+        awaiting = awaiting_from_ask_next(ask_next) or awaiting
 
     has_presentation = _has_planner_presentation(
         action_branch=action_branch,
@@ -179,7 +154,7 @@ def _reconcile_terminal_decision(
         and not has_presentation
     ):
         status = "NEEDS_CLARIFICATION"
-        awaiting = _awaiting_from_ask_next(ask_next) or awaiting
+        awaiting = awaiting_from_ask_next(ask_next) or awaiting
         action_branch = "reconcile_unanswered_ask_next"
         availability_reshow = False
         if stage is None or stage not in ("AVAILABILITY", "CONFIRM"):
@@ -190,7 +165,7 @@ def _reconcile_terminal_decision(
         and awaiting is None
         and ask_next
     ):
-        awaiting = _awaiting_from_ask_next(ask_next)
+        awaiting = awaiting_from_ask_next(ask_next)
 
     # Invariant: illegal dead terminal state must never leave Decision.
     if (
@@ -247,25 +222,26 @@ def build_decision_plan_from_evidence(
     """Decision evidence → plan (called only from ``decide()``)."""
     intent_name = slot_state.intent_name
     payload = working_turn.payload
-    missing_slots = list(slot_state.missing_slots)
-    promptable_slots = list(getattr(slot_state, "promptable_slots", None) or [])
-    declined_slots = list(getattr(slot_state, "declined_slots", None) or [])
-    ask_next = slot_state.ask_next
-    if ask_next is None:
-        from core.planning.planner.missing_slots import derive_ask_next
-
-        ask_next = derive_ask_next(missing_slots, promptable_slots)
+    clarification = build_clarification_readiness_evidence(
+        slot_state=slot_state,
+        payload=payload,
+    )
+    missing_slots = list(clarification.missing_slots)
+    promptable_slots = list(clarification.promptable_slots)
+    declined_slots = list(clarification.declined_slots)
+    needs_clarification = clarification.needs_clarification
+    # Stage 04 default ask is a proposal only; Stage 08 may override from the
+    # current progress execution step (see progress_clarification precedence).
+    default_ask_next = clarification.default_ask_next
+    ask_next = default_ask_next
+    has_planning_evidence = clarification.has_planning_evidence
+    turn_understanding = clarification.turn_understanding
     entity_schema = (
         payload.get("_entity_schema")
         if isinstance(payload.get("_entity_schema"), dict)
         else None
     )
-    # Stage 04 default ask is a proposal only; Stage 08 may override from the
-    # current progress execution step (see progress_clarification precedence).
-    default_ask_next = ask_next
     effective_slots = dict(slot_state.effective_collected_slots)
-    needs_clarification = slot_state.needs_clarification
-    availability_resolved = availability.availability_ready
     confirmation_state = confirmation.confirmation_state
     user_confirmation_satisfied = confirmation.user_confirmation_satisfied
     active_capability = capability.active_capability
@@ -299,13 +275,8 @@ def build_decision_plan_from_evidence(
     if not time_match_outcome and isinstance(time_resolution, dict):
         time_match_outcome = time_resolution.get("outcome")
 
-    # No current-turn planning evidence with open slots must not auto-reshow
-    # availability; reconciliation owns clarify/recovery precedence.
-    has_planning_evidence = _current_turn_planning_evidence(payload)
-    turn_understanding = _turn_understanding_from_payload(payload)
-    block_auto_reshow = (not has_planning_evidence) and bool(missing_slots)
     allow_availability_reshow = bool(
-        confirmation.availability_reshow and not block_auto_reshow
+        confirmation.availability_reshow and not clarification.block_auto_reshow
     )
 
     if allow_availability_reshow:
@@ -359,7 +330,7 @@ def build_decision_plan_from_evidence(
             and not user_confirmation_satisfied
             and not _availability_operation_precedes_confirm(turn_operation)
         ):
-            awaiting = _awaiting_from_ask_next(ask_next)
+            awaiting = awaiting_from_ask_next(ask_next)
         elif confirmation.awaiting_user_confirmation and not availability_op:
             awaiting = "USER_CONFIRMATION"
         elif capability.awaiting_capability:
@@ -410,7 +381,7 @@ def build_decision_plan_from_evidence(
                 policy_client = None
                 action_branch = progress_branch
                 status = "NEEDS_CLARIFICATION"
-                awaiting = _awaiting_from_ask_next(ask_next)
+                awaiting = awaiting_from_ask_next(ask_next)
                 stage = "AVAILABILITY"
                 if isinstance(progress_meta, dict):
                     payload["_progress_clarification"] = progress_meta
@@ -423,7 +394,7 @@ def build_decision_plan_from_evidence(
                     if promptables:
                         ask_next = promptables[0]
                 status = "NEEDS_CLARIFICATION"
-                awaiting = _awaiting_from_ask_next(ask_next)
+                awaiting = awaiting_from_ask_next(ask_next)
                 stage = "AVAILABILITY"
                 if isinstance(progress_meta, dict):
                     payload["_progress_clarification"] = progress_meta
@@ -482,7 +453,7 @@ def build_decision_plan_from_evidence(
             policy_client = None
             action_branch = "exact_time_incomplete_required"
             status = "NEEDS_CLARIFICATION"
-            awaiting = _awaiting_from_ask_next(ask_next) or awaiting
+            awaiting = awaiting_from_ask_next(ask_next) or awaiting
             stage = "AVAILABILITY"
 
         if stage is None:
@@ -534,7 +505,7 @@ def build_decision_plan_from_evidence(
         )
     ):
         status = "NEEDS_CLARIFICATION"
-        awaiting = _awaiting_from_ask_next(ask_next) or awaiting
+        awaiting = awaiting_from_ask_next(ask_next) or awaiting
         action_branch = action_branch or "promptable_optional"
         if stage is None:
             stage = "AVAILABILITY"
