@@ -1,7 +1,7 @@
-"""ExecutionCoordinator — operational prep, dispatch, and post-processing.
+"""ExecutionCoordinator — validate, select adapter, dispatch, post-process.
 
 Decision owns whether an action should execute (via ``ExecutionCommand``).
-This coordinator validates operational prerequisites and prepares dispatch input.
+Adapters own action-specific operational preparation.
 The legacy resolve path remains temporarily as a parity oracle.
 """
 
@@ -12,6 +12,8 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
+from core.execution.adapters import get_execution_adapter
+from core.execution.adapters.base import PreparedExecution
 from core.execution.command import ExecutionBlocked, ExecutionCommand
 
 logger = logging.getLogger(__name__)
@@ -56,7 +58,7 @@ class ExecutionRunResult:
 
 
 class ExecutionCoordinator:
-    """Coordinates operational prep, dispatch, and workflow hooks."""
+    """Coordinates adapter prep, dispatch, and workflow hooks."""
 
     def resolve(
         self,
@@ -134,28 +136,6 @@ class ExecutionCoordinator:
         intent_name = command.intent_name
         plan_action = action
 
-        # Execution-input copy — never mutate the finalized Decision plan.
-        execution_plan = deepcopy(plan)
-        slots = dict(command.slots)
-
-        if command.execution_proposal_context is not None:
-            execution_plan["execution_proposal_context"] = dict(
-                command.execution_proposal_context
-            )
-        if command.entity_schema is not None:
-            execution_plan["_entity_schema"] = dict(command.entity_schema)
-        if command.turn_operation:
-            execution_plan["turn_operation"] = command.turn_operation
-        if command.stage is not None:
-            execution_plan["stage"] = command.stage
-
-        # Stage labels for dispatch adapters (execution overlay only).
-        if action == "SEARCH_AVAILABILITY":
-            execution_plan["stage"] = "AVAILABILITY"
-        elif action == "CONFIRM_APPOINTMENT":
-            execution_plan["stage"] = "CONFIRM"
-        execution_plan["action"] = action
-
         execution_client, client_block = self._resolve_execution_client(
             action=action,
             client_name=client_name,
@@ -189,70 +169,47 @@ class ExecutionCoordinator:
                 ),
             )
 
-        slots = self._apply_organization_id(
-            slots, organization_id=organization_id
-        )
-        slots = self._inject_customer_id(
-            slots, session_state=session_state, kwargs=kwargs
-        )
-
-        if action == "SEARCH_AVAILABILITY":
-            slots = self._prepare_availability_slots(
-                slots,
-                execution_plan=execution_plan,
-                session_state=session_state,
-            )
-
-        self._attach_catalog_mapping(
-            execution_plan,
-            organization_id=organization_id,
-            organization_client=organization_client,
-        )
-
-        if action == "FINALIZE_RESERVATION":
-            self._attach_finalize_facts(
-                execution_plan,
-                session_state=session_state,
-                organization_client=organization_client,
-                organization_id=organization_id,
-            )
-
-        if action == "CONFIRM_APPOINTMENT":
-            slots = self._inject_bound_datetime(
-                slots, session_state=session_state
-            )
-
-        execution_plan["slots"] = slots
-
-        if action in ("CONFIRM_APPOINTMENT", "CREATE_BOOKING_HOLD"):
-            from core.adapters.customer_resolver import coerce_positive_customer_id
-
-            if coerce_positive_customer_id(slots.get("customer_id")) is None:
-                logger.info(
-                    "Blocking %s: tenant customer_id is unresolved",
-                    action,
-                )
-                blocked = ExecutionBlocked(
-                    reason="CUSTOMER_ID_REQUIRED",
-                    required_input="phone_or_email",
+        adapter = get_execution_adapter(action)
+        if adapter is None:
+            return ExecutionGateResult(
+                path="no_step",
+                response=build_planning_only_response(plan),
+                plan=plan,
+                plan_status=plan.get("status"),
+                plan_action=plan.get("action"),
+                can_execute=False,
+                blocked=ExecutionBlocked(
+                    reason="UNSUPPORTED_ACTION",
                     action=action,
-                )
-                blocked_plan = deepcopy(execution_plan)
+                ),
+            )
+
+        prepared = adapter.prepare(
+            command,
+            session_state,
+            organization_id,
+            organization_client=organization_client,
+            kwargs=kwargs,
+            plan_snapshot=plan,
+        )
+        execution_plan = self._execution_plan_from_prepared(plan, prepared)
+
+        if prepared.blocked is not None:
+            blocked = prepared.blocked
+            blocked_plan = deepcopy(execution_plan)
+            if blocked.reason == "CUSTOMER_ID_REQUIRED":
                 blocked_plan["status"] = "NEEDS_CLARIFICATION"
-                blocked_plan["slots"] = slots
-                response = build_planning_response_from_plan(blocked_plan)
-                apply_execution_blocked_text(
-                    response, reason=blocked.reason
-                )
-                return ExecutionGateResult(
-                    path="blocked",
-                    response=response,
-                    plan=blocked_plan,
-                    plan_status=blocked_plan.get("status"),
-                    plan_action=plan_action,
-                    can_execute=False,
-                    blocked=blocked,
-                )
+            response = build_planning_response_from_plan(blocked_plan)
+            apply_execution_blocked_text(response, reason=blocked.reason)
+            return ExecutionGateResult(
+                path="blocked",
+                response=response,
+                plan=blocked_plan,
+                plan_status=blocked_plan.get("status"),
+                plan_action=plan_action,
+                can_execute=False,
+                blocked=blocked,
+            )
 
         return ExecutionGateResult(
             path="ready",
@@ -264,7 +221,7 @@ class ExecutionCoordinator:
             client_name=client_name,
             execution_client=execution_client,
             intent_name=intent_name,
-            slots=slots,
+            slots=dict(prepared.slots),
             session_state=session_state,
         )
 
@@ -278,8 +235,9 @@ class ExecutionCoordinator:
         organization_id: int,
         kwargs: Dict[str, Any],
     ) -> ExecutionGateResult:
-        """Parity oracle: historical policy re-evaluation path."""
+        """Parity oracle: historical policy re-evaluation, then adapter prep."""
         from core.engine.outcome_builder import (
+            apply_execution_blocked_text,
             build_planning_only_response,
             build_planning_response_from_plan,
         )
@@ -338,13 +296,6 @@ class ExecutionCoordinator:
             f"plan_status={plan_status}, required_slots_satisfied=True"
         )
 
-        if execution_step and plan_action:
-            plan["action"] = plan_action
-            if plan_action == "SEARCH_AVAILABILITY":
-                plan["stage"] = "AVAILABILITY"
-            elif plan_action == "CONFIRM_APPOINTMENT":
-                plan["stage"] = "CONFIRM"
-
         if not execution_step and plan_action:
             for step in steps:
                 if step.get("action") == plan_action:
@@ -399,75 +350,64 @@ class ExecutionCoordinator:
                 can_execute=False,
             )
 
-        slots = self._apply_organization_id(
-            dict(slots) if isinstance(slots, dict) else {},
-            organization_id=organization_id,
-        )
-        slots = self._inject_customer_id(
-            slots, session_state=session_state, kwargs=kwargs
-        )
-
-        if action == "SEARCH_AVAILABILITY":
-            slots = self._prepare_availability_slots(
-                slots,
-                execution_plan=plan,
-                session_state=session_state,
+        adapter = get_execution_adapter(str(action))
+        if adapter is None:
+            return ExecutionGateResult(
+                path="no_step",
+                response=build_planning_only_response(plan),
+                plan=plan,
+                plan_status=plan.get("status"),
+                plan_action=plan.get("action"),
+                can_execute=False,
             )
 
-        plan["slots"] = slots
-
-        self._attach_catalog_mapping(
-            plan,
-            organization_id=organization_id,
+        proposal_ctx = plan.get("execution_proposal_context")
+        entity_schema = plan.get("_entity_schema")
+        legacy_command = ExecutionCommand(
+            action=str(action),
+            client_name=str(client_name),
+            intent_name=str(intent_name or ""),
+            mode=str(execution_step.get("mode") or "exploratory"),
+            slots=dict(slots) if isinstance(slots, dict) else {},
+            organization_id=int(organization_id),
+            execution_proposal_context=(
+                dict(proposal_ctx) if isinstance(proposal_ctx, dict) else None
+            ),
+            entity_schema=(
+                dict(entity_schema) if isinstance(entity_schema, dict) else None
+            ),
+            turn_operation=(
+                str(plan["turn_operation"]) if plan.get("turn_operation") else None
+            ),
+            stage=str(plan["stage"]) if plan.get("stage") is not None else None,
+        )
+        prepared = adapter.prepare(
+            legacy_command,
+            session_state,
+            organization_id,
             organization_client=organization_client,
+            kwargs=kwargs,
+            plan_snapshot=plan,
         )
+        self._apply_prepared_to_plan(plan, prepared)
 
-        plan["action"] = action
-
-        if action == "FINALIZE_RESERVATION":
-            self._attach_finalize_facts(
-                plan,
-                session_state=session_state,
-                organization_client=organization_client,
-                organization_id=organization_id,
-            )
-
-        if action == "CONFIRM_APPOINTMENT":
-            slots = self._inject_bound_datetime(
-                slots, session_state=session_state
-            )
-            plan["slots"] = slots
-
-        if action in ("CONFIRM_APPOINTMENT", "CREATE_BOOKING_HOLD"):
-            from core.adapters.customer_resolver import coerce_positive_customer_id
-
-            if coerce_positive_customer_id(slots.get("customer_id")) is None:
-                logger.info(
-                    "Blocking %s: tenant customer_id is unresolved",
-                    action,
-                )
-                blocked_plan = dict(plan)
+        if prepared.blocked is not None:
+            blocked = prepared.blocked
+            blocked_plan = dict(plan)
+            if blocked.reason == "CUSTOMER_ID_REQUIRED":
                 blocked_plan["status"] = "NEEDS_CLARIFICATION"
-                blocked_plan["slots"] = slots
-                response = build_planning_response_from_plan(blocked_plan)
-                from core.engine.outcome_builder import apply_execution_blocked_text
-
-                apply_execution_blocked_text(
-                    response, reason="CUSTOMER_ID_REQUIRED"
-                )
-                return ExecutionGateResult(
-                    path="skipped",
-                    response=response,
-                    plan=blocked_plan,
-                    plan_status=blocked_plan.get("status"),
-                    plan_action=plan_action,
-                    can_execute=False,
-                    blocked=ExecutionBlocked(
-                        reason="CUSTOMER_ID_REQUIRED",
-                        required_input="phone_or_email",
-                        action=str(action) if action else None,
-                    ),
-                )
+            blocked_plan["slots"] = dict(prepared.slots)
+            response = build_planning_response_from_plan(blocked_plan)
+            apply_execution_blocked_text(response, reason=blocked.reason)
+            return ExecutionGateResult(
+                path="skipped",
+                response=response,
+                plan=blocked_plan,
+                plan_status=blocked_plan.get("status"),
+                plan_action=plan_action,
+                can_execute=False,
+                blocked=blocked,
+            )
 
         return ExecutionGateResult(
             path="ready",
@@ -479,9 +419,43 @@ class ExecutionCoordinator:
             client_name=client_name,
             execution_client=execution_client,
             intent_name=intent_name,
-            slots=slots,
+            slots=dict(prepared.slots),
             session_state=session_state,
         )
+
+    @staticmethod
+    def _execution_plan_from_prepared(
+        source_plan: Dict[str, Any],
+        prepared: PreparedExecution,
+    ) -> Dict[str, Any]:
+        """Build a dispatch plan copy; never mutates the Decision plan."""
+        execution_plan = deepcopy(source_plan)
+        ExecutionCoordinator._apply_prepared_to_plan(execution_plan, prepared)
+        return execution_plan
+
+    @staticmethod
+    def _apply_prepared_to_plan(
+        plan: Dict[str, Any],
+        prepared: PreparedExecution,
+    ) -> None:
+        plan["action"] = prepared.action
+        if prepared.stage is not None:
+            plan["stage"] = prepared.stage
+        plan["slots"] = dict(prepared.slots)
+        if prepared.sku_to_catalog_id is not None:
+            plan["sku_to_catalog_id"] = dict(prepared.sku_to_catalog_id)
+        else:
+            plan.setdefault("sku_to_catalog_id", {})
+        if prepared.facts is not None:
+            plan["facts"] = dict(prepared.facts)
+        if prepared.execution_proposal_context is not None:
+            plan["execution_proposal_context"] = dict(
+                prepared.execution_proposal_context
+            )
+        if prepared.entity_schema is not None:
+            plan["_entity_schema"] = dict(prepared.entity_schema)
+        if prepared.turn_operation:
+            plan["turn_operation"] = prepared.turn_operation
 
     @staticmethod
     def _resolve_execution_client(
@@ -509,146 +483,6 @@ class ExecutionCoordinator:
             f"Unknown client name '{client_name}' for execution step {action}"
         )
         return None, "unknown_client"
-
-    @staticmethod
-    def _apply_organization_id(
-        slots: Dict[str, Any], *, organization_id: int
-    ) -> Dict[str, Any]:
-        slot_org = slots.get("organization_id")
-        if slot_org is not None and int(slot_org) != int(organization_id):
-            logger.warning(
-                "Ignoring conflicting slots.organization_id=%s (request=%s)",
-                slot_org,
-                organization_id,
-            )
-        slots["organization_id"] = organization_id
-        return slots
-
-    @staticmethod
-    def _inject_customer_id(
-        slots: Dict[str, Any],
-        *,
-        session_state: Optional[Dict[str, Any]],
-        kwargs: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        from core.adapters.customer_resolver import coerce_positive_customer_id
-
-        customer_id = coerce_positive_customer_id(kwargs.get("customer_id"))
-        if customer_id is None and isinstance(session_state, dict):
-            customer_id = coerce_positive_customer_id(session_state.get("customer_id"))
-        if customer_id is None:
-            customer_id = coerce_positive_customer_id(slots.get("customer_id"))
-        if customer_id is not None:
-            slots["customer_id"] = customer_id
-        return slots
-
-    @staticmethod
-    def _prepare_availability_slots(
-        slots: Dict[str, Any],
-        *,
-        execution_plan: Dict[str, Any],
-        session_state: Optional[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        from core.planning.temporal_proposal import (
-            resolve_execution_proposals,
-            slots_for_availability_search,
-        )
-
-        _exec_proposals = resolve_execution_proposals(
-            execution_plan,
-            session_state,
-            context=execution_plan.get("execution_proposal_context"),
-        )
-        return slots_for_availability_search(
-            slots,
-            _exec_proposals["date_proposal"],
-            _exec_proposals["time_proposal"],
-        )
-
-    @staticmethod
-    def _attach_catalog_mapping(
-        execution_plan: Dict[str, Any],
-        *,
-        organization_id: int,
-        organization_client: Optional[Any],
-    ) -> None:
-        try:
-            from core.execution.catalog_resolver import (
-                load_sku_to_catalog_id_for_org,
-            )
-
-            execution_plan["sku_to_catalog_id"] = load_sku_to_catalog_id_for_org(
-                organization_id, organization_client
-            )
-        except Exception as e:
-            logger.debug("Could not load sku_to_catalog_id for execution: %s", e)
-            execution_plan.setdefault("sku_to_catalog_id", {})
-
-    @staticmethod
-    def _attach_finalize_facts(
-        execution_plan: Dict[str, Any],
-        *,
-        session_state: Optional[Dict[str, Any]],
-        organization_client: Optional[Any],
-        organization_id: int,
-    ) -> None:
-        plan_facts: Dict[str, Any] = {}
-        if session_state and isinstance(session_state, dict):
-            plan_facts = session_state.get("facts", {})
-            if not isinstance(plan_facts, dict):
-                plan_facts = {}
-
-        if organization_client:
-            if not plan_facts.get("org"):
-                try:
-                    org_details = organization_client.get_details(organization_id)
-                    if isinstance(org_details, dict):
-                        org_data = org_details.get("organization") or org_details
-                        if org_data and isinstance(org_data, dict):
-                            if not plan_facts:
-                                plan_facts = {}
-                            plan_facts["org"] = org_data
-                except Exception as e:
-                    logger.debug(
-                        "Failed to fetch org data for FINALIZE_RESERVATION "
-                        f"payment verification: {e}"
-                    )
-
-        if plan_facts:
-            execution_plan["facts"] = plan_facts
-            logger.debug(
-                "Added facts to plan for FINALIZE_RESERVATION execution "
-                "(payment verification)"
-            )
-
-    @staticmethod
-    def _inject_bound_datetime(
-        slots: Dict[str, Any],
-        *,
-        session_state: Optional[Dict[str, Any]],
-    ) -> Dict[str, Any]:
-        if "datetime_range" in slots and isinstance(
-            slots.get("datetime_range"), dict
-        ):
-            return slots
-
-        resolved_datetime_range = None
-        if isinstance(session_state, dict):
-            resolved_datetime_range = session_state.get("resolved_datetime_range")
-            if not resolved_datetime_range:
-                planning = session_state.get("planning")
-                if isinstance(planning, dict):
-                    resolved_datetime_range = planning.get("bound_datetime")
-
-        if resolved_datetime_range and isinstance(resolved_datetime_range, dict):
-            slots["datetime_range"] = resolved_datetime_range
-            logger.debug(
-                "[DATETIME_RANGE] Injected resolved_datetime_range into "
-                f"slots for CONFIRM_APPOINTMENT: "
-                f"start={resolved_datetime_range.get('start')}, "
-                f"end={resolved_datetime_range.get('end')}"
-            )
-        return slots
 
     def run(
         self,
