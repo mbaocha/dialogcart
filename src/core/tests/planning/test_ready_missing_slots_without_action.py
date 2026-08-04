@@ -172,10 +172,22 @@ def test_exploratory_ready_preserved_when_search_still_required():
 
 def test_reconcile_preserves_availability_reshow_presentation():
     """Explicit planner reshow remains READY + action=None (presentation)."""
+    from core.planning.pipeline.presentation_readiness import (
+        build_presentation_readiness_evidence,
+    )
     from core.planning.pipeline.stage08_decision_plan import (
         _reconcile_terminal_decision,
     )
 
+    presentation = build_presentation_readiness_evidence(
+        payload={},
+        requested_availability_reshow=True,
+        status="READY",
+        action=None,
+        action_branch="availability_reshow",
+        missing_slots=["time"],
+        ask_next="time",
+    )
     status, action, awaiting, stage, branch, reshow = _reconcile_terminal_decision(
         status="READY",
         action=None,
@@ -186,6 +198,7 @@ def test_reconcile_preserves_availability_reshow_presentation():
         action_branch="availability_reshow",
         availability_reshow=True,
         availability_browse=None,
+        presentation=presentation,
     )
     assert status == "READY"
     assert action is None
@@ -194,10 +207,23 @@ def test_reconcile_preserves_availability_reshow_presentation():
 
 
 def test_reconcile_no_planning_evidence_becomes_recovery_presentation():
+    from core.planning.pipeline.presentation_readiness import (
+        build_presentation_readiness_evidence,
+    )
     from core.planning.pipeline.stage08_decision_plan import (
         _reconcile_terminal_decision,
     )
 
+    presentation = build_presentation_readiness_evidence(
+        payload={},
+        status="READY",
+        action=None,
+        action_branch="no_execution_step",
+        missing_slots=["time"],
+        ask_next="time",
+        has_planning_evidence=False,
+        turn_understanding="UNRECOGNIZED_INPUT",
+    )
     status, action, awaiting, stage, branch, reshow = _reconcile_terminal_decision(
         status="READY",
         action=None,
@@ -208,8 +234,7 @@ def test_reconcile_no_planning_evidence_becomes_recovery_presentation():
         action_branch="no_execution_step",
         availability_reshow=False,
         availability_browse=None,
-        has_planning_evidence=False,
-        turn_understanding="UNRECOGNIZED_INPUT",
+        presentation=presentation,
     )
     assert status == "READY"
     assert action is None
@@ -220,10 +245,23 @@ def test_reconcile_no_planning_evidence_becomes_recovery_presentation():
 
 def test_reconcile_understood_no_evidence_demotes_to_clarification():
     """UNDERSTOOD + no evidence must clarify, not recovery presentation."""
+    from core.planning.pipeline.presentation_readiness import (
+        build_presentation_readiness_evidence,
+    )
     from core.planning.pipeline.stage08_decision_plan import (
         _reconcile_terminal_decision,
     )
 
+    presentation = build_presentation_readiness_evidence(
+        payload={},
+        status="READY",
+        action=None,
+        action_branch="no_execution_step",
+        missing_slots=["time"],
+        ask_next="time",
+        has_planning_evidence=False,
+        turn_understanding="UNDERSTOOD",
+    )
     status, action, awaiting, stage, branch, reshow = _reconcile_terminal_decision(
         status="READY",
         action=None,
@@ -234,8 +272,7 @@ def test_reconcile_understood_no_evidence_demotes_to_clarification():
         action_branch="no_execution_step",
         availability_reshow=False,
         availability_browse=None,
-        has_planning_evidence=False,
-        turn_understanding="UNDERSTOOD",
+        presentation=presentation,
     )
     assert status == "NEEDS_CLARIFICATION"
     assert action is None
@@ -245,10 +282,23 @@ def test_reconcile_understood_no_evidence_demotes_to_clarification():
 
 
 def test_reconcile_demotes_dead_ready_to_clarification():
+    from core.planning.pipeline.presentation_readiness import (
+        build_presentation_readiness_evidence,
+    )
     from core.planning.pipeline.stage08_decision_plan import (
         _reconcile_terminal_decision,
     )
 
+    presentation = build_presentation_readiness_evidence(
+        payload={},
+        status="READY",
+        action=None,
+        action_branch="no_execution_step",
+        missing_slots=["time"],
+        ask_next="time",
+        has_planning_evidence=True,
+        turn_understanding="UNDERSTOOD",
+    )
     status, action, awaiting, stage, branch, reshow = _reconcile_terminal_decision(
         status="READY",
         action=None,
@@ -259,8 +309,7 @@ def test_reconcile_demotes_dead_ready_to_clarification():
         action_branch="no_execution_step",
         availability_reshow=False,
         availability_browse=None,
-        has_planning_evidence=True,
-        turn_understanding="UNDERSTOOD",
+        presentation=presentation,
     )
     assert status == "NEEDS_CLARIFICATION"
     assert action is None

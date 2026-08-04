@@ -16,6 +16,11 @@ from core.planning.pipeline.clarification_readiness import (
 from core.planning.pipeline.execution_readiness import (
     build_execution_readiness_evidence,
 )
+from core.planning.pipeline.presentation_readiness import (
+    PresentationReadinessEvidence,
+    build_presentation_readiness_evidence,
+    has_planner_presentation,
+)
 from core.planning.pipeline.types import (
     AvailabilityDecision,
     CapabilityDecision,
@@ -84,31 +89,6 @@ def _derive_stage_from_status(status: str) -> Optional[str]:
     return None
 
 
-# Planner-owned presentation outcomes that keep READY with action=None.
-_PRESENTATION_ACTION_BRANCHES = frozenset(
-    {
-        "availability_reshow",
-        "cache_satisfiable_browse",
-        "recovery_presentation",
-    }
-)
-
-
-def _has_planner_presentation(
-    *,
-    action_branch: Optional[str],
-    availability_reshow: bool,
-    availability_browse: Optional[Dict[str, Any]],
-) -> bool:
-    if action_branch in _PRESENTATION_ACTION_BRANCHES:
-        return True
-    if availability_reshow and action_branch == "availability_reshow":
-        return True
-    if isinstance(availability_browse, dict) and availability_browse.get("direction"):
-        return True
-    return False
-
-
 def _reconcile_terminal_decision(
     *,
     status: str,
@@ -120,39 +100,22 @@ def _reconcile_terminal_decision(
     action_branch: Optional[str],
     availability_reshow: bool,
     availability_browse: Optional[Dict[str, Any]],
-    has_planning_evidence: bool = False,
-    turn_understanding: Optional[str] = None,
+    presentation: PresentationReadinessEvidence,
 ) -> tuple[str, Optional[str], Optional[str], Optional[str], Optional[str], bool]:
     """Final Stage 08 ownership: forbid READY + no action + missing without presentation.
+
+    Consumes presentation-readiness eligibility; still assigns outcomes.
 
     Returns:
         status, action, awaiting, stage, action_branch, availability_reshow
     """
     # Recovery presentation requires UNRECOGNIZED + no planning evidence.
     # UNDERSTOOD + no evidence continues to clarification demotion below.
-    if (
-        status == "READY"
-        and action is None
-        and missing_slots
-        and not has_planning_evidence
-        and turn_understanding == "UNRECOGNIZED_INPUT"
-        and action_branch not in _PRESENTATION_ACTION_BRANCHES
-    ):
+    if presentation.recovery_presentation_eligible:
         action_branch = "recovery_presentation"
         availability_reshow = False
         awaiting = awaiting_from_ask_next(ask_next) or awaiting
-
-    has_presentation = _has_planner_presentation(
-        action_branch=action_branch,
-        availability_reshow=availability_reshow,
-        availability_browse=availability_browse,
-    )
-    if (
-        status == "READY"
-        and action is None
-        and missing_slots
-        and not has_presentation
-    ):
+    elif presentation.unanswered_required_slots_without_presentation:
         status = "NEEDS_CLARIFICATION"
         awaiting = awaiting_from_ask_next(ask_next) or awaiting
         action_branch = "reconcile_unanswered_ask_next"
@@ -172,7 +135,7 @@ def _reconcile_terminal_decision(
         status == "READY"
         and action is None
         and missing_slots
-        and not _has_planner_presentation(
+        and not has_planner_presentation(
             action_branch=action_branch,
             availability_reshow=availability_reshow,
             availability_browse=availability_browse,
@@ -275,9 +238,14 @@ def build_decision_plan_from_evidence(
     if not time_match_outcome and isinstance(time_resolution, dict):
         time_match_outcome = time_resolution.get("outcome")
 
-    allow_availability_reshow = bool(
-        confirmation.availability_reshow and not clarification.block_auto_reshow
+    presentation_early = build_presentation_readiness_evidence(
+        payload=payload,
+        session_state=session_state,
+        requested_availability_reshow=confirmation.availability_reshow,
+        block_auto_reshow=clarification.block_auto_reshow,
     )
+    allow_availability_reshow = presentation_early.availability_reshow_allowed
+    cache_satisfiable_browse = presentation_early.cache_satisfiable_browse_dict()
 
     if allow_availability_reshow:
         status = "READY"
@@ -414,11 +382,7 @@ def build_decision_plan_from_evidence(
 
             # Invariant: cache-satisfiable page browse must never select SEARCH.
             # Absolute dates / temporal criterion changes always SEARCH.
-            from core.workflows.availability.browse import (
-                cache_satisfiable_browse_request,
-            )
-
-            browse = cache_satisfiable_browse_request(payload, session_state)
+            browse = cache_satisfiable_browse
             if action == "SEARCH_AVAILABILITY" and browse:
                 action = None
                 policy_client = None
@@ -470,6 +434,22 @@ def build_decision_plan_from_evidence(
     if not isinstance(browse_on_payload, dict):
         browse_on_payload = None
 
+    presentation = build_presentation_readiness_evidence(
+        payload=payload,
+        session_state=session_state,
+        requested_availability_reshow=confirmation.availability_reshow,
+        block_auto_reshow=clarification.block_auto_reshow,
+        status=status,
+        action=action,
+        action_branch=action_branch,
+        missing_slots=missing_slots,
+        promptable_slots=promptable_slots,
+        ask_next=ask_next,
+        has_planning_evidence=has_planning_evidence,
+        turn_understanding=turn_understanding,
+        availability_browse=browse_on_payload,
+    )
+
     (
         status,
         action,
@@ -487,23 +467,26 @@ def build_decision_plan_from_evidence(
         action_branch=action_branch,
         availability_reshow=allow_availability_reshow,
         availability_browse=browse_on_payload,
-        has_planning_evidence=has_planning_evidence,
-        turn_understanding=turn_understanding,
+        presentation=presentation,
     )
 
     # Promptable-only clarification (required complete, optional offer open).
-    if (
-        status == "READY"
-        and action is None
-        and not missing_slots
-        and promptable_slots
-        and ask_next in promptable_slots
-        and not _has_planner_presentation(
-            action_branch=action_branch,
-            availability_reshow=allow_availability_reshow,
-            availability_browse=browse_on_payload,
-        )
-    ):
+    presentation_after = build_presentation_readiness_evidence(
+        payload=payload,
+        session_state=session_state,
+        requested_availability_reshow=allow_availability_reshow,
+        block_auto_reshow=False,
+        status=status,
+        action=action,
+        action_branch=action_branch,
+        missing_slots=missing_slots,
+        promptable_slots=promptable_slots,
+        ask_next=ask_next,
+        has_planning_evidence=has_planning_evidence,
+        turn_understanding=turn_understanding,
+        availability_browse=browse_on_payload,
+    )
+    if presentation_after.promptable_optional_eligible:
         status = "NEEDS_CLARIFICATION"
         awaiting = awaiting_from_ask_next(ask_next) or awaiting
         action_branch = action_branch or "promptable_optional"
