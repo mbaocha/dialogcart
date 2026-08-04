@@ -24,7 +24,7 @@ from core.planning.pipeline.stage07_capability import resolve_capability_gating
 from core.planning.pipeline.stage09_outcome import assemble_planning_outcome
 from core.planning.pipeline.types import WorkingTurn
 from core.session.confirmation_gate import ConfirmationGateTurn
-from core.session.invalidation import apply_confirmation_planning_mutations
+from core.planning.planning_mutations import apply_confirmation_planning_mutations
 
 
 def _attached_request_from_payload(

@@ -480,7 +480,8 @@ def _promote_and_bind(
         from core.planning.temporal_proposal import try_bind_offered_time_selection
         from core.planning.booking_revision import detect_booking_revision
         from core.session.confirmation_gate import get_confirmation_state
-        from core.session.invalidation import InvalidationTrigger, apply_invalidation
+        from core.session.invalidation import InvalidationTrigger
+        from core.planning.planning_mutations import apply_trigger
 
         revision = detect_booking_revision(
             merged,
@@ -495,7 +496,7 @@ def _promote_and_bind(
         if revision.any:
             current_turn_promoted_slots = dict(promoted_slots)
             merged["slots"] = dict(promoted_slots)
-            apply_invalidation(
+            apply_trigger(
                 merged,
                 InvalidationTrigger.BOOKING_REVISION,
                 revision=revision,
@@ -592,7 +593,7 @@ def _promote_and_bind(
 
             merged["time_match_outcome"] = TIME_MATCH_EXACT
             # Fresh bind replaces prior selection; plan_builder may re-enter pending.
-            apply_invalidation(
+            apply_trigger(
                 merged,
                 InvalidationTrigger.TIME_REBOUND,
                 reason="rebound_selection",
@@ -616,7 +617,7 @@ def _promote_and_bind(
             merged.get("date_proposal") or merged.get("time_proposal")
         ):
             if get_confirmation_state(merged) == "pending":
-                apply_invalidation(
+                apply_trigger(
                     merged,
                     InvalidationTrigger.UNBOUND_PROPOSAL_WHILE_PENDING,
                     reason="unbound_proposal_revision",
@@ -942,12 +943,10 @@ def _merge_slots_additive(
     )
     if raw_service_id_from_session:
         if current_candidates:
-            from core.session.invalidation import (
-                InvalidationTrigger,
-                apply_invalidation,
-            )
+            from core.session.invalidation import InvalidationTrigger
+            from core.planning.planning_mutations import apply_trigger
 
-            apply_invalidation(
+            apply_trigger(
                 merged,
                 InvalidationTrigger.AMBIGUOUS_SERVICE,
                 merged_slots=merged_slots,
@@ -1004,9 +1003,10 @@ def _merge_slots_additive(
         else ""
     )
     if merged_intent_name == "CREATE_APPOINTMENT" and "booking_id" in merged_slots:
-        from core.session.invalidation import InvalidationTrigger, apply_invalidation
+        from core.session.invalidation import InvalidationTrigger
+        from core.planning.planning_mutations import apply_trigger
 
-        apply_invalidation(
+        apply_trigger(
             merged,
             InvalidationTrigger.NEW_BOOKING_REQUEST,
             merged_slots=merged_slots,

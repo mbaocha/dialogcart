@@ -27,7 +27,7 @@ from core.planning.pipeline.requests import (
     build_current_request,
     build_legacy_attachment_read_report,
 )
-from core.session.invalidation import apply_confirmation_planning_mutations
+from core.planning.planning_mutations import apply_confirmation_planning_mutations
 from core.planning.pipeline.stage01_intent import reconcile_intent
 from core.planning.pipeline.stage02_working_turn import build_working_turn
 from core.planning.pipeline.stage03_revision import apply_revision_policy
