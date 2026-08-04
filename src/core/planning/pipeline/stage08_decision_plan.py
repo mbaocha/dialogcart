@@ -13,13 +13,14 @@ from core.planning.pipeline.clarification_readiness import (
     awaiting_from_ask_next,
     build_clarification_readiness_evidence,
 )
+from core.planning.pipeline.decision_finalization import (
+    build_decision_finalization_evidence,
+)
 from core.planning.pipeline.execution_readiness import (
     build_execution_readiness_evidence,
 )
 from core.planning.pipeline.presentation_readiness import (
-    PresentationReadinessEvidence,
     build_presentation_readiness_evidence,
-    has_planner_presentation,
 )
 from core.planning.pipeline.progress_clarification_readiness import (
     build_progress_clarification_evidence,
@@ -74,66 +75,6 @@ def _derive_stage_from_status(status: str) -> Optional[str]:
     if status == "NEEDS_CLARIFICATION":
         return "AVAILABILITY"
     return None
-
-
-def _reconcile_terminal_decision(
-    *,
-    status: str,
-    action: Optional[str],
-    awaiting: Optional[str],
-    stage: Optional[str],
-    missing_slots: List[str],
-    ask_next: Optional[str],
-    action_branch: Optional[str],
-    availability_reshow: bool,
-    availability_browse: Optional[Dict[str, Any]],
-    presentation: PresentationReadinessEvidence,
-) -> tuple[str, Optional[str], Optional[str], Optional[str], Optional[str], bool]:
-    """Final Stage 08 ownership: forbid READY + no action + missing without presentation.
-
-    Consumes presentation-readiness eligibility; still assigns outcomes.
-
-    Returns:
-        status, action, awaiting, stage, action_branch, availability_reshow
-    """
-    # Recovery presentation requires UNRECOGNIZED + no planning evidence.
-    # UNDERSTOOD + no evidence continues to clarification demotion below.
-    if presentation.recovery_presentation_eligible:
-        action_branch = "recovery_presentation"
-        availability_reshow = False
-        awaiting = awaiting_from_ask_next(ask_next) or awaiting
-    elif presentation.unanswered_required_slots_without_presentation:
-        status = "NEEDS_CLARIFICATION"
-        awaiting = awaiting_from_ask_next(ask_next) or awaiting
-        action_branch = "reconcile_unanswered_ask_next"
-        availability_reshow = False
-        if stage is None or stage not in ("AVAILABILITY", "CONFIRM"):
-            stage = _derive_stage_from_status(status)
-    elif (
-        status == "NEEDS_CLARIFICATION"
-        and missing_slots
-        and awaiting is None
-        and ask_next
-    ):
-        awaiting = awaiting_from_ask_next(ask_next)
-
-    # Invariant: illegal dead terminal state must never leave Decision.
-    if (
-        status == "READY"
-        and action is None
-        and missing_slots
-        and not has_planner_presentation(
-            action_branch=action_branch,
-            availability_reshow=availability_reshow,
-            availability_browse=availability_browse,
-        )
-    ):
-        raise AssertionError(
-            "Illegal planner terminal state: READY + action=None + missing_slots "
-            f"without presentation (missing={missing_slots!r}, ask_next={ask_next!r})"
-        )
-
-    return status, action, awaiting, stage, action_branch, availability_reshow
 
 
 def _apply_has_datetime_invariant(decision_plan: DecisionPlan) -> None:
@@ -424,48 +365,30 @@ def build_decision_plan_from_evidence(
         availability_browse=browse_on_payload,
     )
 
-    (
-        status,
-        action,
-        awaiting,
-        stage,
-        action_branch,
-        allow_availability_reshow,
-    ) = _reconcile_terminal_decision(
+    finalization = build_decision_finalization_evidence(
         status=status,
         action=action,
         awaiting=awaiting,
         stage=stage,
+        action_branch=action_branch,
         missing_slots=missing_slots,
         ask_next=ask_next,
-        action_branch=action_branch,
+        promptable_slots=promptable_slots,
         availability_reshow=allow_availability_reshow,
         availability_browse=browse_on_payload,
         presentation=presentation,
     )
-
-    # Promptable-only clarification (required complete, optional offer open).
-    presentation_after = build_presentation_readiness_evidence(
-        payload=payload,
-        session_state=session_state,
-        requested_availability_reshow=allow_availability_reshow,
-        block_auto_reshow=False,
-        status=status,
-        action=action,
-        action_branch=action_branch,
-        missing_slots=missing_slots,
-        promptable_slots=promptable_slots,
-        ask_next=ask_next,
-        has_planning_evidence=has_planning_evidence,
-        turn_understanding=turn_understanding,
-        availability_browse=browse_on_payload,
-    )
-    if presentation_after.promptable_optional_eligible:
-        status = "NEEDS_CLARIFICATION"
-        awaiting = awaiting_from_ask_next(ask_next) or awaiting
-        action_branch = action_branch or "promptable_optional"
-        if stage is None:
-            stage = "AVAILABILITY"
+    if finalization.violates_dead_ready_invariant:
+        raise AssertionError(
+            finalization.dead_ready_invariant_message
+            or "Illegal planner terminal state: READY without presentation"
+        )
+    status = finalization.status
+    action = finalization.action
+    awaiting = finalization.awaiting
+    stage = finalization.stage
+    action_branch = finalization.action_branch
+    allow_availability_reshow = finalization.availability_reshow
 
     allowed_actions: List[str] = []
     blocked_actions: List[str] = []

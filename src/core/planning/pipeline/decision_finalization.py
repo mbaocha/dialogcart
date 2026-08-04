@@ -1,17 +1,24 @@
-"""Decision finalization after time-resolution evidence (Phase 5).
+"""Decision finalization for Stage 08 and time-resolution plan mutations.
 
-Sole owner of planner outcome mutations driven by time-match exact/mismatch
-evidence (planning-time pre-bind mismatch and post-SEARCH execution).
+Terminal reconciliation (recovery / unanswered demotion / promptable demotion /
+dead-READY inputs) is projected as immutable ``DecisionFinalizationEvidence``.
+Stage 08 consumes that evidence when selecting final outcomes.
 
-Production and tests call ``finalize_decision_after_time_resolution`` directly.
+Time-match exact/mismatch plan mutations remain in
+``finalize_decision_after_time_resolution``.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
+from core.planning.pipeline.clarification_readiness import awaiting_from_ask_next
+from core.planning.pipeline.presentation_readiness import (
+    PresentationReadinessEvidence,
+    has_planner_presentation,
+)
 from core.planning.time_resolution import (
     TIME_MATCH_EXACT,
     TIME_MATCH_MISMATCH,
@@ -24,6 +31,133 @@ from core.session.confirmation_gate import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _derive_stage_from_status(status: str) -> Optional[str]:
+    if status == "AWAITING_CONFIRMATION":
+        return "CONFIRM"
+    if status == "NEEDS_CLARIFICATION":
+        return "AVAILABILITY"
+    return None
+
+
+@dataclass(frozen=True)
+class DecisionFinalizationEvidence:
+    """Terminal reconciliation facts Stage 08 applies when selecting outcomes.
+
+    Does not mutate payload or assemble ``DecisionPlan``.
+    """
+
+    status: str
+    action: Optional[str] = None
+    awaiting: Optional[str] = None
+    stage: Optional[str] = None
+    action_branch: Optional[str] = None
+    availability_reshow: bool = False
+    recovery_presentation_applied: bool = False
+    clarification_demotion_applied: bool = False
+    awaiting_filled_from_ask: bool = False
+    promptable_optional_demotion: bool = False
+    violates_dead_ready_invariant: bool = False
+    dead_ready_invariant_message: Optional[str] = None
+
+
+def build_decision_finalization_evidence(
+    *,
+    status: str,
+    action: Optional[str],
+    awaiting: Optional[str],
+    stage: Optional[str],
+    action_branch: Optional[str],
+    missing_slots: List[str],
+    ask_next: Optional[str],
+    promptable_slots: Optional[List[str]] = None,
+    availability_reshow: bool,
+    availability_browse: Optional[Mapping[str, Any]],
+    presentation: PresentationReadinessEvidence,
+) -> DecisionFinalizationEvidence:
+    """Compute terminal reconciliation / demotion facts without applying them."""
+    promptables = list(promptable_slots or [])
+    recovery_applied = False
+    clarification_demotion = False
+    awaiting_filled = False
+    promptable_demotion = False
+
+    # Recovery presentation requires UNRECOGNIZED + no planning evidence.
+    # UNDERSTOOD + no evidence continues to clarification demotion below.
+    if presentation.recovery_presentation_eligible:
+        action_branch = "recovery_presentation"
+        availability_reshow = False
+        awaiting = awaiting_from_ask_next(ask_next) or awaiting
+        recovery_applied = True
+    elif presentation.unanswered_required_slots_without_presentation:
+        status = "NEEDS_CLARIFICATION"
+        awaiting = awaiting_from_ask_next(ask_next) or awaiting
+        action_branch = "reconcile_unanswered_ask_next"
+        availability_reshow = False
+        clarification_demotion = True
+        if stage is None or stage not in ("AVAILABILITY", "CONFIRM"):
+            stage = _derive_stage_from_status(status)
+    elif (
+        status == "NEEDS_CLARIFICATION"
+        and missing_slots
+        and awaiting is None
+        and ask_next
+    ):
+        awaiting = awaiting_from_ask_next(ask_next)
+        awaiting_filled = True
+
+    # Promptable-only clarification (required complete, optional offer open).
+    if (
+        status == "READY"
+        and action is None
+        and not missing_slots
+        and promptables
+        and ask_next in promptables
+        and not has_planner_presentation(
+            action_branch=action_branch,
+            availability_reshow=availability_reshow,
+            availability_browse=availability_browse,
+        )
+    ):
+        status = "NEEDS_CLARIFICATION"
+        awaiting = awaiting_from_ask_next(ask_next) or awaiting
+        action_branch = action_branch or "promptable_optional"
+        promptable_demotion = True
+        if stage is None:
+            stage = "AVAILABILITY"
+
+    violates = bool(
+        status == "READY"
+        and action is None
+        and missing_slots
+        and not has_planner_presentation(
+            action_branch=action_branch,
+            availability_reshow=availability_reshow,
+            availability_browse=availability_browse,
+        )
+    )
+    invariant_message = None
+    if violates:
+        invariant_message = (
+            "Illegal planner terminal state: READY + action=None + missing_slots "
+            f"without presentation (missing={missing_slots!r}, ask_next={ask_next!r})"
+        )
+
+    return DecisionFinalizationEvidence(
+        status=status,
+        action=action,
+        awaiting=awaiting,
+        stage=stage,
+        action_branch=action_branch,
+        availability_reshow=availability_reshow,
+        recovery_presentation_applied=recovery_applied,
+        clarification_demotion_applied=clarification_demotion,
+        awaiting_filled_from_ask=awaiting_filled,
+        promptable_optional_demotion=promptable_demotion,
+        violates_dead_ready_invariant=violates,
+        dead_ready_invariant_message=invariant_message,
+    )
 
 
 @dataclass(frozen=True)

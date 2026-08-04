@@ -172,11 +172,11 @@ def test_exploratory_ready_preserved_when_search_still_required():
 
 def test_reconcile_preserves_availability_reshow_presentation():
     """Explicit planner reshow remains READY + action=None (presentation)."""
+    from core.planning.pipeline.decision_finalization import (
+        build_decision_finalization_evidence,
+    )
     from core.planning.pipeline.presentation_readiness import (
         build_presentation_readiness_evidence,
-    )
-    from core.planning.pipeline.stage08_decision_plan import (
-        _reconcile_terminal_decision,
     )
 
     presentation = build_presentation_readiness_evidence(
@@ -188,30 +188,31 @@ def test_reconcile_preserves_availability_reshow_presentation():
         missing_slots=["time"],
         ask_next="time",
     )
-    status, action, awaiting, stage, branch, reshow = _reconcile_terminal_decision(
+    finalization = build_decision_finalization_evidence(
         status="READY",
         action=None,
         awaiting=None,
         stage="AVAILABILITY",
+        action_branch="availability_reshow",
         missing_slots=["time"],
         ask_next="time",
-        action_branch="availability_reshow",
         availability_reshow=True,
         availability_browse=None,
         presentation=presentation,
     )
-    assert status == "READY"
-    assert action is None
-    assert branch == "availability_reshow"
-    assert reshow is True
+    assert finalization.status == "READY"
+    assert finalization.action is None
+    assert finalization.action_branch == "availability_reshow"
+    assert finalization.availability_reshow is True
+    assert finalization.violates_dead_ready_invariant is False
 
 
 def test_reconcile_no_planning_evidence_becomes_recovery_presentation():
+    from core.planning.pipeline.decision_finalization import (
+        build_decision_finalization_evidence,
+    )
     from core.planning.pipeline.presentation_readiness import (
         build_presentation_readiness_evidence,
-    )
-    from core.planning.pipeline.stage08_decision_plan import (
-        _reconcile_terminal_decision,
     )
 
     presentation = build_presentation_readiness_evidence(
@@ -224,32 +225,33 @@ def test_reconcile_no_planning_evidence_becomes_recovery_presentation():
         has_planning_evidence=False,
         turn_understanding="UNRECOGNIZED_INPUT",
     )
-    status, action, awaiting, stage, branch, reshow = _reconcile_terminal_decision(
+    finalization = build_decision_finalization_evidence(
         status="READY",
         action=None,
         awaiting=None,
         stage="AVAILABILITY",
+        action_branch="no_execution_step",
         missing_slots=["time"],
         ask_next="time",
-        action_branch="no_execution_step",
         availability_reshow=False,
         availability_browse=None,
         presentation=presentation,
     )
-    assert status == "READY"
-    assert action is None
-    assert branch == "recovery_presentation"
-    assert awaiting == "time"
-    assert reshow is False
+    assert finalization.status == "READY"
+    assert finalization.action is None
+    assert finalization.action_branch == "recovery_presentation"
+    assert finalization.awaiting == "time"
+    assert finalization.availability_reshow is False
+    assert finalization.recovery_presentation_applied is True
 
 
 def test_reconcile_understood_no_evidence_demotes_to_clarification():
     """UNDERSTOOD + no evidence must clarify, not recovery presentation."""
+    from core.planning.pipeline.decision_finalization import (
+        build_decision_finalization_evidence,
+    )
     from core.planning.pipeline.presentation_readiness import (
         build_presentation_readiness_evidence,
-    )
-    from core.planning.pipeline.stage08_decision_plan import (
-        _reconcile_terminal_decision,
     )
 
     presentation = build_presentation_readiness_evidence(
@@ -262,31 +264,32 @@ def test_reconcile_understood_no_evidence_demotes_to_clarification():
         has_planning_evidence=False,
         turn_understanding="UNDERSTOOD",
     )
-    status, action, awaiting, stage, branch, reshow = _reconcile_terminal_decision(
+    finalization = build_decision_finalization_evidence(
         status="READY",
         action=None,
         awaiting=None,
         stage="AVAILABILITY",
+        action_branch="no_execution_step",
         missing_slots=["time"],
         ask_next="time",
-        action_branch="no_execution_step",
         availability_reshow=False,
         availability_browse=None,
         presentation=presentation,
     )
-    assert status == "NEEDS_CLARIFICATION"
-    assert action is None
-    assert awaiting == "time"
-    assert branch == "reconcile_unanswered_ask_next"
-    assert reshow is False
+    assert finalization.status == "NEEDS_CLARIFICATION"
+    assert finalization.action is None
+    assert finalization.awaiting == "time"
+    assert finalization.action_branch == "reconcile_unanswered_ask_next"
+    assert finalization.availability_reshow is False
+    assert finalization.clarification_demotion_applied is True
 
 
 def test_reconcile_demotes_dead_ready_to_clarification():
+    from core.planning.pipeline.decision_finalization import (
+        build_decision_finalization_evidence,
+    )
     from core.planning.pipeline.presentation_readiness import (
         build_presentation_readiness_evidence,
-    )
-    from core.planning.pipeline.stage08_decision_plan import (
-        _reconcile_terminal_decision,
     )
 
     presentation = build_presentation_readiness_evidence(
@@ -299,20 +302,20 @@ def test_reconcile_demotes_dead_ready_to_clarification():
         has_planning_evidence=True,
         turn_understanding="UNDERSTOOD",
     )
-    status, action, awaiting, stage, branch, reshow = _reconcile_terminal_decision(
+    finalization = build_decision_finalization_evidence(
         status="READY",
         action=None,
         awaiting=None,
         stage="AVAILABILITY",
+        action_branch="no_execution_step",
         missing_slots=["time"],
         ask_next="time",
-        action_branch="no_execution_step",
         availability_reshow=False,
         availability_browse=None,
         presentation=presentation,
     )
-    assert status == "NEEDS_CLARIFICATION"
-    assert action is None
-    assert awaiting == "time"
-    assert branch == "reconcile_unanswered_ask_next"
-    assert reshow is False
+    assert finalization.status == "NEEDS_CLARIFICATION"
+    assert finalization.action is None
+    assert finalization.awaiting == "time"
+    assert finalization.action_branch == "reconcile_unanswered_ask_next"
+    assert finalization.availability_reshow is False
