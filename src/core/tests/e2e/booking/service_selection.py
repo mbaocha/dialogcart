@@ -5,13 +5,13 @@
 #
 # ✓ Valid
 # ✓ Revision
+# ✓ Interruptions
+# ✓ Invalid
 # ✓ Recovery
 #
 # TODO
 #
 # □ References
-# □ Interruptions
-# □ Invalid
 # ============================================================
 
 from __future__ import annotations
@@ -243,11 +243,142 @@ _register(
 # ============================================================
 # INTERRUPTIONS
 # ============================================================
-# (no scenarios in this section yet)
+_register(
+    Scenario(
+        "Off-topic during service clarification then premium",
+        Turn(
+            "book haircut",
+            Expect(
+                response_status="NEEDS_CLARIFICATION",
+                planner="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+                missing_slots=["service_id"],
+                response_text_present=True,
+            ),
+            after=_assert_no_search_yet,
+        ),
+        Turn(
+            "Who is the president of Nigeria?",
+            Expect(
+                response_status="OFF_TOPIC",
+                intent="CREATE_APPOINTMENT",
+                missing_slots=["service_id"],
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_assert_no_search_yet,
+        ),
+        Turn(
+            "premium",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                confirmation=None,
+            ),
+            after=_assert_no_booking_single_search,
+        ),
+        fixture="scripted_off_topic",
+        tags=["booking", "service-selection", "off_topic", "interruption"],
+        id="off-topic-during-service-then-premium",
+    )
+)
+
+_register(
+    Scenario(
+        "FAQ during service clarification then premium",
+        Turn(
+            "book haircut",
+            Expect(
+                response_status="NEEDS_CLARIFICATION",
+                planner="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+                missing_slots=["service_id"],
+                response_text_present=True,
+            ),
+            after=_assert_no_search_yet,
+        ),
+        Turn(
+            "how much does a haircut cost?",
+            Expect(
+                response_status="HANDLER_DELEGATED",
+                intent="CREATE_APPOINTMENT",
+                missing_slots=["service_id"],
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_assert_no_search_yet,
+        ),
+        Turn(
+            "premium",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                confirmation=None,
+            ),
+            after=_assert_no_booking_single_search,
+        ),
+        fixture="scripted_off_topic",
+        tags=["booking", "service-selection", "faq", "interruption"],
+        id="faq-during-service-then-premium",
+    )
+)
 # ============================================================
 # INVALID INPUT
 # ============================================================
-# (no scenarios in this section yet)
+_register(
+    Scenario(
+        "Invalid during service clarification then premium",
+        Turn(
+            "book haircut",
+            Expect(
+                response_status="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+                missing_slots=["service_id"],
+            ),
+            after=_assert_no_search_yet,
+        ),
+        Turn(
+            "aaa",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                missing_slots=["service_id"],
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_assert_no_search_yet,
+        ),
+        Turn(
+            "premium",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                confirmation=None,
+            ),
+            after=_assert_no_booking_single_search,
+        ),
+        fixture="scripted_off_topic",
+        tags=["booking", "service-selection", "invalid", "recovery"],
+        id="invalid-during-service-then-premium",
+    )
+)
 # ============================================================
 # RECOVERY
 # ============================================================

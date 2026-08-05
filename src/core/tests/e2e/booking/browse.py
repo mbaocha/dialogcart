@@ -4,12 +4,12 @@
 # Covered
 #
 # ✓ Valid
+# ✓ Interruptions
 #
 # TODO
 #
 # □ References
 # □ Revision
-# □ Interruptions
 # □ Invalid
 # □ Recovery
 # ============================================================
@@ -550,7 +550,52 @@ _register(
 # ============================================================
 # INTERRUPTIONS
 # ============================================================
-# (no scenarios in this section yet)
+_register(
+    Scenario(
+        "Off-topic during browse preserves offers without search",
+        Turn(
+            "Book me haircut",
+            Expect(
+                response_status="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+            ),
+        ),
+        Turn(
+            "Premium",
+            Expect(
+                action="SEARCH_AVAILABILITY",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution_type="availability",
+                has_availability_slots=True,
+            ),
+            after=_capture_searches,
+        ),
+        Turn(
+            "Are there more times?",
+            Expect(
+                action=None,
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+            ),
+            after=_assert_no_extra_search,
+        ),
+        Turn(
+            "Who is the president of Nigeria?",
+            Expect(
+                response_status="OFF_TOPIC",
+                action=None,
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_assert_no_extra_search,
+        ),
+        fixture="scripted_off_topic",
+        tags=["browse", "off_topic", "interruption"],
+        id="off-topic-during-browse-preserves",
+    )
+)
 # ============================================================
 # INVALID INPUT
 # ============================================================

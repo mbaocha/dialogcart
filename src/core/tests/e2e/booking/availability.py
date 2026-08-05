@@ -8,10 +8,8 @@
 # ✓ Revision
 # ✓ Interruptions
 # ✓ Invalid
+# ✓ Recovery
 #
-# TODO
-#
-# □ Recovery
 # ============================================================
 
 from __future__ import annotations
@@ -763,4 +761,162 @@ _register(
 # ============================================================
 # RECOVERY
 # ============================================================
-# (no scenarios in this section yet)
+_register(
+    Scenario(
+        "Invalid after times then valid time binds",
+        Turn(
+            "book me a premium haircut",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                confirmation=None,
+            ),
+            after=_capture_post_availability_baseline,
+        ),
+        Turn(
+            "xxxxx",
+            Expect(
+                planner="READY",
+                action=None,
+                intent="CREATE_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": PREMIUM_SERVICE},
+                missing_slots=["time"],
+                response_text_present=True,
+            ),
+            after=_assert_invalid_time_explains_and_reshows,
+        ),
+        Turn(
+            "1.30",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                planner="AWAITING_CONFIRMATION",
+                stage="CONFIRM",
+                awaiting="USER_CONFIRMATION",
+                action=None,
+                intent="CREATE_APPOINTMENT",
+                confirmation="pending",
+                time_match=TIME_MATCH_EXACT,
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "13:30"},
+                missing_slots=[],
+            ),
+            after=_assert_dotted_time_bound("1.30"),
+        ),
+        fixture="scripted_dotted_time_selection",
+        tags=["booking", "availability", "recovery"],
+        id="invalid-after-times-then-valid-time",
+    )
+)
+
+_register(
+    Scenario(
+        "Off-topic after times then valid time binds",
+        Turn(
+            "book me a premium haircut",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                confirmation=None,
+            ),
+            after=_capture_post_availability_baseline,
+        ),
+        Turn(
+            "Does a lion lay eggs?",
+            Expect(
+                response_status="OFF_TOPIC",
+                action=None,
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_assert_no_booking,
+        ),
+        Turn(
+            "1.30",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                planner="AWAITING_CONFIRMATION",
+                stage="CONFIRM",
+                awaiting="USER_CONFIRMATION",
+                action=None,
+                intent="CREATE_APPOINTMENT",
+                confirmation="pending",
+                time_match=TIME_MATCH_EXACT,
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "13:30"},
+                missing_slots=[],
+            ),
+            after=_assert_dotted_time_bound("1.30"),
+        ),
+        fixture="scripted_dotted_time_selection",
+        tags=["booking", "availability", "recovery", "off_topic"],
+        id="off-topic-after-times-then-valid-time",
+    )
+)
+
+_register(
+    Scenario(
+        "FAQ after times then valid time binds",
+        Turn(
+            "book me a premium haircut",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                confirmation=None,
+            ),
+            after=_capture_post_availability_baseline,
+        ),
+        Turn(
+            "how much does a haircut cost?",
+            Expect(
+                response_status="HANDLER_DELEGATED",
+                action=None,
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_assert_no_booking,
+        ),
+        Turn(
+            "1.30",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                planner="AWAITING_CONFIRMATION",
+                stage="CONFIRM",
+                awaiting="USER_CONFIRMATION",
+                action=None,
+                intent="CREATE_APPOINTMENT",
+                confirmation="pending",
+                time_match=TIME_MATCH_EXACT,
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "13:30"},
+                missing_slots=[],
+            ),
+            after=_assert_dotted_time_bound("1.30"),
+        ),
+        fixture="scripted_dotted_time_selection",
+        tags=["booking", "availability", "recovery", "faq"],
+        id="faq-after-times-then-valid-time",
+    )
+)

@@ -6,11 +6,11 @@
 # ✓ Valid
 # ✓ Revision
 # ✓ Interruptions
+# ✓ Invalid
 #
 # TODO
 #
 # □ References
-# □ Invalid
 # □ Recovery
 # ============================================================
 
@@ -457,7 +457,58 @@ _register(
 # ============================================================
 # INVALID INPUT
 # ============================================================
-# (no scenarios in this section yet)
+_register(
+    Scenario(
+        "Gibberish after commit does not create a second booking",
+        Turn(
+            "book haircut",
+            Expect(
+                response_status="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+            ),
+        ),
+        Turn(
+            "premium",
+            Expect(
+                response_status="succeeded",
+                action="SEARCH_AVAILABILITY",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                has_availability_slots=True,
+            ),
+        ),
+        Turn(
+            "10am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                confirmation="pending",
+                slot_contains={"time": "10"},
+            ),
+            after=_assert_no_booking,
+        ),
+        Turn(
+            "yes",
+            Expect(
+                action="CONFIRM_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": PREMIUM_SERVICE},
+            ),
+            after=_capture_committed_booking,
+        ),
+        Turn(
+            "asdfghjkl",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_assert_duplicate_yes_idempotent,
+        ),
+        fixture="booking",
+        tags=["booking", "completed", "invalid", "idempotency"],
+        id="gibberish-after-commit-no-second-booking",
+        requires_customer_identity=True,
+    )
+)
 # ============================================================
 # RECOVERY
 # ============================================================
