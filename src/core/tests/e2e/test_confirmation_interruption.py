@@ -12,7 +12,12 @@ from core.tests.e2e.framework.fixtures import (
     live_luma,
 )
 from core.tests.e2e.framework.runner import run_bundle
-from core.tests.e2e.scenarios.confirmation_interruption import SCENARIOS
+from core.tests.e2e.booking import (
+    CONFIRMATION_INTERRUPTION_IDS,
+    scenarios_with_ids,
+)
+
+SCENARIOS = scenarios_with_ids(CONFIRMATION_INTERRUPTION_IDS)
 
 
 @pytest.fixture(autouse=True)

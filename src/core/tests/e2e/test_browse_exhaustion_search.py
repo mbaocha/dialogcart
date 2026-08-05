@@ -12,7 +12,9 @@ from core.tests.e2e.framework.fixtures import (
     live_luma,
 )
 from core.tests.e2e.framework.runner import run_bundle
-from core.tests.e2e.scenarios.browse_exhaustion_search import SCENARIOS
+from core.tests.e2e.booking import BROWSE_EXHAUSTION_IDS, scenarios_with_ids
+
+SCENARIOS = scenarios_with_ids(BROWSE_EXHAUSTION_IDS)
 
 
 @pytest.fixture(autouse=True)

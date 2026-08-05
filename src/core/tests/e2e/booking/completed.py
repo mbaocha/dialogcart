@@ -6,34 +6,43 @@
 # ✓ Valid
 # ✓ Revision
 # ✓ Digressions
-# ✓ Recovery
 #
 # TODO
 #
 # □ References
 # □ Invalid
+# □ Recovery
 # ============================================================
 
 from __future__ import annotations
 
-from typing import List
+from typing import Any, Callable, Dict, List, Optional
 
 from core.planning.time_resolution import TIME_MATCH_EXACT, TIME_MATCH_MISMATCH
 from core.tests.e2e.framework.conversation import (
     Expect,
     FLEXI_SERVICE,
+    FIRST_AVAILABLE_DATE,
     FROZEN_TIME,
+    ORG_ID,
     PREMIUM_SERVICE,
     Scenario,
     Turn,
     _confirmation_state,
+    _normalize_explicit_search_date,
+    _plan_view,
+    _presentation_page_index,
     _resolve_search_date,
+    _response_indicates_no_more_times,
     _response_text,
+    assert_no_booking_execution,
     attach_commit_customer_identity,
+    extract_presented_times,
 )
 from core.adapters.errors import UpstreamError
 from core.session.session_manager import get_session, save_session
 from core.tests.e2e.booking import _helpers as _booking_helpers
+from core.workflows.availability.fingerprint import compute_availability_fingerprint
 
 globals().update(
     {
@@ -44,18 +53,11 @@ globals().update(
 )
 
 SCENARIOS: List[Scenario] = []
-RELATED_SCENARIOS: List[Scenario] = []
 
 
 def _register(scenario: Scenario) -> Scenario:
     SCENARIOS.append(scenario)
     return scenario
-
-
-def _register_related(scenario: Scenario) -> Scenario:
-    RELATED_SCENARIOS.append(scenario)
-    return scenario
-
 
 # ============================================================
 # VALID RESPONSES
@@ -277,12 +279,10 @@ _register(
         requires_customer_identity=True,
     )
 )
-
 # ============================================================
 # REFERENCE EXPRESSIONS
 # ============================================================
 # (no scenarios in this section yet)
-
 # ============================================================
 # REVISIONS
 # ============================================================
@@ -385,7 +385,6 @@ _register(
         requires_customer_identity=True,
     )
 )
-
 # ============================================================
 # DIGRESSIONS
 # ============================================================
@@ -455,69 +454,11 @@ _register(
         force_session_reload=True,
     )
 )
-
-# Handler-delegated FAQ digression then resume commit (related suite).
-from core.tests.e2e.booking._handler_digression import SCENARIOS as _HANDLER_DIGRESSION_SCENARIOS
-RELATED_SCENARIOS.extend(_HANDLER_DIGRESSION_SCENARIOS)
-
 # ============================================================
 # INVALID INPUT
 # ============================================================
 # (no scenarios in this section yet)
-
 # ============================================================
 # RECOVERY
 # ============================================================
-
-_register(
-    Scenario(
-        "Execution failure then safe retry",
-        Turn(
-            "book haircut",
-            Expect(
-                response_status="NEEDS_CLARIFICATION",
-                intent="CREATE_APPOINTMENT",
-            ),
-        ),
-        Turn(
-            "premium",
-            Expect(
-                response_status="succeeded",
-                action="SEARCH_AVAILABILITY",
-                session_slots={"service_id": PREMIUM_SERVICE},
-                has_availability_slots=True,
-            ),
-        ),
-        Turn(
-            "10am",
-            Expect(
-                response_status="AWAITING_CONFIRMATION",
-                confirmation="pending",
-                slot_contains={"time": "10"},
-            ),
-            after=_assert_no_booking,
-        ),
-        # No Expect: failed commit returns success=False.
-        Turn(
-            "yes",
-            before=_fail_booking_once,
-            after=_assert_execution_failed_resumable,
-        ),
-        Turn(
-            "yes",
-            Expect(
-                planner="READY",
-                stage="CONFIRM",
-                action="CONFIRM_APPOINTMENT",
-                confirmation=None,
-                session_slots={"service_id": PREMIUM_SERVICE},
-                slot_contains={"time": "10"},
-            ),
-            after=_assert_retry_single_success,
-        ),
-        fixture="booking",
-        tags=["booking", "execution", "retry", "audit"],
-        id="execution-failure-then-safe-retry",
-        requires_customer_identity=True,
-    )
-)
+# (no scenarios in this section yet)

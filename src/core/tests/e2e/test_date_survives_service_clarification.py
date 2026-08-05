@@ -12,12 +12,10 @@ from core.tests.e2e.framework.fixtures import (
     live_luma,
 )
 from core.tests.e2e.framework.runner import run_bundle
-from core.tests.e2e.scenarios.date_survives_service_clarification import (
-    JULY_20,
-    JULY_21,
-    JULY_23,
-    SCENARIOS,
-)
+from core.tests.e2e.booking import DATE_SURVIVES_IDS, scenarios_with_ids
+from core.tests.e2e.booking.service_selection import JULY_20, JULY_21, JULY_23
+
+SCENARIOS = scenarios_with_ids(DATE_SURVIVES_IDS)
 
 _DATE_PHRASES = {
     JULY_20: "July 20",

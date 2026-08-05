@@ -14,7 +14,9 @@ from core.tests.e2e.framework.fixtures import (
     live_luma,
 )
 from core.tests.e2e.framework.runner import run_bundle
-from core.tests.e2e.scenarios.handler_digression import SCENARIOS
+from core.tests.e2e.booking import HANDLER_DIGRESSION_IDS, scenarios_with_ids
+
+SCENARIOS = scenarios_with_ids(HANDLER_DIGRESSION_IDS)
 
 _FAQ_DATA = {
     "chunks": [

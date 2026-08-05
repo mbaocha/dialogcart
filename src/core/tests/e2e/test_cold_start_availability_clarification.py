@@ -12,7 +12,12 @@ from core.tests.e2e.framework.fixtures import (
     live_luma,
 )
 from core.tests.e2e.framework.runner import run_bundle
-from core.tests.e2e.scenarios.cold_start_availability_clarification import SCENARIOS
+from core.tests.e2e.booking import (
+    COLD_START_CLARIFICATION_IDS,
+    scenarios_with_ids,
+)
+
+SCENARIOS = scenarios_with_ids(COLD_START_CLARIFICATION_IDS)
 
 
 @pytest.fixture(autouse=True)

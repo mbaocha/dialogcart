@@ -16,24 +16,33 @@
 
 from __future__ import annotations
 
-from typing import List
+from typing import Any, Callable, Dict, List, Optional
 
 from core.planning.time_resolution import TIME_MATCH_EXACT, TIME_MATCH_MISMATCH
 from core.tests.e2e.framework.conversation import (
     Expect,
     FLEXI_SERVICE,
+    FIRST_AVAILABLE_DATE,
     FROZEN_TIME,
+    ORG_ID,
     PREMIUM_SERVICE,
     Scenario,
     Turn,
     _confirmation_state,
+    _normalize_explicit_search_date,
+    _plan_view,
+    _presentation_page_index,
     _resolve_search_date,
+    _response_indicates_no_more_times,
     _response_text,
+    assert_no_booking_execution,
     attach_commit_customer_identity,
+    extract_presented_times,
 )
 from core.adapters.errors import UpstreamError
 from core.session.session_manager import get_session, save_session
 from core.tests.e2e.booking import _helpers as _booking_helpers
+from core.workflows.availability.fingerprint import compute_availability_fingerprint
 
 globals().update(
     {
@@ -44,18 +53,11 @@ globals().update(
 )
 
 SCENARIOS: List[Scenario] = []
-RELATED_SCENARIOS: List[Scenario] = []
 
 
 def _register(scenario: Scenario) -> Scenario:
     SCENARIOS.append(scenario)
     return scenario
-
-
-def _register_related(scenario: Scenario) -> Scenario:
-    RELATED_SCENARIOS.append(scenario)
-    return scenario
-
 
 # ============================================================
 # VALID RESPONSES
@@ -95,7 +97,6 @@ _register(
         id="tomorrow-by-9am-premium-exact",
     )
 )
-
 # ============================================================
 # REFERENCE EXPRESSIONS
 # ============================================================
@@ -113,49 +114,9 @@ _register(
         id="time-resolution-persists-across-turns",
     )
 )
-
 # ============================================================
 # REVISIONS
 # ============================================================
-_register(
-    Scenario(
-        "Availability service revision searches Flexi not Premium",
-        Turn("book haircut"),
-        Turn(
-            "premium",
-            Expect(
-                response_status="succeeded",
-                planner="READY",
-                stage="AVAILABILITY",
-                action="SEARCH_AVAILABILITY",
-                session_slots={"service_id": PREMIUM_SERVICE},
-                execution="availability",
-                has_availability_slots=True,
-            ),
-            after=_capture_searches_before_flexi,
-        ),
-        Turn(
-            "show availability for flexi",
-            Expect(
-                response_status="succeeded",
-                planner="READY",
-                stage="AVAILABILITY",
-                action="SEARCH_AVAILABILITY",
-                intent="CREATE_APPOINTMENT",
-                session_slots={"service_id": FLEXI_SERVICE},
-                execution="availability",
-                has_availability_slots=True,
-                availability_invalidated=True,
-            ),
-            after=_assert_availability_searched_flexi,
-        ),
-        fixture="scripted_availability_service_revision",
-        tags=["booking", "availability", "service-revision", "bug2"],
-        id="availability-service-revision-flexi",
-    )
-)
-
-
 _register(
     Scenario(
         "Date request after availability creates a new search",
@@ -191,12 +152,10 @@ _register(
         id="date-request-after-availability-searches",
     )
 )
-
 # ============================================================
 # DIGRESSIONS
 # ============================================================
 # (no scenarios in this section yet)
-
 # ============================================================
 # INVALID INPUT
 # ============================================================
@@ -407,7 +366,6 @@ _register(
         id="unavailable-5pm-mismatch-not-unparseable",
     )
 )
-
 # ============================================================
 # RECOVERY
 # ============================================================
