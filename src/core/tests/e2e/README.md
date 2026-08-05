@@ -2,6 +2,9 @@
 
 Multi-turn conversation tests against the Core HTTP `/api/message` path.
 
+Booking conversation ownership and Covered/Missing inventory:
+[`BOOKING_CONVERSATION_SPEC.md`](BOOKING_CONVERSATION_SPEC.md).
+
 ## Philosophy
 
 E2E replays real production `/resolve` responses. Handwritten NLU payloads are not used.
