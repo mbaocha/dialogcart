@@ -184,7 +184,6 @@ class AttachedRequest:
     session_reset_occurred: bool
     confirm_booking_continuation: bool = False
     gate_action: Optional[ConfirmationGateTurn] = None
-    defer_confirmation_acceptance: bool = False
 
 
 def build_attached_request(intent_decision: "IntentDecision") -> AttachedRequest:
@@ -195,7 +194,6 @@ def build_attached_request(intent_decision: "IntentDecision") -> AttachedRequest
         session_reset_occurred=intent_decision.session_reset_occurred,
         confirm_booking_continuation=intent_decision.confirm_booking_continuation,
         gate_action=intent_decision.gate_action,
-        defer_confirmation_acceptance=intent_decision.defer_confirmation_acceptance,
     )
 
 

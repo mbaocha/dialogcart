@@ -52,9 +52,6 @@ def _attached_request_from_payload(
         session_reset_occurred=False,
         confirm_booking_continuation=bool(payload.get("_confirm_booking_continuation")),
         gate_action=gate_action,
-        defer_confirmation_acceptance=bool(
-            payload.get("_defer_confirmation_acceptance")
-        ),
     )
 
 

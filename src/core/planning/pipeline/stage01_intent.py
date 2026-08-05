@@ -89,26 +89,6 @@ def _session_booking_intent(session_state: Optional[Dict[str, Any]]) -> str:
 
 
 
-def _session_identity_reconfirm_required(
-    session_state: Optional[Dict[str, Any]],
-) -> bool:
-    if not isinstance(session_state, dict):
-        return False
-    if session_state.get("identity_reconfirm_required"):
-        return True
-    booking = session_state.get("booking")
-    return isinstance(booking, dict) and bool(
-        booking.get("identity_reconfirm_required")
-    )
-
-
-def _clear_session_identity_reconfirm(session_state: Dict[str, Any]) -> None:
-    session_state["identity_reconfirm_required"] = False
-    booking = session_state.get("booking")
-    if isinstance(booking, dict):
-        booking["identity_reconfirm_required"] = False
-
-
 def _session_has_committed_booking(session_state: Optional[Dict[str, Any]]) -> bool:
     from core.planning.booking_revision import has_committed_create_appointment
 
@@ -182,7 +162,6 @@ def reconcile_intent(
 
 
     confirm_booking_continuation = False
-    defer_confirmation_acceptance = False
 
 
 
@@ -191,28 +170,12 @@ def reconcile_intent(
         # Already-committed create workflow: do not re-authorize CONFIRM.
         if _session_has_committed_booking(gate_session):
             confirm_booking_continuation = False
-        elif _session_identity_reconfirm_required(gate_session):
-            # Identity just became available after CUSTOMER_ID_REQUIRED —
-            # re-present pending; do not consume this turn as the commit yes.
-            confirm_booking_continuation = False
-            defer_confirmation_acceptance = True
-            _clear_session_identity_reconfirm(gate_session)
         else:
             confirm_booking_continuation = True
 
     if gate_action == ConfirmationGateTurn.NO and gate_booking_intent:
         # Keep durable booking intent so confirmation stage can apply reject policy.
         planning_intent = gate_booking_intent
-
-    # Identity attached on a non-yes turn (e.g. "ok"): drop the one-shot flag so
-    # the next explicit yes can commit, while Stage 06 preserves pending.
-    if (
-        gate_action != ConfirmationGateTurn.YES
-        and _session_identity_reconfirm_required(gate_session)
-        and gate_session.get("customer_id") not in (None, "", 0)
-    ):
-        defer_confirmation_acceptance = True
-        _clear_session_identity_reconfirm(gate_session)
 
 
 
@@ -256,10 +219,6 @@ def reconcile_intent(
                         # Bare yes after commit must not reopen confirmation.
                         if _session_has_committed_booking(gate_session):
                             confirm_booking_continuation = False
-                        elif _session_identity_reconfirm_required(gate_session):
-                            confirm_booking_continuation = False
-                            defer_confirmation_acceptance = True
-                            _clear_session_identity_reconfirm(gate_session)
                         else:
                             confirm_booking_continuation = True
 
@@ -479,8 +438,6 @@ def reconcile_intent(
         confirm_booking_continuation=confirm_booking_continuation,
 
         gate_action=gate_action,
-
-        defer_confirmation_acceptance=defer_confirmation_acceptance,
 
     )
 

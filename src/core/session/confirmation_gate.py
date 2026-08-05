@@ -132,8 +132,7 @@ def classify_confirmation_gate_turn(
 
     The gate only owns the user's relationship to the pending confirmation.
     It does not interpret booking revisions or the next request:
-      1. YES — raw CONFIRM_ACTION, or CREATE_APPOINTMENT with no actionable
-         revision facts (NLU may label bare affirmations as CREATE_APPOINTMENT)
+      1. YES — raw CONFIRM_ACTION
       2. NO — raw REJECT_ACTION
       3. ANOTHER_REQUEST — every other turn while the gate is open
 
@@ -147,13 +146,5 @@ def classify_confirmation_gate_turn(
         return ConfirmationGateTurn.YES
     if raw_intent == "REJECT_ACTION":
         return ConfirmationGateTurn.NO
-
-    if raw_intent == "CREATE_APPOINTMENT":
-        from core.planning.booking_revision import has_actionable_booking_facts
-
-        # Same-service / empty CREATE while pending is a confirmation act, not
-        # a new booking request — keep admission aligned with CONFIRM_ACTION.
-        if not has_actionable_booking_facts(luma_response, session_state):
-            return ConfirmationGateTurn.YES
 
     return ConfirmationGateTurn.ANOTHER_REQUEST

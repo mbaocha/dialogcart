@@ -75,7 +75,6 @@ _EMPTY_SESSION_V2: Dict[str, Any] = {
     "booking": {
         "booking_id": None,
         "booking_code": None,
-        "identity_reconfirm_required": False,
     },
     "availability": {
         "fingerprint": None,
@@ -336,10 +335,6 @@ def normalize_session_to_v2(session: Optional[Mapping[str, Any]]) -> Dict[str, A
         planning["slots"].get("booking_code"),
         nested_committed.get("booking_code"),
     )
-    booking["identity_reconfirm_required"] = bool(
-        working.get("identity_reconfirm_required")
-        or nested_booking.get("identity_reconfirm_required")
-    )
     # Committed identifiers belong only to booking, never planning slots.
     planning["slots"].pop("booking_id", None)
     planning["slots"].pop("booking_code", None)
@@ -477,11 +472,6 @@ def hydrate_v1_compat_shims(v2_session: Mapping[str, Any]) -> Dict[str, Any]:
     if booking.get("booking_code") is not None:
         working.setdefault("slots", {})
         working["slots"].setdefault("booking_code", booking.get("booking_code"))
-
-    if booking.get("identity_reconfirm_required"):
-        working["identity_reconfirm_required"] = True
-    else:
-        working.pop("identity_reconfirm_required", None)
 
     # Availability mirrors are no longer hydrated: runtime consumers use
     # nested availability.* via canonical accessors.
