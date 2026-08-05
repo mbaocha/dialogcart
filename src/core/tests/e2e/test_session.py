@@ -251,5 +251,5 @@ def test_awaiting_confirmation_outcome_persists_bound_datetime_and_pending(user_
     assert resolved.get("start") == "2026-07-03T14:30:00Z"
     assert session.get("confirmation_state") == "pending"
     assert "confirmation_state" not in (session.get("booking") or {})
-    assert session.get("status") == "NEEDS_CLARIFICATION"
+    assert session.get("status") == "AWAITING_CONFIRMATION"
     assert session.get("missing_slots") == []
