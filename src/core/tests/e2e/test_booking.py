@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
+from core.session.session_manager import clear_session
+from core.tests.e2e.booking import SCENARIOS
 from core.tests.e2e.framework.conversation import ORG_ID, Expect, Scenario, Turn, coerce_turn
 from core.tests.e2e.framework.fixtures import (
     E2E_FIXTURE_PARAMS,
@@ -11,13 +15,49 @@ from core.tests.e2e.framework.fixtures import (
     live_luma,
 )
 from core.tests.e2e.framework.runner import run_bundle
-from core.tests.e2e.booking import BOOKING_RUNNER_SCENARIOS as SCENARIOS
-from core.session.session_manager import clear_session
+
+_DATE_PHRASES = {
+    # Keep TARGET_DATE (2026-07-03) as raw ISO so recorded Luma keys for
+    # dotted-time selection stay stable (legacy booking runner behaviour).
+    "2026-07-20": "July 20",
+    "2026-07-21": "July 21",
+    "2026-07-22": "July 22",
+    "2026-07-23": "July 23",
+    "2026-07-24": "July 24",
+}
+
+_FAQ_DATA = {
+    "chunks": [
+        {
+            "id": 7,
+            "source_type": "document",
+            "source_id": 12,
+            "content": "Haircuts start at $25 and include a wash.",
+            "score": 0.84,
+        }
+    ],
+    "structured_context": {
+        "business_name": "Glamour Studio",
+        "business_phone": "+1 555 000 1234",
+        "services": [
+            {
+                "name": "Haircut",
+                "type": "service",
+                "config": {"price": 25, "duration": 30},
+            }
+        ],
+        "hours": {"mon": "9am-6pm"},
+        "cancellation_policy": {"notice_hours": 24, "fee": "50%"},
+        "rescheduling_policy": None,
+        "reservations": [],
+    },
+    "no_hit": False,
+}
 
 
 @pytest.fixture(autouse=True)
 def _deterministic_booking_llm(monkeypatch):
-    """Avoid live LLM for availability / confirmation rendering in booking E2E."""
+    """Deterministic rendering for all booking conversation-state suites."""
 
     def _fake_render(request):
         from core.rendering.availability_renderer import resolve_time_mismatch_text
@@ -74,6 +114,7 @@ def _deterministic_booking_llm(monkeypatch):
                         )
                     ),
                 )
+
         # Recovery before availability: acknowledgement owns the reply; times are support.
         recovery = facts.get("recovery") if isinstance(facts.get("recovery"), dict) else {}
         if recovery:
@@ -112,42 +153,64 @@ def _deterministic_booking_llm(monkeypatch):
                 "Sorry, I didn't understand that. "
                 "Could you rephrase, or tell me how I can help?"
             )
+
         if facts.get("confirmation") or facts.get("booking_summary"):
             return "Would you like me to go ahead and book this appointment?"
+
+        browse_status = str(
+            facts.get("browse_status") or availability.get("browse_status") or ""
+        ).lower()
+        if browse_status in {"exhausted"} or "no more" in browse_status:
+            return "There are no more available times to show from your last search."
+
+        missing = facts.get("missing_slots") or getattr(request, "missing_slots", None) or []
+        if isinstance(missing, list) and "service_id" in missing:
+            return (
+                "Which service would you like me to check availability for?\n"
+                "- Premium haircut\n"
+                "- Flexi haircut + pruning"
+            )
+
+        # HANDLER_DELEGATED FAQ digression — require real FAQ chunks, not empty context.
+        chunks = facts.get("chunks") or []
+        if isinstance(chunks, list) and chunks:
+            resume = facts.get("resume_instruction")
+            text = "Haircuts start at $25 and include a wash."
+            if isinstance(resume, str) and resume.strip():
+                if "confirm" in resume.lower():
+                    text += "\n\nPlease confirm your appointment to continue."
+                else:
+                    text += "\n\nShall we continue with your booking?"
+            return text
+
         instruction = str(getattr(request, "render_instruction", "") or "").lower()
         if "missing" in instruction and "time" in instruction:
             return (
                 "I didn't quite catch which time you meant. "
                 "Could you choose one of the available times, such as 9:00 AM or 9:30 AM?"
             )
+
         date_label = str(availability.get("date") or "").strip()
+        date_phrase = _DATE_PHRASES.get(date_label, date_label)
         times = availability.get("times") or []
         if times:
             lines = "\n".join(f"- {t}" for t in times[:5])
-            if date_label == "2026-07-23":
-                date_phrase = "July 23"
-            elif date_label == "2026-07-24":
-                date_phrase = "July 24"
-            else:
-                date_phrase = date_label
             if date_phrase:
                 return (
                     f"Here are the available times for {date_phrase}:\n"
                     f"{lines}\nWhich would you like?"
                 )
             return f"Here are the available times:\n{lines}\nWhich would you like?"
-        if date_label:
-            if date_label == "2026-07-23":
-                date_phrase = "July 23"
-            elif date_label == "2026-07-24":
-                date_phrase = "July 24"
-            else:
-                date_phrase = date_label
+        if date_phrase:
             return (
                 f"Here are the available appointment times for {date_phrase}. "
                 "Which would you like?"
             )
-        return "Here are the available appointment times. Which would you like?"
+        return (
+            "Which service would you like me to check availability for?\n"
+            "- Premium haircut\n"
+            "- Flexi haircut + pruning"
+        )
 
     monkeypatch.setattr("core.rendering.llm_renderer.render_llm", _fake_render)
     monkeypatch.setattr("core.rendering.response_renderer.render_llm", _fake_render)
@@ -189,11 +252,21 @@ def _booking_scenario_params():
     ]
 
 
+def _run_with_optional_faq_mock(scenario, bundle) -> None:
+    """FaqClient mock is only required for HANDLER_DELEGATED digression."""
+    if scenario.pytest_id() == "handler-delegated-faq-resume-commit":
+        with patch("extensions.handlers.adapters.rag.FaqClient") as mock_faq:
+            mock_faq.return_value.retrieve.return_value = _FAQ_DATA
+            run_bundle(scenario, bundle)
+        return
+    run_bundle(scenario, bundle)
+
+
 @pytest.mark.parametrize("scenario", _booking_scenario_params())
 def test_booking_scenario(scenario, api_client, monkeypatch, request):
     if scenario.fixture == "booking":
         bundle = request.getfixturevalue("booking_conversation")
-        run_bundle(scenario, bundle)
+        _run_with_optional_faq_mock(scenario, bundle)
         return
 
     params = dict(E2E_FIXTURE_PARAMS.get(scenario.fixture) or {})
@@ -201,6 +274,6 @@ def test_booking_scenario(scenario, api_client, monkeypatch, request):
         api_client, monkeypatch, **params
     )
     try:
-        run_bundle(scenario, (conv, booking, availability))
+        _run_with_optional_faq_mock(scenario, (conv, booking, availability))
     finally:
         clear_session(ORG_ID, user_id)
