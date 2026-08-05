@@ -252,7 +252,7 @@ _register(
                 response_status="NEEDS_CLARIFICATION",
                 planner="NEEDS_CLARIFICATION",
                 intent="CREATE_APPOINTMENT",
-                missing_slots=["service_id"],
+                missing_slots=["service_id", "date", "time"],
                 response_text_present=True,
             ),
             after=_assert_no_search_yet,
@@ -262,7 +262,7 @@ _register(
             Expect(
                 response_status="OFF_TOPIC",
                 intent="CREATE_APPOINTMENT",
-                missing_slots=["service_id"],
+                missing_slots=["service_id", "date", "time"],
                 confirmation=None,
                 response_text_present=True,
             ),
@@ -298,7 +298,7 @@ _register(
                 response_status="NEEDS_CLARIFICATION",
                 planner="NEEDS_CLARIFICATION",
                 intent="CREATE_APPOINTMENT",
-                missing_slots=["service_id"],
+                missing_slots=["service_id", "date", "time"],
                 response_text_present=True,
             ),
             after=_assert_no_search_yet,
@@ -308,7 +308,7 @@ _register(
             Expect(
                 response_status="HANDLER_DELEGATED",
                 intent="CREATE_APPOINTMENT",
-                missing_slots=["service_id"],
+                missing_slots=["service_id", "date", "time"],
                 confirmation=None,
                 response_text_present=True,
             ),
@@ -345,7 +345,7 @@ _register(
             Expect(
                 response_status="NEEDS_CLARIFICATION",
                 intent="CREATE_APPOINTMENT",
-                missing_slots=["service_id"],
+                missing_slots=["service_id", "date", "time"],
             ),
             after=_assert_no_search_yet,
         ),
@@ -353,7 +353,7 @@ _register(
             "aaa",
             Expect(
                 intent="CREATE_APPOINTMENT",
-                missing_slots=["service_id"],
+                missing_slots=["service_id", "date", "time"],
                 confirmation=None,
                 response_text_present=True,
             ),
