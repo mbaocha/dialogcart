@@ -68,10 +68,10 @@
     },
     "intent": {
       "confidence": 0.95,
-      "name": "CREATE_APPOINTMENT"
+      "name": "CONFIRM_ACTION"
     },
     "temporal": {
-      "confidence": 0.95,
+      "confidence": 0.0,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,
@@ -84,7 +84,7 @@
       "start_time_expression": null
     },
     "turn": {
-      "understanding": "UNRECOGNIZED_INPUT"
+      "understanding": "UNDERSTOOD"
     }
   }
 }

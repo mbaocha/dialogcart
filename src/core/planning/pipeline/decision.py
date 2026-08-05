@@ -5,6 +5,8 @@ fields for a planning turn from ``DecisionInput`` evidence.
 
 Post-execution / time-resolution completion uses
 ``finalize_decision_after_time_resolution`` (Decision finalization).
+Operational execution blocks use
+``finalize_decision_after_execution_blocked``.
 """
 
 from __future__ import annotations

@@ -457,6 +457,184 @@ def _finalize_confirmation_transition(plan: Dict[str, Any], *, time_match: str) 
     _emit_decision_finalization_trace(plan, time_match=time_match)
 
 
+@dataclass(frozen=True)
+class ExecutionBlockedFinalizationEvidence:
+    """Evidence for Decision finalization after an operational execution block."""
+
+    reason: str
+    """ExecutionBlocked.reason (e.g. CUSTOMER_ID_REQUIRED)."""
+
+    required_input: Optional[str] = None
+    """Optional required_input from ExecutionBlocked."""
+
+    preserve_pending_confirmation: bool = True
+    """When True, keep confirmation_state=pending (no side effect occurred)."""
+
+
+def finalize_decision_after_execution_blocked(
+    plan: Dict[str, Any],
+    *,
+    evidence: ExecutionBlockedFinalizationEvidence,
+) -> Dict[str, Any]:
+    """Finalize planner Decision after execution blocks without a side effect.
+
+    Stage 08 may have authorized READY + a commit action. When execution then
+    returns ``ExecutionBlocked``, this seam owns the post-execution Decision
+    completion: demote to ``NEEDS_CLARIFICATION``, clear the runnable action,
+    and (for identity blocks) keep pending confirmation authorization.
+
+    Uses ``_patch_plan_container`` so outer plan, nested plan, and
+    ``plan[\"_decision\"]`` stay coherent for response builders and projection.
+
+    Mutates ``plan`` in place and returns it.
+    """
+    reason = evidence.reason
+    awaiting: Optional[str] = None
+    stage = "CONFIRM"
+    if reason == "CUSTOMER_ID_REQUIRED":
+        awaiting = evidence.required_input or "phone_or_email"
+    elif reason == "BOOKING_IDENTIFICATION_REQUIRED":
+        awaiting = evidence.required_input or "booking_identification"
+        stage = "AVAILABILITY"
+
+    # Response builders read ``plan["_decision"]``; keep it coherent with the
+    # demoted outer plan even when the dispatch copy omitted the Decision envelope.
+    if not isinstance(plan.get("_decision"), dict):
+        plan["_decision"] = {
+            "status": plan.get("status"),
+            "intent_name": plan.get("intent_name") or plan.get("intent") or "",
+            "plan": {
+                "status": plan.get("status"),
+                "stage": plan.get("stage"),
+                "action": plan.get("action"),
+                "awaiting": plan.get("awaiting"),
+            },
+            "facts": {
+                "slots": dict(plan.get("slots") or {}),
+                "missing_slots": list(plan.get("missing_slots") or []),
+            },
+        }
+
+    _patch_plan_container(
+        plan,
+        status="NEEDS_CLARIFICATION",
+        stage=stage,
+        action=None,
+        awaiting=awaiting,
+    )
+
+    if evidence.preserve_pending_confirmation:
+        merged = plan.get("_merged_luma_response")
+        if not isinstance(merged, dict):
+            merged = {}
+            plan["_merged_luma_response"] = merged
+        # No irreversible side effect — keep authorization resumable.
+        set_confirmation_state(merged, "pending")
+        set_confirmation_state(plan, "pending")
+
+    _emit_execution_blocked_finalization_trace(plan, reason=reason)
+    return plan
+
+
+def _emit_execution_blocked_finalization_trace(
+    plan: Dict[str, Any],
+    *,
+    reason: str,
+) -> None:
+    try:
+        from core.tracing.decision_trace import TurnTrace, emit_evidence, emit_mutation
+        from core.tracing.planner import (
+            PLANNER_SELECT_ACTION_ID,
+            PLANNER_SELECT_STAGE_ID,
+            PLANNER_STATUS_ID,
+        )
+    except ImportError:
+        return
+
+    trace = TurnTrace.current()
+    if trace is None:
+        return
+
+    status = plan.get("status")
+    stage = plan.get("stage")
+    action = plan.get("action")
+    awaiting = plan.get("awaiting")
+    reason_text = (
+        f"Execution blocked ({reason}); Decision demoted to clarification"
+    )
+
+    if not trace.has_record("evidence.planning.post_execution"):
+        emit_evidence(
+            "POST_EXECUTION_PLANNING",
+            subsystem="planning",
+            facts={
+                "status": status,
+                "stage": stage,
+                "action": action,
+                "awaiting": awaiting,
+                "execution_blocked_reason": reason,
+            },
+            node_id="evidence.planning.post_execution",
+            source="decision.finalize_after_execution_blocked",
+            observed_at_stage="execution",
+        )
+
+    if not trace.has_record("evidence.architecture.decision_finalization"):
+        emit_evidence(
+            "DECISION_FINALIZATION",
+            subsystem="planning",
+            facts={
+                "status": status,
+                "stage": stage,
+                "action": action,
+                "awaiting": awaiting,
+                "execution_blocked_reason": reason,
+                "observational_only": False,
+            },
+            node_id="evidence.architecture.decision_finalization",
+            source="decision_finalization",
+            observed_at_stage="architecture",
+        )
+
+    trace = TurnTrace.current()
+    if trace is None:
+        return
+
+    if trace.has_record(PLANNER_STATUS_ID) and status is not None:
+        emit_mutation(
+            PLANNER_STATUS_ID,
+            subsystem="planning",
+            field="plan.status",
+            previous="READY",
+            new=status,
+            reason_code=reason,
+            reason_text=reason_text,
+            presentation_only=True,
+        )
+    if trace.has_record(PLANNER_SELECT_ACTION_ID):
+        emit_mutation(
+            PLANNER_SELECT_ACTION_ID,
+            subsystem="planning",
+            field="plan.action",
+            previous="CONFIRM_APPOINTMENT",
+            new=action,
+            reason_code=reason,
+            reason_text=reason_text,
+            presentation_only=True,
+        )
+    if trace.has_record(PLANNER_SELECT_STAGE_ID) and stage is not None:
+        emit_mutation(
+            PLANNER_SELECT_STAGE_ID,
+            subsystem="planning",
+            field="plan.stage",
+            previous="CONFIRM",
+            new=stage,
+            reason_code=reason,
+            reason_text=reason_text,
+            presentation_only=True,
+        )
+
+
 def _emit_decision_finalization_trace(plan: Dict[str, Any], *, time_match: str) -> None:
     try:
         from core.tracing.decision_trace import TurnTrace, emit_evidence, emit_mutation

@@ -43,6 +43,37 @@ from core.policy.intent_policy import (
 logger = logging.getLogger(__name__)
 
 
+def _identity_clarification_requires_reconfirm(
+    *,
+    session_state: Optional[Dict[str, Any]],
+    action: Optional[str],
+    missing_slots: List[str],
+    confirmation_state: Optional[str],
+) -> bool:
+    """True when prior identity block must re-present confirmation this turn.
+
+    Prior Decision was ``NEEDS_CLARIFICATION`` after ``CUSTOMER_ID_REQUIRED`` while
+    confirmation stayed pending and booking criteria were already complete.
+    Customer identity is now present — re-present; do not commit on this turn.
+
+    Distinguisher vs normal pending confirm: durable session status is still
+    ``NEEDS_CLARIFICATION`` (identity demotion), not ``AWAITING_CONFIRMATION``.
+    """
+    if action != "CONFIRM_APPOINTMENT":
+        return False
+    if confirmation_state != "pending":
+        return False
+    if missing_slots:
+        return False
+    if not isinstance(session_state, dict):
+        return False
+    if session_state.get("status") != "NEEDS_CLARIFICATION":
+        return False
+    if session_state.get("customer_id") in (None, "", 0):
+        return False
+    return True
+
+
 def _availability_operation_precedes_confirm(turn_operation: Optional[str]) -> bool:
     """Explicit availability ops outrank confirm-presentation shortcuts."""
     return is_availability_turn_operation(turn_operation)
@@ -344,6 +375,26 @@ def build_decision_plan_from_evidence(
                 stage = None
             else:
                 stage = _derive_stage_from_status(status)
+
+        # Post-identity-block: criteria complete + pending + customer now present
+        # while prior Decision was clarification → re-present, do not commit yet.
+        if _identity_clarification_requires_reconfirm(
+            session_state=session_state,
+            action=action,
+            missing_slots=missing_slots,
+            confirmation_state=confirmation_state,
+        ):
+            status = "AWAITING_CONFIRMATION"
+            action = None
+            policy_client = None
+            awaiting = "USER_CONFIRMATION"
+            stage = "CONFIRM"
+            action_branch = "identity_resolved_reconfirm"
+            # Ensure durable pending survives projection (merged is authoritative).
+            from core.session.confirmation_gate import set_confirmation_state
+
+            set_confirmation_state(payload, "pending")
+            confirmation_state = "pending"
 
     browse_on_payload = payload.get("availability_browse")
     if not isinstance(browse_on_payload, dict):

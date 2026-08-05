@@ -135,10 +135,10 @@ NLU admission (invoke_nlu_for_planning / nlu_failure_fallback)
 
 ## DecisionFinalization (`decision_finalization.py`)
 
-- **Responsibility:** Complete planner fields after time-match exact/mismatch (pre-bind or post-SEARCH).
-- **Inputs:** Plan + `TimeResolutionEvidence`.
-- **Outputs:** Mutated plan (status/stage/awaiting/slots/confirmation presentation as needed).
-- **Ownership boundaries:** Post-execution / time-resolution completion of the same Decision — not a second planner.
+- **Responsibility:** Complete planner fields after time-match exact/mismatch (pre-bind or post-SEARCH), and after operational execution blocks (e.g. `CUSTOMER_ID_REQUIRED`).
+- **Inputs:** Plan + `TimeResolutionEvidence` or `ExecutionBlockedFinalizationEvidence`.
+- **Outputs:** Mutated plan (status/stage/awaiting/action/confirmation as needed), including coherent `plan["_decision"]`.
+- **Ownership boundaries:** Post-execution completion of the same Decision — not a second planner; not multi-envelope response patching.
 - **May depend on:** Time-resolution helpers, confirmation gate.
 
 ## RelationshipEvaluator (`relationship_evaluator.py`)

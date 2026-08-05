@@ -168,7 +168,21 @@ class ExecutionCoordinator:
                 "CUSTOMER_ID_REQUIRED",
                 "BOOKING_IDENTIFICATION_REQUIRED",
             ):
-                blocked_plan["status"] = "NEEDS_CLARIFICATION"
+                from core.planning.pipeline.decision_finalization import (
+                    ExecutionBlockedFinalizationEvidence,
+                    finalize_decision_after_execution_blocked,
+                )
+
+                finalize_decision_after_execution_blocked(
+                    blocked_plan,
+                    evidence=ExecutionBlockedFinalizationEvidence(
+                        reason=blocked.reason,
+                        required_input=getattr(blocked, "required_input", None),
+                        preserve_pending_confirmation=(
+                            blocked.reason == "CUSTOMER_ID_REQUIRED"
+                        ),
+                    ),
+                )
             response = build_planning_response_from_plan(blocked_plan)
             apply_execution_blocked_text(response, reason=blocked.reason)
             return ExecutionGateResult(

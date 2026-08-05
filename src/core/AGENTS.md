@@ -8,14 +8,14 @@ Extends the root [Architectural Constitution](../../AGENTS.md). Core-specific ow
 
 Orchestration between NLU, Capabilities, and the user. Applies only within Core; cross-system boundaries are in the root constitution.
 
-The production owner of each conversational turn within Core is **ConversationEngine** (`process_turn`). HTTP and compat shims prepare context and persist results; they do not own the turn pipeline.
+The production owner of each conversational turn within Core is **ConversationEngine** (`process_turn`). HTTP and compat entrypoints prepare context and persist results; they do not own the turn pipeline.
 
 ---
 
 ## Turn orchestration
 
 - The primary durable orchestration lifecycle for a turn is **Planning → Execution → Rendering**.
-- The engine sequences those stages. It must not re-implement planning, booking dispatch, or domain post-processing owned elsewhere.
+- The engine sequences those phases. It must not re-implement planning, booking dispatch, or domain post-processing owned elsewhere.
 - **Planning** produces the plan (intent, status, stage, action, slots, missing slots, and related planning artifacts).
 - **Execution** decides whether a policy-selected step runs and, when it does, performs coordination through to pre-render business outcomes.
 - **Rendering** produces the user-facing response from plan, execution, and other supplied evidence (see Rendering).
@@ -24,13 +24,14 @@ The production owner of each conversational turn within Core is **ConversationEn
 - Browse/pagination remains presentation routing after planning; it must not become a fourth durable stage.
 - Non-execute and clarification response shapes belong with outcome builders—not ad hoc in the turn owner.
 - Grow turn-lifecycle behaviour in the engine and its execution-coordination boundary—not in orchestration compat shims.
-- Observability (Decision Trace, invariant stage checks) is **orthogonal** to business logic. Tracing must not dictate business return types or orchestration APIs; emitters wrap seams owned by the subsystem that makes the decision.
+- Observability (Decision Trace, invariant checks) is **orthogonal** to business logic. Tracing must not dictate business return types or orchestration APIs; emitters wrap seams owned by the subsystem that makes the decision.
 
 ---
 
 ## Session
 
 - Core session is the **single owner of persistent booking state** (see root Ownership).
+- **Session V2 is the canonical runtime and persisted session model.** Nested sections are the source of truth for durable booking conversation state.
 - Transient state during merge, planning, or execution is a processing view—not a competing source of truth.
 - Core merges each NLU response with persisted session before planning or execution.
 - NLU produces per-turn deltas; Core retains, promotes, or discards.
@@ -40,9 +41,9 @@ The production owner of each conversational turn within Core is **ConversationEn
 
 ### Session schema V2
 
-- Persisted sessions use ``schema_version: 2`` with nested sections: ``conversation``, ``planning``, ``booking``, ``availability``, ``confirmation_state``, ``capability``.
-- V1 sessions are normalized on load; legacy top-level mirrors are hydrated in memory for existing consumers.
-- ``core.session.session_schema_v2`` owns shape, validation, and migration only—not planning or execution decisions.
+- Sessions use nested sections: ``conversation``, ``planning``, ``booking``, ``availability``, ``confirmation_state``, ``capability``.
+- Session schema modules own shape and validation only—not planning or execution decisions.
+- Historical persisted documents may be normalized into Session V2 on load; that load path is not a second runtime model.
 - **Planning** owns ``planning.*``, including ``planning.slots`` and ``planning.bound_datetime``.
 - **Execution** results are ephemeral. The projector persists only durable committed identifiers and availability artifacts.
 - **Booking** contains only successfully committed ``booking_id`` and ``booking_code`` values.
@@ -89,9 +90,9 @@ The production owner of each conversational turn within Core is **ConversationEn
 - A prior search is not trusted after booking parameters change.
 - Parameter changes require re-established availability before committing steps proceed.
 - `availability_ready` reflects trust at planning time.
-- `AvailabilityCache` is the authoritative trusted search result until invalidated. It is currently persisted using the legacy session field `last_execution_result`; that storage key is not part of the domain contract.
+- `AvailabilityCache` is the authoritative trusted search result until invalidated. It lives under Session V2 ``availability``; storage layout is not part of the domain contract.
 - `PresentedAvailability` is the current discovery/disambiguation window shown to the user.
-- Domain modules read cache and presentation via the availability presentation session adapter—not by storage-field name.
+- Domain modules read cache and presentation via canonical availability session accessors—not by inventing alternate session shapes.
 - Slot selection is hybrid: ambiguous or presentation-anchored choices resolve against the current presented availability only (never cache fallthrough); explicit complete current-turn choices may resolve against the trusted availability cache when they uniquely identify one offer; slots absent from that cache must not bind.
 - Current-turn explicit date/time provenance (`_current_turn_has_date` / `_current_turn_has_time`) distinguishes utterance facts from carried session proposals; session date alone must not activate cache selection.
 - Browse exhaustion preserves the last successful `PresentedAvailability` as the ambiguous-selection window.
@@ -119,7 +120,7 @@ Reference: [`AVAILABILITY_INTERACTION_CONTRACT.md`](orchestration/contracts/AVAI
 
 - Session merge is additive by default.
 - Durable booking slots are preserved unless an explicit invalidation rule applies.
-- Explicit state removal must go through the invalidation registry.
+- Explicit state removal must go through the invalidation registry, applied via the planning mutation boundary.
 
 ---
 
@@ -137,16 +138,36 @@ Reference: [`AVAILABILITY_INTERACTION_CONTRACT.md`](orchestration/contracts/AVAI
 - After user confirmation, policy may select a commit step (e.g. `CONFIRM_APPOINTMENT`).
 - Eligibility inputs: business facts. Sequencing: policy + generic selector. Fact computation: runtime fact registry. Conversation phase/UI: presentation fields. Slot completeness and safety checks belong to planning infrastructure—not sequencing. Whether and how `plan.action` runs belongs to **execution coordination**—not the planner.
 
-### Planning ownership model (Phase 1 — boundaries only)
+### Planning ownership model
 
-Target inputs: **Workflow**, **Current Request**, **Conversation Context** (previous Decision outputs). Evidence producers feed a pure **Relationship Evaluator**; **Decision** is the intended aggregate root for action/stage/status/next context.
+**Decision is the single owner of planning-turn outcomes** (action, status, stage, awaiting, and related plan fields). Evidence producers do not select outcomes. Post-execution / time-match completion of Decision is owned by Decision finalization—not by ad hoc writers.
+
+Target inputs: **Workflow**, **Current Request**, **Conversation Context** (previous Decision outputs). Evidence producers feed a pure **Relationship Evaluator**; Decision selects planning outcomes from that evidence.
 
 ```text
 CurrentRequest  →  Attach  →  AttachedRequest
-     (NLU)      Stage 2    (planning_intent, turn_operation, …)
+     (NLU)                 (planning_intent, turn_operation, …)
+         ↓
+Evidence producers  →  Relationship Evaluator  →  Decision
+         ↓
+[execution when selected]
+         ↓
+Decision finalization (when required)  →  Persist  →  Render
 ```
 
-Numbered Stage 01–09 modules expose the unchanged runtime order. Macro-phase classification: [`planning/pipeline/MACRO_PHASES.md`](planning/pipeline/MACRO_PHASES.md). Phase 5 completes Decision ownership: `decide()` selects planning-turn outcomes; `finalize_decision_after_time_resolution()` owns post-execution / time-match finalization. `nlu_failure_fallback` remains a planner admission boundary (pre-Attach). Decision Trace records CurrentRequest, AttachedRequest, DecisionInput, Decision, and DecisionFinalization.
+Macro-phase classification (Attach → Evaluate → Decide → finalize / render): [`planning/pipeline/MACRO_PHASES.md`](planning/pipeline/MACRO_PHASES.md). NLU failure remains a planner admission boundary before Attach. Decision Trace records CurrentRequest, AttachedRequest, DecisionInput, Decision, and DecisionFinalization.
+
+---
+
+## Mutation Boundary
+
+Planning turns separate **evidence** from **state change**.
+
+- **Evidence is immutable.** Request models, confirmation classification, revision facts, availability trust evidence, and related planning evidence describe what was observed; producers must not rewrite that evidence to encode outcomes.
+- **Working-session mutations occur only at the planning mutation boundary.** After evidence is produced, clears, restores, confirmation consumption, and related working-state writes go through the mutation coordinator—not through scattered direct invalidation calls from merge or evidence producers.
+- **Decision consumes post-mutation state.** Outcome selection reads the working turn after authorized mutations have been applied; Decision does not itself own registry-style booking clears, and evidence stages do not select final plan outcomes.
+- Invalidation **declares** trigger → clear-set rules; the mutation boundary **applies** them onto the working turn.
+- Durable persistence remains SessionProjector / session infrastructure after the turn completes—not an alternate mutation path during planning.
 
 ---
 
@@ -212,7 +233,7 @@ Booking sequencing, required slots, execution steps, step modes (exploratory/com
 - Architecture evolves through small, reviewable changes.
 - Each PR should have one clearly defined architectural objective.
 - Implement only the agreed scope for the current PR.
-- Do not implement future phases ahead of the agreed roadmap.
+- Do not implement future work ahead of the agreed roadmap.
 - If a better design is discovered, report it separately rather than implementing it.
 
 ### Minimal change principle
@@ -252,7 +273,7 @@ Decision Trace is the **primary debugging tool** for orchestration behaviour. Re
 
 - Do not add bracket-prefixed `logger.error` instrumentation for decision debugging; use Decision Trace emitters.
 - Do not extend the trace framework proactively. Record operational gaps first; improve only when a genuine blind spot is confirmed.
-- Do not implement deferred rollout phases (invariant bridge, dual-emit removal) without explicit approval driven by real debugging pain.
+- Do not implement deferred tracing rollouts without explicit approval driven by real debugging pain.
 
 ### Enable for investigation
 

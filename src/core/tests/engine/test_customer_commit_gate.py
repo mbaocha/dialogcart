@@ -58,8 +58,17 @@ def test_confirm_blocked_without_customer_id_leaves_pending():
     assert gate.can_execute is False
     assert gate.response is not None
     assert "phone" in (gate.response.get("text") or "").lower()
+    assert gate.plan.get("status") == "NEEDS_CLARIFICATION"
+    assert gate.plan.get("action") is None
+    assert (gate.response.get("outcome") or {}).get("status") == "NEEDS_CLARIFICATION"
+    assert (gate.response.get("outcome") or {}).get("action") is None
     assert get_confirmation_state(session) == "pending"
+    assert get_confirmation_state(gate.plan) == "pending"
     assert get_confirmation_state(gate.plan) != "confirmed"
+    decision = gate.plan.get("_decision")
+    assert isinstance(decision, dict)
+    assert (decision.get("plan") or {}).get("status") == "NEEDS_CLARIFICATION"
+    assert (decision.get("plan") or {}).get("action") is None
 
 
 def test_confirm_ready_with_session_customer_id():

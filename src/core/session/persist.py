@@ -430,13 +430,17 @@ def assemble_session_projection_fields(
     )
 
 
-    # Determine status
-    status = (
-        "NEEDS_CLARIFICATION"
-        if outcome_status
-        in ("NEEDS_CLARIFICATION", "AWAITING_CONFIRMATION", "AWAITING_CAPABILITY")
-        else "READY"
-    )
+    # Determine status — preserve awaiting terminals distinctly from clarification.
+    # Collapsing AWAITING_* into NEEDS_CLARIFICATION made next-turn Decision unable
+    # to tell "re-present confirmation" apart from "identity/slot clarification".
+    if outcome_status in (
+        "NEEDS_CLARIFICATION",
+        "AWAITING_CONFIRMATION",
+        "AWAITING_CAPABILITY",
+    ):
+        status = outcome_status
+    else:
+        status = "READY"
 
     # Build session state WITH missing_slots (for conversation continuity)
     # missing_slots come from the planner outcome and are persisted unchanged

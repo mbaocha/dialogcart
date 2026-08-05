@@ -7,7 +7,7 @@ and `MACRO_PHASES.md`.
 1. **Single orchestration path** — production planning turns go through `run_planning_pipeline` only.
 2. **Stages emit evidence, not outcomes** — Stages 03–07 must not select final `action` / `status` / `stage` / `awaiting`.
 3. **Decision is the sole planning-turn outcome owner** — only `decide()` / handler-delegation Decision selects planner outcomes.
-4. **DecisionFinalization owns post-execution decision completion** — time-match exact/mismatch updates go through `finalize_decision_after_time_resolution`.
+4. **DecisionFinalization owns post-execution decision completion** — time-match exact/mismatch updates go through `finalize_decision_after_time_resolution`; operational execution blocks go through `finalize_decision_after_execution_blocked`. After `CUSTOMER_ID_REQUIRED`, Decision demotes to `NEEDS_CLARIFICATION` while keeping `confirmation_state=pending`; the next turn with customer identity re-presents via Stage 08 (`identity_resolved_reconfirm`) without durable reconfirm flags.
 5. **RelationshipEvaluator is observational** — it must not influence Decision or any stage's control flow.
 6. **Request models are immutable** — `CurrentRequest` / `AttachedRequest` are frozen; later phases derive new evidence instead of mutating them.
 7. **AttachedRequest is the sole attachment read model** — do not re-derive attachment from payload flags.
