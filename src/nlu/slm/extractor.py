@@ -13,6 +13,8 @@ from typing import Any, Dict, Optional
 
 import anthropic
 
+from ..stages.shared.slot_fill_continuation import slot_fill_continuation_section
+
 logger = logging.getLogger(__name__)
 
 _MODEL = "claude-haiku-4-5-20251001"
@@ -286,19 +288,8 @@ CORRECTION guidance (ONLY when CONVERSATION CONTEXT shows an active booking inte
   "change booking" (no prior context) → MODIFY_BOOKING
   "I need to reschedule" (no prior context) → MODIFY_BOOKING
 
-SLOT-FILL continuation (ONLY when CONVERSATION CONTEXT shows Last intent OR Active booking intent
-is CREATE_APPOINTMENT, CREATE_RESERVATION, or MODIFY_BOOKING):
-  User supplies ONLY missing slot material — bare date, bare time, date range, or date+time — with
-  NO new booking/switch verb and NO correction language ("instead", "wait I meant", "actually", "no make it").
-  → Return the SAME booking intent from context (NOT UNKNOWN, NOT CORRECTION).
-  last_intent=CREATE_APPOINTMENT + "tomorrow"           → CREATE_APPOINTMENT, dates=["tomorrow"]
-  last_intent=CREATE_APPOINTMENT + "11am"               → CREATE_APPOINTMENT, times=["11:00"]
-  last_intent=CREATE_APPOINTMENT + "tomorrow at 3pm"    → CREATE_APPOINTMENT, dates=["tomorrow"], times=["15:00"]
-  last_intent=CREATE_RESERVATION + "march 10 to 15"     → CREATE_RESERVATION, dates=[start,end ISO]
-  active_booking_intent=CREATE_APPOINTMENT + "tomorrow at 5pm" (after a QUOTE/FAQ detour) → CREATE_APPOINTMENT
-  Do NOT apply when Last intent is QUOTE, GENERAL_INQUIRY, DISCOVERY, DETAILS, or other FAQ/RAG intents.
-  Do NOT apply without CONVERSATION CONTEXT (cold start).
-  Explicit booking verb in the utterance ("book", "schedule", "reserve") → classify normally, not slot-fill rule.
+SLOT-FILL continuation and CLOCK FORMS — see shared contract below (must match Stage 1):
+{slot_fill_continuation_section()}
 
 UNKNOWN examples (NO conversation context / cold start):
   "haircut tomorrow"          → UNKNOWN  (no booking verb, not a question)
@@ -325,6 +316,8 @@ Numeric format is DD/MM (day first): "04/03"→day=4,month=3→2026-03-04.
 ── TIME RULES ──────────────────────────────────────────────────────────────
 Exact times → mode=exact, start=HH:MM, end=HH:MM (same value), label=null; also in facts.times.
   ("3pm"→15:00, "9am"→09:00, "noon"→12:00, "midnight"→00:00)
+Dotted / colon clocks under an active booking intent:
+  "1.30" / "1:30" → 01:30; "1.30pm" → 13:30; "13:30" → 13:30.
 "after X" → mode=exact, start=HH:MM, end="23:59" (open-ended lower bound).
 "from X" / "by X" → mode=exact, start=end=HH:MM.
 Named windows (morning/afternoon/evening/night) → mode=fuzzy, label=<name>, times=[].

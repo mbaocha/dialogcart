@@ -18,6 +18,12 @@ With a pending confirmation ask, authorize that proposal:
   → CONFIRM_ACTION (not CREATE_APPOINTMENT / CREATE_RESERVATION) for this turn only.
   Empty context + "book it" + Stage 1 CREATE_* → keep CREATE_* (not CONFIRM_ACTION).
 
+Time-selection prompts are NOT confirmation asks:
+  "Which time works best?", "Please choose one of these available times", offered
+  clock lists, or resume-after-digression time prompts do NOT authorize CONFIRM_ACTION.
+  Clock replies ("1.30", "1:30", "1.30pm", "10am", "13:30") after those asks are
+  booking slot-fill — never CONFIRM_ACTION.
+
 Meta-questions are never CONFIRM_ACTION (a pending ask does not change this):
 Questions about state, correctness, saved/applied changes, whether the flow continues,
 or consequences of confirming stay informational — never promote to CONFIRM_ACTION.

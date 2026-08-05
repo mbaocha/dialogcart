@@ -386,6 +386,23 @@ def test_strip_unmentioned_times_preserves_bare_hour_slot_fill():
     assert result["temporal"]["start_time"] == "09:00"
 
 
+def test_strip_unmentioned_times_preserves_dotted_clock_slot_fill():
+    """Bare '1.30' / '1.30pm' must not be stripped as unmentioned times."""
+    for text, hhmm in (("1.30", "01:30"), ("1:30", "01:30"), ("1.30pm", "13:30")):
+        slm = _slm_with_leaked_time(hhmm)
+        result = _strip_unmentioned_times(text, slm)
+        assert result["facts"]["times"] == [hhmm], text
+        assert result["temporal"]["start_time"] == hhmm, text
+
+
+def test_strip_unmentioned_times_clears_price_decimal_hallucination():
+    """'price is 1.30' is not a bare clock; hallucinated times are stripped."""
+    slm = _slm_with_leaked_time("01:30")
+    result = _strip_unmentioned_times("price is 1.30", slm)
+    assert result["facts"]["times"] == []
+    assert result["temporal"]["start_time"] is None
+
+
 def test_strip_unmentioned_times_preserves_fuzzy_period():
     slm = {
         "intent": "CREATE_APPOINTMENT",

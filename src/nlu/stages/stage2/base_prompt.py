@@ -34,6 +34,9 @@ def time_rules() -> str:
     return """── TIME RULES ──────────────────────────────────────────────────────────────
 Exact times → mode=exact, start=HH:MM, end=HH:MM (same value), label=null; also in facts.times.
   ("3pm"→15:00, "9am"→09:00, "noon"→12:00, "midnight"→00:00)
+Dotted / colon clocks under an active booking intent:
+  "1.30" / "1:30" → 01:30; "1.30pm" → 13:30; "13:30" → 13:30 (facts.times + temporal).
+  Never treat these as CONFIRM_ACTION after a time-selection ask.
 "after X" → mode=exact, start=HH:MM, end="23:59".
 "from X" / "by X" → mode=exact, start=end=HH:MM.
 Named windows (morning/afternoon/evening/night) → mode=fuzzy, label=<name>, times=[].
@@ -96,6 +99,10 @@ Ambiguous examples (anchor = Tuesday 2026-07-07 local):
 
 Time resolution:
 - Exact clock → start_time HH:MM ("3pm"→15:00, "9am"→09:00, "noon"→12:00, "midnight"→00:00).
+- Dotted / colon clocks when a booking intent is active (last_intent or
+  active_booking_intent): "1.30" / "1:30" → start_time="01:30"; "1.30pm" → "13:30";
+  "13:30" → "13:30". Also put the HH:MM value in facts.times.
+  These are booking times, not decimal quantities, after a time-selection ask.
 - "after X" → start_time=HH:MM, end_time="23:59".
 - "from X" / "by X" → start_time=end_time=HH:MM.
 - Named windows → start_time_expression=morning|afternoon|evening|night; start_time/end_time null.

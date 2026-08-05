@@ -34,7 +34,7 @@
       },
       "booking_mode": "service"
     },
-    "text": "xxxxx",
+    "text": "how much does a haircut cost?",
     "timezone": "UTC"
   },
   "response": {
@@ -42,16 +42,16 @@
       "booking_id": null,
       "date_time_pairs": [],
       "dates": [],
-      "service": null,
       "service_id": "premium haircut",
       "times": []
     },
     "intent": {
-      "confidence": 0.3,
-      "name": "CREATE_APPOINTMENT"
+      "confidence": 0.95,
+      "name": "QUOTE"
     },
+    "search_query": "haircut price",
     "temporal": {
-      "confidence": 0.3,
+      "confidence": 0.95,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,
@@ -64,7 +64,7 @@
       "start_time_expression": null
     },
     "turn": {
-      "understanding": "UNRECOGNIZED_INPUT"
+      "understanding": "UNDERSTOOD"
     }
   }
 }

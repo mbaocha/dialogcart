@@ -16,6 +16,8 @@ _CONFIRM_MARKERS = (
     "HARD CONSTRAINT: CONFIRM_ACTION is valid only when CONVERSATION CONTEXT contains an",
     "Pending-only override of booking verbs",
     'Empty context + "book it" + Stage 1 CREATE_*',
+    "Time-selection prompts are NOT confirmation asks",
+    "Clock replies",
     "Meta-questions are never CONFIRM_ACTION",
     "never promote to CONFIRM_ACTION",
     'Not CONFIRM_ACTION: "Did you update it?"',

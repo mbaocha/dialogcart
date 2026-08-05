@@ -12,6 +12,7 @@ from ...registry.intent_groups import ALL_INTENTS, format_intent_registry
 from ..shared.confirm_dialog_act import confirm_action_dialog_act_section
 from ..shared.reject_dialog_act import reject_action_dialog_act_section
 from ..shared.context import format_conversation_context
+from ..shared.slot_fill_continuation import slot_fill_continuation_section
 
 _TOOL = {
     "name": "classify_intent",
@@ -51,22 +52,7 @@ Current date/time: {now}
 CLASSIFICATION RULES
 ════════════════════════════════════════
 
-SLOT-FILL CONTINUATION (active booking context only):
-When CONVERSATION CONTEXT shows last_intent or active_booking_intent is
-CREATE_APPOINTMENT, CREATE_RESERVATION, or MODIFY_BOOKING, AND the user
-does NOT express a new booking verb, correction, cancel, informational question,
-or off-topic digression:
-→ Return the SAME booking intent from context (NOT UNKNOWN, NOT CORRECTION).
-  This includes slot replies AND uninterpretable in-flow input with no competing act.
-  last_intent=CREATE_APPOINTMENT + "tomorrow"         → CREATE_APPOINTMENT
-  last_intent=CREATE_APPOINTMENT + "11am"             → CREATE_APPOINTMENT
-  last_intent=CREATE_RESERVATION + "march 10 to 15"  → CREATE_RESERVATION
-  last_intent=CREATE_APPOINTMENT + "premium"          → CREATE_APPOINTMENT  (service reply)
-  last_intent=CREATE_APPOINTMENT + "the standard one" → CREATE_APPOINTMENT  (service reply)
-  last_intent=CREATE_APPOINTMENT + "aaaa"             → CREATE_APPOINTMENT  (in-flow, no competing act)
-  last_intent=CREATE_APPOINTMENT + "tell me a joke"   → OFF_TOPIC  (off-topic digression)
-Do NOT apply without CONVERSATION CONTEXT (cold start).
-Explicit booking verb in the utterance → classify normally, not slot-fill.
+{slot_fill_continuation_section()}
 
 CONVERSATIONAL ANSWER (assistant just requested or offered values):
 When Immediately preceding assistant asked for or offered a finite set of values

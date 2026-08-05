@@ -1208,4 +1208,165 @@ booking_scenarios = [
             },
         },
     },
+    # Post-digression / recovery clock slot-fill
+    {
+        "sentence": "1.30",
+        "booking_mode": "service",
+        "aliases": {"haircut": "haircut", "premium haircut": "haircut"},
+        "conversation_context": {
+            "last_intent": "CREATE_APPOINTMENT",
+            "missing_slots": ["date", "time"],
+            "resolved_service_id": "premium haircut",
+            "turns": [
+                {
+                    "user": "book me a premium haircut",
+                    "intent": "CREATE_APPOINTMENT",
+                    "search_query": None,
+                }
+            ],
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "facts": {
+                "dates": [],
+                "times": ["01:30"],
+                "date_time_pairs": [],
+                "service_id": None,
+                "booking_id": None,
+            },
+        },
+    },
+    {
+        "sentence": "1.30",
+        "booking_mode": "service",
+        "aliases": {"haircut": "haircut", "premium haircut": "haircut"},
+        "conversation_context": {
+            "last_intent": "OFF_TOPIC",
+            "active_booking_intent": "CREATE_APPOINTMENT",
+            "missing_slots": ["time"],
+            "resolved_service_id": "premium haircut",
+            "turns": [
+                {
+                    "user": "book me a premium haircut",
+                    "intent": "CREATE_APPOINTMENT",
+                    "search_query": None,
+                },
+                {
+                    "user": "Does a lion lay eggs?",
+                    "intent": "OFF_TOPIC",
+                    "search_query": None,
+                    "assistant": (
+                        "No, lions do not lay eggs.\n\n"
+                        "Which time works best for your appointment?"
+                    ),
+                },
+            ],
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "facts": {
+                "dates": [],
+                "times": ["01:30"],
+                "date_time_pairs": [],
+                "service_id": None,
+                "booking_id": None,
+            },
+        },
+    },
+    {
+        "sentence": "1.30",
+        "booking_mode": "service",
+        "aliases": {"haircut": "haircut", "premium haircut": "haircut"},
+        "conversation_context": {
+            "last_intent": "QUOTE",
+            "last_search_query": "haircut price",
+            "active_booking_intent": "CREATE_APPOINTMENT",
+            "missing_slots": ["time"],
+            "resolved_service_id": "premium haircut",
+            "turns": [
+                {
+                    "user": "book me a premium haircut",
+                    "intent": "CREATE_APPOINTMENT",
+                    "search_query": None,
+                },
+                {
+                    "user": "how much does a haircut cost?",
+                    "intent": "QUOTE",
+                    "search_query": "haircut price",
+                    "assistant": (
+                        "A premium haircut is 34 pounds.\n\n"
+                        "Which time works best for you?"
+                    ),
+                },
+            ],
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "facts": {
+                "dates": [],
+                "times": ["01:30"],
+                "date_time_pairs": [],
+                "service_id": None,
+                "booking_id": None,
+            },
+        },
+    },
+    {
+        "sentence": "1.30",
+        "booking_mode": "service",
+        "aliases": {"haircut": "haircut", "premium haircut": "haircut"},
+        "conversation_context": {
+            "last_intent": "CREATE_APPOINTMENT",
+            "missing_slots": ["time"],
+            "resolved_service_id": "premium haircut",
+            "turns": [
+                {
+                    "user": "book me a premium haircut",
+                    "intent": "CREATE_APPOINTMENT",
+                    "search_query": None,
+                },
+                {
+                    "user": "xxxxx",
+                    "intent": "CREATE_APPOINTMENT",
+                    "search_query": None,
+                },
+            ],
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "facts": {
+                "dates": [],
+                "times": ["01:30"],
+                "date_time_pairs": [],
+                "service_id": None,
+                "booking_id": None,
+            },
+        },
+    },
+    {
+        "sentence": "price is 1.30",
+        "booking_mode": "service",
+        "aliases": {"haircut": "haircut"},
+        "conversation_context": {
+            "last_intent": "CREATE_APPOINTMENT",
+            "active_booking_intent": "CREATE_APPOINTMENT",
+            "turns": [
+                {
+                    "user": "book a haircut",
+                    "intent": "CREATE_APPOINTMENT",
+                    "search_query": None,
+                }
+            ],
+        },
+        "expected": {
+            "intent": "CREATE_APPOINTMENT",
+            "facts": {
+                "dates": [],
+                "times": [],
+                "date_time_pairs": [],
+                "service_id": None,
+                "booking_id": None,
+            },
+        },
+    },
 ]

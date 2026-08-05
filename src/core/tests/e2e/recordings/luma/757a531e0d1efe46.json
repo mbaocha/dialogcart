@@ -1,20 +1,23 @@
 {
   "key": {
     "conversation_context": {
+      "last_date_proposal": {
+        "mode": "single_day",
+        "start": "2026-07-03"
+      },
       "last_intent": "CREATE_APPOINTMENT",
       "last_search_query": null,
       "messages": [
         {
           "role": "user",
-          "text": "book me a premium haircut"
+          "text": "xxxxx"
         },
         {
           "role": "assistant",
-          "text": "Here are the available times for 2026-07-03:\n- 1:30 PM\n- 2:00 PM\n- 2:30 PM\n- 3:00 PM\n- 3:30 PM\nWhich would you like?"
+          "text": "Sorry, I didn't understand that. Please choose one of these available times:\n- 1:30 PM\n- 2:00 PM\n- 2:30 PM\n- 3:00 PM\n- 3:30 PM"
         }
       ],
       "missing_slots": [
-        "date",
         "time"
       ],
       "resolved_service_id": "premium haircut",
@@ -23,6 +26,11 @@
           "intent": "CREATE_APPOINTMENT",
           "search_query": null,
           "user": "book me a premium haircut"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "xxxxx"
         }
       ]
     },
@@ -34,7 +42,7 @@
       },
       "booking_mode": "service"
     },
-    "text": "xxxxx",
+    "text": "1.30",
     "timezone": "UTC"
   },
   "response": {
@@ -44,27 +52,35 @@
       "dates": [],
       "service": null,
       "service_id": "premium haircut",
-      "times": []
+      "times": [
+        "01:30"
+      ]
     },
     "intent": {
-      "confidence": 0.3,
+      "confidence": 0.95,
       "name": "CREATE_APPOINTMENT"
     },
     "temporal": {
-      "confidence": 0.3,
+      "confidence": 0.95,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,
       "end_time_expression": null,
-      "expression": null,
+      "expression": "1.30",
       "mode": "none",
       "start_date": null,
       "start_date_expression": null,
-      "start_time": null,
+      "start_time": "01:30",
       "start_time_expression": null
     },
+    "time_constraint": {
+      "end": "01:30",
+      "label": null,
+      "mode": "exact",
+      "start": "01:30"
+    },
     "turn": {
-      "understanding": "UNRECOGNIZED_INPUT"
+      "understanding": "UNDERSTOOD"
     }
   }
 }

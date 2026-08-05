@@ -111,20 +111,24 @@ def _text_mentions_date(text: str) -> bool:
 _FUZZY_TIME_TOKENS = {"morning", "afternoon", "evening", "night"}
 _TIME_PERIOD_TOKENS = _FUZZY_TIME_TOKENS | {"noon", "midnight"}
 
-# Explicit clock-time patterns: "3pm", "3:30 am", "15:00", "9am"
+# Explicit clock-time patterns: "3pm", "3:30 am", "15:00", "9am", "1.30pm"
+# Dotted minutes without am/pm are NOT matched here (avoids "price is 1.30");
+# bare dotted replies like "1.30" are covered by _BARE_CLOCK_UTTERANCE_RE.
 _EXPLICIT_CLOCK_RE = re.compile(
-    r"\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b|\b\d{2}:\d{2}\b",
+    r"\b\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)\b|\b\d{2}:\d{2}\b",
     re.IGNORECASE,
 )
-# "at 9", "by 12", "around 3:30", "until 5"
+# "at 9", "by 12", "around 3:30", "until 5", "at 1.30"
 _PREPOSITIONAL_HOUR_RE = re.compile(
-    r"\b(?:at|by|around|before|after|until|till|from)\s+\d{1,2}(?::\d{2})?\b",
+    r"\b(?:at|by|around|before|after|until|till|from)\s+\d{1,2}(?:[:.]\d{2})?\b",
     re.IGNORECASE,
 )
 _OCLOCK_RE = re.compile(r"\b\d{1,2}\s*o'?clock\b", re.IGNORECASE)
-# Bare hour / HH:MM as the whole utterance (slot-fill: "9", "9:30").
+# Bare hour / HH:MM / H.MM as the whole utterance (slot-fill: "9", "9:30", "1.30").
+# Optional am/pm covers "1.30pm" / "3pm" as the entire reply.
 _BARE_CLOCK_UTTERANCE_RE = re.compile(
-    r"^\s*\d{1,2}(?::\d{2})?\s*$",
+    r"^\s*\d{1,2}(?:[:.]\d{2})?\s*(?:am|pm)?\s*$",
+    re.IGNORECASE,
 )
 
 

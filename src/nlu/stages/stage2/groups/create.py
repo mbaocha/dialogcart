@@ -28,6 +28,7 @@ from ..entity_schema import (
 from ..in_flow_validation import in_flow_act_validation_rules
 from ...shared.context import format_conversation_context
 from ...shared.in_flow_act import promote_in_flow_booking_intent
+from ...shared.slot_fill_continuation import slot_fill_continuation_section
 from ....catalog import _try_pick_from_candidate_list
 from ....temporal.stage2_output import (
     empty_temporal_dict,
@@ -164,6 +165,7 @@ Extract booking slots for validated_intent only.
 
 Current date/time (tenant-local): {now}
 {ctx_section}
+{slot_fill_continuation_section()}
 {in_flow_act_validation_rules(candidate_intent)}
 
 {_booking_mode_guidance(booking_mode)}

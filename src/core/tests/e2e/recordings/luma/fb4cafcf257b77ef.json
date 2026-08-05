@@ -1,8 +1,9 @@
 {
   "key": {
     "conversation_context": {
-      "last_intent": "CREATE_APPOINTMENT",
-      "last_search_query": null,
+      "active_booking_intent": "CREATE_APPOINTMENT",
+      "last_intent": "QUOTE",
+      "last_search_query": "haircut price",
       "messages": [
         {
           "role": "user",
@@ -11,6 +12,14 @@
         {
           "role": "assistant",
           "text": "Here are the available times for 2026-07-03:\n- 1:30 PM\n- 2:00 PM\n- 2:30 PM\n- 3:00 PM\n- 3:30 PM\nWhich would you like?"
+        },
+        {
+          "role": "user",
+          "text": "how much does a haircut cost?"
+        },
+        {
+          "role": "assistant",
+          "text": "A Premium haircut is \u00a334, plus a \u00a35 reservation fee, and takes 30 minutes.\n\nSo, which of these times works best for you \u2014 1:30 PM, 2:00 PM, 2:30 PM, 3:00 PM, 3:30 PM, or 4:00 PM?"
         }
       ],
       "missing_slots": [
@@ -23,6 +32,12 @@
           "intent": "CREATE_APPOINTMENT",
           "search_query": null,
           "user": "book me a premium haircut"
+        },
+        {
+          "assistant": "A Premium haircut is \u00a334, plus a \u00a35 reservation fee, and takes 30 minutes.\n\nSo, which of these times works best for you \u2014 1:30 PM, 2:00 PM, 2:30 PM, 3:00 PM, 3:30 PM, or 4:00 PM?",
+          "intent": "QUOTE",
+          "search_query": "haircut price",
+          "user": "how much does a haircut cost?"
         }
       ]
     },
@@ -34,7 +49,7 @@
       },
       "booking_mode": "service"
     },
-    "text": "xxxxx",
+    "text": "1.30",
     "timezone": "UTC"
   },
   "response": {
@@ -44,27 +59,35 @@
       "dates": [],
       "service": null,
       "service_id": "premium haircut",
-      "times": []
+      "times": [
+        "13:30"
+      ]
     },
     "intent": {
-      "confidence": 0.3,
+      "confidence": 0.95,
       "name": "CREATE_APPOINTMENT"
     },
     "temporal": {
-      "confidence": 0.3,
+      "confidence": 0.95,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,
       "end_time_expression": null,
-      "expression": null,
+      "expression": "1.30 PM",
       "mode": "none",
       "start_date": null,
       "start_date_expression": null,
-      "start_time": null,
+      "start_time": "13:30",
       "start_time_expression": null
     },
+    "time_constraint": {
+      "end": "13:30",
+      "label": null,
+      "mode": "exact",
+      "start": "13:30"
+    },
     "turn": {
-      "understanding": "UNRECOGNIZED_INPUT"
+      "understanding": "UNDERSTOOD"
     }
   }
 }

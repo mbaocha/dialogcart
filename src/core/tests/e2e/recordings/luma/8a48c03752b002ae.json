@@ -1,8 +1,9 @@
 {
   "key": {
     "conversation_context": {
-      "last_intent": "CREATE_APPOINTMENT",
-      "last_search_query": null,
+      "active_booking_intent": "CREATE_APPOINTMENT",
+      "last_intent": "QUOTE",
+      "last_search_query": "haircut price",
       "messages": [
         {
           "role": "user",
@@ -11,6 +12,14 @@
         {
           "role": "assistant",
           "text": "Here are the available times for 2026-07-03:\n- 1:30 PM\n- 2:00 PM\n- 2:30 PM\n- 3:00 PM\n- 3:30 PM\nWhich would you like?"
+        },
+        {
+          "role": "user",
+          "text": "how much does a haircut cost?"
+        },
+        {
+          "role": "assistant",
+          "text": "A premium haircut is **\u00a334** plus a **\u00a35 reservation fee** (\u00a339 total), and takes 30 minutes.\n\nWe also offer a flexi haircut + pruning for \u00a376 plus \u00a315 reservation fee if you'd like a longer, more detailed service.\n\nWhich of these times works best for you: 1:30 PM, 2:00 PM, 2:30 PM, 3:00 PM, 3:30 PM, or 4:00 PM?"
         }
       ],
       "missing_slots": [
@@ -23,6 +32,12 @@
           "intent": "CREATE_APPOINTMENT",
           "search_query": null,
           "user": "book me a premium haircut"
+        },
+        {
+          "assistant": "A premium haircut is **\u00a334** plus a **\u00a35 reservation fee** (\u00a339 total), and takes 30 minutes.\n\nWe also offer a flexi haircut + pruning for \u00a376 plus \u00a315 reservation fee if you'd like a longer, more detailed service.\n\nWhich of these times works best for you: 1:30 PM, 2:00 PM, 2:30 PM, 3:00 PM, 3:30 PM, or 4:00 PM?",
+          "intent": "QUOTE",
+          "search_query": "haircut price",
+          "user": "how much does a haircut cost?"
         }
       ]
     },
@@ -34,7 +49,7 @@
       },
       "booking_mode": "service"
     },
-    "text": "1.30pm",
+    "text": "1.30",
     "timezone": "UTC"
   },
   "response": {
@@ -42,7 +57,7 @@
       "booking_id": null,
       "date_time_pairs": [],
       "dates": [],
-      "service": null,
+      "service": "premium haircut",
       "service_id": "premium haircut",
       "times": [
         "13:30"
@@ -53,12 +68,12 @@
       "name": "CREATE_APPOINTMENT"
     },
     "temporal": {
-      "confidence": 0.98,
+      "confidence": 0.95,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,
       "end_time_expression": null,
-      "expression": "1.30pm",
+      "expression": "1:30 PM",
       "mode": "none",
       "start_date": null,
       "start_date_expression": null,
