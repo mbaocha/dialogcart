@@ -11,7 +11,7 @@ from core.tests.e2e.framework.fixtures import (
     live_luma,
 )
 from core.tests.e2e.framework.runner import run_bundle
-from core.tests.e2e.scenarios.booking import SCENARIOS
+from core.tests.e2e.booking import SCENARIOS
 from core.session.session_manager import clear_session
 
 

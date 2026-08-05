@@ -1,0 +1,99 @@
+"""Booking E2E scenarios — service selection conversation state."""
+
+# ============================================================
+# Covered
+#
+# ✓ Valid
+# ✓ Recovery
+#
+# TODO
+#
+# □ References
+# □ Revision
+# □ Digressions
+# □ Invalid
+# ============================================================
+
+from __future__ import annotations
+
+from typing import List
+
+from core.planning.time_resolution import TIME_MATCH_EXACT, TIME_MATCH_MISMATCH
+from core.tests.e2e.framework.conversation import (
+    Expect,
+    FLEXI_SERVICE,
+    FROZEN_TIME,
+    PREMIUM_SERVICE,
+    Scenario,
+    Turn,
+    _confirmation_state,
+    _resolve_search_date,
+    _response_text,
+    attach_commit_customer_identity,
+)
+from core.adapters.errors import UpstreamError
+from core.session.session_manager import get_session, save_session
+from core.tests.e2e.booking import _helpers as _booking_helpers
+
+globals().update(
+    {
+        name: getattr(_booking_helpers, name)
+        for name in getattr(_booking_helpers, "__all__", dir(_booking_helpers))
+        if not name.startswith("__")
+    }
+)
+
+SCENARIOS: List[Scenario] = []
+RELATED_SCENARIOS: List[Scenario] = []
+
+
+def _register(scenario: Scenario) -> Scenario:
+    SCENARIOS.append(scenario)
+    return scenario
+
+
+def _register_related(scenario: Scenario) -> Scenario:
+    RELATED_SCENARIOS.append(scenario)
+    return scenario
+
+
+# ============================================================
+# VALID RESPONSES
+# ============================================================
+# Cold-start / dated availability -> service clarification (related suite).
+from core.tests.e2e.booking._cold_start_availability_clarification import (
+    SCENARIOS as _COLD_START_SCENARIOS,
+)
+RELATED_SCENARIOS.extend(_COLD_START_SCENARIOS)
+
+# ============================================================
+# REFERENCE EXPRESSIONS
+# ============================================================
+# (no scenarios in this section yet)
+
+# ============================================================
+# REVISIONS
+# ============================================================
+# (no scenarios in this section yet)
+
+# ============================================================
+# DIGRESSIONS
+# ============================================================
+# (no scenarios in this section yet)
+
+# ============================================================
+# INVALID INPUT
+# ============================================================
+# (no scenarios in this section yet)
+
+# ============================================================
+# RECOVERY
+# ============================================================
+# Explicit date must survive service clarification (related suite).
+from core.tests.e2e.booking._date_survives_service_clarification import (
+    SCENARIOS as _DATE_SURVIVES_SCENARIOS,
+    JULY_20,
+    JULY_21,
+    JULY_23,
+)
+RELATED_SCENARIOS.extend(_DATE_SURVIVES_SCENARIOS)
