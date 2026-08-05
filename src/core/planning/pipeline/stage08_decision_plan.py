@@ -58,6 +58,10 @@ def _identity_clarification_requires_reconfirm(
 
     Distinguisher vs normal pending confirm: durable session status is still
     ``NEEDS_CLARIFICATION`` (identity demotion), not ``AWAITING_CONFIRMATION``.
+
+    This branch relies on persisted AWAITING_CONFIRMATION remaining distinct from
+    NEEDS_CLARIFICATION. At present, the only commit-ready pending state persisted
+    as NEEDS_CLARIFICATION is an operational identity block.
     """
     if action != "CONFIRM_APPOINTMENT":
         return False
