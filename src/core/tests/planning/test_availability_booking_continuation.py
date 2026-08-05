@@ -180,6 +180,10 @@ def test_e2e_availability_date_refinement_after_service_resolved():
         "success": True,
         "intent": {"name": "AVAILABILITY"},
         "facts": {"dates": ["2026-07-03"], "service_id": "premium haircut"},
+        "temporal": {
+            "mode": "single_day",
+            "start_date": "2026-07-03",
+        },
         "slots": {},
         "service_candidates": [],
         "missing_slots": [],
@@ -340,7 +344,11 @@ def test_e2e_july6_search_fingerprint_and_time_selection_confirm():
     mock_luma_turn2.resolve.return_value = {
         "success": True,
         "intent": {"name": "CREATE_APPOINTMENT"},
-        "facts": {"service_id": "premium haircut"},
+        "facts": {"service_id": "premium haircut", "dates": ["2026-07-03"]},
+        "temporal": {
+            "mode": "single_day",
+            "start_date": "2026-07-03",
+        },
         "slots": {"service_id": "premium haircut"},
         "missing_slots": ["date", "time"],
         "needs_clarification": False,
@@ -364,6 +372,13 @@ def test_e2e_july6_search_fingerprint_and_time_selection_confirm():
     assert session_state is not None
     cache = availability_cache_from_session(session_state) or {}
     assert cache.get("slots")
+    fp_july3 = availability_fingerprint_from_session(session_state)
+    assert fp_july3 is not None
+    assert mock_availability_client.get_service_availability.call_count == 1
+    assert (
+        mock_availability_client.get_service_availability.call_args.kwargs.get("date")
+        == "2026-07-03"
+    )
 
     # Turn 3: July 6 availability search
     mock_luma_turn3 = Mock(spec=LumaClient)
@@ -371,6 +386,10 @@ def test_e2e_july6_search_fingerprint_and_time_selection_confirm():
         "success": True,
         "intent": {"name": "AVAILABILITY"},
         "facts": {"dates": ["2026-07-06"], "service_id": "premium haircut"},
+        "temporal": {
+            "mode": "single_day",
+            "start_date": "2026-07-06",
+        },
         "slots": {},
         "missing_slots": [],
         "needs_clarification": False,
@@ -386,29 +405,44 @@ def test_e2e_july6_search_fingerprint_and_time_selection_confirm():
         organization_id=1,
     )
     assert result3.get("success") is True, result3.get("error")
-    plan3 = result3.get("plan") or {}
+    plan3 = (
+        result3.get("plan")
+        or result3.get("result")
+        or result3.get("outcome")
+        or {}
+    )
     assert plan3.get("intent_name") == "CREATE_APPOINTMENT"
     assert plan3.get("action") == "SEARCH_AVAILABILITY"
-
-    exec_result3 = result3.get("result", {})
-    stored_fp = availability_fingerprint_from_session(
-        session_store.get_session(1, user_id)
+    assert mock_availability_client.get_service_availability.call_count == 2
+    assert (
+        mock_availability_client.get_service_availability.call_args.kwargs.get("date")
+        == "2026-07-06"
     )
-    current_fp = exec_result3.get("availability_fingerprint")
-    assert stored_fp == current_fp
 
     session_state = _persist_session_from_result(
         result3, session_state, user_id, session_store
     )
     assert session_state is not None
-    assert availability_fingerprint_from_session(session_state) == current_fp
-
+    fp_july6 = availability_fingerprint_from_session(session_state)
+    assert fp_july6 is not None
+    assert fp_july6 != fp_july3
+    cache_july6 = availability_cache_from_session(session_state) or {}
+    assert cache_july6.get("search_date") == "2026-07-06" or any(
+        str(s.get("start") or s.get("starts_at") or "").startswith("2026-07-06")
+        for s in (cache_july6.get("slots") or [])
+        if isinstance(s, dict)
+    )
     # Turn 4: 9:00 AM → bind + await confirmation (no SEARCH, no booking)
     mock_luma_turn4 = Mock(spec=LumaClient)
     mock_luma_turn4.resolve.return_value = {
         "success": True,
         "intent": {"name": "CREATE_APPOINTMENT"},
         "facts": {"times": ["9:00 AM"]},
+        "temporal": {
+            "mode": "exact",
+            "start_time": "09:00",
+            "start_time_expression": "9:00 AM",
+        },
         "slots": {},
         "missing_slots": [],
         "needs_clarification": False,
@@ -466,6 +500,7 @@ def test_e2e_july6_search_fingerprint_and_time_selection_confirm():
         session_store=session_store,
         frozen_time=frozen_time,
         organization_id=1,
+        customer_id=55,
     )
     assert result5.get("success") is True, result5.get("error")
     plan5 = result5.get("plan") or result5.get("result", {})
