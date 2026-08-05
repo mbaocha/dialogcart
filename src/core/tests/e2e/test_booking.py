@@ -157,6 +157,49 @@ def _deterministic_booking_llm(monkeypatch):
         if facts.get("confirmation") or facts.get("booking_summary"):
             return "Would you like me to go ahead and book this appointment?"
 
+        # OFF_TOPIC interruption: answer + resume guidance back into booking.
+        resume = facts.get("resume_instruction")
+        if facts.get("off_topic_query") or facts.get("answer") is not None:
+            answer = facts.get("answer") or "I can only help with bookings."
+            text = str(answer)
+            if isinstance(resume, str) and resume.strip():
+                lowered = resume.lower()
+                history = getattr(request, "conversation_history", None) or []
+                show_more = False
+                for msg in history:
+                    if not isinstance(msg, dict):
+                        continue
+                    content = str(msg.get("content") or msg.get("text") or "").lower()
+                    if "show more" in content:
+                        show_more = True
+                        break
+                show_more_clause = (
+                    ' You can also say "show more" to see additional times.'
+                    if show_more
+                    else ""
+                )
+                if "already-presented times" in lowered or (
+                    "choose a time" in lowered and "already offered" in lowered
+                ):
+                    text += (
+                        "\n\nWhich time works best for your appointment?"
+                        + show_more_clause
+                    )
+                elif "confirm" in lowered:
+                    text += "\n\nPlease confirm your appointment to continue."
+                elif "service" in lowered:
+                    text += "\n\nWhich service would you like to book?"
+                elif "date" in lowered:
+                    text += "\n\nWhich date would you like?"
+                elif "invite" in lowered:
+                    text += (
+                        "\n\nI can help you book a service or appointment "
+                        "with this business."
+                    )
+                else:
+                    text += "\n\nShall we continue with your booking?"
+            return text
+
         browse_status = str(
             facts.get("browse_status") or availability.get("browse_status") or ""
         ).lower()
@@ -196,11 +239,28 @@ def _deterministic_booking_llm(monkeypatch):
         if times:
             lines = "\n".join(f"- {t}" for t in times[:5])
             if date_phrase:
-                return (
+                text = (
                     f"Here are the available times for {date_phrase}:\n"
                     f"{lines}\nWhich would you like?"
                 )
-            return f"Here are the available times:\n{lines}\nWhich would you like?"
+            else:
+                text = f"Here are the available times:\n{lines}\nWhich would you like?"
+            more_count = availability.get("more_count") or 0
+            try:
+                more_count = int(more_count)
+            except (TypeError, ValueError):
+                more_count = 0
+            browse_hints = availability.get("browse_hints")
+            suggested = (
+                browse_hints.get("suggested_next")
+                if isinstance(browse_hints, dict)
+                else None
+            )
+            if more_count > 0 or suggested == "show more" or (
+                isinstance(browse_hints, dict) and browse_hints.get("has_more_any")
+            ):
+                text += ' You can also say "show more" to see additional times.'
+            return text
         if date_phrase:
             return (
                 f"Here are the available appointment times for {date_phrase}. "
@@ -219,6 +279,7 @@ def _deterministic_booking_llm(monkeypatch):
         _fake_render,
     )
     monkeypatch.setattr("core.rendering.recovery_renderer.render_llm", _fake_render)
+    monkeypatch.setattr("core.rendering.off_topic_renderer.render_llm", _fake_render)
 
 
 def test_conversation_dsl_expect_aliases():

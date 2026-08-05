@@ -6,7 +6,7 @@
 # ✓ Valid
 # ✓ References
 # ✓ Revision
-# ✓ Digressions
+# ✓ Interruptions
 # ✓ Recovery
 #
 # TODO
@@ -380,7 +380,7 @@ _register(
     )
 )
 # ============================================================
-# DIGRESSIONS
+# INTERRUPTIONS
 # ============================================================
 _INTERRUPTION_STATE: Dict[str, Any] = {}
 _JULY_20 = "2026-07-20"

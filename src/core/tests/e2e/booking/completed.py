@@ -5,7 +5,7 @@
 #
 # ✓ Valid
 # ✓ Revision
-# ✓ Digressions
+# ✓ Interruptions
 #
 # TODO
 #
@@ -386,7 +386,7 @@ _register(
     )
 )
 # ============================================================
-# DIGRESSIONS
+# INTERRUPTIONS
 # ============================================================
 _register(
     Scenario(
