@@ -106,7 +106,9 @@ def derive_business_facts(context: PlanningFactContext) -> BusinessFacts:
         user_confirmation_satisfied=user_confirmation_satisfied,
     )
 
-    booking_identified = _derive_booking_identified(slots)
+    booking_identified = _derive_booking_identified(
+        slots, session_state=session_state
+    )
     booking_identification_required = _derive_booking_identification_required(
         intent_name=intent_name,
         booking_identified=booking_identified,
@@ -139,6 +141,7 @@ def derive_business_facts(context: PlanningFactContext) -> BusinessFacts:
         availability_ready=availability_ready,
         time_selection_ready=time_selection_ready,
         user_confirmation_satisfied=user_confirmation_satisfied,
+        booking_identified=booking_identified,
     )
 
     awaiting_user_confirmation = (
@@ -439,9 +442,14 @@ def _derive_availability_check_required(
     return not availability_ready
 
 
-def _derive_booking_identified(slots: Dict[str, Any]) -> bool:
-    booking_id = slots.get("booking_id")
-    return booking_id is not None and booking_id != ""
+def _derive_booking_identified(
+    slots: Dict[str, Any],
+    *,
+    session_state: Optional[Dict[str, Any]] = None,
+) -> bool:
+    from core.planning.booking_revision import has_committed_create_appointment
+
+    return has_committed_create_appointment(slots, session_state=session_state)
 
 
 def _derive_booking_identification_required(
@@ -521,11 +529,12 @@ def _derive_user_confirmation_required(
     availability_ready: bool,
     time_selection_ready: bool,
     user_confirmation_satisfied: bool,
+    booking_identified: bool = False,
 ) -> bool:
     if user_confirmation_satisfied:
         return False
 
-    if intent_name == "CREATE_APPOINTMENT" and _derive_booking_identified(slots):
+    if intent_name == "CREATE_APPOINTMENT" and booking_identified:
         return False
 
     if confirmation_state == "pending":
@@ -539,6 +548,7 @@ def _derive_user_confirmation_required(
             availability_ready=availability_ready,
             time_selection_ready=time_selection_ready,
             confirmation_state=confirmation_state,
+            booking_identified=booking_identified,
         )
 
     if intent_name in _RESERVATION_INTENTS | {"MODIFY_BOOKING"}:
@@ -563,9 +573,11 @@ def _create_appointment_commit_ready_for_confirmation(
     availability_ready: bool,
     time_selection_ready: bool,
     confirmation_state: Optional[str],
+    booking_identified: bool = False,
 ) -> bool:
     """Business view of commit-ready CREATE_APPOINTMENT awaiting explicit confirmation."""
-    if _derive_booking_identified(slots):
+    _ = slots
+    if booking_identified:
         return False
     if confirmation_state is not None:
         return False

@@ -77,6 +77,32 @@ class SessionProjectorV2:
                 return None
             working = hydrate_v1_compat_shims(pure_v2)
 
+        prior_for_auth = previous_session_state or working_session_state
+        from core.session.confirmation_gate import (
+            get_confirmation_state as _get_conf,
+            set_confirmation_state as _set_conf,
+        )
+
+        def _identity_reconfirm_signal(state: Optional[Dict[str, Any]]) -> bool:
+            if not isinstance(state, dict):
+                return False
+            if state.get("identity_reconfirm_required"):
+                return True
+            booking = state.get("booking")
+            return isinstance(booking, dict) and bool(
+                booking.get("identity_reconfirm_required")
+            )
+
+        # Only CUSTOMER_ID_REQUIRED (stamped identity_reconfirm_required) keeps
+        # pending across NEEDS_CLARIFICATION — not reject / normal clarify.
+        preserve_pending_identity_block = (
+            outcome_status == "NEEDS_CLARIFICATION"
+            and _get_conf(prior_for_auth) == "pending"
+            and (
+                _identity_reconfirm_signal(merged_luma_response)
+                or _identity_reconfirm_signal(working_session_state)
+            )
+        )
         self._apply_optional_inputs(
             working,
             working_session_state=working_session_state,
@@ -87,10 +113,57 @@ class SessionProjectorV2:
             conversation_messages=conversation_messages,
             # Digressions (RAG HANDLER_DELEGATED, Core OFF_TOPIC) must not clear
             # booking authorization / bound datetime from an empty NLU payload.
+            # Identity-blocked confirm also keeps pending + bound datetime.
             preserve_booking_authorization=(
                 outcome_status in ("HANDLER_DELEGATED", "OFF_TOPIC")
+                or preserve_pending_identity_block
             ),
         )
+        if preserve_pending_identity_block and isinstance(prior_for_auth, dict):
+            # V2 assembly may have dropped pending; restore from pre-turn session.
+            _set_conf(working, "pending")
+            prior_bound = prior_for_auth.get("resolved_datetime_range")
+            if not isinstance(prior_bound, dict):
+                prior_planning = prior_for_auth.get("planning")
+                if isinstance(prior_planning, dict):
+                    prior_bound = prior_planning.get("bound_datetime")
+            if isinstance(prior_bound, dict) and prior_bound.get("start"):
+                planning = working.setdefault("planning", {})
+                if isinstance(planning, dict):
+                    planning["bound_datetime"] = prior_bound
+                working["resolved_datetime_range"] = prior_bound
+            if prior_for_auth.get("identity_reconfirm_required") or (
+                isinstance(merged_luma_response, dict)
+                and merged_luma_response.get("identity_reconfirm_required")
+            ):
+                working["identity_reconfirm_required"] = True
+                booking = working.setdefault("booking", {})
+                if isinstance(booking, dict):
+                    booking["identity_reconfirm_required"] = True
+        elif isinstance(merged_luma_response, dict) and merged_luma_response.get(
+            "identity_reconfirm_required"
+        ):
+            working["identity_reconfirm_required"] = True
+            booking = working.setdefault("booking", {})
+            if isinstance(booking, dict):
+                booking["identity_reconfirm_required"] = True
+        elif isinstance(working_session_state, dict) and (
+            "identity_reconfirm_required" in working_session_state
+            or (
+                isinstance(working_session_state.get("booking"), dict)
+                and "identity_reconfirm_required"
+                in working_session_state["booking"]
+            )
+        ):
+            # Propagate Stage 01 clear/set — including False after identity resume.
+            flag = bool(working_session_state.get("identity_reconfirm_required"))
+            nested = working_session_state.get("booking")
+            if isinstance(nested, dict) and "identity_reconfirm_required" in nested:
+                flag = bool(nested.get("identity_reconfirm_required"))
+            working["identity_reconfirm_required"] = flag
+            booking = working.setdefault("booking", {})
+            if isinstance(booking, dict):
+                booking["identity_reconfirm_required"] = flag
         return working
 
     @staticmethod

@@ -72,6 +72,33 @@ def _try_infer_most_recent_booking(
     return _slot_identifier_present(slots)
 
 
+def _inject_committed_booking_ids(
+    slots: Dict[str, Any],
+    *,
+    session_state: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Copy Session V2 booking.* ids into the execution-input slots copy only."""
+    if _slot_identifier_present(slots):
+        return slots
+    if not isinstance(session_state, dict):
+        return slots
+    booking = session_state.get("booking")
+    booking_id = None
+    booking_code = None
+    if isinstance(booking, dict):
+        booking_id = booking.get("booking_id")
+        booking_code = booking.get("booking_code")
+    if booking_id is None:
+        booking_id = session_state.get("booking_id")
+    if booking_code is None:
+        booking_code = session_state.get("booking_code")
+    if booking_id is not None and str(booking_id).strip() != "":
+        slots["booking_id"] = booking_id
+    if booking_code is not None and str(booking_code).strip() != "":
+        slots["booking_code"] = booking_code
+    return slots
+
+
 class BookingAdapter(ExecutionAdapter):
     """Prepare booking / reservation / fetch / modify / cancel inputs."""
 
@@ -91,6 +118,8 @@ class BookingAdapter(ExecutionAdapter):
         slots = inject_customer_id(
             slots, session_state=session_state, kwargs=kwargs
         )
+        # Execution-input only — does not mutate Decision plan.slots.
+        slots = _inject_committed_booking_ids(slots, session_state=session_state)
 
         stage = command.stage
         if command.action == "CONFIRM_APPOINTMENT":

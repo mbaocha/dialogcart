@@ -467,6 +467,29 @@ def _invalidate_new_booking_request(
     if merged_intent_name != "CREATE_APPOINTMENT" or "booking_id" not in merged_slots:
         return False
 
+    # Confirmation-only / post-commit yes must not clear canonical committed identity.
+    # Explicit new-booking requests still clear via changed criteria below.
+    if isinstance(session_state, dict):
+        booking = session_state.get("booking")
+        committed_id = None
+        if isinstance(booking, dict):
+            committed_id = booking.get("booking_id")
+        if committed_id is None:
+            committed_id = session_state.get("booking_id")
+        if committed_id is not None and committed_id != "":
+            from core.session.confirmation_gate import get_confirmation_state
+
+            # Already committed and not opening a fresh pending confirm → keep ids.
+            if get_confirmation_state(session_state) != "pending":
+                session_service = None
+                session_slots = session_state.get("slots")
+                if isinstance(session_slots, dict):
+                    session_service = session_slots.get("service_id")
+                luma_service = luma_slots.get("service_id")
+                # Same service (or no new service evidence) is confirmation/idempotent.
+                if luma_service is None or luma_service == session_service:
+                    return False
+
     has_new_booking_slots = any(
         key in luma_slots and luma_slots.get(key) is not None
         for key in ("service_id", "date", "time")

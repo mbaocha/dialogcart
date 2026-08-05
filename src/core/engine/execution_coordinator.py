@@ -169,8 +169,69 @@ class ExecutionCoordinator:
                 "BOOKING_IDENTIFICATION_REQUIRED",
             ):
                 blocked_plan["status"] = "NEEDS_CLARIFICATION"
+                # Operational block: do not advertise a runnable action.
+                blocked_plan["action"] = None
+                nested_plan = blocked_plan.get("plan")
+                if isinstance(nested_plan, dict):
+                    nested_plan["status"] = "NEEDS_CLARIFICATION"
+                    nested_plan["action"] = None
+                # Response builder prefers plan["_decision"]; keep it coherent.
+                decision = blocked_plan.get("_decision")
+                if isinstance(decision, dict):
+                    decision_plan = decision.get("plan")
+                    if isinstance(decision_plan, dict):
+                        decision_plan["status"] = "NEEDS_CLARIFICATION"
+                        decision_plan["action"] = None
+                if blocked.reason == "CUSTOMER_ID_REQUIRED":
+                    # No side effect occurred — keep pending confirmation resumable.
+                    from core.session.confirmation_gate import (
+                        get_confirmation_state,
+                        set_confirmation_state,
+                    )
+
+                    prior_pending = get_confirmation_state(session_state) == "pending"
+                    if prior_pending or get_confirmation_state(blocked_plan) is None:
+                        set_confirmation_state(blocked_plan, "pending")
+                    merged = blocked_plan.get("_merged_luma_response")
+                    if isinstance(merged, dict) and (
+                        prior_pending or get_confirmation_state(merged) is None
+                    ):
+                        set_confirmation_state(merged, "pending")
+                    # Next turn may bring identity; require a fresh yes after re-present.
+                    blocked_plan["identity_reconfirm_required"] = True
+                    booking_section = blocked_plan.setdefault("booking", {})
+                    if isinstance(booking_section, dict):
+                        booking_section["identity_reconfirm_required"] = True
+                    if isinstance(merged, dict):
+                        merged["identity_reconfirm_required"] = True
+                        merged_booking = merged.setdefault("booking", {})
+                        if isinstance(merged_booking, dict):
+                            merged_booking["identity_reconfirm_required"] = True
+                    if isinstance(session_state, dict):
+                        session_state["identity_reconfirm_required"] = True
+                        session_booking = session_state.setdefault("booking", {})
+                        if isinstance(session_booking, dict):
+                            session_booking["identity_reconfirm_required"] = True
             response = build_planning_response_from_plan(blocked_plan)
             apply_execution_blocked_text(response, reason=blocked.reason)
+            # Ensure HTTP outcome status matches the blocked rewrite.
+            outcome = response.get("outcome")
+            if isinstance(outcome, dict) and blocked.reason in (
+                "CUSTOMER_ID_REQUIRED",
+                "BOOKING_IDENTIFICATION_REQUIRED",
+            ):
+                outcome["status"] = "NEEDS_CLARIFICATION"
+                plan_view = outcome.get("plan")
+                if isinstance(plan_view, dict):
+                    plan_view["status"] = "NEEDS_CLARIFICATION"
+                    plan_view["action"] = None
+                result = response.get("result")
+                if isinstance(result, dict) and result is not outcome:
+                    result["status"] = "NEEDS_CLARIFICATION"
+                    result_plan = result.get("plan")
+                    if isinstance(result_plan, dict):
+                        result_plan["status"] = "NEEDS_CLARIFICATION"
+                        result_plan["action"] = None
             return ExecutionGateResult(
                 path="blocked",
                 response=response,

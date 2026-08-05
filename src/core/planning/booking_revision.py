@@ -12,9 +12,27 @@ from core.adapters.nlu.entity_schema_builder import (
 
 
 def has_committed_create_appointment(
-    slots: Optional[Dict[str, Any]],
+    slots: Optional[Dict[str, Any]] = None,
+    *,
+    session_state: Optional[Mapping[str, Any]] = None,
 ) -> bool:
-    """True when CREATE_APPOINTMENT slots contain a persisted booking identifier."""
+    """True when CREATE_APPOINTMENT already has a persisted booking identifier.
+
+    Canonical source is Session V2 ``booking.booking_id`` / ``booking_code``.
+    Flat/hydrated ``slots.booking_id`` remains a secondary signal.
+    """
+    if isinstance(session_state, Mapping):
+        booking = session_state.get("booking")
+        if isinstance(booking, Mapping):
+            booking_id = booking.get("booking_id")
+            if booking_id is not None and booking_id != "":
+                return True
+            booking_code = booking.get("booking_code")
+            if booking_code is not None and str(booking_code).strip() != "":
+                return True
+        top_id = session_state.get("booking_id")
+        if top_id is not None and top_id != "":
+            return True
     if not isinstance(slots, dict):
         return False
     booking_id = slots.get("booking_id")

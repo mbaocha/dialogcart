@@ -20,6 +20,9 @@ class IntentDecision:
     session_reset_occurred: bool
     confirm_booking_continuation: bool = False
     gate_action: Optional[ConfirmationGateTurn] = None
+    # Identity just resolved after CUSTOMER_ID_REQUIRED — keep pending and
+    # require a fresh yes; do not treat this turn as commit acceptance.
+    defer_confirmation_acceptance: bool = False
     handler_delegated: bool = False
     handler_name: Optional[str] = None
     non_durable_status: Optional[str] = None

@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any, Dict, List
 
+from core.adapters.errors import UpstreamError
 from core.session.session_manager import get_session, save_session
 from core.planning.time_resolution import TIME_MATCH_EXACT, TIME_MATCH_MISMATCH
 from core.tests.e2e.framework.conversation import (
@@ -17,6 +18,7 @@ from core.tests.e2e.framework.conversation import (
     _confirmation_state,
     _resolve_search_date,
     _response_text,
+    attach_commit_customer_identity,
 )
 
 def _sess_fp(sess):
@@ -1684,5 +1686,663 @@ _register(
         fixture="scripted_multi_day_july23",
         tags=["booking", "availability", "search", "date-revision", "regression"],
         id="date-request-after-availability-searches",
+    )
+)
+
+# ---------------------------------------------------------------------------
+# Highest-value audit gaps (identity / failure / idempotency / reload / multi-revision)
+# ---------------------------------------------------------------------------
+
+_AUDIT_STATE: Dict[str, Any] = {}
+_JULY_12 = "2026-07-12"
+
+
+def _session_booking_ids(sess: Dict[str, Any]) -> tuple:
+    slots = sess.get("slots") if isinstance(sess.get("slots"), dict) else {}
+    booking = sess.get("booking") if isinstance(sess.get("booking"), dict) else {}
+    booking_id = booking.get("booking_id") or slots.get("booking_id")
+    booking_code = booking.get("booking_code") or slots.get("booking_code")
+    return booking_id, booking_code
+
+
+def _assert_criteria_intact(conv, *, service_id=PREMIUM_SERVICE, time_fragment="10") -> None:
+    sess = conv.session() or {}
+    slots = sess.get("slots") if isinstance(sess.get("slots"), dict) else {}
+    planning = sess.get("planning") if isinstance(sess.get("planning"), dict) else {}
+    planning_slots = (
+        planning.get("slots") if isinstance(planning.get("slots"), dict) else {}
+    )
+    effective_service = planning_slots.get("service_id") or slots.get("service_id")
+    effective_time = planning_slots.get("time") or slots.get("time")
+    assert effective_service == service_id, (
+        f"turn {conv.turn}: service_id expected {service_id!r}, got {effective_service!r}"
+    )
+    assert effective_time and time_fragment in str(effective_time), (
+        f"turn {conv.turn}: time expected to contain {time_fragment!r}, got {effective_time!r}"
+    )
+
+
+def _assert_identity_blocked_yes(conv, booking, _availability=None) -> None:
+    """First yes without ingress identity must not dispatch booking."""
+    assert not booking.create_booking.called, (
+        f"turn {conv.turn}: identity-blocked yes must not call create_booking"
+    )
+    sess = conv.session() or {}
+    assert _confirmation_state(sess) == "pending", (
+        f"turn {conv.turn}: confirmation must remain pending after identity block, "
+        f"got {_confirmation_state(sess)!r}"
+    )
+    assert _confirmation_state(sess) != "confirmed"
+    booking_id, booking_code = _session_booking_ids(sess)
+    assert not booking_id and not booking_code, (
+        f"turn {conv.turn}: no durable booking ids after identity block "
+        f"(booking_id={booking_id!r}, booking_code={booking_code!r})"
+    )
+    assert sess.get("customer_id") in (None, "", 0, False), (
+        f"turn {conv.turn}: customer_id must not be chat user_id stand-in, "
+        f"got {sess.get('customer_id')!r}"
+    )
+    assert str(sess.get("customer_id") or "") != str(conv.user_id)
+    _assert_criteria_intact(conv)
+    text = _response_text(conv.last_body or {}).lower()
+    assert "phone" in text or "email" in text, (
+        f"turn {conv.turn}: identity block must ask for phone/email, got "
+        f"{_response_text(conv.last_body or {})!r}"
+    )
+
+
+def _attach_identity_before_resume(conv, _booking=None, _availability=None) -> None:
+    attach_commit_customer_identity(conv)
+
+
+def _assert_identity_resolved_pending(conv, booking, _availability=None) -> None:
+    """After ingress identity, tenant customer_id is persisted and confirm re-presented."""
+    _assert_no_booking(conv, booking)
+    sess = conv.session() or {}
+    customer_id = sess.get("customer_id")
+    assert customer_id and int(customer_id) > 0, (
+        f"turn {conv.turn}: expected resolved tenant customer_id, got {customer_id!r}"
+    )
+    assert str(customer_id) != str(conv.user_id), (
+        f"turn {conv.turn}: customer_id must not equal chat user_id {conv.user_id!r}"
+    )
+    assert _confirmation_state(sess) == "pending", (
+        f"turn {conv.turn}: confirmation must be re-presented as pending, "
+        f"got {_confirmation_state(sess)!r}"
+    )
+    _assert_criteria_intact(conv)
+    _AUDIT_STATE["resolved_customer_id"] = customer_id
+
+
+def _fail_booking_once(conv, booking, _availability=None) -> None:
+    original = booking.create_booking.side_effect
+
+    def _failing(*args, **kwargs):
+        booking.create_booking.side_effect = original
+        raise UpstreamError("API returned error 500: booking creation failed")
+
+    booking.create_booking.side_effect = _failing
+    _AUDIT_STATE["fail_calls_before"] = booking.create_booking.call_count
+
+
+def _assert_execution_failed_resumable(conv, booking, _availability=None) -> None:
+    """Failed commit must not leave durable booking or false confirmed state."""
+    assert booking.create_booking.call_count == _AUDIT_STATE.get("fail_calls_before", 0) + 1, (
+        f"turn {conv.turn}: failed attempt must invoke create_booking once"
+    )
+    # Failed turns may return success=False; do not require assert_http_ok here.
+    assert conv.last_http is not None and conv.last_http.status_code == 200, (
+        f"turn {conv.turn}: expected HTTP 200 envelope on controlled execution failure, "
+        f"got {getattr(conv.last_http, 'status_code', None)}"
+    )
+    body = conv.last_body or {}
+    assert body.get("success") is False or (body.get("outcome") or {}).get("status") in (
+        "failed",
+        None,
+    ) or body.get("error") in ("execution_failed", "upstream_error", None), (
+        f"turn {conv.turn}: expected failed execution envelope, got {body!r}"
+    )
+
+    sess = conv.session() or {}
+    booking_id, booking_code = _session_booking_ids(sess)
+    assert not booking_id and not booking_code, (
+        f"turn {conv.turn}: failed attempt must not persist booking identifiers "
+        f"(booking_id={booking_id!r}, booking_code={booking_code!r})"
+    )
+    confirmation = _confirmation_state(sess)
+    assert confirmation != "confirmed", (
+        f"turn {conv.turn}: must not leave durable confirmed after failure, "
+        f"got {confirmation!r}"
+    )
+    # Prefer pending for safe retry; expose defect if confirmation was consumed.
+    assert confirmation == "pending", (
+        f"turn {conv.turn}: booking must remain resumable with pending confirmation, "
+        f"got {confirmation!r}"
+    )
+    _assert_criteria_intact(conv)
+    _AUDIT_STATE["fail_call_count"] = booking.create_booking.call_count
+
+
+def _assert_retry_single_success(conv, booking, _availability=None) -> None:
+    """One failed attempt + one successful commit — not two successful bookings."""
+    assert booking.create_booking.called, (
+        f"turn {conv.turn}: expected create_booking after successful retry"
+    )
+    fail_count = _AUDIT_STATE.get("fail_call_count", 1)
+    assert booking.create_booking.call_count == fail_count + 1, (
+        f"turn {conv.turn}: expected exactly one successful retry after the failed attempt, "
+        f"call_count={booking.create_booking.call_count} (fail_baseline={fail_count})"
+    )
+    call = booking.create_booking.call_args
+    kwargs = call.kwargs if call else {}
+    payload_customer_id = kwargs.get("customer_id")
+    sess = conv.session() or {}
+    session_customer_id = sess.get("customer_id")
+    assert payload_customer_id and int(payload_customer_id) > 0, (
+        f"turn {conv.turn}: booking payload must use resolved commerce "
+        f"customer_id, got {payload_customer_id!r}"
+    )
+    assert session_customer_id == payload_customer_id, (
+        f"turn {conv.turn}: session customer_id {session_customer_id!r} "
+        f"must match booking payload {payload_customer_id!r}"
+    )
+    assert str(payload_customer_id) != str(conv.user_id), (
+        f"turn {conv.turn}: customer_id must not be chat user_id "
+        f"({conv.user_id!r})"
+    )
+    booking_id, booking_code = _session_booking_ids(sess)
+    assert booking_id, (
+        f"turn {conv.turn}: expected booking_id after successful retry"
+    )
+    assert booking_code, (
+        f"turn {conv.turn}: expected booking_code after successful retry"
+    )
+    assert _confirmation_state(sess) is None, (
+        f"turn {conv.turn}: confirmation must be consumed after successful commit, "
+        f"got {_confirmation_state(sess)!r}"
+    )
+
+
+def _capture_committed_booking(conv, booking, _availability=None) -> None:
+    _assert_booking_created(conv, booking)
+    sess = conv.session() or {}
+    booking_id, booking_code = _session_booking_ids(sess)
+    _AUDIT_STATE["committed_booking_id"] = booking_id
+    _AUDIT_STATE["committed_booking_code"] = booking_code
+    _AUDIT_STATE["commit_call_count"] = booking.create_booking.call_count
+
+
+def _assert_duplicate_yes_idempotent(conv, booking, _availability=None) -> None:
+    assert booking.create_booking.call_count == _AUDIT_STATE.get("commit_call_count", 1), (
+        f"turn {conv.turn}: duplicate yes must not call create_booking again "
+        f"(baseline={_AUDIT_STATE.get('commit_call_count')}, "
+        f"got={booking.create_booking.call_count})"
+    )
+    sess = conv.session() or {}
+    booking_id, booking_code = _session_booking_ids(sess)
+    assert booking_id == _AUDIT_STATE.get("committed_booking_id"), (
+        f"turn {conv.turn}: booking_id must remain stable "
+        f"({_AUDIT_STATE.get('committed_booking_id')!r} -> {booking_id!r})"
+    )
+    assert booking_code == _AUDIT_STATE.get("committed_booking_code"), (
+        f"turn {conv.turn}: booking_code must remain stable "
+        f"({_AUDIT_STATE.get('committed_booking_code')!r} -> {booking_code!r})"
+    )
+
+
+def _capture_revision_search(conv, _booking, availability) -> None:
+    _AUDIT_STATE["search_count"] = availability.get_service_availability.call_count
+    _AUDIT_STATE["fingerprint"] = _sess_fp(conv.session() or {})
+
+
+def _assert_revision_searched_once(conv, booking, availability, *, service_id) -> None:
+    baseline = _AUDIT_STATE.get("search_count", 0)
+    assert availability.get_service_availability.call_count == baseline + 1, (
+        f"turn {conv.turn}: expected exactly one new SEARCH after revision "
+        f"(baseline={baseline}, got={availability.get_service_availability.call_count})"
+    )
+    call = availability.get_service_availability.call_args
+    kwargs = call.kwargs if call else {}
+    assert kwargs.get("service_id") == service_id, (
+        f"turn {conv.turn}: search must use {service_id!r}, got {kwargs.get('service_id')!r}"
+    )
+    sess = conv.session() or {}
+    assert not sess.get("resolved_datetime_range"), (
+        f"turn {conv.turn}: stale bound datetime must be cleared, "
+        f"got {sess.get('resolved_datetime_range')!r}"
+    )
+    new_fp = _sess_fp(sess)
+    prior_fp = _AUDIT_STATE.get("fingerprint")
+    if prior_fp:
+        assert new_fp != prior_fp, (
+            f"turn {conv.turn}: stale availability fingerprint must not be reused "
+            f"(prior={prior_fp!r}, new={new_fp!r})"
+        )
+    _assert_no_booking(conv, booking)
+    _AUDIT_STATE["search_count"] = availability.get_service_availability.call_count
+    _AUDIT_STATE["fingerprint"] = new_fp
+
+
+def _assert_flexi_revision(conv, booking, availability) -> None:
+    _assert_revision_searched_once(conv, booking, availability, service_id=FLEXI_SERVICE)
+    sess = conv.session() or {}
+    slots = sess.get("slots") or {}
+    assert slots.get("time") in (None, ""), (
+        f"turn {conv.turn}: stale time must clear on service revision, got {slots.get('time')!r}"
+    )
+
+
+def _assert_date_revision_july12(conv, booking, availability) -> None:
+    _assert_revision_searched_once(conv, booking, availability, service_id=FLEXI_SERVICE)
+    conv.assert_date_proposal(_JULY_12)
+
+
+def _assert_premium_rerevision(conv, booking, availability) -> None:
+    _assert_revision_searched_once(conv, booking, availability, service_id=PREMIUM_SERVICE)
+
+
+def _assert_final_multi_revision_booking(conv, booking, _availability=None) -> None:
+    _assert_booking_created(conv, booking)
+    sess = conv.session() or {}
+    slots = sess.get("slots") or {}
+    planning = sess.get("planning") if isinstance(sess.get("planning"), dict) else {}
+    planning_slots = (
+        planning.get("slots") if isinstance(planning.get("slots"), dict) else {}
+    )
+    service_id = planning_slots.get("service_id") or slots.get("service_id")
+    assert service_id == PREMIUM_SERVICE, (
+        f"turn {conv.turn}: final booking service must be Premium (latest criteria), "
+        f"got {service_id!r}"
+    )
+    time_value = str(planning_slots.get("time") or slots.get("time") or "")
+    assert "10" in time_value, (
+        f"turn {conv.turn}: final booking time must be 10am (latest selection), "
+        f"got {time_value!r}"
+    )
+    # Intermediate Flexi 11am bind must not survive.
+    assert "11:00" not in time_value and not time_value.strip().startswith("11"), (
+        f"turn {conv.turn}: stale Flexi 11am must not remain, got {time_value!r}"
+    )
+
+
+def _assert_hard_reload_state_survives(conv, booking, _availability=None) -> None:
+    """Canonical booking criteria survive forced Session V2 reloads."""
+    _assert_no_booking(conv, booking)
+    sess = conv.session() or {}
+    assert sess.get("schema_version") == 2 or isinstance(sess.get("planning"), dict), (
+        f"turn {conv.turn}: expected Session V2 shape after hard reload, keys={list(sess.keys())}"
+    )
+    assert _confirmation_state(sess) == "pending"
+    _assert_criteria_intact(conv)
+
+
+def _assert_digression_preserves_pending(conv, booking, availability) -> None:
+    _assert_no_booking(conv, booking)
+    sess = conv.session() or {}
+    assert _confirmation_state(sess) == "pending", (
+        f"turn {conv.turn}: digression must preserve pending confirmation, "
+        f"got {_confirmation_state(sess)!r}"
+    )
+    _assert_criteria_intact(conv)
+    # Digression must not SEARCH.
+    if "reload_search_count" in _AUDIT_STATE:
+        assert availability.get_service_availability.call_count == _AUDIT_STATE[
+            "reload_search_count"
+        ], (
+            f"turn {conv.turn}: digression must not trigger SEARCH_AVAILABILITY"
+        )
+
+
+def _capture_reload_search(conv, booking, availability) -> None:
+    _AUDIT_STATE["reload_search_count"] = availability.get_service_availability.call_count
+    _assert_hard_reload_state_survives(conv, booking)
+
+
+_register(
+    Scenario(
+        "Identity blocked then resolved then freshly confirmed",
+        Turn(
+            "book haircut",
+            Expect(
+                response_status="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+            ),
+        ),
+        Turn(
+            "premium",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+            ),
+        ),
+        Turn(
+            "10am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                planner="AWAITING_CONFIRMATION",
+                stage="CONFIRM",
+                awaiting="USER_CONFIRMATION",
+                action=None,
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "10"},
+            ),
+            after=_assert_no_booking,
+        ),
+        Turn(
+            "yes",
+            Expect(
+                planner="NEEDS_CLARIFICATION",
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "10"},
+                response_text_present=True,
+            ),
+            after=_assert_identity_blocked_yes,
+        ),
+        Turn(
+            "ok",
+            Expect(
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "10"},
+                response_text_present=True,
+            ),
+            before=_attach_identity_before_resume,
+            after=_assert_identity_resolved_pending,
+        ),
+        Turn(
+            "yes",
+            Expect(
+                planner="READY",
+                stage="CONFIRM",
+                action="CONFIRM_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "10"},
+            ),
+            after=_assert_booking_created,
+        ),
+        fixture="booking",
+        tags=["booking", "identity", "confirmation", "audit"],
+        id="identity-blocked-then-resolved-then-confirmed",
+        # Identity attached mid-flow — do not set requires_customer_identity.
+    )
+)
+
+
+_register(
+    Scenario(
+        "Execution failure then safe retry",
+        Turn(
+            "book haircut",
+            Expect(
+                response_status="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+            ),
+        ),
+        Turn(
+            "premium",
+            Expect(
+                response_status="succeeded",
+                action="SEARCH_AVAILABILITY",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                has_availability_slots=True,
+            ),
+        ),
+        Turn(
+            "10am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                confirmation="pending",
+                slot_contains={"time": "10"},
+            ),
+            after=_assert_no_booking,
+        ),
+        # No Expect: failed commit returns success=False.
+        Turn(
+            "yes",
+            before=_fail_booking_once,
+            after=_assert_execution_failed_resumable,
+        ),
+        Turn(
+            "yes",
+            Expect(
+                planner="READY",
+                stage="CONFIRM",
+                action="CONFIRM_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "10"},
+            ),
+            after=_assert_retry_single_success,
+        ),
+        fixture="booking",
+        tags=["booking", "execution", "retry", "audit"],
+        id="execution-failure-then-safe-retry",
+        requires_customer_identity=True,
+    )
+)
+
+
+_register(
+    Scenario(
+        "Duplicate yes after successful commit",
+        Turn(
+            "book haircut",
+            Expect(
+                response_status="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+            ),
+        ),
+        Turn(
+            "premium",
+            Expect(
+                response_status="succeeded",
+                action="SEARCH_AVAILABILITY",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                has_availability_slots=True,
+            ),
+        ),
+        Turn(
+            "10am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                confirmation="pending",
+                slot_contains={"time": "10"},
+            ),
+            after=_assert_no_booking,
+        ),
+        Turn(
+            "yes",
+            Expect(
+                action="CONFIRM_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": PREMIUM_SERVICE},
+            ),
+            after=_capture_committed_booking,
+        ),
+        Turn(
+            "yes",
+            after=_assert_duplicate_yes_idempotent,
+        ),
+        fixture="booking",
+        tags=["booking", "idempotency", "confirmation", "audit"],
+        id="duplicate-yes-after-commit",
+        requires_customer_identity=True,
+    )
+)
+
+
+_register(
+    Scenario(
+        "Hard session reload across booking lifecycle",
+        Turn(
+            "book haircut",
+            Expect(
+                response_status="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+            ),
+        ),
+        Turn(
+            "premium",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+            ),
+        ),
+        Turn(
+            "10am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                planner="AWAITING_CONFIRMATION",
+                stage="CONFIRM",
+                awaiting="USER_CONFIRMATION",
+                action=None,
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "10"},
+            ),
+            after=_capture_reload_search,
+        ),
+        Turn(
+            "Does a lion lay eggs?",
+            Expect(
+                response_status="OFF_TOPIC",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                confirmation="pending",
+                response_text_present=True,
+            ),
+            after=_assert_digression_preserves_pending,
+        ),
+        Turn(
+            "yes",
+            Expect(
+                planner="READY",
+                stage="CONFIRM",
+                action="CONFIRM_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "10"},
+            ),
+            after=_assert_booking_created,
+        ),
+        fixture="scripted_off_topic",
+        tags=["booking", "session", "reload", "audit"],
+        id="hard-session-reload-booking-lifecycle",
+        requires_customer_identity=True,
+        force_session_reload=True,
+    )
+)
+
+
+_register(
+    Scenario(
+        "Multiple successive revisions then confirm",
+        Turn(
+            "book haircut",
+            Expect(
+                response_status="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+            ),
+        ),
+        Turn(
+            "premium",
+            Expect(
+                response_status="succeeded",
+                action="SEARCH_AVAILABILITY",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                has_availability_slots=True,
+            ),
+        ),
+        Turn(
+            "10am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "10"},
+            ),
+            after=_capture_revision_search,
+        ),
+        Turn(
+            "rather book flexi haircut",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": FLEXI_SERVICE},
+                confirmation=None,
+            ),
+            before=_clear_sticky_temporal_facts,
+            after=_assert_flexi_revision,
+        ),
+        Turn(
+            "actually July 12",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                action="SEARCH_AVAILABILITY",
+                session_slots={"service_id": FLEXI_SERVICE},
+                confirmation=None,
+                date_proposal=_JULY_12,
+                slot_absent=["date", "time"],
+                availability_invalidated=True,
+            ),
+            before=_clear_sticky_temporal_facts,
+            after=_assert_date_revision_july12,
+        ),
+        Turn(
+            "11am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                confirmation="pending",
+                session_slots={"service_id": FLEXI_SERVICE},
+                slot_contains={"time": "11"},
+            ),
+            after=_capture_revision_search,
+        ),
+        Turn(
+            "rather book premium haircut",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                confirmation=None,
+            ),
+            before=_clear_sticky_temporal_facts,
+            after=_assert_premium_rerevision,
+        ),
+        Turn(
+            "10am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "10"},
+            ),
+            after=_assert_no_booking,
+        ),
+        Turn(
+            "yes",
+            Expect(
+                action="CONFIRM_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "10"},
+            ),
+            after=_assert_final_multi_revision_booking,
+        ),
+        fixture="scripted_july_confirm_date_shift",
+        tags=["booking", "revision", "invalidation", "audit"],
+        id="multiple-successive-revisions-then-confirm",
+        requires_customer_identity=True,
     )
 )

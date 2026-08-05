@@ -2,11 +2,31 @@
 
 from __future__ import annotations
 
+import copy
+import json
 from typing import Any, Tuple
 
 from core.tests.e2e.framework.conversation import BookingConversation, Expect, Scenario, Turn
 
 ConversationBundle = Tuple[BookingConversation, Any, Any]
+
+
+def hard_reload_persisted_session(conv: BookingConversation) -> None:
+    """Discard request-scoped session aliases; reload pure Session V2 from the store.
+
+    Uses only the public session lifecycle (``get_session`` / ``clear_session`` /
+    ``save_session``). JSON round-trip breaks in-memory nested-dict aliasing so the
+    next turn cannot rely on mutated request-scoped objects.
+    """
+    from core.session.session_manager import clear_session, get_session, save_session
+
+    sess = get_session(conv.organization_id, conv.user_id)
+    if sess is None:
+        return
+    pure = json.loads(json.dumps(sess, default=str))
+    clear_session(conv.organization_id, conv.user_id)
+    # Deep copy so callers cannot retain aliases into the document we persist.
+    save_session(conv.organization_id, conv.user_id, copy.deepcopy(pure))
 
 
 def run_scenario(
@@ -31,6 +51,7 @@ def run_scenario(
     if scenario.before is not None:
         _call_hook(scenario.before, ctx)
 
+    force_reload = bool(getattr(scenario, "force_session_reload", False))
     for index, turn in enumerate(scenario.turns):
         ctx["turn_index"] = index
         ctx["turn"] = turn
@@ -44,6 +65,10 @@ def run_scenario(
 
         if turn.after is not None:
             _call_hook(turn.after, ctx)
+
+        # After normal API persist + hooks: drop aliases and reload for the next turn.
+        if force_reload and index < len(scenario.turns) - 1:
+            hard_reload_persisted_session(conv)
 
     if scenario.after is not None:
         _call_hook(scenario.after, ctx)

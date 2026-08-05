@@ -160,9 +160,7 @@ def _maybe_enter_booking_confirmation_pending(
     )
 
     if has_committed_create_appointment(effective_slots) or has_committed_create_appointment(
-
-        session_slots
-
+        session_slots, session_state=session_state
     ):
 
         return confirmation_state
@@ -332,6 +330,7 @@ def resolve_confirmation(
     turn_operation = attached_request.turn_operation
 
     confirm_booking_continuation = attached_request.confirm_booking_continuation
+    defer_confirmation_acceptance = attached_request.defer_confirmation_acceptance
 
 
 
@@ -473,7 +472,10 @@ def resolve_confirmation(
         # authorization. Unrecognized no-evidence turns are not supersession —
         # keep pending so recovery can re-ask.
 
-        if _non_superseding_unrecognized_pending(payload, confirmation_state):
+        if (
+            _non_superseding_unrecognized_pending(payload, confirmation_state)
+            or defer_confirmation_acceptance
+        ):
             same_turn_time_rebind = False
         else:
 
@@ -524,6 +526,8 @@ def resolve_confirmation(
 
             or same_turn_time_rebind
 
+            or defer_confirmation_acceptance
+
         )
 
         and not availability_reshow
@@ -560,10 +564,14 @@ def resolve_confirmation(
 
     # Stage 01 sets confirm_booking_continuation on gate YES; treat YES itself
     # as acceptance so unit callers that pass gate_action alone stay correct.
-    acceptance = bool(
-        confirm_booking_continuation
-        or gate_action == ConfirmationGateTurn.YES
-    )
+    # Identity-resume / deferred turns must not treat YES as commit acceptance.
+    acceptance = bool(confirm_booking_continuation)
+    if (
+        not acceptance
+        and gate_action == ConfirmationGateTurn.YES
+        and not defer_confirmation_acceptance
+    ):
+        acceptance = True
     user_confirmation_satisfied = derive_user_confirmation_satisfied(
         confirmation_state,
         confirm_booking_continuation=acceptance,
@@ -574,6 +582,11 @@ def resolve_confirmation(
         confirmation_state == "pending" and not user_confirmation_satisfied
 
     )
+
+    # Durable pending must live on the working payload so projection/persist
+    # cannot drop it when Stage 06 only read it from session (identity resume).
+    if confirmation_state == "pending":
+        set_confirmation_state(payload, "pending")
 
     return ConfirmationDecision(
 

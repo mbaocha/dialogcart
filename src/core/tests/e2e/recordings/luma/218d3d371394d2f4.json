@@ -1,0 +1,94 @@
+{
+  "key": {
+    "conversation_context": {
+      "active_booking_intent": "CREATE_APPOINTMENT",
+      "last_date_proposal": {
+        "mode": "single_day",
+        "start": "2026-07-03"
+      },
+      "last_intent": "OFF_TOPIC",
+      "last_search_query": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "10am"
+        },
+        {
+          "role": "assistant",
+          "text": "You're about to book a Premium Haircut on July 3 at 10:00 AM. Would you like me to go ahead?"
+        },
+        {
+          "role": "user",
+          "text": "Does a lion lay eggs?"
+        },
+        {
+          "role": "assistant",
+          "text": "No, lions do not lay eggs. Lions are mammals and reproduce by giving birth to live young, not by laying eggs.\n\nSo, to confirm your Premium Haircut appointment on July 3 at 10:00 AM\u2014should I go ahead and book it?"
+        }
+      ],
+      "resolved_service_id": "premium haircut",
+      "turns": [
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "book haircut"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "premium"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "10am"
+        },
+        {
+          "assistant": "No, lions do not lay eggs. Lions are mammals and reproduce by giving birth to live young, not by laying eggs.\n\nSo, to confirm your Premium Haircut appointment on July 3 at 10:00 AM\u2014should I go ahead and book it?",
+          "intent": "OFF_TOPIC",
+          "search_query": null,
+          "user": "Does a lion lay eggs?"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": "haircut",
+        "premium haircut": "haircut"
+      },
+      "booking_mode": "service"
+    },
+    "text": "yes",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service_id": "premium haircut",
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CONFIRM_ACTION"
+    },
+    "temporal": {
+      "confidence": 0.0,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": null,
+      "mode": "none",
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

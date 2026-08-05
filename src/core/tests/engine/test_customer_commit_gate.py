@@ -58,7 +58,10 @@ def test_confirm_blocked_without_customer_id_leaves_pending():
     assert gate.can_execute is False
     assert gate.response is not None
     assert "phone" in (gate.response.get("text") or "").lower()
+    assert gate.plan.get("status") == "NEEDS_CLARIFICATION"
+    assert (gate.response.get("outcome") or {}).get("status") == "NEEDS_CLARIFICATION"
     assert get_confirmation_state(session) == "pending"
+    assert get_confirmation_state(gate.plan) == "pending"
     assert get_confirmation_state(gate.plan) != "confirmed"
 
 
@@ -101,8 +104,13 @@ def test_identity_block_preserves_pending_on_merged_and_session():
     assert get_confirmation_state(merged) == "pending"
     assert get_confirmation_state(gate.plan) != "confirmed"
     response_merged = gate.response.get("_merged_luma_response")
-    assert response_merged == merged
     assert get_confirmation_state(response_merged) == "pending"
+    assert response_merged.get("identity_reconfirm_required") is True
+    assert (response_merged.get("booking") or {}).get(
+        "identity_reconfirm_required"
+    ) is True
+    assert response_merged.get("confirmation_state") == "pending"
+    assert response_merged.get("slots") == merged.get("slots")
 
 
 def test_identity_block_then_resolved_customer_allows_fresh_confirm():

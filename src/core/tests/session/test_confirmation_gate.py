@@ -123,6 +123,26 @@ def test_create_appointment_with_time_only_is_another_request():
     assert action == ConfirmationGateTurn.ANOTHER_REQUEST
 
 
+def test_create_appointment_same_service_echo_is_yes_while_pending():
+    """NLU may label bare 'yes' as CREATE_APPOINTMENT with a service echo."""
+    action = classify_confirmation_gate_turn(
+        {
+            "intent": {"name": "CREATE_APPOINTMENT"},
+            "facts": {"service_id": "premium haircut"},
+        },
+        _pending_session(),
+    )
+    assert action == ConfirmationGateTurn.YES
+
+
+def test_create_appointment_empty_facts_is_yes_while_pending():
+    action = classify_confirmation_gate_turn(
+        {"intent": {"name": "CREATE_APPOINTMENT"}, "facts": {}},
+        _pending_session(),
+    )
+    assert action == ConfirmationGateTurn.YES
+
+
 def test_no_classification_when_gate_closed():
     action = classify_confirmation_gate_turn(
         {"intent": {"name": "REJECT_ACTION"}, "facts": {}},
