@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from core.api.main import app
 from core.tests.harness.recording_luma_client import RECACHE_ENV
+from core.tests.harness.test_clock import LUMA_TEST_NOW_ENV, TEST_NOW_ISO
 from core.tracing.invariant_trace import TRACE_ENV_VAR
 
 # Register booking conversation fixtures for all e2e test modules.
@@ -32,6 +33,10 @@ def pytest_configure(config):
         "markers",
         "live_luma: integration test that requires a reachable Live Luma /resolve service",
     )
+    # Pin relative-date resolution for any live /resolve during E2E (cache miss
+    # or --recache-luma). RecordingLumaClient also defaults to TEST_NOW_ISO;
+    # this covers production LumaClient env fallback used by the inner client.
+    os.environ.setdefault(LUMA_TEST_NOW_ENV, TEST_NOW_ISO)
     if config.getoption("--recache-luma"):
         os.environ[RECACHE_ENV] = "1"
     if config.getoption("--trace-invariants", default=False):

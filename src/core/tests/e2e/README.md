@@ -31,11 +31,12 @@ Consumers:
 - E2E fixtures (`FROZEN_TIME` via `framework/conversation.py`)
 - `run.py` (sets `LUMA_TEST_NOW` for NLU test bootstrap only)
 - `LumaClient.resolve` (sends body `test_now` when env or argument is set)
-- `RecordingLumaClient` (forwards `test_now` on **live** miss/recache only; **cache keys omit `test_now`**)
+- `RecordingLumaClient` (always forwards `test_now` on **live** miss/recache — explicit kwarg, `LUMA_TEST_NOW`, or canonical `TEST_NOW_ISO`; **cache keys omit `test_now`**)
+- E2E `conftest.py` (`setdefault(LUMA_TEST_NOW, TEST_NOW_ISO)` for the suite)
 
 Production NLU (`python -m nlu.api` without `LUMA_TEST_NOW`) uses wall clock. Production `LumaClient` omits `test_now` when the env is unset.
 
-For deterministic live/recache relative dates, start NLU with:
+E2E live fallback does **not** depend on starting NLU via `run.py`; `RecordingLumaClient` injects `TEST_NOW_ISO` on every live `/resolve`. For standalone NLU process tests outside E2E, prefer:
 
 ```bash
 python run.py

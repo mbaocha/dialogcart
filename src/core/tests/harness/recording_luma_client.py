@@ -12,6 +12,8 @@ import os
 from pathlib import Path
 from typing import Any, Dict, Optional, Protocol
 
+from core.tests.harness.test_clock import LUMA_TEST_NOW_ENV, TEST_NOW_ISO
+
 RECACHE_ENV = "DIALOGCART_RECACHE_LUMA"
 
 _DEFAULT_RECORDINGS_DIR = (
@@ -81,11 +83,19 @@ def recording_filename(key: Dict[str, Any]) -> str:
 
 def _resolve_test_now(
     explicit: Optional[str] = None,
-) -> Optional[str]:
+) -> str:
+    """Resolve the frozen clock for live ``/resolve`` fallback.
+
+    Precedence: explicit kwarg → ``LUMA_TEST_NOW`` env → canonical
+    ``TEST_NOW_ISO``. This client is test-only; live fallback must never use
+    wall clock (named-month year rollover would drift after ``TEST_NOW``).
+    """
     if explicit and str(explicit).strip():
         return str(explicit).strip()
-    env_now = os.getenv("LUMA_TEST_NOW", "").strip()
-    return env_now or None
+    env_now = os.getenv(LUMA_TEST_NOW_ENV, "").strip()
+    if env_now:
+        return env_now
+    return TEST_NOW_ISO
 
 
 class RecordingLumaClient:  # noqa: N801
@@ -103,7 +113,8 @@ class RecordingLumaClient:  # noqa: N801
 
     Cache keys deliberately omit ``test_now`` so existing absolute-date
     recordings keep matching. On live miss / corpus recache, ``test_now`` is
-    forwarded to the inner client when set via kwargs or ``LUMA_TEST_NOW``.
+    always forwarded to the inner client (explicit kwarg, ``LUMA_TEST_NOW``,
+    or canonical ``TEST_NOW_ISO``).
     """
 
     def __init__(
@@ -162,10 +173,7 @@ class RecordingLumaClient:  # noqa: N801
             return response
 
         # Miss (or default-corpus recache bypass) → live, then save.
-        live_kwargs: Dict[str, Any] = {}
-        if test_now:
-            live_kwargs["test_now"] = test_now
-
+        # Always pin the E2E reference clock so named-month dates stay stable.
         response = self._inner.resolve(
             user_id=user_id,
             text=text,
@@ -174,7 +182,7 @@ class RecordingLumaClient:  # noqa: N801
             tenant_context=tenant_context,
             conversation_context=conversation_context,
             entity_schema=kwargs.get("entity_schema"),
-            **live_kwargs,
+            test_now=test_now,
         )
         self._save_recording(path, key, response)
         self.last_cache_hit = False
