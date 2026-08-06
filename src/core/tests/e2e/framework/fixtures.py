@@ -47,6 +47,7 @@ from core.tests.harness.car_service_catalog import (
 )
 from core.tests.harness.clients import TestCatalogClient, TestLumaClient
 from core.tests.harness.recording_luma_client import RecordingLumaClient
+from core.tests.harness.recording_render_client import RecordingRenderClient
 from core.tests.harness.mock_clients import (
     create_mock_booking_client,
     create_mock_organization_client,
@@ -261,6 +262,24 @@ def _skip_if_live_luma_unavailable(request):
 E2E_FIXTURE_PARAMS: Dict[str, Dict[str, Any]] = {
     "scripted": {},
     "scripted_empty": {"empty": True},
+    "car_service_proposal_continuity": {
+        "handler_render_recordings": {
+            "Hi, my car is making a weird rattling noise when I start it. Not sure what I need.": {
+                "text": "For your rattling noise, the Premium Full Service would be the better "
+                "choice since it includes the kind of checks that would help us pinpoint "
+                "what's actually causing it. The oil change alone might resolve it if low "
+                "oil is the culprit, but we wouldn't know without that fuller inspection.\n\n"
+                "Would you like to book the Premium Full Service so we can diagnose that "
+                "rattle for you?",
+                "selected_entities": [{
+                    "entity_type": "service",
+                    "catalog_id": 27,
+                    "display_name": "Premium Full Service",
+                }],
+                "metadata": {"source": "recording"},
+            }
+        }
+    },
     "scripted_mismatch": {
         "fixed_slots": [
             {"start": f"{TARGET_DATE}T09:00:00Z", "end": f"{TARGET_DATE}T09:30:00Z"},
@@ -460,6 +479,7 @@ def build_recorded_bundle(
     absolute_slots: Optional[List[Dict[str, Any]]] = None,
     start_hours: tuple[int, ...] = (9, 10),
     trace_availability: bool = False,
+    handler_render_recordings: Optional[Dict[str, Any]] = None,
     **_ignored: Any,
 ) -> Tuple[BookingConversation, Any, Any, str]:
     """E2E booking bundle: RecordingLumaClient + configurable availability.
@@ -493,6 +513,7 @@ def build_recorded_bundle(
         monkeypatch,
         availability_client=availability_client,
         business_category=category,
+        handler_render_recordings=handler_render_recordings,
     )
     conv = BookingConversation(api_client, user_id, domain=booking_domain)
     conv.structured_business_context = copy.deepcopy(
@@ -500,6 +521,9 @@ def build_recorded_bundle(
     )
     conv.faq_chunks = copy.deepcopy(cat_fx.get("faq_chunks") or [])
     conv.luma_client = luma_client
+    conv.handler_render_client = getattr(
+        message_api, "_e2e_handler_render_client", None
+    )
     return conv, booking_client, availability_client, user_id
 
 
@@ -512,6 +536,7 @@ def _wire_booking_deps(
     *,
     availability_client,
     business_category: Optional[str] = None,
+    handler_render_recordings: Optional[Dict[str, Any]] = None,
 ):
     """Wire RecordingLumaClient + catalog/org/booking mocks into the engine."""
     category = business_category or DEFAULT_BUSINESS_CATEGORY
@@ -552,6 +577,17 @@ def _wire_booking_deps(
     monkeypatch.setattr(message_api, "_availability_client",
                         availability_client)
     monkeypatch.setattr(message_api, "_customer_client", customer_client)
+    if handler_render_recordings is not None:
+        handler_render_client = RecordingRenderClient(handler_render_recordings)
+        monkeypatch.setattr(
+            message_api, "render_handler_response", handler_render_client.render
+        )
+        monkeypatch.setattr(
+            message_api,
+            "_e2e_handler_render_client",
+            handler_render_client,
+            raising=False,
+        )
 
     def handle_message_with_test_deps(**kwargs):
         kwargs.setdefault("luma_client", luma_client)

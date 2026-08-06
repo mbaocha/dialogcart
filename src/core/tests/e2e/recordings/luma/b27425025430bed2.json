@@ -1,0 +1,77 @@
+{
+  "key": {
+    "conversation_context": {
+      "last_intent": "GENERAL_INQUIRY",
+      "last_search_query": "rattling noise when starting car diagnosis",
+      "messages": [
+        {"role": "user", "text": "Hi, my car is making a weird rattling noise when I start it. Not sure what I need."},
+        {"role": "assistant", "text": "For your rattling noise, the Premium Full Service would be the better choice since it includes the kind of checks that would help us pinpoint what's actually causing it. The oil change alone might resolve it if low oil is the culprit, but we wouldn't know without that fuller inspection.\n\nWould you like to book the Premium Full Service so we can diagnose that rattle for you?"}
+      ],
+      "pending_assistant_proposals": [
+        {
+          "canonical_id": "premium full service",
+          "display_name": "Premium Full Service",
+          "entity_type": "service",
+          "expected_responses": ["ACCEPT", "REJECT"],
+          "expiry_policy": "NEXT_COMPATIBLE_USER_TURN",
+          "proposal_type": "ENTITY_RECOMMENDATION",
+          "slot_key": "service_id",
+          "status": "PENDING"
+        }
+      ],
+      "turns": [
+        {
+          "assistant": "For your rattling noise, the Premium Full Service would be the better choice since it includes the kind of checks that would help us pinpoint what's actually causing it. The oil change alone might resolve it if low oil is the culprit, but we wouldn't know without that fuller inspection.\n\nWould you like to book the Premium Full Service so we can diagnose that rattle for you?",
+          "intent": "GENERAL_INQUIRY",
+          "search_query": "rattling noise when starting car diagnosis",
+          "user": "Hi, my car is making a weird rattling noise when I start it. Not sure what I need."
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "brake pad change": 28,
+        "executive oil change": 26,
+        "john": 201,
+        "mike": 202,
+        "premium full service": 27
+      },
+      "booking_mode": "service"
+    },
+    "text": "Yeah, maybe next week. What have you got?",
+    "timezone": "UTC"
+  },
+  "response": {
+    "date_constraint": {"mode": "flexible"},
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": ["2026-07-06", "2026-07-12"],
+      "service_id": null,
+      "staff_id": null,
+      "times": []
+    },
+    "intent": {"confidence": 0.92, "name": "AVAILABILITY"},
+    "response_act": "CONFIRM_ACTION",
+    "service_candidates": [
+      "executive oil change",
+      "premium full service",
+      "brake pad change"
+    ],
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": "2026-07-12",
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": "next week",
+      "mode": "flexible",
+      "start_date": "2026-07-06",
+      "start_date_expression": "next week",
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {"understanding": "UNDERSTOOD"}
+  }
+}

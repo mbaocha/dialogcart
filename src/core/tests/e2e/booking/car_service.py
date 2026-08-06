@@ -14,6 +14,58 @@ from core.tests.e2e.framework.conversation import (
 BUSINESS_CATEGORY = "car_service"
 EXECUTIVE_OIL_CHANGE_SKU = "executive oil change"
 EXECUTIVE_OIL_CHANGE_ID = 26
+PREMIUM_FULL_SERVICE_SKU = "premium full service"
+_RATTLE_RECOMMENDATION = (
+    "For your rattling noise, the Premium Full Service would be the better choice "
+    "since it includes the kind of checks that would help us pinpoint what's actually "
+    "causing it. The oil change alone might resolve it if low oil is the culprit, but "
+    "we wouldn't know without that fuller inspection.\n\nWould you like to book the "
+    "Premium Full Service so we can diagnose that rattle for you?"
+)
+
+
+def _assert_recommendation_persisted(conv, _booking, _availability) -> None:
+    response = _response_text(conv.last_body or {})
+    conv._assert(
+        response == _RATTLE_RECOMMENDATION,
+        f"turn {conv.turn}: expected recorded recommendation, got {response!r}",
+    )
+    session = conv.session() or {}
+    history = ((session.get("conversation") or {}).get("history") or [])
+    conv._assert(
+        {"role": "assistant", "text": _RATTLE_RECOMMENDATION} in history,
+        f"turn {conv.turn}: recommendation did not follow normal history persistence",
+    )
+    turns = (((session.get("conversation") or {}).get("memory") or {}).get("turns") or [])
+    conv._assert(
+        bool(turns) and turns[-1].get("assistant") == _RATTLE_RECOMMENDATION,
+        f"turn {conv.turn}: recommendation missing from conversation memory",
+    )
+
+
+def _assert_proposal_continuity(conv, _booking, _availability) -> None:
+    session = conv.session() or {}
+    slots = session.get("slots") or {}
+    missing = session.get("missing_slots") or []
+    response = _response_text(conv.last_body or {}).lower()
+    conv._assert(
+        slots.get("service_id") == PREMIUM_FULL_SERVICE_SKU,
+        f"turn {conv.turn}: accepted proposal must select "
+        f"{PREMIUM_FULL_SERVICE_SKU!r}, got {slots.get('service_id')!r}; "
+        f"missing_slots={missing!r}; response={response!r}",
+    )
+    conv._assert(
+        "service_id" not in missing and session.get("ask_next") != "service_id",
+        f"turn {conv.turn}: accepted service must not require service clarification",
+    )
+    conv._assert(
+        "brake pad" not in response,
+        f"turn {conv.turn}: unrelated Brake Pad Change was introduced: {response!r}",
+    )
+    conv._assert(
+        "which service" not in response,
+        f"turn {conv.turn}: booking restarted service selection: {response!r}",
+    )
 
 
 def _assert_engine_type_not_requested_again(conv, booking, availability) -> None:
@@ -32,6 +84,31 @@ def _assert_engine_type_not_requested_again(conv, booking, availability) -> None
 
 
 SCENARIOS: List[Scenario] = [
+    Scenario(
+        "Car service accepts an assistant recommendation with next-week availability",
+        Turn(
+            "Hi, my car is making a weird rattling noise when I start it. Not sure what I need.",
+            Expect(
+                response_status="HANDLER_DELEGATED",
+                intent="GENERAL_INQUIRY",
+                response_text_present=True,
+            ),
+            after=_assert_recommendation_persisted,
+        ),
+        Turn(
+            "Yeah, maybe next week. What have you got?",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                stage="AVAILABILITY",
+                date_proposal="2026-07-06",
+                response_text_present=True,
+            ),
+            after=_assert_proposal_continuity,
+        ),
+        fixture="car_service_proposal_continuity",
+        tags=["booking", "car-service", "proposal", "continuity", "regression"],
+        id="car-service-proposal-acceptance-with-next-week",
+    ),
     Scenario(
         "Car service engine type persists through confirmation",
         Turn(

@@ -29,6 +29,60 @@ from core.session.invalidation import (
 )
 
 
+def apply_assistant_proposal_promotion(working_turn: Any, relationship: Any) -> bool:
+    """Promote a bound accepted proposal through the planning working state."""
+    if relationship is None or getattr(relationship, "resolution", None) != "BOUND":
+        return False
+    if getattr(relationship, "response_act", None) != "CONFIRM_ACTION":
+        return False
+    proposal = getattr(relationship, "proposal", None)
+    if not isinstance(proposal, dict):
+        return False
+    slot_key = proposal.get("slot_key")
+    value = proposal.get("canonical_id")
+    if not isinstance(slot_key, str) or not slot_key or value is None:
+        return False
+
+    payload = working_turn.payload
+    explicit = payload.get("_raw_luma_slots") or {}
+    if isinstance(explicit, dict) and explicit.get(slot_key) is not None:
+        return False
+    slots = dict(payload.get("slots") or {})
+    slots[slot_key] = value
+    payload["slots"] = slots
+    facts = dict(payload.get("facts") or {})
+    facts[slot_key] = value
+    payload["facts"] = facts
+    working_turn.effective_collected_slots = {
+        **working_turn.effective_collected_slots,
+        slot_key: value,
+    }
+    payload["_assistant_proposal_updates"] = [{
+        "proposal_id": str(proposal.get("proposal_id")),
+        "status": "CONSUMED",
+    }]
+    payload["_assistant_proposal_promoted"] = True
+    return True
+
+
+def apply_assistant_proposal_rejection(working_turn: Any, relationship: Any) -> bool:
+    """Project rejection evidence without promoting the proposed entity."""
+    if (
+        relationship is None
+        or getattr(relationship, "resolution", None) != "BOUND"
+        or getattr(relationship, "response_act", None) != "REJECT_ACTION"
+    ):
+        return False
+    proposal = getattr(relationship, "proposal", None)
+    if not isinstance(proposal, dict) or not proposal.get("proposal_id"):
+        return False
+    working_turn.payload["_assistant_proposal_updates"] = [{
+        "proposal_id": str(proposal["proposal_id"]),
+        "status": "REJECTED",
+    }]
+    return True
+
+
 def apply_trigger(
     state: Dict[str, Any],
     trigger: InvalidationTrigger,

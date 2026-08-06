@@ -16,6 +16,7 @@ from core.session.confirmation_gate import ConfirmationGateTurn
 
 if TYPE_CHECKING:
     from core.planning.pipeline.types import IntentDecision
+    from core.session.assistant_proposals import AssistantProposalRelationship
 
 
 TurnOperation = Literal[
@@ -69,6 +70,7 @@ class CurrentRequest:
 
     raw_luma_response: Mapping[str, Any]
     """Frozen shallow copy of the original Luma response for this turn."""
+    response_act: Optional[str] = None
 
 
 def build_current_request(
@@ -125,6 +127,11 @@ def build_current_request(
         operation=operation,
         confirmation_classification_input=raw_intent,
         raw_luma_response=_freeze_mapping(raw),
+        response_act=(
+            raw.get("response_act")
+            if raw.get("response_act") in ("CONFIRM_ACTION", "REJECT_ACTION")
+            else (raw_intent if raw_intent in ("CONFIRM_ACTION", "REJECT_ACTION") else None)
+        ),
     )
 
 
@@ -184,9 +191,14 @@ class AttachedRequest:
     session_reset_occurred: bool
     confirm_booking_continuation: bool = False
     gate_action: Optional[ConfirmationGateTurn] = None
+    assistant_proposal_relationship: Optional["AssistantProposalRelationship"] = None
 
 
-def build_attached_request(intent_decision: "IntentDecision") -> AttachedRequest:
+def build_attached_request(
+    intent_decision: "IntentDecision",
+    *,
+    assistant_proposal_relationship: Optional["AssistantProposalRelationship"] = None,
+) -> AttachedRequest:
     """Project workflow attachment fields from ``IntentDecision`` (single builder)."""
     return AttachedRequest(
         planning_intent=intent_decision.planning_intent or "",
@@ -194,6 +206,7 @@ def build_attached_request(intent_decision: "IntentDecision") -> AttachedRequest
         session_reset_occurred=intent_decision.session_reset_occurred,
         confirm_booking_continuation=intent_decision.confirm_booking_continuation,
         gate_action=intent_decision.gate_action,
+        assistant_proposal_relationship=assistant_proposal_relationship,
     )
 
 

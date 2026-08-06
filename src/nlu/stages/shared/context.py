@@ -114,6 +114,7 @@ def format_conversation_context(ctx: Dict[str, Any]) -> str:
         or ctx.get("last_search_query")
         or (ctx.get("turns") or [])
         or ctx.get("active_booking_intent")
+        or (ctx.get("pending_assistant_proposals") or [])
     )
     if not has_data:
         return ""
@@ -135,6 +136,22 @@ def format_conversation_context(ctx: Dict[str, Any]) -> str:
     active_booking = ctx.get("active_booking_intent")
     if active_booking and active_booking != last_intent:
         lines.append(f"Active booking intent (durable session): {active_booking}")
+
+    proposals = ctx.get("pending_assistant_proposals") or []
+    if isinstance(proposals, list) and proposals:
+        lines.append("")
+        lines.append("Active assistant proposals:")
+        for proposal in proposals:
+            if isinstance(proposal, dict):
+                lines.append(
+                    "  - "
+                    f"type={proposal.get('proposal_type')}; "
+                    f"entity_type={proposal.get('entity_type')}; "
+                    f"slot={proposal.get('slot_key')}; "
+                    f"canonical_id={proposal.get('canonical_id')}; "
+                    f"display_name={proposal.get('display_name')}; "
+                    f"expected_responses={proposal.get('expected_responses')}"
+                )
 
     turns = (ctx.get("turns") or [])[-3:]
     if turns:
@@ -169,6 +186,8 @@ def format_conversation_context(ctx: Dict[str, Any]) -> str:
         "",
         "Context rules:",
         "- Resolve follow-up references ('it', 'that', 'how long') using prior turns and last_search_query.",
+        "- response_act is additive: emit CONFIRM_ACTION or REJECT_ACTION for an",
+        "  active assistant proposal even when primary intent describes another act.",
         "- For RAG intents, merge/refine search_query with the prior topic.",
         "- Do NOT invent booking slots (dates, times, services) on the FAQ / OFF_TOPIC",
         "  utterance itself.",

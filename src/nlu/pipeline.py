@@ -492,6 +492,7 @@ class PipelineResult:
     date_constraint: Optional[Dict[str, Any]] = None
     service_candidates: List[str] = field(default_factory=list)
     operation: Optional[str] = None
+    response_act: Optional[str] = None
     # Top-level Stage2 dialogue acts: schema field names explicitly declined.
     declined_entities: List[str] = field(default_factory=list)
     # Canonical OFF_TOPIC question (Stage2); never used as business FAQ search_query.
@@ -1042,6 +1043,7 @@ class NLUPipeline:
         stage1 = self._stage1.classify(text, now, conversation_context)
         intent = stage1.get("intent", "UNKNOWN")
         confidence = stage1.get("confidence", 0.0)
+        response_act = stage1.get("response_act")
         logger.info(
             "[NLU_STAGE1] text=%r intent=%r confidence=%.2f ctx_last_intent=%r",
             text,
@@ -1076,6 +1078,10 @@ class NLUPipeline:
             result = {**result, "service_candidates": []}
         if "service_term" not in result:
             result = {**result, "service_term": None}
+        if response_act in ("CONFIRM_ACTION", "REJECT_ACTION"):
+            result = {**result, "response_act": response_act}
+        elif intent in ("CONFIRM_ACTION", "REJECT_ACTION"):
+            result = {**result, "response_act": intent}
         return result
 
     def _bind_calendar(
@@ -1109,6 +1115,7 @@ class NLUPipeline:
         answer = decision.get("answer")
         service_candidates = decision.get("service_candidates") or []
         operation = decision.get("operation")
+        response_act = decision.get("response_act")
         raw_declined = decision.get("declined_entities")
         declined_entities: List[str] = []
         if isinstance(raw_declined, list):
@@ -1207,6 +1214,9 @@ class NLUPipeline:
             date_constraint=date_constraint,
             service_candidates=service_candidates,
             operation=operation if isinstance(operation, str) else None,
+            response_act=(response_act if response_act in (
+                "CONFIRM_ACTION", "REJECT_ACTION"
+            ) else None),
             declined_entities=declined_entities,
             off_topic_query=off_topic_query if isinstance(off_topic_query, str) else None,
             answerable=answerable if isinstance(answerable, bool) else None,

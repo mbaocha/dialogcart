@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 from typing import Any, Dict, List, Optional
 
 from core.session.session_schema_v2 import (
@@ -50,6 +51,8 @@ class SessionProjectorV2:
         capability_result: Optional[Dict[str, Any]] = None,
         handler_conversation_update: Optional[Dict[str, Any]] = None,
         conversation_messages: Optional[List[Dict[str, Any]]] = None,
+        assistant_proposals: Optional[List[Dict[str, Any]]] = None,
+        assistant_proposal_updates: Optional[List[Dict[str, Any]]] = None,
     ) -> Optional[Dict[str, Any]]:
         _ = session_store  # Compatibility-only; projection never performs storage I/O.
         projection_outcome = dict(outcome)
@@ -70,6 +73,8 @@ class SessionProjectorV2:
                 capability_result=capability_result,
                 handler_conversation_update=handler_conversation_update,
                 conversation_messages=conversation_messages,
+                assistant_proposals=assistant_proposals,
+                assistant_proposal_updates=assistant_proposal_updates,
                 organization_id=organization_id,
                 user_id=user_id,
             )
@@ -85,6 +90,8 @@ class SessionProjectorV2:
             capability_result=capability_result,
             handler_conversation_update=handler_conversation_update,
             conversation_messages=conversation_messages,
+            assistant_proposals=assistant_proposals,
+            assistant_proposal_updates=assistant_proposal_updates,
             # Digressions (RAG HANDLER_DELEGATED, Core OFF_TOPIC) must not clear
             # booking authorization / bound datetime from an empty NLU payload.
             preserve_booking_authorization=(
@@ -103,6 +110,8 @@ class SessionProjectorV2:
         capability_result: Optional[Dict[str, Any]],
         handler_conversation_update: Optional[Dict[str, Any]],
         conversation_messages: Optional[List[Dict[str, Any]]],
+        assistant_proposals: Optional[List[Dict[str, Any]]],
+        assistant_proposal_updates: Optional[List[Dict[str, Any]]],
         preserve_booking_authorization: bool = False,
     ) -> None:
         """Apply explicit same-turn artifacts without consulting storage."""
@@ -191,6 +200,30 @@ class SessionProjectorV2:
                     results[key] = value
 
         conversation = working.setdefault("conversation", {})
+        source_conversation = (
+            working_session_state.get("conversation")
+            if isinstance(working_session_state, dict)
+            else None
+        )
+        if (
+            isinstance(source_conversation, dict)
+            and isinstance(source_conversation.get("pending_proposals"), list)
+            and not conversation.get("pending_proposals")
+        ):
+            conversation["pending_proposals"] = copy.deepcopy(
+                source_conversation["pending_proposals"]
+            )
+        if isinstance(assistant_proposals, list):
+            conversation["pending_proposals"] = copy.deepcopy(assistant_proposals)
+        if isinstance(assistant_proposal_updates, list):
+            updates = {
+                item.get("proposal_id"): item.get("status")
+                for item in assistant_proposal_updates
+                if isinstance(item, dict) and item.get("proposal_id") and item.get("status")
+            }
+            for proposal in conversation.get("pending_proposals") or []:
+                if isinstance(proposal, dict) and proposal.get("proposal_id") in updates:
+                    proposal["status"] = updates[proposal["proposal_id"]]
         if isinstance(handler_conversation_update, dict):
             memory = handler_conversation_update.get("memory")
             if isinstance(memory, dict):

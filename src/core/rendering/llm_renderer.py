@@ -59,6 +59,48 @@ class LlmRenderRequest:
     user_request: Optional[str] = None
 
 
+@dataclass(frozen=True)
+class HandlerEntitySelection:
+    """Entity selected by handler rendering; contains no lifecycle policy."""
+
+    entity_type: str
+    catalog_id: Any = None
+    canonical_id: Any = None
+    display_name: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class HandlerRenderResult:
+    """Complete handler-rendering result passed into normal response assembly."""
+
+    text: str
+    selected_entities: List[HandlerEntitySelection] = field(default_factory=list)
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+
+def coerce_handler_render_result(value: Any) -> HandlerRenderResult:
+    """Coerce persisted/replayed JSON into the typed handler boundary."""
+    if isinstance(value, HandlerRenderResult):
+        return value
+    if isinstance(value, str):
+        return HandlerRenderResult(text=_provider_text_or_fallback(value))
+    if not isinstance(value, dict):
+        raise TypeError("Handler renderer result must be a mapping or HandlerRenderResult")
+    selections = []
+    for item in value.get("selected_entities") or []:
+        if not isinstance(item, dict):
+            raise TypeError("selected_entities entries must be mappings")
+        selections.append(HandlerEntitySelection(**item))
+    metadata = value.get("metadata") or {}
+    if not isinstance(metadata, dict):
+        raise TypeError("handler renderer metadata must be a mapping")
+    return HandlerRenderResult(
+        text=_provider_text_or_fallback(value.get("text")),
+        selected_entities=selections,
+        metadata=dict(metadata),
+    )
+
+
 def _format_structured_data(value: Any) -> str:
     """Render arbitrary structured data as indented JSON (stable, key-preserving)."""
     return json.dumps(value, default=str, ensure_ascii=False, indent=2)
@@ -317,6 +359,44 @@ def render_llm(request: LlmRenderRequest) -> str:
     except RuntimeError:
         logger.warning("ANTHROPIC_API_KEY not set — returning fallback text")
         return _FALLBACK_TEXT
-    except Exception as e:
-        logger.error("LLM render failed: %s", e)
+    except Exception as exc:
+        logger.error("LLM render failed: %s", exc)
         return _FALLBACK_TEXT
+
+
+def render_handler_response(request: LlmRenderRequest) -> HandlerRenderResult:
+    """Render a delegated-handler response with optional entity selections.
+
+    This handler-only contract leaves proposal semantics and lifecycle to Core.
+    The model returns text and selections in one response so they share a single
+    semantic decision. Invalid payloads degrade to text without a selection.
+    """
+    try:
+        sc = request.facts.get("structured_context") or {}
+        if not isinstance(sc, dict):
+            sc = {}
+        system_prompt = _build_system_prompt(sc) + (
+            "\nReturn one JSON object with keys text, selected_entities, and metadata. "
+            "selected_entities is an array of catalog entities you explicitly recommend "
+            "in text; copy entity_type/type, id as catalog_id, and name as display_name "
+            "from Business Knowledge. Use an empty array when no entity is recommended."
+        )
+        client = get_anthropic_client()
+        response = client.messages.create(
+            model=resolve_model(),
+            max_tokens=_MAX_TOKENS,
+            system=system_prompt,
+            messages=[{"role": "user", "content": _build_user_message(request)}],
+        )
+        raw = _provider_text_or_fallback(response.content[0].text)
+        try:
+            return coerce_handler_render_result(json.loads(raw))
+        except (json.JSONDecodeError, TypeError, ValueError):
+            logger.warning("Handler renderer returned unstructured output; ignoring selections")
+            return HandlerRenderResult(text=raw)
+    except RuntimeError:
+        logger.warning("ANTHROPIC_API_KEY not set — returning fallback handler result")
+        return HandlerRenderResult(text=_FALLBACK_TEXT)
+    except Exception as exc:
+        logger.error("Handler LLM render failed: %s", exc)
+        return HandlerRenderResult(text=_FALLBACK_TEXT)

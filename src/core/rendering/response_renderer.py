@@ -250,13 +250,30 @@ def _inject_rendering_text_impl(
                     facts["slot_attempts"] = slot_attempts
 
         facts = decision.get("facts", {})
-        facts_missing = facts.get("missing_slots") if isinstance(facts, dict) else None
-        facts_promptable = (
-            facts.get("promptable_slots") if isinstance(facts, dict) else None
+        plan = decision.get("plan") if isinstance(decision.get("plan"), dict) else {}
+        missing_slots = next(
+            (
+                list(value)
+                for value in (
+                    decision.get("missing_slots"),
+                    plan.get("missing_slots"),
+                    facts.get("missing_slots") if isinstance(facts, dict) else None,
+                )
+                if isinstance(value, list)
+            ),
+            [],
         )
-        missing_slots = facts_missing if isinstance(facts_missing, list) else []
-        promptable_slots = (
-            facts_promptable if isinstance(facts_promptable, list) else []
+        promptable_slots = next(
+            (
+                list(value)
+                for value in (
+                    decision.get("promptable_slots"),
+                    plan.get("promptable_slots"),
+                    facts.get("promptable_slots") if isinstance(facts, dict) else None,
+                )
+                if isinstance(value, list)
+            ),
+            [],
         )
         if not missing_slots and not promptable_slots:
             # Still allow ask_next-only promptable clarification
@@ -275,17 +292,24 @@ def _inject_rendering_text_impl(
         slot_attempts = decision.get("slot_attempts") or {}
         if not isinstance(slot_attempts, dict):
             slot_attempts = {}
-        ask_next = (
+        selected_ask_next = (
             decision.get("ask_next")
-            or (decision.get("plan") or {}).get("ask_next")
+            or plan.get("ask_next")
             or (facts.get("ask_next") if isinstance(facts, dict) else None)
         )
-        if not isinstance(ask_next, str) or not ask_next.strip():
-            ask_next = (
-                missing_slots[0]
-                if missing_slots
-                else (promptable_slots[0] if promptable_slots else None)
-            )
+        valid_targets = {
+            str(slot) for slot in (*missing_slots, *promptable_slots) if slot
+        }
+        ask_next = (
+            selected_ask_next.strip()
+            if isinstance(selected_ask_next, str)
+            and selected_ask_next.strip() in valid_targets
+            else None
+        )
+        if ask_next is None:
+            from core.planning.planner.missing_slots import derive_ask_next
+
+            ask_next = derive_ask_next(missing_slots, promptable_slots)
         if not ask_next:
             return
         attempt_count = slot_attempts.get(ask_next, 0)
@@ -394,7 +418,13 @@ def _inject_rendering_text_impl(
         rendered_text = render_llm(
             LlmRenderRequest(
                 render_instruction=render_instruction,
-                facts={"structured_context": _structured_context_from_decision(decision)},
+                facts={
+                    "structured_context": _structured_context_from_decision(decision),
+                    "rendering_purpose": "clarification",
+                    "ask_next": ask_next,
+                    "missing_slots": list(missing_slots),
+                    "promptable_slots": list(promptable_slots),
+                },
                 conversation_history=conversation_history,
             )
         )

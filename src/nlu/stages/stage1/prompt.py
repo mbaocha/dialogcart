@@ -29,8 +29,13 @@ _TOOL = {
                 "type": "number",
                 "description": "Confidence score 0.0–1.0.",
             },
+            "response_act": {
+                "type": ["string", "null"],
+                "enum": ["CONFIRM_ACTION", "REJECT_ACTION", None],
+                "description": "Additive response to an active assistant proposal.",
+            },
         },
-        "required": ["intent", "confidence"],
+        "required": ["intent", "confidence", "response_act"],
     },
 }
 

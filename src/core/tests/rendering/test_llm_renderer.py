@@ -8,7 +8,12 @@ from unittest.mock import MagicMock
 import pytest
 
 from core.rendering import llm_renderer
-from core.rendering.llm_renderer import LlmRenderRequest, render_llm
+from core.rendering.llm_renderer import (
+    HandlerEntitySelection,
+    LlmRenderRequest,
+    render_handler_response,
+    render_llm,
+)
 
 
 @pytest.fixture
@@ -54,3 +59,33 @@ def test_render_llm_empty_string_returns_fallback(monkeypatch, render_request):
 def test_render_llm_whitespace_only_returns_fallback(monkeypatch, render_request):
     _patch_anthropic_response(monkeypatch, "   \n\t  ")
     assert render_llm(render_request) == llm_renderer._FALLBACK_TEXT
+
+
+def test_handler_renderer_returns_complete_typed_result(monkeypatch, render_request):
+    _patch_anthropic_response(
+        monkeypatch,
+        '{"text":"Premium Full Service is best.","selected_entities":'
+        '[{"entity_type":"service","catalog_id":27,'
+        '"display_name":"Premium Full Service"}],"metadata":{"reason":"rattle"}}',
+    )
+
+    result = render_handler_response(render_request)
+
+    assert result.text == "Premium Full Service is best."
+    assert result.selected_entities == [
+        HandlerEntitySelection(
+            entity_type="service",
+            catalog_id=27,
+            display_name="Premium Full Service",
+        )
+    ]
+    assert result.metadata == {"reason": "rattle"}
+
+
+def test_handler_renderer_unstructured_text_has_no_proposal(monkeypatch, render_request):
+    _patch_anthropic_response(monkeypatch, "A normal legacy-style response.")
+
+    result = render_handler_response(render_request)
+
+    assert result.text == "A normal legacy-style response."
+    assert result.selected_entities == []

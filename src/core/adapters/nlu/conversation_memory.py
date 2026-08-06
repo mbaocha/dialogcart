@@ -105,6 +105,12 @@ def build_conversation_context(
         return None
     conv = get_conversation_memory(session)
     messages = get_conversation_history(session)
+    conversation = session.get("conversation")
+    pending_proposals = (
+        conversation.get("pending_proposals")
+        if isinstance(conversation, dict)
+        else None
+    )
 
     has_conv = (
         isinstance(conv, dict)
@@ -112,7 +118,7 @@ def build_conversation_context(
     )
     has_messages = isinstance(messages, list) and len(messages) > 0
 
-    if not has_conv and not has_messages:
+    if not has_conv and not has_messages and not pending_proposals:
         # Durable booking sessions may lack session["conversation"] when the prior
         # turn's merged Luma response was not persisted (e.g. handle_message strips
         # _merged_luma_response). Synthesize last_intent so NLU can bind slot-fill
@@ -156,6 +162,16 @@ def build_conversation_context(
         result = {**result, "missing_slots": missing}
     result = _attach_resolved_service_id(result, session)
     result = _attach_service_candidates(result, session)
+    if isinstance(pending_proposals, list) and pending_proposals:
+        semantic_fields = (
+            "proposal_type", "status", "entity_type", "slot_key",
+            "canonical_id", "display_name", "expected_responses", "expiry_policy",
+        )
+        result["pending_assistant_proposals"] = [
+            {key: proposal.get(key) for key in semantic_fields if key in proposal}
+            for proposal in pending_proposals
+            if isinstance(proposal, dict) and proposal.get("status") == "PENDING"
+        ]
     return result
 
 

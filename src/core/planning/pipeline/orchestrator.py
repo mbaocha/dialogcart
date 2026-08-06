@@ -27,7 +27,11 @@ from core.planning.pipeline.requests import (
     build_current_request,
     build_legacy_attachment_read_report,
 )
-from core.planning.planning_mutations import apply_confirmation_planning_mutations
+from core.planning.planning_mutations import (
+    apply_assistant_proposal_promotion,
+    apply_assistant_proposal_rejection,
+    apply_confirmation_planning_mutations,
+)
 from core.planning.pipeline.stage01_intent import reconcile_intent
 from core.planning.pipeline.stage02_working_turn import build_working_turn
 from core.planning.pipeline.stage03_revision import apply_revision_policy
@@ -182,6 +186,8 @@ def run_planning_pipeline(
         luma_response = {**luma_response, "_entity_schema": entity_schema}
     original_session_state = session_state
 
+    current_request = build_current_request(luma_response, source_text=text)
+
     intent_decision, session_state = reconcile_intent(
         luma_response=luma_response,
         session_state=session_state,
@@ -191,7 +197,47 @@ def run_planning_pipeline(
         source_text=text,
     )
 
-    attached_request = build_attached_request(intent_decision)
+    relationship = None
+    explicit_proposal_updates = []
+    if intent_decision.gate_action is None:
+        from core.planning.luma_facts_adapter import facts_to_slots
+        from core.session.assistant_proposals import bind_assistant_proposal
+
+        conversation = (
+            (original_session_state or {}).get("conversation")
+            if isinstance(original_session_state, dict)
+            else {}
+        )
+        pending = conversation.get("pending_proposals") if isinstance(conversation, dict) else []
+        explicit_slots = facts_to_slots(
+            dict(current_request.facts),
+            intent_name=intent_decision.planning_intent,
+            source_text=text,
+            entity_schema=entity_schema,
+        )
+        explicit_slots.update(dict(current_request.raw_slots))
+        relationship = bind_assistant_proposal(
+            response_act=current_request.response_act,
+            proposals=pending,
+            explicit_slots=explicit_slots,
+        )
+        for proposal in pending or []:
+            if not isinstance(proposal, dict) or proposal.get("status") != "PENDING":
+                continue
+            slot_key = str(proposal.get("slot_key") or "")
+            explicit_value = explicit_slots.get(slot_key)
+            if explicit_value is not None and str(explicit_value) != str(
+                proposal.get("canonical_id")
+            ):
+                explicit_proposal_updates.append({
+                    "proposal_id": str(proposal.get("proposal_id")),
+                    "status": "SUPERSEDED",
+                })
+
+    attached_request = build_attached_request(
+        intent_decision,
+        assistant_proposal_relationship=relationship,
+    )
     _architecture_session = original_session_state or session_state
 
     if intent_decision.non_durable_status:
@@ -219,6 +265,13 @@ def run_planning_pipeline(
         apply_domain_filter=apply_domain_filter,
         entity_schema=entity_schema,
     )
+    if explicit_proposal_updates:
+        working_turn.payload["_assistant_proposal_updates"] = explicit_proposal_updates
+    if relationship is not None:
+        if relationship.response_act == "REJECT_ACTION":
+            apply_assistant_proposal_rejection(working_turn, relationship)
+        else:
+            apply_assistant_proposal_promotion(working_turn, relationship)
     _hydrate_org_facts(working_turn.payload, organization_id, organization_client)
 
     apply_revision_policy(working_turn, original_session_state or session_state)

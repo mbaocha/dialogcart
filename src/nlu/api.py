@@ -143,6 +143,8 @@ def resolve():
         response["service_candidates"] = result.service_candidates
     if result.operation is not None:
         response["operation"] = result.operation
+    if result.response_act is not None:
+        response["response_act"] = result.response_act
     if result.declined_entities:
         response["declined_entities"] = list(result.declined_entities)
     if result.temporal is not None:

@@ -55,7 +55,8 @@ from core.engine.conversation_engine import ConversationEngine
 from core.session.session_manager import clear_session, get_session
 from core.session.session_schema_v2 import prepare_session_for_load
 from core.session.turn_persistence import project_and_persist_turn_result, resolve_projection_status
-from core.rendering.llm_renderer import LlmRenderRequest, render_llm
+from core.rendering.llm_renderer import LlmRenderRequest, render_handler_response, render_llm
+from core.session.assistant_proposals import create_assistant_proposals
 
 # Module-level execution clients — core owns these; callers pass text only.
 _availability_client = AvailabilityClient()
@@ -354,7 +355,7 @@ async def post_message(request: MessageRequest, http_request: Request):
                     session_state=_raw_session or {},
                     facts=dict(handler_result.facts or {}),
                 )
-                rendered_text = render_llm(
+                handler_render_result = render_handler_response(
                     LlmRenderRequest(
                         render_instruction=render_instruction,
                         facts=render_facts,
@@ -362,6 +363,22 @@ async def post_message(request: MessageRequest, http_request: Request):
                         user_request=request.text,
                     )
                 )
+                rendered_text = handler_render_result.text
+                structured_context = render_facts.get("structured_context")
+                try:
+                    result["_handler_assistant_proposals"] = create_assistant_proposals(
+                        handler_render_result,
+                        structured_context=(
+                            structured_context
+                            if isinstance(structured_context, dict)
+                            else {}
+                        ),
+                        handler_name=handler_name,
+                        transaction_id=transaction_id,
+                    )
+                except ValueError as exc:
+                    logger.warning("Discarding invalid handler proposal metadata: %s", exc)
+                    result["_handler_assistant_proposals"] = []
             else:
                 rendered_text = "I'm unable to respond right now."
 
@@ -442,6 +459,16 @@ async def post_message(request: MessageRequest, http_request: Request):
                             "_handler_conversation_update"
                         ),
                         conversation_messages=conversation_messages,
+                        assistant_proposals=(
+                            result.get("_handler_assistant_proposals") or None
+                        ),
+                        assistant_proposal_updates=(
+                            (result.get("_merged_luma_response") or {}).get(
+                                "_assistant_proposal_updates"
+                            )
+                            if isinstance(result.get("_merged_luma_response"), dict)
+                            else None
+                        ),
                         fallback_session_state=current_working_session or {},
                     )
 

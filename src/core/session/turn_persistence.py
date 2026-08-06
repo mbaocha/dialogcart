@@ -137,6 +137,8 @@ def project_and_persist_turn_result(
     capability_result: Optional[Dict[str, Any]] = None,
     handler_conversation_update: Optional[Dict[str, Any]] = None,
     conversation_messages: Optional[List[Dict[str, Any]]] = None,
+    assistant_proposals: Optional[List[Dict[str, Any]]] = None,
+    assistant_proposal_updates: Optional[List[Dict[str, Any]]] = None,
     fallback_session_state: Optional[Dict[str, Any]] = None,
     save: bool = True,
     save_callback: Optional[Callable[[int, str, Dict[str, Any]], None]] = None,
@@ -174,6 +176,8 @@ def project_and_persist_turn_result(
         capability_result=capability_result,
         handler_conversation_update=handler_conversation_update,
         conversation_messages=conversation_messages,
+        assistant_proposals=assistant_proposals,
+        assistant_proposal_updates=assistant_proposal_updates,
     )
 
     if projected is None and status in ("READY", "success"):

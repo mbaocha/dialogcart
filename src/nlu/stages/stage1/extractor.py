@@ -58,6 +58,7 @@ class Stage1IntentExtractor:
                 return {
                     "intent": block.input.get("intent", "UNKNOWN"),
                     "confidence": float(block.input.get("confidence", 0.0)),
+                    "response_act": block.input.get("response_act"),
                 }
 
         logger.warning("Stage1: no tool_use block returned for text=%r", text)

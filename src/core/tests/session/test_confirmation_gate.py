@@ -419,3 +419,15 @@ def test_clear_pending_confirmation_only_keeps_time():
     assert booking is None or booking.get("booking_id") is None
     assert session["slots"].get("time") == "09:00"
     assert session.get("resolved_datetime_range")
+
+
+def test_additive_response_act_obeys_pending_final_confirmation_gate():
+    action = classify_confirmation_gate_turn(
+        {
+            "intent": {"name": "AVAILABILITY"},
+            "response_act": "CONFIRM_ACTION",
+            "temporal": {"start_date_expression": "next week"},
+        },
+        _pending_session(),
+    )
+    assert action == ConfirmationGateTurn.YES

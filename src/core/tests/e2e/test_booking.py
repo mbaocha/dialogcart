@@ -119,6 +119,17 @@ def _render_structured_service_discovery(
     return "\n\n".join([*lines, prompt])
 
 
+def _structured_clarification_target(facts: Dict[str, Any]) -> str | None:
+    """Read an exact clarification target from authoritative render facts."""
+    if facts.get("rendering_purpose") != "clarification":
+        return None
+    ask_next = facts.get("ask_next")
+    missing = facts.get("missing_slots") or []
+    promptable = facts.get("promptable_slots") or []
+    valid_targets = {str(slot) for slot in (*missing, *promptable) if slot}
+    return ask_next if isinstance(ask_next, str) and ask_next in valid_targets else None
+
+
 @pytest.fixture(autouse=True)
 def _deterministic_booking_llm(monkeypatch):
     """Deterministic rendering for all booking conversation-state suites."""
@@ -270,37 +281,47 @@ def _deterministic_booking_llm(monkeypatch):
         if browse_status in {"exhausted"} or "no more" in browse_status:
             return "There are no more available times to show from your last search."
 
-        missing = facts.get("missing_slots") or getattr(request, "missing_slots", None) or []
-        if isinstance(missing, list) and "service_id" in missing:
-            return (
-                "Which service would you like me to check availability for?\n"
-                "- Premium haircut\n"
-                "- Flexi haircut + pruning"
+        # Availability is an explicit structured rendering mode. Availability
+        # instructions naturally mention dates, so they take precedence over
+        # exact clarification dispatch below.
+        if availability.get("empty"):
+            service_name = str(
+                availability.get("service_name") or "your appointment"
+            ).strip()
+            history = getattr(request, "conversation_history", None) or []
+            previously_offered_another_day = any(
+                isinstance(message, dict)
+                and str(message.get("role") or "").lower() == "assistant"
+                and (
+                    "no available times"
+                    in str(
+                        message.get("text") or message.get("content") or ""
+                    ).lower()
+                    or "try another day"
+                    in str(
+                        message.get("text") or message.get("content") or ""
+                    ).lower()
+                )
+                for message in history
             )
-
-        # HANDLER_DELEGATED FAQ/discovery — structured business facts are the
-        # deterministic source of truth; chunks remain a compatibility fallback.
-        chunks = facts.get("chunks") or []
-        structured_response = _render_structured_service_discovery(
-            facts.get("structured_context")
-        )
-        if structured_response:
-            return structured_response
-        if isinstance(chunks, list) and chunks:
-            resume = facts.get("resume_instruction")
-            text = "Haircuts start at $25 and include a wash."
-            if isinstance(resume, str) and resume.strip():
-                if "confirm" in resume.lower():
-                    text += "\n\nPlease confirm your appointment to continue."
-                else:
-                    text += "\n\nShall we continue with your booking?"
-            return text
-
-        instruction = str(getattr(request, "render_instruction", "") or "").lower()
-        if "missing" in instruction and "time" in instruction:
+            if previously_offered_another_day:
+                return (
+                    f"What date, day, or week would you like me to try for "
+                    f"{service_name}?"
+                )
+            empty_date_label = str(availability.get("date") or "").strip()
+            empty_date_phrase = _DATE_PHRASES.get(
+                empty_date_label, empty_date_label
+            )
+            if empty_date_phrase:
+                return (
+                    f"There are no available times for {service_name} on "
+                    f"{empty_date_phrase}. What other day or week would you like me "
+                    "to try?"
+                )
             return (
-                "I didn't quite catch which time you meant. "
-                "Could you choose one of the available times, such as 9:00 AM or 9:30 AM?"
+                f"There are no available times for {service_name}. "
+                "What date, day, or week would you like me to try instead?"
             )
 
         date_label = str(availability.get("date") or "").strip()
@@ -336,6 +357,44 @@ def _deterministic_booking_llm(monkeypatch):
                 f"Here are the available appointment times for {date_phrase}. "
                 "Which would you like?"
             )
+
+        clarification_target = _structured_clarification_target(facts)
+        if clarification_target == "service_id":
+            return (
+                "Which service would you like me to check availability for?\n"
+                "- Premium haircut\n"
+                "- Flexi haircut + pruning"
+            )
+        if clarification_target == "date":
+            return "What date or day would you like me to check availability for?"
+        if clarification_target == "engine_type":
+            return "What engine type does your vehicle use?"
+        if clarification_target == "registration_number":
+            return "What is your vehicle registration number?"
+        if clarification_target == "time":
+            return (
+                "I didn't quite catch which time you meant. "
+                "Could you choose one of the available times, such as 9:00 AM or 9:30 AM?"
+            )
+
+        # HANDLER_DELEGATED FAQ/discovery — structured business facts are the
+        # deterministic source of truth; chunks remain a compatibility fallback.
+        chunks = facts.get("chunks") or []
+        structured_response = _render_structured_service_discovery(
+            facts.get("structured_context")
+        )
+        if structured_response:
+            return structured_response
+        if isinstance(chunks, list) and chunks:
+            resume = facts.get("resume_instruction")
+            text = "Haircuts start at $25 and include a wash."
+            if isinstance(resume, str) and resume.strip():
+                if "confirm" in resume.lower():
+                    text += "\n\nPlease confirm your appointment to continue."
+                else:
+                    text += "\n\nShall we continue with your booking?"
+            return text
+
         return (
             "Which service would you like me to check availability for?\n"
             "- Premium haircut\n"
@@ -363,6 +422,84 @@ def test_conversation_dsl_expect_aliases():
     assert checks["confirmation"] is None
     assert checks["execution_type"] == "availability"
     assert checks["time_match_outcome"] == "TIME_MATCH_EXACT"
+
+
+@pytest.mark.parametrize(
+    ("ask_next", "expected"),
+    [
+        ("date", "What date or day would you like me to check availability for?"),
+        ("engine_type", "What engine type does your vehicle use?"),
+        ("registration_number", "What is your vehicle registration number?"),
+    ],
+)
+def test_deterministic_renderer_uses_exact_structured_clarification(
+    monkeypatch, ask_next, expected
+):
+    from core.rendering import response_renderer
+    from core.rendering.llm_renderer import LlmRenderRequest
+
+    _deterministic_booking_llm.__wrapped__(monkeypatch)
+    request = LlmRenderRequest(
+        render_instruction="This free-form instruction mentions date and engine_type.",
+        facts={
+            "rendering_purpose": "clarification",
+            "ask_next": ask_next,
+            "missing_slots": [ask_next],
+            "promptable_slots": [],
+        },
+    )
+
+    assert response_renderer.render_llm(request) == expected
+
+
+def test_deterministic_renderer_prioritizes_dated_availability(monkeypatch):
+    from core.rendering import response_renderer
+    from core.rendering.llm_renderer import LlmRenderRequest
+
+    _deterministic_booking_llm.__wrapped__(monkeypatch)
+    request = LlmRenderRequest(
+        render_instruction="Present availability for this date.",
+        facts={
+            "availability": {
+                "date": "2026-07-21",
+                "times": ["10:00 AM", "11:00 AM"],
+            },
+            "rendering_purpose": "clarification",
+            "ask_next": "date",
+            "missing_slots": ["date"],
+        },
+    )
+
+    rendered = response_renderer.render_llm(request)
+    assert "July 21" in rendered
+    assert "10:00 AM" in rendered
+    assert not rendered.startswith("What date or day")
+
+
+def test_deterministic_renderer_prioritizes_empty_dated_availability(monkeypatch):
+    from core.rendering import response_renderer
+    from core.rendering.llm_renderer import LlmRenderRequest
+
+    _deterministic_booking_llm.__wrapped__(monkeypatch)
+    request = LlmRenderRequest(
+        render_instruction="Report no availability on this date.",
+        facts={
+            "availability": {
+                "date": "2026-07-21",
+                "service_name": "Premium haircut",
+                "times": [],
+                "empty": True,
+            },
+            "rendering_purpose": "clarification",
+            "ask_next": "date",
+            "missing_slots": ["date"],
+        },
+    )
+
+    rendered = response_renderer.render_llm(request)
+    assert "no available times" in rendered.lower()
+    assert "July 21" in rendered
+    assert not rendered.startswith("What date or day")
 
 
 def test_conversation_dsl_coerces_turn_shorthand():

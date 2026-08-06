@@ -44,6 +44,7 @@ _EMPTY_SESSION_V2: Dict[str, Any] = {
     "conversation": {
         "history": [],
         "memory": {},
+        "pending_proposals": [],
     },
     "planning": {
         "intent_name": None,
@@ -127,6 +128,8 @@ def validate_session_v2_sections(session: Mapping[str, Any]) -> None:
         raise TypeError("conversation.history must be a list")
     if not isinstance(conversation.get("memory"), dict):
         raise TypeError("conversation.memory must be a dict")
+    if not isinstance(conversation.get("pending_proposals"), list):
+        raise TypeError("conversation.pending_proposals must be a list")
 
     planning = session.get("planning")
     if not isinstance(planning, dict):
@@ -413,6 +416,9 @@ def normalize_session_to_v2(session: Optional[Mapping[str, Any]]) -> Dict[str, A
             nested_conversation.get("memory"),
             nested_conversation.get("context"),
         )
+    conversation["pending_proposals"] = _pick_list(
+        nested_conversation.get("pending_proposals")
+    )
 
     validate_session_v2_sections(v2)
     return v2

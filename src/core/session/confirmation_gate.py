@@ -116,6 +116,9 @@ def is_confirmation_gate_open(session_state: Optional[Dict[str, Any]]) -> bool:
 def _raw_luma_intent_name(luma_response: Optional[Dict[str, Any]]) -> str:
     if not isinstance(luma_response, dict):
         return ""
+    response_act = luma_response.get("response_act")
+    if response_act in ("CONFIRM_ACTION", "REJECT_ACTION"):
+        return response_act
     intent = luma_response.get("intent")
     if isinstance(intent, dict):
         return intent.get("name") or ""

@@ -95,6 +95,8 @@ def project_session_v2(
     capability_result: Optional[Dict[str, Any]] = None,
     handler_conversation_update: Optional[Dict[str, Any]] = None,
     conversation_messages: Optional[List[Dict[str, Any]]] = None,
+    assistant_proposals: Optional[List[Dict[str, Any]]] = None,
+    assistant_proposal_updates: Optional[List[Dict[str, Any]]] = None,
     organization_id: int,
     user_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
@@ -111,6 +113,8 @@ def project_session_v2(
         capability_result,
         handler_conversation_update,
         conversation_messages,
+        assistant_proposals,
+        assistant_proposal_updates,
     )
 
     from core.session.persist import assemble_session_projection_fields
