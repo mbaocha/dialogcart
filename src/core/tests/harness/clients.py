@@ -279,10 +279,9 @@ class TestCatalogClient(CatalogClient):  # noqa: N801
 
     """CatalogClient that returns catalog entries derived from test aliases.
 
-    ``test_aliases`` maps display name → id for the primary bookable collection
-    (services or room_types). Optional ``collections`` supplies additional
-    named collections (e.g. ``{"staff": {"John": 201}}``) without hardcoding
-    verticals in the cache layer.
+    ``test_aliases`` maps display name → id for the configured primary catalog
+    collection. Optional ``collections`` supplies additional configured catalogs.
+    Legacy callers may omit ``catalog_collection_keys`` and retain domain defaults.
     """
 
     def __init__(
@@ -291,11 +290,24 @@ class TestCatalogClient(CatalogClient):  # noqa: N801
         domain: str = "service",
         collections: Optional[Dict[str, Dict[str, Any]]] = None,
         business_category_id: Any = None,
+        service_records: Optional[List[Dict[str, Any]]] = None,
+        catalog_collection_keys: Optional[List[str]] = None,
+        primary_catalog_collection: Optional[str] = None,
     ):
         super().__init__()
         self.test_aliases = test_aliases or {}
         self.domain = domain
         self.collections = collections or {}
+        self.service_records = copy.deepcopy(service_records or [])
+        # Domain-based defaults are retained only for legacy callers that do not
+        # provide the configured bookable-item catalog.
+        default_collection = "services" if domain == "service" else "room_types"
+        self.catalog_collection_keys = list(
+            catalog_collection_keys or [default_collection]
+        )
+        self.primary_catalog_collection = (
+            primary_catalog_collection or default_collection
+        )
         if business_category_id is not None:
             self.business_category_id = business_category_id
         else:
@@ -321,15 +333,44 @@ class TestCatalogClient(CatalogClient):  # noqa: N801
             items.append(entry)
         return items
 
+    def _primary_catalog_items(self, *, reservation: bool = False) -> List[Dict[str, Any]]:
+        if self.service_records:
+            records = []
+            for raw_record in self.service_records:
+                record = copy.deepcopy(raw_record)
+                # Aliases are NLU input, not business catalog metadata.
+                record.pop("aliases", None)
+                canonical = record.get("canonical", record.get("id"))
+                record.setdefault("canonical", canonical)
+                record.setdefault("service_family_id", canonical)
+                record.setdefault("is_active", True)
+                if reservation:
+                    record.setdefault("canonical_key", canonical)
+                records.append(record)
+            return records
+
+        # Legacy phrase-map behavior remains the default for existing tests.
+        if not reservation:
+            return self._items_from_phrase_map(self.test_aliases, duration=60)
+        return [
+            {
+                "name": alias_name,
+                "canonical_key": canonical_key,
+                "canonical": canonical_key,
+                "is_active": True,
+            }
+            for alias_name, canonical_key in self.test_aliases.items()
+        ]
+
     def get_services(self, organization_id: int) -> Dict[str, Any]:
-        services = self._items_from_phrase_map(self.test_aliases, duration=60)
+        services = self._primary_catalog_items()
         payload: Dict[str, Any] = {
             "catalog_last_updated_at": "2026-01-01T00:00:00Z",
             "business_category_id": self.business_category_id,
-            "services": services,
+            self.primary_catalog_collection: services,
         }
         for collection_name, phrase_map in self.collections.items():
-            if collection_name == "services":
+            if collection_name == self.primary_catalog_collection:
                 continue
             if not isinstance(phrase_map, dict):
                 continue
@@ -337,24 +378,15 @@ class TestCatalogClient(CatalogClient):  # noqa: N801
         return payload
 
     def get_reservation(self, organization_id: int) -> Dict[str, Any]:
-        rooms = []
-        for alias_name, canonical_key in self.test_aliases.items():
-            rooms.append(
-                {
-                    "name": alias_name,
-                    "canonical_key": canonical_key,
-                    "canonical": canonical_key,
-                    "is_active": True,
-                }
-            )
+        rooms = self._primary_catalog_items(reservation=True)
         payload: Dict[str, Any] = {
             "catalog_last_updated_at": "2026-01-01T00:00:00Z",
             "business_category_id": self.business_category_id,
-            "room_types": rooms,
+            self.primary_catalog_collection: rooms,
             "extras": [],
         }
         for collection_name, phrase_map in self.collections.items():
-            if collection_name in ("room_types", "extras"):
+            if collection_name in (self.primary_catalog_collection, "extras"):
                 continue
             if not isinstance(phrase_map, dict):
                 continue

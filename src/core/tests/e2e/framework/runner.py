@@ -44,6 +44,7 @@ def run_scenario(
         "availability_client": availability_client,
         "scenario": scenario,
     }
+    conv.availability_client = availability_client
 
     if getattr(scenario, "requires_customer_identity", False):
         attach_commit_customer_identity(conv)
@@ -58,6 +59,9 @@ def run_scenario(
         if turn.before is not None:
             _call_hook(turn.before, ctx)
 
+        conv._availability_calls_before_turn = len(
+            availability_client.get_service_availability.call_args_list
+        ) if availability_client is not None else 0
         conv.send(turn.user, trace=turn.trace)
 
         if turn.expect is not None:

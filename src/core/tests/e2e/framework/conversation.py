@@ -63,6 +63,8 @@ class Expect:
     slot_contains: Any = _UNSET
     slot_absent: Any = _UNSET
     availability_invalidated: Any = _UNSET
+    availability_request: Any = _UNSET
+    availability_extra_params: Any = _UNSET
 
     def to_assert_turn_kwargs(self) -> Dict[str, Any]:
         """Map Expect fields onto BookingConversation.assert_turn kwargs."""
@@ -123,6 +125,12 @@ class Expect:
             checks["slot_absent"] = list(self.slot_absent or [])
         if self.availability_invalidated is not _UNSET:
             checks["availability_invalidated"] = self.availability_invalidated
+        if self.availability_request is not _UNSET:
+            checks["availability_request"] = dict(self.availability_request or {})
+        if self.availability_extra_params is not _UNSET:
+            checks["availability_extra_params"] = dict(
+                self.availability_extra_params or {}
+            )
 
         return checks
 
@@ -247,6 +255,9 @@ class Scenario:
         self.id = id or _slugify(name)
         self.requires_customer_identity = requires_customer_identity
         self.force_session_reload = force_session_reload
+        # Set by booking package aggregation from the owning module's
+        # BUSINESS_CATEGORY (default beauty_salon). Not a Scenario() kwarg.
+        self.business_category = "beauty_salon"
 
     def pytest_id(self) -> str:
         return self.id
@@ -685,13 +696,26 @@ def _execution_view(body: Dict[str, Any], session: Optional[Dict[str, Any]]) -> 
 class BookingConversation:
     """Thin wrapper around POST /api/message for readable multi-turn tests."""
 
-    def __init__(self, api_client, user_id: str, organization_id: int = ORG_ID):
+    def __init__(
+        self,
+        api_client,
+        user_id: str,
+        organization_id: int = ORG_ID,
+        *,
+        domain: str = "service",
+    ):
         self.api_client = api_client
         self.user_id = user_id
         self.organization_id = organization_id
+        self.domain = domain
         self.last_http = None
         self.last_body: Dict[str, Any] = {}
         self.turn = 0
+        # Category-owned evidence exposed by the bundle builder for handlers/rendering.
+        self.structured_business_context: Dict[str, Any] = {}
+        self.faq_chunks: List[Dict[str, Any]] = []
+        self.availability_client: Optional[Mock] = None
+        self._availability_calls_before_turn = 0
         # Optional channel identity for commit scenarios (never chat user_id).
         self.customer_id: Optional[int] = None
         self.customer_phone: Optional[str] = None
@@ -708,7 +732,7 @@ class BookingConversation:
             "user_id": self.user_id,
             "text": text,
             "organization_id": self.organization_id,
-            "domain": "service",
+            "domain": self.domain,
             "timezone": "UTC",
         }
         if self.customer_id is not None:
@@ -907,6 +931,43 @@ class BookingConversation:
                 ),
             )
 
+    def assert_availability_request(
+        self,
+        expected: Dict[str, Any],
+        *,
+        expected_extra_params: Any = _UNSET,
+    ) -> None:
+        client = self.availability_client
+        self._assert(
+            client is not None,
+            f"turn {self.turn}: availability client is not attached to conversation",
+        )
+        calls = client.get_service_availability.call_args_list[
+            self._availability_calls_before_turn:
+        ]
+        self._assert(
+            bool(calls),
+            f"turn {self.turn}: expected a service availability request this turn",
+        )
+        kwargs = calls[-1].kwargs or {}
+        for key, value in expected.items():
+            self._assert(
+                kwargs.get(key) == value,
+                (
+                    f"turn {self.turn}: availability request {key!r} expected "
+                    f"{value!r}, got {kwargs.get(key)!r}; request={kwargs!r}"
+                ),
+            )
+        if expected_extra_params is not _UNSET:
+            actual_extra = kwargs.get("extra_params") or {}
+            self._assert(
+                actual_extra == expected_extra_params,
+                (
+                    f"turn {self.turn}: availability extra_params expected "
+                    f"{expected_extra_params!r}, got {actual_extra!r}"
+                ),
+            )
+
     def assert_date_proposal(self, start: str) -> None:
         sess = self.session() or {}
         proposal = sess.get("date_proposal")
@@ -1028,6 +1089,13 @@ class BookingConversation:
             self.assert_response_text_present()
         if checks.get("availability_invalidated"):
             self.assert_availability_invalidated()
+        if "availability_request" in checks or "availability_extra_params" in checks:
+            self.assert_availability_request(
+                checks.get("availability_request") or {},
+                expected_extra_params=checks.get(
+                    "availability_extra_params", _UNSET
+                ),
+            )
 
 
 def _presentation_page_index(session: Optional[Dict[str, Any]]) -> int:

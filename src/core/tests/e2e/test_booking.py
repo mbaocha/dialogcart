@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import copy
+from typing import Any, Dict
 from unittest.mock import patch
 
 import pytest
@@ -10,6 +12,7 @@ from core.session.session_manager import clear_session
 from core.tests.e2e.booking import SCENARIOS
 from core.tests.e2e.framework.conversation import ORG_ID, Expect, Scenario, Turn, coerce_turn
 from core.tests.e2e.framework.fixtures import (
+    DEFAULT_BUSINESS_CATEGORY,
     E2E_FIXTURE_PARAMS,
     build_recorded_bundle,
     live_luma,
@@ -53,6 +56,67 @@ _FAQ_DATA = {
     },
     "no_hit": False,
 }
+
+
+_CURRENCY_SYMBOLS = {
+    "GBP": "£",
+    "USD": "$",
+    "EUR": "€",
+}
+
+
+def _render_structured_service_discovery(
+    structured_context: Any,
+) -> str | None:
+    """Project structured service facts into deterministic discovery text."""
+    if not isinstance(structured_context, dict):
+        return None
+
+    services = structured_context.get("services")
+    if not isinstance(services, list):
+        return None
+
+    lines = []
+    for service in services:
+        if not isinstance(service, dict) or not service.get("name"):
+            continue
+
+        label = str(service["name"])
+        details = []
+        config = service.get("config")
+        if isinstance(config, dict):
+            price = config.get("price")
+            if price is not None:
+                currency = str(config.get("currency") or "").strip().upper()
+                symbol = _CURRENCY_SYMBOLS.get(currency)
+                if symbol:
+                    details.append(f"{symbol}{price}")
+                elif currency:
+                    details.append(f"{currency} {price}")
+                else:
+                    details.append(str(price))
+
+            duration = config.get("duration")
+            if duration is None:
+                duration = config.get("durationMinutes")
+            if duration is not None:
+                details.append(f"{duration} minutes")
+
+        if details:
+            label += f" — {details[0]}"
+            if len(details) > 1:
+                label += f" ({', '.join(details[1:])})"
+        lines.append(label)
+
+    if not lines:
+        return None
+
+    prompt = (
+        "Which one would you like to book?"
+        if len(lines) > 1
+        else "Would you like to book this service?"
+    )
+    return "\n\n".join([*lines, prompt])
 
 
 @pytest.fixture(autouse=True)
@@ -214,8 +278,14 @@ def _deterministic_booking_llm(monkeypatch):
                 "- Flexi haircut + pruning"
             )
 
-        # HANDLER_DELEGATED FAQ digression — require real FAQ chunks, not empty context.
+        # HANDLER_DELEGATED FAQ/discovery — structured business facts are the
+        # deterministic source of truth; chunks remain a compatibility fallback.
         chunks = facts.get("chunks") or []
+        structured_response = _render_structured_service_discovery(
+            facts.get("structured_context")
+        )
+        if structured_response:
+            return structured_response
         if isinstance(chunks, list) and chunks:
             resume = facts.get("resume_instruction")
             text = "Haircuts start at $25 and include a wash."
@@ -313,28 +383,43 @@ def _booking_scenario_params():
     ]
 
 
-def _run_with_optional_faq_mock(scenario, bundle) -> None:
-    """FaqClient mock is only required for HANDLER_DELEGATED digression."""
-    if scenario.pytest_id() == "handler-delegated-faq-resume-commit":
-        with patch("extensions.handlers.adapters.rag.FaqClient") as mock_faq:
-            mock_faq.return_value.retrieve.return_value = _FAQ_DATA
-            run_bundle(scenario, bundle)
-        return
-    run_bundle(scenario, bundle)
+def _run_with_category_faq_mock(scenario, bundle) -> None:
+    """Run with category-owned FAQ evidence available to every scenario."""
+    conv = bundle[0]
+    chunks = conv.faq_chunks
+    if not chunks and conv.structured_business_context == _FAQ_DATA["structured_context"]:
+        # Preserve the established beauty-salon FAQ evidence exactly.
+        chunks = copy.deepcopy(_FAQ_DATA["chunks"])
+    faq_data = {
+        "chunks": chunks,
+        "structured_context": conv.structured_business_context,
+        "no_hit": False,
+    }
+    with patch("extensions.handlers.adapters.rag.FaqClient") as mock_faq:
+        mock_faq.return_value.retrieve.return_value = faq_data
+        run_bundle(scenario, bundle)
 
 
 @pytest.mark.parametrize("scenario", _booking_scenario_params())
-def test_booking_scenario(scenario, api_client, monkeypatch, request):
+def test_booking_scenario(scenario, api_client, monkeypatch):
+    # Availability layout from scenario.fixture; vertical from owning module.
     if scenario.fixture == "booking":
-        bundle = request.getfixturevalue("booking_conversation")
-        _run_with_optional_faq_mock(scenario, bundle)
-        return
+        # Match historic booking_conversation multi-slot layout (10, 11).
+        params: Dict[str, Any] = {"start_hours": (10, 11)}
+    else:
+        params = dict(E2E_FIXTURE_PARAMS.get(scenario.fixture) or {})
 
-    params = dict(E2E_FIXTURE_PARAMS.get(scenario.fixture) or {})
+    business_category = getattr(
+        scenario, "business_category", None
+    ) or DEFAULT_BUSINESS_CATEGORY
+
     conv, booking, availability, user_id = build_recorded_bundle(
-        api_client, monkeypatch, **params
+        api_client,
+        monkeypatch,
+        business_category=business_category,
+        **params,
     )
     try:
-        _run_with_optional_faq_mock(scenario, (conv, booking, availability))
+        _run_with_category_faq_mock(scenario, (conv, booking, availability))
     finally:
         clear_session(ORG_ID, user_id)
