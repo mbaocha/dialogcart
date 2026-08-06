@@ -16,6 +16,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from core.rendering.business_hours import prepare_structured_context_for_render
 from core.rendering.llm_client import get_anthropic_client, resolve_model
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,8 @@ _BUSINESS_KNOWLEDGE_PRESENTATION = (
     "- Surface decision-useful details when relevant — such as what each option "
     "is, what it costs, how long it takes, and when you are open — woven into "
     "clear, readable language rather than raw data dumps.\n"
+    "- When opening_hours is present, use opening_summary / open_days / "
+    "closed_days / hours exactly. Do not invent or extend open days.\n"
     "- Prefer continuing the conversation here: invite the next useful step "
     "(for example choosing or booking something) instead of sending the "
     "customer elsewhere.\n"
@@ -120,11 +123,14 @@ def _build_user_message(request: LlmRenderRequest) -> str:
         parts.append(f"Facts:\n- {answer.strip()}")
 
     # Authoritative org facts — full structured_context, no field allowlist.
+    # Raw Commerce isOpen schedules are normalized for the prompt only; the
+    # original facts["structured_context"] remains unchanged for booking logic.
     structured_context = request.facts.get("structured_context")
     if isinstance(structured_context, dict) and structured_context:
+        knowledge = prepare_structured_context_for_render(structured_context)
         parts.append(
             "Business Knowledge (Authoritative):\n"
-            + _format_structured_data(structured_context)
+            + _format_structured_data(knowledge)
         )
         parts.append(_BUSINESS_KNOWLEDGE_PRESENTATION)
 
