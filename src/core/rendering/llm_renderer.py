@@ -36,6 +36,9 @@ _BUSINESS_KNOWLEDGE_PRESENTATION = (
     "clear, readable language rather than raw data dumps.\n"
     "- When opening_hours is present, use opening_summary / open_days / "
     "closed_days / hours exactly. Do not invent or extend open days.\n"
+    "- When cancellation_summary or rescheduling_summary is present, use those "
+    "facts exactly. Do not reinterpret refundType, policy type enums, or raw "
+    "policy objects.\n"
     "- Prefer continuing the conversation here: invite the next useful step "
     "(for example choosing or booking something) instead of sending the "
     "customer elsewhere.\n"
@@ -123,7 +126,7 @@ def _build_user_message(request: LlmRenderRequest) -> str:
         parts.append(f"Facts:\n- {answer.strip()}")
 
     # Authoritative org facts — full structured_context, no field allowlist.
-    # Raw Commerce isOpen schedules are normalized for the prompt only; the
+    # Raw Commerce schedules/policies are normalized for the prompt only; the
     # original facts["structured_context"] remains unchanged for booking logic.
     structured_context = request.facts.get("structured_context")
     if isinstance(structured_context, dict) and structured_context:

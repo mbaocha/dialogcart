@@ -11,6 +11,8 @@ from __future__ import annotations
 import copy
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from core.rendering.business_policies import apply_policy_summaries
+
 _DAY_NAMES = (
     "Sunday",
     "Monday",
@@ -295,23 +297,21 @@ def prepare_structured_context_for_render(
     """
     Build a Business Knowledge view for the LLM prompt.
 
-    Adds a deterministic hours representation when raw ``isOpen`` schedules are
+    Adds deterministic hours and policy summaries when raw Commerce objects are
     present, and removes those ambiguous raw objects from the prompt view.
-    The caller's original ``structured_context`` is left unchanged.
+    The caller's original `structured_context` is left unchanged.
     """
     if not isinstance(structured_context, dict) or not structured_context:
         return structured_context
 
     prepared = copy.deepcopy(structured_context)
     key, raw = _extract_raw_schedule(prepared)
-    if key is None:
-        return prepared
+    if key is not None:
+        normalized = normalize_business_hours(raw)
+        if normalized is not None:
+            # Prefer normalized summary for conversational text; hide ambiguous raw.
+            prepared.pop(key, None)
+            prepared["opening_hours"] = normalized
 
-    normalized = normalize_business_hours(raw)
-    if normalized is None:
-        return prepared
-
-    # Prefer normalized summary for conversational text; hide ambiguous raw.
-    prepared.pop(key, None)
-    prepared["opening_hours"] = normalized
+    apply_policy_summaries(prepared)
     return prepared
