@@ -109,6 +109,7 @@ class BookingAdapter(ExecutionAdapter):
         organization_id: int,
         *,
         organization_client: Optional[Any] = None,
+        catalog_client: Optional[Any] = None,
         kwargs: Optional[Dict[str, Any]] = None,
         plan_snapshot: Optional[Mapping[str, Any]] = None,
     ) -> PreparedExecution:
@@ -166,6 +167,7 @@ class BookingAdapter(ExecutionAdapter):
             sku_to_catalog_id=load_catalog_mapping(
                 organization_id=organization_id,
                 organization_client=organization_client,
+                catalog_client=catalog_client,
             ),
             facts=facts,
             entity_schema=(

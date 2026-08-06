@@ -71,6 +71,7 @@ class ExecutionCoordinator:
         organization_id: int,
         kwargs: Dict[str, Any],
         command: Optional[ExecutionCommand] = None,
+        catalog_client: Optional[Any] = None,
     ) -> ExecutionGateResult:
         """Operational gate + execution preparation (no tool I/O).
 
@@ -156,6 +157,7 @@ class ExecutionCoordinator:
             session_state,
             organization_id,
             organization_client=organization_client,
+            catalog_client=catalog_client,
             kwargs=kwargs,
             plan_snapshot=plan,
         )

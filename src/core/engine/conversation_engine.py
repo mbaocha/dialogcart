@@ -446,6 +446,7 @@ class ConversationEngine:
                 user_id=user_id,
                 availability_client=availability_client,
                 organization_client=organization_client,
+                catalog_client=catalog_client,
                 organization_id=organization_id,
                 kwargs=kwargs,
                 command=execution_command,

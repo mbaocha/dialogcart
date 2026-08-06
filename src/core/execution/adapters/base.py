@@ -91,11 +91,16 @@ def load_catalog_mapping(
     *,
     organization_id: int,
     organization_client: Optional[Any],
+    catalog_client: Optional[Any] = None,
 ) -> Dict[str, Any]:
     try:
         from core.execution.catalog_resolver import load_sku_to_catalog_id_for_org
 
-        return load_sku_to_catalog_id_for_org(organization_id, organization_client)
+        return load_sku_to_catalog_id_for_org(
+            organization_id,
+            organization_client,
+            catalog_client=catalog_client,
+        )
     except Exception as e:
         logger.debug("Could not load sku_to_catalog_id for execution: %s", e)
         return {}
@@ -112,6 +117,7 @@ class ExecutionAdapter(ABC):
         organization_id: int,
         *,
         organization_client: Optional[Any] = None,
+        catalog_client: Optional[Any] = None,
         kwargs: Optional[Dict[str, Any]] = None,
         plan_snapshot: Optional[Mapping[str, Any]] = None,
     ) -> PreparedExecution:

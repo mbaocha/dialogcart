@@ -87,6 +87,8 @@ def resolve_catalog_item_id(
 def load_sku_to_catalog_id_for_org(
     organization_id: int,
     organization_client: Any = None,
+    *,
+    catalog_client: Any = None,
 ) -> Dict[str, int]:
     """Load cached catalog and build SKU → id map for an organization."""
     from core.adapters.cache.catalog_cache import catalog_cache
@@ -102,6 +104,8 @@ def load_sku_to_catalog_id_for_org(
         return {}
 
     catalog = catalog_cache.get_catalog(
-        organization_id, CatalogClient(), domain=domain
+        organization_id,
+        catalog_client or CatalogClient(),
+        domain=domain,
     )
     return build_sku_to_catalog_id(catalog, domain)
