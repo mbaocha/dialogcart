@@ -17,6 +17,7 @@ from nlu.stages.stage2.groups.create import (
     build_create_tool,
 )
 from nlu.stages.stage2.prompt_cache import (
+    CACHE_PROBE_MESSAGE,
     HAIKU_45_MIN_CACHE_TOKENS,
     cache_eligibility,
     log_usage,
@@ -86,6 +87,14 @@ def test_create_stable_prefix_ignores_request_specific_values():
     assert "2026-09-02" in second_dynamic
     assert "Active assistant proposals" in second_dynamic
     assert "Oil Change" in second_dynamic
+    assert "TEMPORAL CONTINUATION:" not in second_stable
+    assert "retain that established date" in second_dynamic
+    assert second_dynamic.index("CONVERSATION CONTEXT") < second_dynamic.index(
+        "TEMPORAL CONTINUATION:"
+    )
+    assert second_dynamic.index("TEMPORAL CONTINUATION:") < second_dynamic.index(
+        "Temporal anchor (tenant-local): 2026-09-02T12:30:00"
+    )
 
 
 def test_availability_stable_prefix_ignores_request_specific_values():
@@ -171,29 +180,73 @@ def test_catalog_order_is_preserved_as_meaningful_prompt_order():
     assert first.prompt_rules != second.prompt_rules
 
 
-def test_cache_control_attaches_only_when_provider_count_meets_minimum():
+def test_cache_probe_uses_data_free_message_and_excludes_its_tokens():
     tool = AVAILABILITY_TOOL
     client = MagicMock()
-    client.messages.count_tokens.return_value = SimpleNamespace(
-        input_tokens=HAIKU_45_MIN_CACHE_TOKENS
-    )
+    placeholder_tokens = 11
+    client.messages.count_tokens.side_effect = [
+        SimpleNamespace(input_tokens=HAIKU_45_MIN_CACHE_TOKENS + placeholder_tokens),
+        SimpleNamespace(input_tokens=placeholder_tokens),
+    ]
     eligible, count, _ = cache_eligibility(
         client, model="eligible-model", tool=tool, stable_text="eligible-prefix"
     )
+    calls = client.messages.count_tokens.call_args_list
+    assert len(calls) == 2
+    assert calls[0].kwargs["messages"] == [CACHE_PROBE_MESSAGE]
+    assert calls[1].kwargs == {
+        "model": "eligible-model",
+        "messages": [CACHE_PROBE_MESSAGE],
+    }
+    assert "eligible-prefix" not in str(CACHE_PROBE_MESSAGE)
     blocks = system_blocks("eligible-prefix", "dynamic", eligible=eligible)
     assert count == HAIKU_45_MIN_CACHE_TOKENS
     assert blocks[0]["cache_control"] == {"type": "ephemeral"}
     assert "cache_control" not in blocks[1]
 
-    client.messages.count_tokens.return_value = SimpleNamespace(
-        input_tokens=HAIKU_45_MIN_CACHE_TOKENS - 1
-    )
+    client.messages.count_tokens.reset_mock()
+    client.messages.count_tokens.side_effect = [
+        SimpleNamespace(input_tokens=HAIKU_45_MIN_CACHE_TOKENS + placeholder_tokens - 1),
+        SimpleNamespace(input_tokens=placeholder_tokens),
+    ]
     eligible, _, _ = cache_eligibility(
         client, model="ineligible-model", tool=tool, stable_text="short-prefix"
     )
     assert not eligible
     assert "cache_control" not in system_blocks(
         "short-prefix", "dynamic", eligible=eligible
+    )[0]
+
+
+def test_placeholder_tokens_cannot_make_short_prefix_eligible():
+    client = MagicMock()
+    client.messages.count_tokens.side_effect = [
+        SimpleNamespace(input_tokens=HAIKU_45_MIN_CACHE_TOKENS + 100),
+        SimpleNamespace(input_tokens=101),
+    ]
+    eligible, count, _ = cache_eligibility(
+        client,
+        model="placeholder-false-positive-model",
+        tool=AVAILABILITY_TOOL,
+        stable_text="short-prefix-with-large-placeholder-overhead",
+    )
+    assert count == HAIKU_45_MIN_CACHE_TOKENS - 1
+    assert not eligible
+
+
+def test_cache_probe_failure_disables_cache_control():
+    client = MagicMock()
+    client.messages.count_tokens.side_effect = RuntimeError("provider unavailable")
+    eligible, count, _ = cache_eligibility(
+        client,
+        model="failed-probe-model",
+        tool=AVAILABILITY_TOOL,
+        stable_text="failed-prefix",
+    )
+    assert count is None
+    assert not eligible
+    assert "cache_control" not in system_blocks(
+        "failed-prefix", "dynamic", eligible=eligible
     )[0]
 
 

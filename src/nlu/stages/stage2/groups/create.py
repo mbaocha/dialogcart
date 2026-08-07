@@ -180,10 +180,13 @@ Extract booking slots for validated_intent only.
     dynamic = f"""DYNAMIC REQUEST CONTEXT
 {intent_candidate_section(candidate_intent)}
 Current date/time (tenant-local): {now}
-{temporal_anchor_section(now)}
 {ctx_section}
 {in_flow_act_validation_rules(candidate_intent)}
-{candidate_section}"""
+{candidate_section}
+TEMPORAL CONTINUATION:
+When conversation context establishes a booking date and the current user supplies
+only a time, retain that established date and pair it with the newly supplied time.
+{temporal_anchor_section(now)}"""
     return stable, dynamic
 
 

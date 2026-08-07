@@ -11,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 HAIKU_45_MIN_CACHE_TOKENS = 4096
 CACHE_TTL = "5m"
+CACHE_PROBE_MESSAGE = {"role": "user", "content": "."}
 
 _eligibility_cache: Dict[Tuple[str, str], Tuple[bool, Optional[int]]] = {}
 _eligibility_lock = Lock()
@@ -33,7 +34,14 @@ def cache_eligibility(
     tool: Mapping[str, Any],
     stable_text: str,
 ) -> Tuple[bool, Optional[int], str]:
-    """Provider-tokenize the static prefix once; fail closed when unavailable."""
+    """Provider-tokenize the static prefix once; fail closed when unavailable.
+
+    Anthropic requires at least one message.  Both counts use the same fixed,
+    data-free placeholder: the first includes tools + stable system, while the
+    second measures only placeholder/request framing.  Subtracting the latter
+    yields a conservative count for the real cache prefix and prevents the
+    probe message from making an undersized prefix eligible.
+    """
     fingerprint = prefix_fingerprint(tool, stable_text)
     key = (model, fingerprint)
     with _eligibility_lock:
@@ -45,17 +53,27 @@ def cache_eligibility(
     try:
         counter = getattr(getattr(client, "messages", None), "count_tokens", None)
         if callable(counter):
-            result = counter(
+            combined = counter(
                 model=model,
                 tools=[dict(tool)],
                 system=[{"type": "text", "text": stable_text}],
-                messages=[],
+                messages=[dict(CACHE_PROBE_MESSAGE)],
             )
-            raw_count = getattr(result, "input_tokens", None)
-            if raw_count is None and isinstance(result, Mapping):
-                raw_count = result.get("input_tokens")
-            if raw_count is not None:
-                token_count = int(raw_count)
+            placeholder_only = counter(
+                model=model,
+                messages=[dict(CACHE_PROBE_MESSAGE)],
+            )
+
+            def _input_tokens(result: Any) -> Optional[int]:
+                raw = getattr(result, "input_tokens", None)
+                if raw is None and isinstance(result, Mapping):
+                    raw = result.get("input_tokens")
+                return int(raw) if raw is not None else None
+
+            combined_count = _input_tokens(combined)
+            placeholder_count = _input_tokens(placeholder_only)
+            if combined_count is not None and placeholder_count is not None:
+                token_count = max(0, combined_count - placeholder_count)
     except Exception:
         logger.warning(
             "Stage2 cache token count failed model=%s prefix=%s; cache disabled",
