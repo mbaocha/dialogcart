@@ -428,6 +428,7 @@ def _project_presented(
     view: _AvailabilityView,
     cursor: _Cursor,
     *,
+    search_date: Optional[str] = None,
     fingerprint: Optional[str] = None,
     browse_status: Optional[str] = None,
 ) -> PresentedAvailability:
@@ -437,7 +438,7 @@ def _project_presented(
     from core.planning.recovery_actions import recovery_actions_for_browse_window
 
     presented: PresentedAvailability = {
-        "search_date": date_label,
+        "search_date": date_label or normalize_search_date(search_date),
         "slots": page_slots,
         "times": times,
         "more_count": more_count,
@@ -497,7 +498,10 @@ def build_initial_presentation(
             preferred = start
     cursor = _initial_cursor(view, search_date=preferred)
     return _project_presented(
-        view, cursor, fingerprint=cache.get("fingerprint")
+        view,
+        cursor,
+        search_date=preferred,
+        fingerprint=cache.get("fingerprint"),
     )
 
 
@@ -708,7 +712,9 @@ def build_presented_availability(
     )
     view = _build_availability_view(shaped, page_size=max_times)
     cursor = _initial_cursor(view, search_date=search_date)
-    return _project_presented(view, cursor, fingerprint=fingerprint)
+    return _project_presented(
+        view, cursor, search_date=search_date, fingerprint=fingerprint
+    )
 
 
 def build_presented_availability_page(
@@ -728,7 +734,9 @@ def build_presented_availability_page(
     view = _build_availability_view(shaped, page_size=page_size)
     cursor = _initial_cursor(view, search_date=search_date)
     cursor = _Cursor(cursor.group_index, max(0, int(page_index)), page_size)
-    return _project_presented(view, cursor, fingerprint=fingerprint)
+    return _project_presented(
+        view, cursor, search_date=search_date, fingerprint=fingerprint
+    )
 
 
 def build_availability_presentation(

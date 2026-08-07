@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from core.workflows.availability.contracts import AvailabilityCache
+from core.workflows.availability.discovery.bridge import present_via_discovery
 from core.workflows.availability.presentation import (
     advance_presentation,
     build_initial_presentation,
@@ -38,6 +39,28 @@ def test_single_day_criteria_span_from_date():
     assert span == "single_day"
     assert start == JULY_24
     assert end == JULY_24
+
+
+def test_empty_search_preserves_authoritative_search_date():
+    cache: AvailabilityCache = {
+        "type": "availability",
+        "status": "success",
+        "slots": [],
+        "search_date": "2026-09-08",
+        "fingerprint": "fp-empty-september-8",
+    }
+
+    presented = present_via_discovery(
+        cache,
+        search_date="2026-09-08",
+        slots={"service_id": "executive oil change", "date": "2026-09-08"},
+    )
+
+    assert presented["search_date"] == "2026-09-08"
+    assert presented["slots"] == []
+    assert presented["times"] == []
+    assert presented["total_unique"] == 0
+    assert cache["search_date"] == "2026-09-08"
 
 
 def test_multi_day_criteria_span_from_date_range():
