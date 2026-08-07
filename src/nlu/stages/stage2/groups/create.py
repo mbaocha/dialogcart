@@ -15,9 +15,11 @@ import anthropic
 from ..base_prompt import (
     build_tool,
     declined_entities_rules,
-    intent_validation_section,
+    intent_candidate_section,
+    intent_validation_instructions,
     service_rules,
-    temporal_rules,
+    temporal_anchor_section,
+    temporal_instructions,
 )
 from ..browse_operation import normalize_operation, operation_rules
 from ..entity_schema import (
@@ -26,6 +28,7 @@ from ..entity_schema import (
     extract_declared_facts,
 )
 from ..in_flow_validation import in_flow_act_validation_rules
+from ..prompt_cache import cache_eligibility, log_usage, system_blocks
 from ...shared.context import format_conversation_context
 from ...shared.in_flow_act import promote_in_flow_booking_intent
 from ...shared.slot_fill_continuation import slot_fill_continuation_section
@@ -138,14 +141,16 @@ def _service_term_from_clarification_reply(
     return service_term
 
 
-def _system_prompt(
+def _prompt_blocks(
     now: str,
     tenant_context: Dict[str, Any],
     conversation_context: Optional[Dict[str, Any]],
     candidate_intent: str,
     compiled: Optional[CompiledBusinessEntities] = None,
-) -> str:
+) -> tuple[str, str]:
     aliases = tenant_context.get("aliases", {})
+    # Alias maps are lookup vocabularies, not ranked catalog presentation.
+    aliases = {key: aliases[key] for key in sorted(aliases, key=str.casefold)}
     booking_mode = tenant_context.get("booking_mode", "service")
     ctx_block = format_conversation_context(conversation_context or {})
     ctx_section = f"\n{ctx_block}\n" if ctx_block else ""
@@ -158,15 +163,12 @@ def _system_prompt(
     candidate_block = _service_candidate_pick_guidance(conversation_context)
     candidate_section = f"\n{candidate_block}\n" if candidate_block else ""
     declined_section = f"\n{declined_block}\n" if declined_block else ""
-    return f"""{intent_validation_section(candidate_intent)}
+    stable = f"""{intent_validation_instructions()}
 
 ── EXTRACTION (CREATE) ─────────────────────────────────────────────────────
 Extract booking slots for validated_intent only.
 
-Current date/time (tenant-local): {now}
-{ctx_section}
 {slot_fill_continuation_section()}
-{in_flow_act_validation_rules(candidate_intent)}
 
 {_booking_mode_guidance(booking_mode)}
 
@@ -174,8 +176,33 @@ Current date/time (tenant-local): {now}
 
 {business_block}
 {declined_section}
-{candidate_section}
-{temporal_rules(now)}"""
+{temporal_instructions()}"""
+    dynamic = f"""DYNAMIC REQUEST CONTEXT
+{intent_candidate_section(candidate_intent)}
+Current date/time (tenant-local): {now}
+{temporal_anchor_section(now)}
+{ctx_section}
+{in_flow_act_validation_rules(candidate_intent)}
+{candidate_section}"""
+    return stable, dynamic
+
+
+def _system_prompt(
+    now: str,
+    tenant_context: Dict[str, Any],
+    conversation_context: Optional[Dict[str, Any]],
+    candidate_intent: str,
+    compiled: Optional[CompiledBusinessEntities] = None,
+) -> str:
+    """Compatibility view of the ordered prompt blocks."""
+    stable, dynamic = _prompt_blocks(
+        now,
+        tenant_context,
+        conversation_context,
+        candidate_intent,
+        compiled=compiled,
+    )
+    return f"{stable}\n{dynamic}"
 
 
 class CreateGroupExtractor:
@@ -194,7 +221,7 @@ class CreateGroupExtractor:
         # compiled_entities is validated once in NLUPipeline.run; CREATE does not recompile.
         compiled = compiled_entities
 
-        system = _system_prompt(
+        stable_system, dynamic_system = _prompt_blocks(
             now,
             tenant_context,
             conversation_context,
@@ -202,19 +229,21 @@ class CreateGroupExtractor:
             compiled=compiled,
         )
         tool = build_create_tool(compiled)
+        cache_ok, prefix_tokens, fingerprint = cache_eligibility(
+            self._client,
+            model=_MODEL,
+            tool=tool,
+            stable_text=stable_system,
+        )
+        system = system_blocks(stable_system, dynamic_system, eligible=cache_ok)
         ctx_block = format_conversation_context(conversation_context or {})
         user_content = f"CURRENT USER MESSAGE:\n{text}" if ctx_block else text
 
-        logger.debug(
-            "[CREATE_PROMPT] system=\n%s\n[CREATE_USER] user=%r",
-            system,
-            user_content,
-        )
         logger.info(
-            "[CREATE_STAGE2] text=%r candidate_intent=%r entity_schema=%s",
-            text,
+            "[CREATE_STAGE2] candidate_intent=%r entity_schema=%s prefix=%s",
             candidate_intent,
             "present" if compiled is not None else "absent",
+            fingerprint,
         )
         try:
             response = self._client.messages.create(
@@ -225,8 +254,17 @@ class CreateGroupExtractor:
                 tool_choice={"type": "any"},
                 messages=[{"role": "user", "content": user_content}],
             )
+            log_usage(
+                response,
+                model=_MODEL,
+                group="create",
+                prefix=fingerprint,
+                prefix_tokens=prefix_tokens,
+                cache_eligible=cache_ok,
+                cache_control_applied=cache_ok,
+            )
         except Exception:
-            logger.exception("CreateGroupExtractor failed for text=%r", text)
+            logger.exception("CreateGroupExtractor failed")
             return _empty(candidate_intent, text, conversation_context)
 
         for block in response.content:
@@ -239,7 +277,7 @@ class CreateGroupExtractor:
                     compiled=compiled,
                 )
 
-        logger.warning("CreateGroupExtractor: no tool_use block for text=%r", text)
+        logger.warning("CreateGroupExtractor: no tool_use block")
         return _empty(candidate_intent, text, conversation_context)
 
 

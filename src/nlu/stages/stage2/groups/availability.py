@@ -12,11 +12,14 @@ import anthropic
 
 from ..base_prompt import (
     build_tool,
-    intent_validation_section,
+    intent_candidate_section,
+    intent_validation_instructions,
     service_rules,
-    temporal_rules,
+    temporal_anchor_section,
+    temporal_instructions,
 )
 from ..browse_operation import normalize_operation, operation_rules
+from ..prompt_cache import cache_eligibility, log_usage, system_blocks
 from ...shared.context import format_conversation_context
 from ....temporal.stage2_output import (
     empty_temporal_dict,
@@ -38,22 +41,20 @@ _TOOL = build_tool(
 )
 
 
-def _system_prompt(
+def _prompt_blocks(
     now: str,
     tenant_context: Dict[str, Any],
     conversation_context: Optional[Dict[str, Any]],
     candidate_intent: str,
-) -> str:
+) -> tuple[str, str]:
     aliases = tenant_context.get("aliases", {})
     ctx_block = format_conversation_context(conversation_context or {})
     ctx_section = f"\n{ctx_block}\n" if ctx_block else ""
-    return f"""{intent_validation_section(candidate_intent)}
+    stable = f"""{intent_validation_instructions()}
 
 ── EXTRACTION (AVAILABILITY) ───────────────────────────────────────────────
 Extract availability query slots for validated_intent only.
 
-Current date/time (tenant-local): {now}
-{ctx_section}
 The user is asking about available time slots, not booking yet.
 Extract which service, date, and time window they want to check.
 
@@ -61,7 +62,26 @@ Extract which service, date, and time window they want to check.
 
 {service_rules(aliases)}
 
-{temporal_rules(now)}"""
+{temporal_instructions()}"""
+    dynamic = f"""DYNAMIC REQUEST CONTEXT
+{intent_candidate_section(candidate_intent)}
+Current date/time (tenant-local): {now}
+{temporal_anchor_section(now)}
+{ctx_section}"""
+    return stable, dynamic
+
+
+def _system_prompt(
+    now: str,
+    tenant_context: Dict[str, Any],
+    conversation_context: Optional[Dict[str, Any]],
+    candidate_intent: str,
+) -> str:
+    """Compatibility view of the ordered prompt blocks."""
+    stable, dynamic = _prompt_blocks(
+        now, tenant_context, conversation_context, candidate_intent
+    )
+    return f"{stable}\n{dynamic}"
 
 
 class AvailabilityGroupExtractor:
@@ -76,7 +96,16 @@ class AvailabilityGroupExtractor:
         candidate_intent: str,
         conversation_context: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
-        system = _system_prompt(now, tenant_context, conversation_context, candidate_intent)
+        stable_system, dynamic_system = _prompt_blocks(
+            now, tenant_context, conversation_context, candidate_intent
+        )
+        cache_ok, prefix_tokens, fingerprint = cache_eligibility(
+            self._client,
+            model=_MODEL,
+            tool=_TOOL,
+            stable_text=stable_system,
+        )
+        system = system_blocks(stable_system, dynamic_system, eligible=cache_ok)
         ctx_block = format_conversation_context(conversation_context or {})
         user_content = f"CURRENT USER MESSAGE:\n{text}" if ctx_block else text
 
@@ -89,15 +118,24 @@ class AvailabilityGroupExtractor:
                 tool_choice={"type": "any"},
                 messages=[{"role": "user", "content": user_content}],
             )
+            log_usage(
+                response,
+                model=_MODEL,
+                group="availability",
+                prefix=fingerprint,
+                prefix_tokens=prefix_tokens,
+                cache_eligible=cache_ok,
+                cache_control_applied=cache_ok,
+            )
         except Exception:
-            logger.exception("AvailabilityGroupExtractor failed for text=%r", text)
+            logger.exception("AvailabilityGroupExtractor failed")
             return _empty(candidate_intent)
 
         for block in response.content:
             if block.type == "tool_use" and block.name == "extract_availability_slots":
                 return _merge(block.input, candidate_intent, text=text)
 
-        logger.warning("AvailabilityGroupExtractor: no tool_use block for text=%r", text)
+        logger.warning("AvailabilityGroupExtractor: no tool_use block")
         return _empty(candidate_intent)
 
 

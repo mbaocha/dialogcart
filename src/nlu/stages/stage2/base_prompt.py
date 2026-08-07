@@ -43,10 +43,11 @@ Named windows (morning/afternoon/evening/night) → mode=fuzzy, label=<name>, ti
 No time → time_constraint=null, times=[]. ALWAYS extract times even for UNKNOWN intent."""
 
 
-def temporal_rules(now: str) -> str:
+def temporal_instructions() -> str:
+    """Stable temporal contract; request-specific anchor is supplied later."""
     return f"""── TEMPORAL RULES ──────────────────────────────────────────────────────────
 Populate the temporal object only. Do NOT invent dates or times the user did not mention.
-Anchor (tenant-local): {now}
+Use the tenant-local temporal anchor supplied in DYNAMIC REQUEST CONTEXT.
 
 Fields:
 - expression: full temporal phrase as spoken when useful (e.g. "tomorrow at 9am"), else null
@@ -125,6 +126,16 @@ Examples:
     → start_time="15:00", end_time="15:00", mode=none"""
 
 
+def temporal_anchor_section(now: str) -> str:
+    """Request-specific temporal value, deliberately outside cached rules."""
+    return f"Temporal anchor (tenant-local): {now}"
+
+
+def temporal_rules(now: str) -> str:
+    """Backward-compatible combined prompt for unaffected groups and callers."""
+    return f"{temporal_instructions()}\n{temporal_anchor_section(now)}"
+
+
 def booking_id_rules(tenant_context: Optional[Dict[str, Any]] = None) -> str:
     from ...config.booking_id import DEFAULT_BOOKING_ID_PATTERN, get_booking_id_settings
 
@@ -172,7 +183,7 @@ Examples:
 For all other intents, search_query must be null."""
 
 
-def intent_validation_section(candidate_intent: str) -> str:
+def intent_validation_instructions() -> str:
     """Shared Stage 2 Intent Validation Contract (all groups).
 
     Stage 1 supplies a proposal only. Stage 2 is the semantic authority:
@@ -183,8 +194,6 @@ def intent_validation_section(candidate_intent: str) -> str:
     return f"""════════════════════════════════════════
 INTENT VALIDATION (Stage 2 contract — all groups)
 ════════════════════════════════════════
-Stage 1 proposal (prior only — NOT the truth): {candidate_intent}
-
 HARD CONSTRAINT: If CONVERSATION CONTEXT has no assistant confirmation ask,
 validated_intent must not be CONFIRM_ACTION (keep CREATE_* / informational intents).
 
@@ -261,6 +270,22 @@ Supported intents:
 
 
 # ── Shared tool schema components ────────────────────────────────────────────
+
+def intent_candidate_section(candidate_intent: str) -> str:
+    """Request-specific Stage 1 proposal, deliberately outside cached rules."""
+    return f"Stage 1 proposal (prior only — NOT the truth): {candidate_intent}"
+
+
+def intent_validation_section(candidate_intent: str) -> str:
+    """Backward-compatible combined contract for unaffected groups and callers."""
+    instructions = intent_validation_instructions()
+    marker = "HARD CONSTRAINT:"
+    return instructions.replace(
+        marker,
+        f"{intent_candidate_section(candidate_intent)}\n\n{marker}",
+        1,
+    )
+
 
 _NON_TEMPORAL_FACT_FIELDS = {
     "service_id": {
