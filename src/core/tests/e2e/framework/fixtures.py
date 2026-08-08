@@ -47,7 +47,10 @@ from core.tests.harness.car_service_catalog import (
     CAR_SERVICE_STRUCTURED_CONTEXT,
 )
 from core.tests.harness.clients import TestCatalogClient, TestLumaClient
-from core.tests.harness.recording_luma_client import RecordingLumaClient
+from core.tests.harness.recording_luma_client import (
+    RecordingLumaClient,
+    live_luma_calls_enabled,
+)
 from core.tests.harness.recording_render_client import RecordingRenderClient
 from core.tests.harness.mock_clients import (
     create_mock_booking_client,
@@ -193,8 +196,8 @@ TARGET_DATE = _resolve_search_date(None)
 
 LIVE_LUMA_SKIP_REASON = "Live Luma unavailable"
 
-# Marker for tests that may call live NLU on RecordingLumaClient cache miss.
-# Skip behaviour is applied by ``_skip_if_live_luma_unavailable`` (autouse).
+# Marker for tests backed by Luma recordings. Live reachability is checked only
+# in explicit record or recache mode.
 live_luma = pytest.mark.live_luma
 # Backward-compatible alias — prefer ``live_luma``.
 requires_luma = live_luma
@@ -245,7 +248,9 @@ def luma_reachable() -> bool:
 
 @pytest.fixture
 def require_live_luma():
-    """Skip the current test when Live Luma is not usable."""
+    """Probe live Luma only when recording was explicitly enabled."""
+    if not live_luma_calls_enabled():
+        return
     if not live_luma_available():
         pytest.skip(LIVE_LUMA_SKIP_REASON)
 
@@ -254,6 +259,8 @@ def require_live_luma():
 def _skip_if_live_luma_unavailable(request):
     """Auto-skip any test marked ``live_luma`` when the service is down."""
     if request.node.get_closest_marker("live_luma") is None:
+        return
+    if not live_luma_calls_enabled():
         return
     if not live_luma_available():
         pytest.skip(LIVE_LUMA_SKIP_REASON)
@@ -550,7 +557,9 @@ def _wire_booking_deps(
     booking_domain = str(cat_fx["booking_domain"])
     business_category_id = int(cat_fx["business_category_id"])
 
-    luma_client = RecordingLumaClient(TestLumaClient(test_aliases=aliases))
+    luma_client = RecordingLumaClient(
+        live_client_factory=lambda: TestLumaClient(test_aliases=aliases)
+    )
     catalog_client = TestCatalogClient(
         test_aliases=aliases,
         domain=booking_domain,

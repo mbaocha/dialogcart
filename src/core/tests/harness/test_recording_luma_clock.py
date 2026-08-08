@@ -42,7 +42,7 @@ def test_recording_key_stable_without_test_now(monkeypatch, tmp_path):
     assert "test_now" not in key
 
     inner = _CaptureInner()
-    client = RecordingLumaClient(inner, recordings_dir=tmp_path)
+    client = RecordingLumaClient(inner, recordings_dir=tmp_path, mode="record")
     # Force live path (empty dir).
     client.resolve(
         user_id="u",
@@ -118,7 +118,7 @@ def test_live_miss_forwards_canonical_test_now_without_env(monkeypatch, tmp_path
         conversation_context={"last_intent": "CREATE_APPOINTMENT"},
     )
     inner = _CaptureInner()
-    client = RecordingLumaClient(inner, recordings_dir=tmp_path)
+    client = RecordingLumaClient(inner, recordings_dir=tmp_path, mode="record")
     client.resolve(
         user_id="u",
         text="July 25",
@@ -141,7 +141,7 @@ def test_live_miss_explicit_test_now_overrides_canonical(monkeypatch, tmp_path):
     monkeypatch.delenv(LUMA_TEST_NOW_ENV, raising=False)
     override = "2025-01-15T12:00:00Z"
     inner = _CaptureInner()
-    client = RecordingLumaClient(inner, recordings_dir=tmp_path)
+    client = RecordingLumaClient(inner, recordings_dir=tmp_path, mode="record")
     client.resolve(
         user_id="u",
         text="July 25",

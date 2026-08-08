@@ -7,7 +7,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from core.api.main import app
-from core.tests.harness.recording_luma_client import RECACHE_ENV
+from core.tests.harness.recording_luma_client import RECACHE_ENV, RECORD_ENV
 from core.tests.harness.test_clock import LUMA_TEST_NOW_ENV, TEST_NOW_ISO
 from core.tracing.invariant_trace import TRACE_ENV_VAR
 
@@ -16,6 +16,15 @@ pytest_plugins = ["core.tests.e2e.framework.fixtures"]
 
 
 def pytest_addoption(parser):
+    parser.addoption(
+        "--record-luma",
+        action="store_true",
+        default=False,
+        help=(
+            "Call live Luma only on E2E replay misses and save them "
+            f"(sets {RECORD_ENV}=1)"
+        ),
+    )
     parser.addoption(
         "--recache-luma",
         action="store_true",
@@ -33,11 +42,19 @@ def pytest_configure(config):
         "markers",
         "live_luma: integration test that requires a reachable Live Luma /resolve service",
     )
-    # Pin relative-date resolution for any live /resolve during E2E (cache miss
-    # or --recache-luma). RecordingLumaClient also defaults to TEST_NOW_ISO;
+    # Pin relative-date resolution for any explicitly enabled live /resolve
+    # (--record-luma or --recache-luma). RecordingLumaClient also defaults to TEST_NOW_ISO;
     # this covers production LumaClient env fallback used by the inner client.
     os.environ.setdefault(LUMA_TEST_NOW_ENV, TEST_NOW_ISO)
-    if config.getoption("--recache-luma"):
+    record = config.getoption("--record-luma")
+    recache = config.getoption("--recache-luma")
+    if record and recache:
+        raise pytest.UsageError(
+            "--record-luma and --recache-luma are mutually exclusive"
+        )
+    if record:
+        os.environ[RECORD_ENV] = "1"
+    if recache:
         os.environ[RECACHE_ENV] = "1"
     if config.getoption("--trace-invariants", default=False):
         os.environ[TRACE_ENV_VAR] = "1"

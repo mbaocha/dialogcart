@@ -10,11 +10,13 @@ import hashlib
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Optional, Protocol
+from typing import Any, Callable, Dict, Literal, Optional, Protocol
 
 from core.tests.harness.test_clock import LUMA_TEST_NOW_ENV, TEST_NOW_ISO
 
 RECACHE_ENV = "DIALOGCART_RECACHE_LUMA"
+RECORD_ENV = "DIALOGCART_RECORD_LUMA"
+LumaRecordingMode = Literal["replay", "record", "recache"]
 
 _DEFAULT_RECORDINGS_DIR = (
     Path(__file__).resolve().parents[1] / "e2e" / "recordings" / "luma"
@@ -44,6 +46,30 @@ def _truthy_env(name: str) -> bool:
 
 def recache_luma_enabled() -> bool:
     return _truthy_env(RECACHE_ENV)
+
+
+def recording_luma_mode() -> LumaRecordingMode:
+    """Return the single E2E recording mode selected by explicit opt-ins."""
+    record = _truthy_env(RECORD_ENV)
+    recache = recache_luma_enabled()
+    if record and recache:
+        raise ValueError(
+            f"Conflicting Luma recording modes: {RECORD_ENV} and {RECACHE_ENV} "
+            "cannot both be enabled"
+        )
+    if recache:
+        return "recache"
+    if record:
+        return "record"
+    return "replay"
+
+
+def live_luma_calls_enabled() -> bool:
+    return recording_luma_mode() in {"record", "recache"}
+
+
+class LumaRecordingMissError(RuntimeError):
+    """Raised when replay-only E2E execution has no matching recording."""
 
 
 def build_recording_key(
@@ -101,12 +127,15 @@ def _resolve_test_now(
 class RecordingLumaClient:  # noqa: N801
     __test__ = False
 
-    """Composition wrapper: lookup/replay recordings; miss or recache → live.
+    """Composition wrapper: replay by default; live only in explicit write modes.
 
     Cache hit invariant: when a recording file exists and is eligible for
     replay, return it and **never** call the inner client.
 
-    ``--recache-luma`` / ``DIALOGCART_RECACHE_LUMA`` bypasses cache only for the
+    A replay miss raises :class:`LumaRecordingMissError` without constructing a
+    live client or touching the recordings directory. ``--record-luma`` enables
+    live calls on misses. ``--recache-luma`` / ``DIALOGCART_RECACHE_LUMA``
+    bypasses cache only for the
     default E2E recordings corpus (force live + overwrite). Custom
     ``recordings_dir`` (e.g. pytest ``tmp_path``) always honors hits so the
     replay invariant remains testable under a suite-level recache flag.
@@ -119,11 +148,17 @@ class RecordingLumaClient:  # noqa: N801
 
     def __init__(
         self,
-        inner: _LumaResolveClient,
+        inner: Optional[_LumaResolveClient] = None,
         *,
         recordings_dir: Optional[Path] = None,
+        live_client_factory: Optional[Callable[[], _LumaResolveClient]] = None,
+        mode: Optional[LumaRecordingMode] = None,
     ):
         self._inner = inner
+        self._live_client_factory = live_client_factory
+        self.mode = mode or recording_luma_mode()
+        if self.mode not in {"replay", "record", "recache"}:
+            raise ValueError(f"Unsupported Luma recording mode: {self.mode!r}")
         self.recordings_dir = Path(recordings_dir or _DEFAULT_RECORDINGS_DIR)
         self.last_response: Optional[Dict[str, Any]] = None
         self.last_recording_path: Optional[Path] = None
@@ -131,7 +166,7 @@ class RecordingLumaClient:  # noqa: N801
 
     def _bypass_cache_for_recache(self) -> bool:
         """Force live only for the shared E2E corpus under ``--recache-luma``."""
-        if not recache_luma_enabled():
+        if self.mode != "recache":
             return False
         try:
             return self.recordings_dir.resolve() == _DEFAULT_RECORDINGS_DIR.resolve()
@@ -172,9 +207,17 @@ class RecordingLumaClient:  # noqa: N801
             self.last_response = response
             return response
 
-        # Miss (or default-corpus recache bypass) → live, then save.
+        if self.mode == "replay":
+            self.last_cache_hit = False
+            raise LumaRecordingMissError(
+                f"Luma replay cache miss: {path}. Re-run with --record-luma "
+                "to record missing responses, or --recache-luma to replace "
+                "the shared E2E recordings."
+            )
+
+        # Explicit record miss (or default-corpus recache bypass) → live, then save.
         # Always pin the E2E reference clock so named-month dates stay stable.
-        response = self._inner.resolve(
+        response = self._get_live_client().resolve(
             user_id=user_id,
             text=text,
             domain=domain,
@@ -192,9 +235,23 @@ class RecordingLumaClient:  # noqa: N801
     def notify_execution(
         self, user_id: str, booking_id: str, domain: str = "service"
     ) -> Dict[str, Any]:
-        return self._inner.notify_execution(
+        if self.mode == "replay":
+            return {
+                "success": False,
+                "message": "Live Luma notification skipped in replay mode",
+            }
+        return self._get_live_client().notify_execution(
             user_id=user_id, booking_id=booking_id, domain=domain
         )
+
+    def _get_live_client(self) -> _LumaResolveClient:
+        if self._inner is None and self._live_client_factory is not None:
+            self._inner = self._live_client_factory()
+        if self._inner is None:
+            raise RuntimeError(
+                f"Luma mode {self.mode!r} requires an explicitly configured live client"
+            )
+        return self._inner
 
     def _save_recording(
         self, path: Path, key: Dict[str, Any], response: Dict[str, Any]
