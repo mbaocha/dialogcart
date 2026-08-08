@@ -666,6 +666,21 @@ def resolve_session_proposals(
             date_proposal = source.get("date_proposal")
         if time_proposal is None:
             time_proposal = source.get("time_proposal")
+    from core.session.invalidation import REVISION_INVALIDATED_PRIOR_TIME_KEY
+
+    invalidated_prior_time = bool(
+        isinstance(merged_luma_response, dict)
+        and (
+            merged_luma_response.get(REVISION_INVALIDATED_PRIOR_TIME_KEY)
+            or merged_luma_response.get("_booking_confirmation_rejected")
+        )
+    )
+    current_turn_replacement = bool(
+        isinstance(merged_luma_response, dict)
+        and merged_luma_response.get("_current_turn_has_time")
+    )
+    if invalidated_prior_time and not current_turn_replacement:
+        time_proposal = None
     return {"date_proposal": date_proposal, "time_proposal": time_proposal}
 
 

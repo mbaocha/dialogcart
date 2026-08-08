@@ -109,6 +109,18 @@ Time resolution:
 - Named windows → start_time_expression=morning|afternoon|evening|night; start_time/end_time null.
 - No time mentioned → all time fields null.
 
+Explicit self-correction precedence:
+- Cues such as "sorry", "I mean", "actually", and "not X, Y" mark an earlier
+  date/time mention as abandoned when the user supplies a corrected mention.
+- The final corrected mention is authoritative. Exclude explicitly abandoned
+  date/time mentions from Temporal and from all projected facts.
+- temporal.expression, expression fields, resolved temporal fields, and projected
+  facts must all represent the same winning mention; never pair the corrected words
+  with the abandoned mention's resolved value.
+- This rule is for explicit correction/retraction, not ordinary alternatives or ranges.
+  "Friday—sorry, Saturday." → expression="Saturday",
+    start_date_expression="Saturday", start_date=<ISO for Saturday>, mode=single_day.
+
 Examples:
   "book haircut tomorrow at 9am"
     → start_date_expression="tomorrow", start_date=<ISO>, start_time="09:00",
@@ -310,15 +322,27 @@ def _temporal_schema() -> dict:
     nullable_str = {"type": ["string", "null"]}
     return {
         "type": ["object", "null"],
-        "description": "Canonical temporal understanding for this utterance. Null only if no date/time mentioned.",
+        "description": (
+            "Canonical temporal understanding for this utterance. Null only if no "
+            "date/time is mentioned. For explicit self-corrections, every field "
+            "must represent the same corrected winning mention."
+        ),
         "properties": {
             "expression": {
                 **nullable_str,
-                "description": "Full temporal phrase as spoken, when useful.",
+                "description": (
+                    "Full authoritative temporal phrase as spoken, when useful. "
+                    "For explicit self-corrections, represent only the corrected "
+                    "winning mention and exclude abandoned mentions."
+                ),
             },
             "start_date_expression": {
                 **nullable_str,
-                "description": "User's start-date words (tomorrow, friday, next monday).",
+                "description": (
+                    "User's authoritative start-date words (tomorrow, friday, next "
+                    "monday). For explicit self-corrections, use only the corrected "
+                    "winning mention."
+                ),
             },
             "start_time_expression": {
                 **nullable_str,
@@ -334,12 +358,18 @@ def _temporal_schema() -> dict:
             },
             "start_date": {
                 **nullable_str,
-                "description": "ISO YYYY-MM-DD resolved against tenant-local now for any mentioned date.",
+                "description": (
+                    "ISO YYYY-MM-DD resolved against tenant-local now for the "
+                    "authoritative mentioned date. For explicit self-corrections, "
+                    "resolve the corrected mention, never the abandoned date."
+                ),
             },
             "start_time": {
                 **nullable_str,
                 "description": (
                     "HH:MM 24h exact start time, else null. "
+                    "For explicit self-corrections, use the corrected winning time "
+                    "and exclude the abandoned time. "
                     "For 'at X', 'by X', and 'from X' set start_time=X "
                     "(and for 'by X'/'from X' also end_time=X)."
                 ),
@@ -443,7 +473,9 @@ def build_tool(
                 "confirmation ask — never for cold-start 'book it'/'reserve it'/"
                 "'schedule it', and never for state/correctness/meta questions. "
                 "CORRECTION only when a workflow slot/selection is being changed — "
-                "not when disputing prices, policies, or explanations. "
+                "not when disputing prices, policies, or explanations. An affirmative "
+                "prefix followed by an explicit slot correction is CORRECTION, not "
+                "CONFIRM_ACTION or CREATE_*, and does not authorize the stale proposal. "
                 "Prefer an explicit intent over null."
             ),
         }

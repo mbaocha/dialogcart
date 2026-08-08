@@ -1,0 +1,72 @@
+{
+  "key": {
+    "conversation_context": {
+      "last_intent": "CREATE_APPOINTMENT",
+      "last_search_query": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "Book me a premium haircut"
+        },
+        {
+          "role": "assistant",
+          "text": "What date or day would you like me to check availability for?"
+        }
+      ],
+      "missing_slots": [
+        "date",
+        "time"
+      ],
+      "resolved_service_id": "premium haircut",
+      "turns": [
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "Book me a premium haircut"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "July 25",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [
+        "2026-07-25"
+      ],
+      "service": "premium haircut",
+      "service_id": "premium haircut",
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CREATE_APPOINTMENT"
+    },
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": "july 25",
+      "mode": "single_day",
+      "start_date": "2026-07-25",
+      "start_date_expression": "july 25",
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

@@ -1,0 +1,92 @@
+{
+  "key": {
+    "conversation_context": {
+      "last_date_proposal": {
+        "mode": "single_day",
+        "start": "2026-07-02"
+      },
+      "last_intent": "CREATE_APPOINTMENT",
+      "last_search_query": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "continue"
+        },
+        {
+          "role": "assistant",
+          "text": "I didn't quite catch which time you meant. Could you choose one of the available times, such as 9:00 AM or 9:30 AM?"
+        }
+      ],
+      "missing_slots": [
+        "time"
+      ],
+      "resolved_service_id": "premium haircut",
+      "turns": [
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "book me a premium haircut tomorrow"
+        },
+        {
+          "assistant": "No, lions do not lay eggs. Lions are mammals and give birth to live young.\n\nWhich time works best for your appointment? You can also say \"show more\" to see additional times.",
+          "intent": "OFF_TOPIC",
+          "search_query": null,
+          "user": "Does a lion lay eggs?"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "continue"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "10am",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service": "premium haircut",
+      "service_id": "premium haircut",
+      "times": [
+        "10:00"
+      ]
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CREATE_APPOINTMENT"
+    },
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": "10:00",
+      "mode": "none",
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": "10:00",
+      "start_time_expression": null
+    },
+    "time_constraint": {
+      "end": "10:00",
+      "label": null,
+      "mode": "exact",
+      "start": "10:00"
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

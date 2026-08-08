@@ -1,0 +1,93 @@
+{
+  "key": {
+    "conversation_context": {
+      "last_date_proposal": {
+        "mode": "single_day",
+        "start": "2026-07-03"
+      },
+      "last_intent": "CREATE_APPOINTMENT",
+      "last_search_query": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "no"
+        },
+        {
+          "role": "assistant",
+          "text": "No problem, I won't book it. What would you like to change?"
+        }
+      ],
+      "resolved_service_id": "premium haircut",
+      "turns": [
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "book haircut"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "premium"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "10am"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "no"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "11am",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service": "premium",
+      "service_id": "premium haircut",
+      "times": [
+        "11:00"
+      ]
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CREATE_APPOINTMENT"
+    },
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": "11:00",
+      "mode": "none",
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": "11:00",
+      "start_time_expression": null
+    },
+    "time_constraint": {
+      "end": "11:00",
+      "label": null,
+      "mode": "exact",
+      "start": "11:00"
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

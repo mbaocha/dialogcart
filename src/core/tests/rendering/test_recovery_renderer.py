@@ -192,6 +192,41 @@ def test_orphaned_confirmation_actions_trigger_distinct_recovery():
         )
 
 
+def test_orphaned_yes_recovers_when_planner_action_left_no_text():
+    """Stale CONFIRM_ACTION after the gate closed must not stay silent.
+
+    Planner may still select SEARCH_AVAILABILITY; if execution produced no
+    reply, recovery must ask what to do next.
+    """
+    outcome = {
+        "status": "READY",
+        "action": "SEARCH_AVAILABILITY",
+        "slots": {"service_id": "flexi haircut + pruning"},
+        "missing_slots": ["time"],
+        "turn": {"understanding": "UNDERSTOOD"},
+        "facts": {
+            "current_turn_planning_evidence": True,
+            "_raw_luma_response": {"intent": {"name": "CONFIRM_ACTION"}},
+        },
+    }
+    result = {
+        "success": True,
+        "outcome": outcome,
+        "_merged_luma_response": {"intent": {"name": "CONFIRM_ACTION"}},
+        "_execution_result": {"status": "succeeded", "availability": {"slots": []}},
+    }
+    assert should_render_recovery(
+        result=result,
+        plan={
+            "status": "READY",
+            "action": "SEARCH_AVAILABILITY",
+            "turn_operation": "CONFIRM_ACTION",
+        },
+        session_state={"confirmation_state": None},
+        availability_client_present=True,
+    )
+
+
 def test_pending_confirmation_actions_remain_suppressed():
     for operation in ("CONFIRM_ACTION", "REJECT_ACTION"):
         outcome = {

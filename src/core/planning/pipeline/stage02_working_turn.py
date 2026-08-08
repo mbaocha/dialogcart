@@ -90,6 +90,54 @@ def build_working_turn(
     payload["_current_turn_has_time"] = current_turn_has_time
     payload["_current_turn_has_date"] = current_turn_has_date
 
+    raw_src = (
+        raw_luma_response_deep_copy
+        if isinstance(raw_luma_response_deep_copy, dict)
+        else luma_response
+    )
+    raw_dialogue_act = ""
+    if isinstance(raw_src, dict):
+        _raw_intent = raw_src.get("intent")
+        if isinstance(_raw_intent, dict):
+            raw_dialogue_act = str(_raw_intent.get("name") or "")
+        elif isinstance(_raw_intent, str):
+            raw_dialogue_act = _raw_intent
+        response_act = raw_src.get("response_act")
+        if isinstance(response_act, str) and response_act.strip():
+            raw_dialogue_act = response_act.strip()
+
+    session_for_merge = original_session_state or session_state
+    session_slots_for_delta: Dict[str, Any] = {}
+    if isinstance(session_for_merge, dict):
+        _ss = session_for_merge.get("slots")
+        if isinstance(_ss, dict):
+            session_slots_for_delta = _ss
+
+    from core.planning.planning_evidence import (
+        drop_unsolicited_service_from_turn_slots,
+        has_explicit_current_turn_service,
+    )
+
+    tenant_aliases = None
+    if isinstance(tenant_context, dict):
+        aliases = tenant_context.get("aliases")
+        if isinstance(aliases, dict):
+            tenant_aliases = aliases
+
+    has_explicit_service = has_explicit_current_turn_service(
+        payload,
+        source_text=source_text,
+        tenant_aliases=tenant_aliases,
+        raw_dialogue_act=raw_dialogue_act,
+        durable_service=session_slots_for_delta.get("service_id"),
+    )
+    payload["_current_turn_has_service"] = has_explicit_service
+    drop_unsolicited_service_from_turn_slots(
+        payload,
+        durable_service=session_slots_for_delta.get("service_id"),
+        has_explicit_service=has_explicit_service,
+    )
+
     if current_turn_has_date and isinstance(nlu_date_proposal, dict):
         from core.workflows.availability.presentation import normalize_search_date
 
@@ -126,6 +174,9 @@ def build_working_turn(
         if value is None and isinstance(luma_response.get("slots"), dict):
             value = luma_response["slots"].get(key)
         canon = canonicalize_search_criteria_key(key)
+        if canon == "service_id" and not has_explicit_service:
+            payload.pop("_current_turn_service_id", None)
+            continue
         if value is not None and value != "":
             payload[f"_current_turn_{canon}"] = value
             seen_canons.add(canon)
@@ -174,26 +225,6 @@ def build_working_turn(
 
     # --- Planning evidence: compute once before merge mixes session state ---
     from core.planning.planning_evidence import stamp_planning_evidence
-
-    raw_src = (
-        raw_luma_response_deep_copy
-        if isinstance(raw_luma_response_deep_copy, dict)
-        else luma_response
-    )
-    raw_dialogue_act = ""
-    if isinstance(raw_src, dict):
-        _raw_intent = raw_src.get("intent")
-        if isinstance(_raw_intent, dict):
-            raw_dialogue_act = str(_raw_intent.get("name") or "")
-        elif isinstance(_raw_intent, str):
-            raw_dialogue_act = _raw_intent
-
-    session_for_merge = original_session_state or session_state
-    session_slots_for_delta: Dict[str, Any] = {}
-    if isinstance(session_for_merge, dict):
-        _ss = session_for_merge.get("slots")
-        if isinstance(_ss, dict):
-            session_slots_for_delta = _ss
 
     turn_slots_snapshot = dict(payload.get("slots") or {})
     stamp_planning_evidence(

@@ -488,6 +488,26 @@ class ConversationEngine:
                     ),
                     renderer=renderer,
                 )
+                if not (
+                    isinstance(response.get("text"), str) and response["text"].strip()
+                ):
+                    decision = (
+                        run.plan.get("_decision")
+                        if isinstance(run.plan, dict)
+                        else None
+                    )
+                    renderer.render_recovery(
+                        response,
+                        plan=run.plan,
+                        session_state=(
+                            run.session_state
+                            if run.session_state is not None
+                            else session_state
+                        ),
+                        user_input=text,
+                        availability_client_present=availability_client is not None,
+                        decision=decision if isinstance(decision, dict) else None,
+                    )
                 stages.tool_execution_executed(
                     plan_action=run.plan_action,
                     execution_result=run.execution_result,

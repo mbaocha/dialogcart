@@ -766,8 +766,109 @@ class TestNormalizeBookingId:
 
 
 class TestFixIsoWeekdayMismatch:
-    def _slm(self, dates):
-        return {"intent": "CORRECTION", "facts": {"dates": dates}}
+    def _slm(self, dates, *, expression=None, start_date_expression=None, mode="single_day"):
+        return {
+            "intent": "CORRECTION",
+            "facts": {"dates": dates},
+            "temporal": {
+                "expression": expression,
+                "start_date_expression": start_date_expression,
+                "start_date": dates[0] if dates else None,
+                "mode": mode,
+            },
+        }
+
+    def test_structured_expression_preserves_corrected_saturday(self):
+        slm = self._slm(["2026-07-04"], expression="Saturday")
+        ctx = {"last_date_proposal": {"start": "2026-07-02"}}
+
+        result = _fix_iso_weekday_mismatch("Friday—sorry, Saturday.", slm, ctx)
+
+        assert result["facts"]["dates"] == ["2026-07-04"]
+        assert result["temporal"]["start_date"] == "2026-07-04"
+
+    def test_structured_saturday_repairs_friday_iso_and_preserves_expression(self):
+        slm = self._slm(
+            ["2026-07-03"],
+            expression="Saturday",
+            start_date_expression="Saturday",
+        )
+        ctx = {"last_date_proposal": {"start": "2026-07-02"}}
+
+        result = _fix_iso_weekday_mismatch("Saturday", slm, ctx)
+
+        assert result["temporal"]["expression"] == "Saturday"
+        assert result["temporal"]["start_date_expression"] == "Saturday"
+        assert result["temporal"]["start_date"] == "2026-07-04"
+        assert result["facts"]["dates"] == ["2026-07-04"]
+
+    def test_authoritative_structured_saturday_removes_abandoned_friday(self):
+        slm = self._slm(
+            ["2026-07-03"],
+            expression="Friday—sorry, Saturday",
+            start_date_expression="Saturday",
+        )
+        ctx = {"last_date_proposal": {"start": "2026-07-02"}}
+
+        result = _fix_iso_weekday_mismatch("Friday—sorry, Saturday.", slm, ctx)
+
+        assert result["temporal"]["expression"] == "Saturday"
+        assert result["temporal"]["start_date_expression"] == "Saturday"
+        assert result["temporal"]["start_date"] == "2026-07-04"
+        assert result["facts"]["dates"] == ["2026-07-04"]
+
+    def test_structured_start_expression_preserves_corrected_saturday(self):
+        slm = self._slm(
+            ["2026-07-04"],
+            expression="Friday—sorry, Saturday",
+            start_date_expression="Saturday",
+        )
+        ctx = {"last_date_proposal": {"start": "2026-07-02"}}
+
+        result = _fix_iso_weekday_mismatch("Friday—sorry, Saturday.", slm, ctx)
+
+        assert result["facts"]["dates"] == ["2026-07-04"]
+        assert result["temporal"]["start_date_expression"] == "Saturday"
+
+    def test_single_raw_weekday_repairs_mismatch_without_structured_expression(self):
+        slm = self._slm(["2026-07-03"])
+        ctx = {"last_date_proposal": {"start": "2026-07-02"}}
+
+        result = _fix_iso_weekday_mismatch("no saturday instead", slm, ctx)
+
+        assert result["facts"]["dates"] == ["2026-07-04"]
+
+    def test_multiple_raw_weekdays_without_structured_authority_do_not_repair(self):
+        slm = self._slm(["2026-07-03"])
+        ctx = {"last_date_proposal": {"start": "2026-07-02"}}
+
+        result = _fix_iso_weekday_mismatch("Friday or Saturday", slm, ctx)
+
+        assert result["facts"]["dates"] == ["2026-07-03"]
+
+    def test_structured_range_keeps_authoritative_start_weekday(self):
+        slm = self._slm(
+            ["2026-07-03"],
+            expression="Friday through Saturday",
+            start_date_expression="Friday",
+            mode="range",
+        )
+
+        result = _fix_iso_weekday_mismatch("Friday through Saturday", slm, None)
+
+        assert result["facts"]["dates"] == ["2026-07-03"]
+        assert result["temporal"]["start_date_expression"] == "Friday"
+
+    def test_structured_alternative_with_multiple_weekdays_does_not_repair(self):
+        slm = self._slm(
+            ["2026-07-03"],
+            expression="Friday or Saturday",
+            start_date_expression="Friday or Saturday",
+        )
+
+        result = _fix_iso_weekday_mismatch("Friday or Saturday", slm, None)
+
+        assert result["facts"]["dates"] == ["2026-07-03"]
 
     def test_corrects_saturday_after_friday_anchor(self):
         slm = self._slm(["2026-01-18"])

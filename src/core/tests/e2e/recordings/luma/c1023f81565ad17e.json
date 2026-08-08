@@ -1,0 +1,64 @@
+{
+  "key": {
+    "conversation_context": {},
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "book me haircut tomorrow by 12pm",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [
+        {
+          "date": "2026-07-02",
+          "time": "12:00"
+        }
+      ],
+      "dates": [
+        "2026-07-02"
+      ],
+      "service": "haircut",
+      "service_id": null,
+      "times": [
+        "12:00"
+      ]
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CREATE_APPOINTMENT"
+    },
+    "service_candidates": [
+      "premium haircut",
+      "flexi haircut + prunning"
+    ],
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": "12:00",
+      "end_time_expression": null,
+      "expression": "tomorrow by 12pm",
+      "mode": "single_day",
+      "start_date": "2026-07-02",
+      "start_date_expression": "tomorrow",
+      "start_time": "12:00",
+      "start_time_expression": null
+    },
+    "time_constraint": {
+      "end": "12:00",
+      "label": null,
+      "mode": "exact",
+      "start": "12:00"
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

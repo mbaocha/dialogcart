@@ -568,8 +568,30 @@ def _fix_iso_weekday_mismatch(
         return slm
     iso = str(raw).split("T")[0].split(" ")[0]
 
-    text_lower = (text or "").lower()
-    mentioned = next((name for name in _WEEKDAY_TO_DOW if name in text_lower), None)
+    def _weekdays(value: Any) -> set[str]:
+        if not isinstance(value, str):
+            return set()
+        return {
+            match.group(0).lower()
+            for match in re.finditer(
+                r"\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b",
+                value,
+                re.IGNORECASE,
+            )
+        }
+
+    def _single_weekday(value: Any) -> Optional[str]:
+        matches = _weekdays(value)
+        return next(iter(matches)) if len(matches) == 1 else None
+
+    mentioned = _single_weekday(temporal.start_date_expression)
+    authoritative_start_expression = (
+        temporal.start_date_expression if mentioned is not None else None
+    )
+    if mentioned is None:
+        mentioned = _single_weekday(temporal.expression)
+    if mentioned is None:
+        mentioned = _single_weekday(text)
     if not mentioned:
         return slm
 
@@ -607,7 +629,17 @@ def _fix_iso_weekday_mismatch(
             fixed,
         )
         temporal.start_date = fixed
-        temporal.start_date_expression = None
+        if authoritative_start_expression is not None:
+            temporal.start_date_expression = authoritative_start_expression
+            expression_weekdays = _weekdays(temporal.expression)
+            if (
+                temporal.mode != "range"
+                and expression_weekdays
+                and expression_weekdays != {mentioned}
+            ):
+                temporal.expression = authoritative_start_expression
+        else:
+            temporal.start_date_expression = None
         return apply_temporal(slm, temporal)
 
     logger.info(

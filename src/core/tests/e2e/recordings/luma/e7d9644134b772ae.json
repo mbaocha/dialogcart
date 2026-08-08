@@ -1,0 +1,47 @@
+{
+  "key": {
+    "conversation_context": {},
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "book me a premium haircut tomorrow",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [
+        "2026-07-02"
+      ],
+      "service": "premium haircut",
+      "service_id": "premium haircut",
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CREATE_APPOINTMENT"
+    },
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": "tomorrow",
+      "mode": "single_day",
+      "start_date": "2026-07-02",
+      "start_date_expression": "tomorrow",
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "key": {
+    "conversation_context": {
+      "last_intent": "DETAILS",
+      "last_search_query": "premium haircut",
+      "messages": [
+        {
+          "role": "user",
+          "text": "tell me about premium haircut"
+        },
+        {
+          "role": "assistant",
+          "text": "```json\n{\n  \"text\": \"At Glamour Studio, we offer a professional Haircut service for $25. Each haircut includes a wash and takes about 30 minutes.\\n\\nI should mention that our Business Knowledge shows a standard Haircut offering rather than a tiered \\\"premium\\\" option, so the $25 haircut is what we have available. It's a solid service that includes the wash, which many places charge extra for.\\n\\nWe're open Mondays from 9am to 6pm. If you'd like to book this haircut or check availability at another time that works better for you, I can help you get that scheduled.\",\n  \"selected_entities\": [\n    {\n      \"type\": \"service\",\n      \"catalog_id\": \"haircut\",\n      \"display_name\": \"Haircut\"\n    }\n  ],\n  \"metadata\": {\n    \"note\": \"Business Knowledge contains one Haircut service at $25 with 30-minute duration; no premium tier is defined. Supporting Evidence confirms wash is included.\"\n  }\n}\n```"
+        }
+      ],
+      "turns": [
+        {
+          "assistant": "```json\n{\n  \"text\": \"At Glamour Studio, we offer a professional Haircut service for $25. Each haircut includes a wash and takes about 30 minutes.\\n\\nI should mention that our Business Knowledge shows a standard Haircut offering rather than a tiered \\\"premium\\\" option, so the $25 haircut is what we have available. It's a solid service that includes the wash, which many places charge extra for.\\n\\nWe're open Mondays from 9am to 6pm. If you'd like to book this haircut or check availability at another time that works better for you, I can help you get that scheduled.\",\n  \"selected_entities\": [\n    {\n      \"type\": \"service\",\n      \"catalog_id\": \"haircut\",\n      \"display_name\": \"Haircut\"\n    }\n  ],\n  \"metadata\": {\n    \"note\": \"Business Knowledge contains one Haircut service at $25 with 30-minute duration; no premium tier is defined. Supporting Evidence confirms wash is included.\"\n  }\n}\n```",
+          "intent": "DETAILS",
+          "search_query": "premium haircut",
+          "user": "tell me about premium haircut"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "go on",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service_id": null,
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.55,
+      "name": "DETAILS"
+    },
+    "search_query": "premium haircut",
+    "service_candidates": [
+      "premium haircut",
+      "flexi haircut + prunning"
+    ],
+    "temporal": {
+      "confidence": 0.55,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": null,
+      "mode": "none",
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

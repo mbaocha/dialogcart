@@ -1,0 +1,70 @@
+{
+  "key": {
+    "conversation_context": {
+      "last_intent": "DETAILS",
+      "last_search_query": "premium haircut",
+      "messages": [
+        {
+          "role": "user",
+          "text": "tell me about premium haircut"
+        },
+        {
+          "role": "assistant",
+          "text": "```json\n{\n  \"text\": \"At Glamour Studio, we offer a Haircut service for $25 that takes about 30 minutes. The service includes a wash, so you'll get a fresh, clean cut. It's a straightforward, quality haircut experience.\\n\\nIf you'd like to book a haircut with us, I'd be happy to help you find a time that works. We're open Mondays from 9am to 6pm. What day and time would work best for you?\",\n  \"selected_entities\": [\n    {\n      \"type\": \"service\",\n      \"catalog_id\": \"haircut\",\n      \"display_name\": \"Haircut\"\n    }\n  ],\n  \"metadata\": {\n    \"confidence\": \"high\",\n    \"source\": \"business_knowledge\"\n  }\n}\n```"
+        }
+      ],
+      "turns": [
+        {
+          "assistant": "```json\n{\n  \"text\": \"At Glamour Studio, we offer a Haircut service for $25 that takes about 30 minutes. The service includes a wash, so you'll get a fresh, clean cut. It's a straightforward, quality haircut experience.\\n\\nIf you'd like to book a haircut with us, I'd be happy to help you find a time that works. We're open Mondays from 9am to 6pm. What day and time would work best for you?\",\n  \"selected_entities\": [\n    {\n      \"type\": \"service\",\n      \"catalog_id\": \"haircut\",\n      \"display_name\": \"Haircut\"\n    }\n  ],\n  \"metadata\": {\n    \"confidence\": \"high\",\n    \"source\": \"business_knowledge\"\n  }\n}\n```",
+          "intent": "DETAILS",
+          "search_query": "premium haircut",
+          "user": "tell me about premium haircut"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": "haircut",
+        "premium haircut": "haircut"
+      },
+      "booking_mode": "service"
+    },
+    "text": "book it",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service_id": null,
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CONFIRM_ACTION"
+    },
+    "response_act": "CONFIRM_ACTION",
+    "service_candidates": [
+      "premium haircut",
+      "flexi haircut + prunning"
+    ],
+    "temporal": {
+      "confidence": 0.0,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": null,
+      "mode": "none",
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

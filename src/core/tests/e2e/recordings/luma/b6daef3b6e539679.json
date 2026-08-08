@@ -1,0 +1,77 @@
+{
+  "key": {
+    "conversation_context": {
+      "confirmation_state": "pending",
+      "last_date_proposal": {
+        "mode": "single_day",
+        "start": "2026-07-03"
+      },
+      "last_intent": "CREATE_APPOINTMENT",
+      "last_search_query": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "9am"
+        },
+        {
+          "role": "assistant",
+          "text": "You're about to book a Premium Haircut on July 3 at 9:00 AM. Would you like me to go ahead?"
+        }
+      ],
+      "resolved_service_id": "premium haircut",
+      "turns": [
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "book me premium haircut"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "9am"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "show availability for July 21",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [
+        "2026-07-21"
+      ],
+      "service_id": "premium haircut",
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "AVAILABILITY"
+    },
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": "July 21",
+      "mode": "single_day",
+      "start_date": "2026-07-21",
+      "start_date_expression": "july 21",
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

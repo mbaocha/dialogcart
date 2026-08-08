@@ -1,0 +1,75 @@
+{
+  "key": {
+    "conversation_context": {
+      "last_intent": "UNKNOWN",
+      "last_search_query": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "go on"
+        },
+        {
+          "role": "assistant",
+          "text": "Sorry, I didn't understand that. Could you rephrase, or tell me how I can help?"
+        }
+      ],
+      "turns": [
+        {
+          "assistant": "```json\n{\n  \"text\": \"We offer a Haircut service at Glamour Studio for $25, and each haircut includes a wash and takes about 30 minutes. While we don't have a separate 'premium' tier listed, this is our signature haircut experience.\\n\\nWe're open Monday through Saturday, 9am\u20136pm. If you'd like to book your haircut or discuss any specific styling preferences you have in mind, I can help you get an appointment set up.\",\n  \"selected_entities\": [\n    {\n      \"type\": \"service\",\n      \"catalog_id\": \"haircut\",\n      \"display_name\": \"Haircut\"\n    }\n  ],\n  \"metadata\": {\n    \"note\": \"Business Knowledge contains only one haircut service with no premium variant. Supporting Evidence confirms the service includes a wash. User asked about 'premium haircut' but no premium option exists in the business offerings.\"\n  }\n}\n```",
+          "intent": "DETAILS",
+          "search_query": "premium haircut",
+          "user": "tell me about premium haircut"
+        },
+        {
+          "intent": "UNKNOWN",
+          "search_query": null,
+          "user": "go on"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "book it",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service": null,
+      "service_id": null,
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.65,
+      "name": "CREATE_APPOINTMENT"
+    },
+    "service_candidates": [
+      "premium haircut",
+      "flexi haircut + prunning"
+    ],
+    "temporal": {
+      "confidence": 0.65,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": null,
+      "mode": "none",
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "key": {
+    "conversation_context": {
+      "last_intent": "DETAILS",
+      "last_search_query": "premium haircut",
+      "messages": [
+        {
+          "role": "user",
+          "text": "tell me about premium haircut"
+        },
+        {
+          "role": "assistant",
+          "text": "At Glamour Studio, we offer a **Haircut service for $25**, which takes about 30 minutes and includes a wash. This is a great foundational service that gives you a clean, polished look.\n\nBased on what we have available, this is our haircut offering. It's a solid choice whether you're looking for a quick refresh or a more styled cut\u2014our stylists work with you to get the look you want within that timeframe.\n\nWe're open Mondays from 9am to 6pm, so there's flexibility to find a time that works for you.\n\nWould you like to book a haircut appointment with us?"
+        }
+      ],
+      "turns": [
+        {
+          "assistant": "At Glamour Studio, we offer a **Haircut service for $25**, which takes about 30 minutes and includes a wash. This is a great foundational service that gives you a clean, polished look.\n\nBased on what we have available, this is our haircut offering. It's a solid choice whether you're looking for a quick refresh or a more styled cut\u2014our stylists work with you to get the look you want within that timeframe.\n\nWe're open Mondays from 9am to 6pm, so there's flexibility to find a time that works for you.\n\nWould you like to book a haircut appointment with us?",
+          "intent": "DETAILS",
+          "search_query": "premium haircut",
+          "user": "tell me about premium haircut"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "go on",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service_id": null,
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.75,
+      "name": "CONFIRM_ACTION"
+    },
+    "service_candidates": [
+      "premium haircut",
+      "flexi haircut + prunning"
+    ],
+    "temporal": {
+      "confidence": 0.0,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": null,
+      "mode": "none",
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

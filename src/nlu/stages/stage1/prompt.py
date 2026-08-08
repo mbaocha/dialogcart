@@ -23,7 +23,11 @@ _TOOL = {
             "intent": {
                 "type": "string",
                 "enum": ALL_INTENTS,
-                "description": "Detected user intent.",
+                "description": (
+                    "Detected user intent. An affirmative prefix followed by an "
+                    "explicit workflow-slot correction is CORRECTION, not "
+                    "CONFIRM_ACTION or CREATE_*, and does not authorize the stale proposal."
+                ),
             },
             "confidence": {
                 "type": "number",

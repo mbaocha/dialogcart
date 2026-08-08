@@ -18,6 +18,13 @@ With a pending confirmation ask, authorize that proposal:
   → CONFIRM_ACTION (not CREATE_APPOINTMENT / CREATE_RESERVATION) for this turn only.
   Empty context + "book it" + Stage 1 CREATE_* → keep CREATE_* (not CONFIRM_ACTION).
 
+CORRECTION OVERRIDES AN AFFIRMATIVE PREFIX:
+When an affirmative opening is followed by an explicit replacement or correction
+of a workflow slot, the turn is CORRECTION — not CONFIRM_ACTION and not CREATE_*.
+The affirmative clause does not authorize the stale proposal. Extract the corrected
+slot in Stage 2 and require fresh confirmation for the revised proposal.
+  "Yes, but make it 11." → CORRECTION (11 replaces the pending time; do not authorize 10).
+
 Time-selection prompts are NOT confirmation asks:
   "Which time works best?", "Please choose one of these available times", offered
   clock lists, or resume-after-digression time prompts do NOT authorize CONFIRM_ACTION.

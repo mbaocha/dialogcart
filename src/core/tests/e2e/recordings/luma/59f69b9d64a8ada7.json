@@ -1,0 +1,89 @@
+{
+  "key": {
+    "conversation_context": {
+      "active_booking_intent": "CREATE_APPOINTMENT",
+      "last_intent": "QUOTE",
+      "last_search_query": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "book haircut"
+        },
+        {
+          "role": "assistant",
+          "text": "Which service would you like me to check availability for?\n- Premium haircut\n- Flexi haircut + pruning"
+        },
+        {
+          "role": "user",
+          "text": "how much does a haircut cost?"
+        },
+        {
+          "role": "assistant",
+          "text": "A haircut at Glamour Studio costs $25 and includes a wash. The appointment takes 30 minutes.\n\nNow, which service would you like to book?\n- Premium haircut\n- Flexi haircut + pruning"
+        }
+      ],
+      "missing_slots": [
+        "service_id",
+        "date",
+        "time"
+      ],
+      "service_candidates": [
+        "premium haircut",
+        "flexi haircut + prunning"
+      ],
+      "turns": [
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "book haircut"
+        },
+        {
+          "assistant": "A haircut at Glamour Studio costs $25 and includes a wash. The appointment takes 30 minutes.\n\nNow, which service would you like to book?\n- Premium haircut\n- Flexi haircut + pruning",
+          "intent": "QUOTE",
+          "search_query": null,
+          "user": "how much does a haircut cost?"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "premium",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service": "premium haircut",
+      "service_id": "premium haircut",
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CREATE_APPOINTMENT"
+    },
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": null,
+      "mode": "none",
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

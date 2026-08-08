@@ -195,7 +195,6 @@ _register(
                 session_slots={"service_id": FLEXI_SERVICE},
                 confirmation=None,
             ),
-            before=_clear_sticky_temporal_facts,
             after=_assert_service_revision,
         ),
         fixture="scripted_service_revision",
@@ -508,11 +507,12 @@ def _assert_search_after_premium(
         kwargs = call.kwargs if call else {}
         searched_service = kwargs.get("service_id")
         searched_date = _resolve_search_date(kwargs.get("date"))
+        expected_item_id = _expected_search_catalog_item_id(PREMIUM_SERVICE)
         conv._assert(
-            searched_service == PREMIUM_SERVICE,
+            searched_service == expected_item_id,
             (
-                f"turn {conv.turn}: availability provider must receive Premium, "
-                f"got {searched_service!r}"
+                f"turn {conv.turn}: availability provider must receive Premium "
+                f"catalog item {expected_item_id!r}, got {searched_service!r}"
             ),
         )
         conv._assert(

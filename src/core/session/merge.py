@@ -917,6 +917,26 @@ def _merge_slots_additive(
     raw_service_id_from_session = session_slots.get("service_id")
     canonical_service_id_from_session = session_slots.get("_canonical_service_id")
 
+    from core.planning.planning_evidence import should_apply_current_turn_service
+
+    tenant_aliases = None
+    tenant_ctx = merged.get("_tenant_context") or merged.get("tenant_context")
+    if isinstance(tenant_ctx, dict) and isinstance(tenant_ctx.get("aliases"), dict):
+        tenant_aliases = tenant_ctx.get("aliases")
+
+    if not should_apply_current_turn_service(
+        merged,
+        durable_service=raw_service_id_from_session,
+        luma_service=luma_slots.get("service_id"),
+        source_text=merged.get("_source_text"),
+        tenant_aliases=tenant_aliases,
+    ):
+        luma_slots = {
+            key: value
+            for key, value in luma_slots.items()
+            if key not in {"service_id", "_catalog_item_id", "_canonical_service_id"}
+        }
+
     if (
         luma_slots.get("service_id") is not None
         and luma_slots.get("service_id") != raw_service_id_from_session

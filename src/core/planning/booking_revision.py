@@ -170,7 +170,13 @@ def detect_booking_revision(
     service_changed = False
     new_service = None
     if isinstance(luma_response, dict):
-        new_service = _current_turn_value(luma_response, "service_id")
+        if "_current_turn_has_service" in luma_response:
+            if luma_response.get("_current_turn_has_service"):
+                new_service = _meaningful_text(
+                    luma_response.get("_current_turn_service_id")
+                ) or _current_turn_value(luma_response, "service_id")
+        else:
+            new_service = _current_turn_value(luma_response, "service_id")
     current_service = _meaningful_text(session_slots.get("service_id"))
     if new_service and current_service and new_service != current_service:
         service_changed = True

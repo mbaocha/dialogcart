@@ -7,13 +7,15 @@ from datetime import timedelta
 from typing import Any, Dict, List
 
 from core.adapters.errors import UpstreamError
-from core.session.session_manager import get_session, save_session
+from core.session.session_manager import get_session
 from core.planning.time_resolution import TIME_MATCH_EXACT, TIME_MATCH_MISMATCH
 from core.tests.e2e.framework.conversation import (
     Expect,
     FLEXI_SERVICE,
+    FLEXI_SERVICE_ITEM_ID,
     FROZEN_TIME,
     PREMIUM_SERVICE,
+    PREMIUM_SERVICE_ITEM_ID,
     Scenario,
     Turn,
     _confirmation_state,
@@ -125,6 +127,45 @@ def _assert_booking_created_with_item_id(expected_item_id: int):
     return assert_booking
 
 
+def _assert_booking_created_with_exact_payload(
+    *,
+    expected_item_id: int,
+    expected_service_id: str,
+    expected_date: str,
+    expected_time: str,
+    abandoned_values=(),
+):
+    """Assert the final booking request uses only the revised booking values."""
+
+    def assert_booking(conv, booking_client, availability=None) -> None:
+        _assert_booking_created(conv, booking_client, availability)
+        call = booking_client.create_booking.call_args
+        kwargs = call.kwargs if call else {}
+        assert kwargs.get("item_id") == expected_item_id, (
+            f"turn {conv.turn}: expected item_id {expected_item_id}, "
+            f"got {kwargs.get('item_id')!r}"
+        )
+        start_time = str(kwargs.get("start_time") or "")
+        expected_prefix = f"{expected_date}T{expected_time}"
+        assert start_time.startswith(expected_prefix), (
+            f"turn {conv.turn}: expected booking start {expected_prefix!r}, "
+            f"got {start_time!r}"
+        )
+        for abandoned in abandoned_values:
+            assert str(abandoned) not in start_time, (
+                f"turn {conv.turn}: abandoned value {abandoned!r} reached "
+                f"create_booking start_time={start_time!r}"
+            )
+        sess = conv.session() or {}
+        slots = (sess.get("planning") or {}).get("slots") or sess.get("slots") or {}
+        assert slots.get("service_id") == expected_service_id, (
+            f"turn {conv.turn}: expected final service {expected_service_id!r}, "
+            f"got {slots.get('service_id')!r}"
+        )
+
+    return assert_booking
+
+
 def _assert_no_booking_and_date_kept(conv, booking_client, _availability=None) -> None:
     _assert_no_booking(conv, booking_client)
     sess = conv.session() or {}
@@ -197,27 +238,95 @@ def _assert_unavailable_time_mismatch(conv, booking, availability) -> None:
     )
 
 
-def _clear_sticky_temporal_facts(conv, _booking=None, _availability=None) -> None:
-    """Drop prior-turn time facts so revision is not immediately re-bound.
+def _assert_authoritative_time_absent(conv, *superseded_times: str) -> None:
+    """Assert a revision left no authoritative projection of the old time."""
+    sess = conv.session() or {}
+    planning = sess.get("planning") if isinstance(sess.get("planning"), dict) else {}
+    slot_maps = [sess.get("slots"), planning.get("slots")]
+    for slots in slot_maps:
+        if isinstance(slots, dict):
+            assert slots.get("time") in (None, ""), (
+                f"turn {conv.turn}: stale slot time survived: {slots.get('time')!r}"
+            )
+            assert not slots.get("datetime_range"), (
+                f"turn {conv.turn}: stale slot datetime survived: "
+                f"{slots.get('datetime_range')!r}"
+            )
+    assert not sess.get("resolved_datetime_range")
+    assert sess.get("time_proposal") in (None, {})
+    assert sess.get("time_constraint") in (None, {})
+    proposals = planning.get("proposals") if isinstance(planning.get("proposals"), dict) else {}
+    assert proposals.get("time") in (None, {}), (
+        f"turn {conv.turn}: stale planning.proposals.time survived: "
+        f"{proposals.get('time')!r}"
+    )
+    assert _confirmation_state(sess) is None, (
+        f"turn {conv.turn}: revision must invalidate pending confirmation"
+    )
+    facts = sess.get("facts") if isinstance(sess.get("facts"), dict) else {}
+    for key in ("times", "time_proposal", "time_constraint", "resolved_datetime_range"):
+        assert facts.get(key) in (None, [], {}), (
+            f"turn {conv.turn}: stale facts.{key} survived: {facts.get(key)!r}"
+        )
+    temporal = sess.get("temporal") if isinstance(sess.get("temporal"), dict) else {}
+    executable_temporal_keys = (
+        "start_time",
+        "end_time",
+        "start_time_expression",
+        "end_time_expression",
+    )
+    for key in executable_temporal_keys:
+        assert temporal.get(key) in (None, ""), (
+            f"turn {conv.turn}: stale temporal.{key} survived: {temporal.get(key)!r}"
+        )
+    # temporal.expression / *_date_expression are raw NLU metadata, not
+    # executable booking criteria (search fingerprint, confirm text, payload).
+    executable_temporal = {key: temporal.get(key) for key in executable_temporal_keys}
+    authoritative = repr(
+        {
+            "slots": slot_maps,
+            "time_proposal": sess.get("time_proposal"),
+            "time_constraint": sess.get("time_constraint"),
+            "planning_time_proposal": proposals.get("time"),
+            "facts": {key: facts.get(key) for key in ("times", "time_proposal", "time_constraint")},
+            "temporal": executable_temporal,
+        }
+    )
+    for stale in superseded_times:
+        assert stale not in authoritative, (
+            f"turn {conv.turn}: superseded time {stale!r} survived in "
+            f"authoritative temporal state: {authoritative}"
+        )
 
-    Scripted bind turns persist ``facts.times`` / ``time_proposal``. Without
-    clearing them, a service/date revision rebinds the old exact time from
-    sticky session proposals and re-enters confirmation â€” masking invalidation.
-    """
-    sess = conv.session()
-    if not isinstance(sess, dict):
-        return
-    sess = dict(sess)
-    facts = sess.get("facts")
-    if isinstance(facts, dict):
-        facts = dict(facts)
-        facts.pop("times", None)
-        facts.pop("time_proposal", None)
-        facts.pop("time_constraint", None)
-        sess["facts"] = facts
-    sess.pop("time_proposal", None)
-    sess.pop("time_constraint", None)
-    save_session(conv.organization_id, conv.user_id, sess)
+
+def _assert_authoritative_time_replaced(
+    conv, expected_time: str, *superseded_times: str
+) -> None:
+    """Assert all current booking projections agree on the replacement time."""
+    sess = conv.session() or {}
+    planning = sess.get("planning") if isinstance(sess.get("planning"), dict) else {}
+    slots = planning.get("slots") if isinstance(planning.get("slots"), dict) else {}
+    if not slots:
+        slots = sess.get("slots") if isinstance(sess.get("slots"), dict) else {}
+    facts = sess.get("facts") if isinstance(sess.get("facts"), dict) else {}
+    temporal = sess.get("temporal") if isinstance(sess.get("temporal"), dict) else {}
+    proposal = sess.get("time_proposal")
+    projections = {
+        "slot": slots.get("time"),
+        "proposal": proposal,
+        "facts_times": facts.get("times"),
+        "facts_proposal": facts.get("time_proposal"),
+        "temporal_start": temporal.get("start_time"),
+    }
+    assert expected_time in repr(projections), (
+        f"turn {conv.turn}: replacement {expected_time!r} missing from "
+        f"authoritative projections: {projections!r}"
+    )
+    for stale in superseded_times:
+        assert stale not in repr(projections), (
+            f"turn {conv.turn}: superseded time {stale!r} survived replacement: "
+            f"{projections!r}"
+        )
 
 
 def _assert_service_revision(conv, booking, availability) -> None:
@@ -238,6 +347,7 @@ def _assert_service_revision(conv, booking, availability) -> None:
         f"expected resolved_datetime_range cleared, "
         f"got {sess.get('resolved_datetime_range')!r}"
     )
+    _assert_authoritative_time_absent(conv, "10:00")
     _assert_no_booking(conv, booking)
 
 
@@ -245,6 +355,11 @@ def _assert_date_revision(_conv, booking, availability) -> None:
     assert availability.get_service_availability.call_count > _SEARCH_STATE.get(
         "count", 0)
     _assert_no_booking(_conv, booking)
+
+
+def _assert_date_revision_without_stale_time(conv, booking, availability) -> None:
+    _assert_date_revision(conv, booking, availability)
+    _assert_authoritative_time_absent(conv, "10:00", "11:00")
 
 
 def _assert_booking_called(conv, booking_client, _availability=None) -> None:
@@ -298,11 +413,12 @@ def _assert_availability_searched_flexi(conv, booking, availability) -> None:
     call = availability.get_service_availability.call_args
     kwargs = call.kwargs if call else {}
     searched = kwargs.get("service_id")
-    assert searched == FLEXI_SERVICE, (
-        f"turn {conv.turn}: AvailabilityClient must receive Flexi service_id, "
-        f"got {searched!r} (Premium overwrite is Bug 2)"
+    expected_item_id = _expected_search_catalog_item_id(FLEXI_SERVICE)
+    assert searched == expected_item_id, (
+        f"turn {conv.turn}: AvailabilityClient must receive Flexi catalog item "
+        f"{expected_item_id!r}, got {searched!r} (Premium overwrite is Bug 2)"
     )
-    assert searched != PREMIUM_SERVICE
+    assert searched != PREMIUM_SERVICE_ITEM_ID
     sess = conv.session() or {}
     slots = sess.get("slots") if isinstance(sess.get("slots"), dict) else {}
     planning = sess.get("planning") if isinstance(sess.get("planning"), dict) else {}
@@ -1072,6 +1188,23 @@ def _capture_revision_search(conv, _booking, availability) -> None:
     _AUDIT_STATE["fingerprint"] = _sess_fp(conv.session() or {})
 
 
+_SEARCH_CATALOG_ITEM_IDS = {
+    PREMIUM_SERVICE: PREMIUM_SERVICE_ITEM_ID,
+    FLEXI_SERVICE: FLEXI_SERVICE_ITEM_ID,
+    "haircut": PREMIUM_SERVICE_ITEM_ID,
+}
+
+
+def _expected_search_catalog_item_id(service_id):
+    """Availability-client boundary uses numeric catalog ids, not SKU text."""
+    if isinstance(service_id, int):
+        return service_id
+    mapped = _SEARCH_CATALOG_ITEM_IDS.get(service_id)
+    if mapped is not None:
+        return mapped
+    return service_id
+
+
 def _assert_revision_searched_once(conv, booking, availability, *, service_id) -> None:
     baseline = _AUDIT_STATE.get("search_count", 0)
     assert availability.get_service_availability.call_count == baseline + 1, (
@@ -1080,8 +1213,10 @@ def _assert_revision_searched_once(conv, booking, availability, *, service_id) -
     )
     call = availability.get_service_availability.call_args
     kwargs = call.kwargs if call else {}
-    assert kwargs.get("service_id") == service_id, (
-        f"turn {conv.turn}: search must use {service_id!r}, got {kwargs.get('service_id')!r}"
+    expected_item_id = _expected_search_catalog_item_id(service_id)
+    assert kwargs.get("service_id") == expected_item_id, (
+        f"turn {conv.turn}: search must use catalog item {expected_item_id!r}, "
+        f"got {kwargs.get('service_id')!r}"
     )
     sess = conv.session() or {}
     assert not sess.get("resolved_datetime_range"), (
@@ -1107,15 +1242,18 @@ def _assert_flexi_revision(conv, booking, availability) -> None:
     assert slots.get("time") in (None, ""), (
         f"turn {conv.turn}: stale time must clear on service revision, got {slots.get('time')!r}"
     )
+    _assert_authoritative_time_absent(conv, "10:00", "11:00")
 
 
 def _assert_date_revision_july12(conv, booking, availability) -> None:
     _assert_revision_searched_once(conv, booking, availability, service_id=FLEXI_SERVICE)
     conv.assert_date_proposal(_JULY_12)
+    _assert_authoritative_time_absent(conv, "10:00", "11:00")
 
 
 def _assert_premium_rerevision(conv, booking, availability) -> None:
     _assert_revision_searched_once(conv, booking, availability, service_id=PREMIUM_SERVICE)
+    _assert_authoritative_time_absent(conv, "11:00")
 
 
 def _assert_final_multi_revision_booking(conv, booking, _availability=None) -> None:
@@ -1140,6 +1278,13 @@ def _assert_final_multi_revision_booking(conv, booking, _availability=None) -> N
     assert "11:00" not in time_value and not time_value.strip().startswith("11"), (
         f"turn {conv.turn}: stale Flexi 11am must not remain, got {time_value!r}"
     )
+    _assert_booking_created_with_exact_payload(
+        expected_item_id=PREMIUM_SERVICE_ITEM_ID,
+        expected_service_id=PREMIUM_SERVICE,
+        expected_date=_JULY_12,
+        expected_time="10:00",
+        abandoned_values=("11:00",),
+    )(conv, booking, _availability)
 
 
 def _assert_hard_reload_state_survives(conv, booking, _availability=None) -> None:
@@ -1180,14 +1325,17 @@ __all__ = [
     '_sess_cache',
     '_assert_booking_created',
     '_assert_booking_created_with_item_id',
+    '_assert_booking_created_with_exact_payload',
     '_assert_no_booking',
     '_assert_no_booking_and_date_kept',
     '_capture_searches',
     '_assert_no_extra_search',
     '_assert_unavailable_time_mismatch',
-    '_clear_sticky_temporal_facts',
+    '_assert_authoritative_time_absent',
+    '_assert_authoritative_time_replaced',
     '_assert_service_revision',
     '_assert_date_revision',
+    '_assert_date_revision_without_stale_time',
     '_assert_booking_called',
     '_capture_searches_before_flexi',
     '_assert_availability_searched_flexi',
@@ -1224,6 +1372,7 @@ __all__ = [
     '_capture_committed_booking',
     '_assert_duplicate_yes_idempotent',
     '_capture_revision_search',
+    '_expected_search_catalog_item_id',
     '_assert_revision_searched_once',
     '_assert_flexi_revision',
     '_assert_date_revision_july12',

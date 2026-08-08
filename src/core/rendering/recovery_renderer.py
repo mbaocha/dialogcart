@@ -248,15 +248,6 @@ def _is_orphaned_confirmation_action(
         return False
     if _current_confirmation_action(result=result, plan=plan) is None:
         return False
-    if isinstance(plan, dict):
-        action = plan.get("action")
-        nested = plan.get("plan")
-        if action is None and isinstance(nested, dict):
-            action = nested.get("action")
-        if action is not None:
-            return False
-    if result.get("_execution_result") is not None:
-        return False
 
     from core.session.confirmation_gate import get_confirmation_state
 

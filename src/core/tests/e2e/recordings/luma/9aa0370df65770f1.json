@@ -1,0 +1,96 @@
+{
+  "key": {
+    "conversation_context": {
+      "active_booking_intent": "CREATE_APPOINTMENT",
+      "confirmation_state": "pending",
+      "last_date_proposal": {
+        "mode": "single_day",
+        "start": "2026-07-03"
+      },
+      "last_intent": "QUOTE",
+      "last_search_query": "haircut price",
+      "messages": [
+        {
+          "role": "user",
+          "text": "10am"
+        },
+        {
+          "role": "assistant",
+          "text": "You're about to book a Premium Haircut on July 3 at 10:00 AM. Would you like me to go ahead?"
+        },
+        {
+          "role": "user",
+          "text": "how much does a haircut cost?"
+        },
+        {
+          "role": "assistant",
+          "text": "```json\n{\n  \"text\": \"A Haircut at Glamour Studio is $25 and takes 30 minutes. It includes a wash.\\n\\nSo we're all set for your Premium Haircut on July 3 at 10:00 AM \u2014 does that work for you?\",\n  \"selected_entities\": [\n    {\n      \"type\": \"service\",\n      \"catalog_id\": \"haircut\",\n      \"display_name\": \"Haircut\"\n    }\n  ],\n  \"metadata\": {}\n}\n```"
+        }
+      ],
+      "resolved_service_id": "premium haircut",
+      "turns": [
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "book haircut"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "premium"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "10am"
+        },
+        {
+          "assistant": "```json\n{\n  \"text\": \"A Haircut at Glamour Studio is $25 and takes 30 minutes. It includes a wash.\\n\\nSo we're all set for your Premium Haircut on July 3 at 10:00 AM \u2014 does that work for you?\",\n  \"selected_entities\": [\n    {\n      \"type\": \"service\",\n      \"catalog_id\": \"haircut\",\n      \"display_name\": \"Haircut\"\n    }\n  ],\n  \"metadata\": {}\n}\n```",
+          "intent": "QUOTE",
+          "search_query": "haircut price",
+          "user": "how much does a haircut cost?"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "yes",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service_id": "premium haircut",
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CONFIRM_ACTION"
+    },
+    "response_act": "CONFIRM_ACTION",
+    "temporal": {
+      "confidence": 0.0,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": null,
+      "mode": "none",
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

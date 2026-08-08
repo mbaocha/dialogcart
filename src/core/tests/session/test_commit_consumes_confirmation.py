@@ -204,6 +204,83 @@ def test_stage08_selects_confirm_appointment_after_yes_without_durable_confirmed
     assert get_confirmation_state(payload) != "confirmed"
 
 
+def test_stale_yes_after_revision_cannot_select_confirm_appointment():
+    """A YES turn cannot revive authorization cleared by date/service/time revision."""
+    from core.planning.pipeline.decision import DecisionInput, decide
+    from core.planning.pipeline.types import CapabilityDecision
+
+    cases = {
+        "date": {
+            "slots": {"service_id": "premium"},
+            "missing_slots": ["date", "time"],
+            "turn_operation": "SEARCH",
+        },
+        "service": {
+            "slots": {"service_id": "flexi"},
+            "missing_slots": ["date", "time"],
+            "turn_operation": "SEARCH",
+        },
+        "time": {
+            "slots": {"service_id": "premium", "date": "2026-07-11"},
+            "missing_slots": ["time"],
+            "turn_operation": "NONE",
+        },
+    }
+
+    for revision_type, case in cases.items():
+        slots = dict(case["slots"])
+        payload = {
+            "intent": {"name": "CREATE_APPOINTMENT"},
+            "slots": slots,
+            "_effective_collected_slots": dict(slots),
+            "missing_slots": list(case["missing_slots"]),
+            "confirmation_state": None,
+            "_revision_invalidated_availability": True,
+        }
+        working_turn = WorkingTurn(
+            payload=payload,
+            effective_collected_slots=dict(slots),
+        )
+        confirmation = _resolve_confirmation(
+            payload=payload,
+            working_turn=working_turn,
+            intent_decision_gate_action=ConfirmationGateTurn.YES,
+            confirm_booking_continuation=True,
+        )
+        decision = decide(
+            DecisionInput(
+                attached_request=AttachedRequest(
+                    planning_intent="CREATE_APPOINTMENT",
+                    turn_operation=case["turn_operation"],
+                    session_reset_occurred=False,
+                    confirm_booking_continuation=True,
+                    gate_action=ConfirmationGateTurn.YES,
+                ),
+                working_turn=working_turn,
+                slot_state=SlotTurnState(
+                    intent_name="CREATE_APPOINTMENT",
+                    missing_slots=list(case["missing_slots"]),
+                    ask_next=case["missing_slots"][0],
+                    effective_collected_slots=dict(slots),
+                    base_status="NEEDS_CLARIFICATION",
+                    needs_clarification=True,
+                ),
+                availability=AvailabilityDecision(availability_ready=False),
+                confirmation=confirmation,
+                capability=CapabilityDecision(),
+                session_state={
+                    "confirmation_state": None,
+                    "slots": dict(slots),
+                },
+                organization_id=1,
+            )
+        )
+
+        assert confirmation.confirmation_state is None, revision_type
+        assert decision.plan.get("action") != "CONFIRM_APPOINTMENT", revision_type
+        assert decision.plan.get("status") != "succeeded", revision_type
+
+
 def test_stage_confirmation_enters_pending_when_commit_ready():
     payload = _commit_ready_payload()
     decision = _resolve_confirmation(payload=payload)

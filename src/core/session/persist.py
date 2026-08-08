@@ -319,6 +319,26 @@ def assemble_session_projection_fields(
     # Merge: new facts from outcome override old facts from session
     # This allows capabilities to update facts (e.g., payment_satisfied: True)
     merged_facts = {**previous_facts, **outcome_facts}
+    from core.session.invalidation import REVISION_INVALIDATED_PRIOR_TIME_KEY
+
+    rejected_confirmation = bool(
+        isinstance(merged_luma_response, dict)
+        and merged_luma_response.get("_booking_confirmation_rejected")
+    )
+    prior_time_tombstone = bool(
+        isinstance(merged_luma_response, dict)
+        and merged_luma_response.get(REVISION_INVALIDATED_PRIOR_TIME_KEY)
+    ) or rejected_confirmation
+    current_turn_replacement = bool(
+        prior_time_tombstone and merged_luma_response.get("_current_turn_has_time")
+    )
+    if prior_time_tombstone:
+        stale_keys = {"time_constraint", "resolved_datetime_range"}
+        if not current_turn_replacement:
+            stale_keys.update({"times", "time_proposal"})
+        for key in stale_keys:
+            if rejected_confirmation or key not in outcome_facts:
+                merged_facts.pop(key, None)
 
     # Extract facts for backward compatibility (used for slots extraction below)
     facts = merged_facts

@@ -22,6 +22,7 @@ from core.planning.time_resolution import TIME_MATCH_EXACT, TIME_MATCH_MISMATCH
 from core.tests.e2e.framework.conversation import (
     Expect,
     FLEXI_SERVICE,
+    FLEXI_SERVICE_ITEM_ID,
     FIRST_AVAILABLE_DATE,
     FROZEN_TIME,
     ORG_ID,
@@ -323,7 +324,6 @@ _register(
                 session_slots={"service_id": FLEXI_SERVICE},
                 confirmation=None,
             ),
-            before=_clear_sticky_temporal_facts,
             after=_assert_flexi_revision,
         ),
         Turn(
@@ -337,7 +337,6 @@ _register(
                 slot_absent=["date", "time"],
                 availability_invalidated=True,
             ),
-            before=_clear_sticky_temporal_facts,
             after=_assert_date_revision_july12,
         ),
         Turn(
@@ -357,7 +356,6 @@ _register(
                 session_slots={"service_id": PREMIUM_SERVICE},
                 confirmation=None,
             ),
-            before=_clear_sticky_temporal_facts,
             after=_assert_premium_rerevision,
         ),
         Turn(
@@ -383,6 +381,145 @@ _register(
         fixture="scripted_july_confirm_date_shift",
         tags=["booking", "revision", "invalidation", "audit"],
         id="multiple-successive-revisions-then-confirm",
+        requires_customer_identity=True,
+    )
+)
+
+
+# Next Monday / Saturday relative to FROZEN_TIME 2026-07-01.
+_NEXT_MONDAY = "2026-07-06"
+_SATURDAY = "2026-07-04"
+
+
+_register(
+    Scenario(
+        "Service and date revision to Flexi next Monday then confirm",
+        Turn(
+            "book me a premium haircut",
+            Expect(
+                response_status="succeeded",
+                action="SEARCH_AVAILABILITY",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                has_availability_slots=True,
+            ),
+            after=_capture_revision_search,
+        ),
+        Turn(
+            "No, do Flexi next Monday.",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                action="SEARCH_AVAILABILITY",
+                session_slots={"service_id": FLEXI_SERVICE},
+                confirmation=None,
+                date_proposal=_NEXT_MONDAY,
+                slot_absent=["date", "time"],
+                availability_invalidated=True,
+            ),
+            after=_assert_flexi_revision,
+        ),
+        Turn(
+            "10am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                confirmation="pending",
+                session_slots={"service_id": FLEXI_SERVICE},
+                slot_contains={"time": "10"},
+                date_proposal=_NEXT_MONDAY,
+            ),
+            after=_assert_no_booking,
+        ),
+        Turn(
+            "yes",
+            Expect(
+                action="CONFIRM_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": FLEXI_SERVICE},
+                slot_contains={"time": "10"},
+                date_proposal=_NEXT_MONDAY,
+            ),
+            after=_assert_booking_created_with_exact_payload(
+                expected_item_id=FLEXI_SERVICE_ITEM_ID,
+                expected_service_id=FLEXI_SERVICE,
+                expected_date=_NEXT_MONDAY,
+                expected_time="10:00",
+            ),
+        ),
+        fixture="scripted_confirm",
+        tags=["booking", "revision", "invalidation"],
+        id="service-and-date-revision-flexi-next-monday",
+        requires_customer_identity=True,
+    )
+)
+
+
+_register(
+    Scenario(
+        "Informal language and self-correction to Saturday then confirm",
+        Turn(
+            "Can you fit me in for a premium trim tomorrow?",
+            Expect(
+                response_status="succeeded",
+                action="SEARCH_AVAILABILITY",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                has_availability_slots=True,
+                confirmation=None,
+                date_proposal=_TOMORROW,
+            ),
+        ),
+        Turn(
+            "10am pelase",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "10"},
+            ),
+            after=_capture_searches,
+        ),
+        Turn(
+            "Friday—sorry, Saturday.",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                action="SEARCH_AVAILABILITY",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                confirmation=None,
+                date_proposal=_SATURDAY,
+                slot_absent=["date", "time"],
+                availability_invalidated=True,
+            ),
+            after=_assert_date_revision_without_stale_time,
+        ),
+        Turn(
+            "10am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "10"},
+                date_proposal=_SATURDAY,
+            ),
+            after=_assert_no_booking,
+        ),
+        Turn(
+            "yes",
+            Expect(
+                action="CONFIRM_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "10"},
+                date_proposal=_SATURDAY,
+            ),
+            after=_assert_booking_created_with_exact_payload(
+                expected_item_id=PREMIUM_SERVICE_ITEM_ID,
+                expected_service_id=PREMIUM_SERVICE,
+                expected_date=_SATURDAY,
+                expected_time="10:00",
+                abandoned_values=(_TOMORROW, "2026-07-03T10:00"),
+            ),
+        ),
+        fixture="scripted_confirm",
+        tags=["booking", "revision", "invalidation"],
+        id="informal-language-self-correction-saturday",
         requires_customer_identity=True,
     )
 )

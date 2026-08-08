@@ -23,6 +23,8 @@ from core.session.confirmation_gate import (
 
 logger = logging.getLogger(__name__)
 
+REVISION_INVALIDATED_PRIOR_TIME_KEY = "_revision_invalidated_prior_time"
+
 _AVAILABILITY_STATE_KEYS = frozenset(
     {
         "presented_availability",
@@ -344,7 +346,44 @@ def apply_invalidation(
             reason=effective_reason,
             clear_confirmation=bool(rule.get("clear_confirmation", True)),
         )
+    if rule.get("revision_derived") and revision is not None and (
+        revision.date or revision.service
+    ):
+        _apply_prior_time_revision_tombstone(state)
     return state
+
+
+def _apply_prior_time_revision_tombstone(state: Dict[str, Any]) -> None:
+    """Mark the old time as deleted; retain an explicit current-turn replacement."""
+    state[REVISION_INVALIDATED_PRIOR_TIME_KEY] = True
+    current_turn_replacement = bool(state.get("_current_turn_has_time"))
+    if not current_turn_replacement:
+        state.pop("time_proposal", None)
+    state.pop("time_constraint", None)
+    facts = state.get("facts")
+    if isinstance(facts, dict):
+        facts = dict(facts)
+        stale_keys = {"time_constraint", "resolved_datetime_range"}
+        if not current_turn_replacement:
+            stale_keys.update({"times", "time_proposal"})
+        for key in stale_keys:
+            facts.pop(key, None)
+        state["facts"] = facts
+
+    if current_turn_replacement:
+        return
+
+    temporal = state.get("temporal")
+    if isinstance(temporal, dict):
+        temporal = dict(temporal)
+        for key in (
+            "start_time",
+            "end_time",
+            "start_time_expression",
+            "end_time_expression",
+        ):
+            temporal[key] = None
+        state["temporal"] = temporal
 
 
 def _revision_clear_sets(

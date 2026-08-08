@@ -1,0 +1,50 @@
+{
+  "key": {
+    "conversation_context": {},
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "show slots for july 24",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [
+        "2026-07-24"
+      ],
+      "service_id": null,
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "AVAILABILITY"
+    },
+    "service_candidates": [
+      "premium haircut",
+      "flexi haircut + prunning"
+    ],
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": "july 24",
+      "mode": "single_day",
+      "start_date": "2026-07-24",
+      "start_date_expression": "july 24",
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

@@ -6,8 +6,10 @@ CONTRACT:
   (NLU returns service_id=null, service_candidates=[]).
 - service_id is DROPPED when the user mentions an ambiguous service
   (NLU returns service_id=null, service_candidates=[...]).
-- service_id is REPLACED when NLU resolves a different service unambiguously
-  (NLU returns a non-null service_id).
+- service_id is REPLACED when current-turn evidence shows an explicit service
+  supply/correction (unambiguous service_id on a service-purpose turn).
+- Invented facts.service_id on time-only / date-only / confirm turns must not
+  overwrite a durable service.
 """
 
 import pytest
@@ -214,13 +216,42 @@ class TestServiceIdReplaced:
     """service_id is overwritten when NLU resolves a different service unambiguously."""
 
     def test_unambiguous_new_service_replaces_session(self):
-        """Non-null service_id from NLU always wins regardless of session value."""
+        """Service-purpose turn: non-null service_id replaces durable service."""
         session = _session("premium spa treatment")
         luma = _luma(service_id="haircut", service_candidates=[])
 
         merged = merge_luma_with_session(luma, session)
 
         assert merged["slots"].get("service_id") == "haircut"
+
+    def test_invented_service_on_time_only_turn_preserves_durable(self):
+        session = {
+            "intent_name": "CREATE_APPOINTMENT",
+            "status": "READY",
+            "slots": {
+                "service_id": "flexi haircut + prunning",
+                "_catalog_item_id": 1002,
+            },
+            "missing_slots": ["time"],
+        }
+        luma = {
+            "intent": {"name": "CREATE_APPOINTMENT"},
+            "_effective_intent": "CREATE_APPOINTMENT",
+            "_source_text": "9:30",
+            "_current_turn_has_time": True,
+            "_current_turn_has_date": False,
+            "slots": {
+                "service_id": "premium haircut",
+                "_catalog_item_id": 1001,
+                "time": "09:30",
+            },
+            "facts": {"service_id": "premium haircut", "times": ["09:30"]},
+        }
+
+        merged = merge_luma_with_session(luma, session)
+
+        assert merged["slots"].get("service_id") == "flexi haircut + prunning"
+        assert merged["slots"].get("_catalog_item_id") == 1002
 
     def test_same_service_repeated_is_stable(self):
         """Restating the same service keeps it unchanged."""

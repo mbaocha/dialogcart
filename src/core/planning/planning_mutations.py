@@ -30,6 +30,56 @@ from core.session.invalidation import (
 )
 
 
+def _clock_hhmm(value: Any) -> Optional[str]:
+    """Normalize a clock-like value to HH:MM for reject restatement checks."""
+    if value is None:
+        return None
+    text_value = str(value).strip()
+    if not text_value:
+        return None
+    if "T" in text_value:
+        text_value = text_value.split("T", 1)[1]
+    text_value = text_value.split("+", 1)[0].split("Z", 1)[0]
+    parts = text_value.split(":")
+    if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+        return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+    return None
+
+
+def _clear_rejected_restated_time(state: Dict[str, Any]) -> None:
+    """Drop echoed clock mirrors after confirmation reject without a new time."""
+    state.pop("time_constraint", None)
+    facts = state.get("facts")
+    if isinstance(facts, dict):
+        facts = dict(facts)
+        for key in (
+            "times",
+            "time_proposal",
+            "time_constraint",
+            "resolved_datetime_range",
+        ):
+            facts.pop(key, None)
+        fact_slots = facts.get("slots")
+        if isinstance(fact_slots, dict):
+            fact_slots = dict(fact_slots)
+            fact_slots.pop("time", None)
+            fact_slots.pop("has_datetime", None)
+            fact_slots.pop("datetime_range", None)
+            facts["slots"] = fact_slots
+        state["facts"] = facts
+    temporal = state.get("temporal")
+    if isinstance(temporal, dict):
+        temporal = dict(temporal)
+        for key in (
+            "start_time",
+            "end_time",
+            "start_time_expression",
+            "end_time_expression",
+        ):
+            temporal[key] = None
+        state["temporal"] = temporal
+
+
 def apply_empty_availability_recovery_acceptance(
     working_turn: Any,
     *,
@@ -263,13 +313,36 @@ def apply_confirmation_planning_mutations(
         or getattr(reject, "reason_code", None)
         or "reject"
     )
+    keep_turn_proposal = False
     if is_reject:
         hydrate_working_slots_from_session(working_turn, session_state)
-        # Bare reject must drop the rejected clock's proposal. Reject-plus-new-time
-        # keeps current-turn proposal so Stage 04/08 can rebind.
+        # Bare reject / NLU echo of the rejected clock must not restore it.
+        # Reject-plus-new-time keeps current-turn proposal so Stage 04/08 rebind.
+        # Prefer durable session time: merge may already have rebound payload slots.
+        prior_time = None
+        if isinstance(session_state, dict):
+            session_slots = session_state.get("slots")
+            if isinstance(session_slots, dict):
+                prior_time = session_slots.get("time")
+            if prior_time is None:
+                prior_proposal = session_state.get("time_proposal")
+                if isinstance(prior_proposal, dict):
+                    prior_time = prior_proposal.get("value")
+        if prior_time is None:
+            prior_slots = (
+                payload.get("slots") if isinstance(payload.get("slots"), dict) else {}
+            )
+            prior_time = prior_slots.get("time") if isinstance(prior_slots, dict) else None
+        turn_clock = _clock_hhmm(payload.get("_current_turn_time"))
+        prior_clock = _clock_hhmm(prior_time)
         keep_turn_proposal = bool(
-            payload.get("_current_turn_has_time") and payload.get("_current_turn_time")
+            payload.get("_current_turn_has_time")
+            and turn_clock
+            and turn_clock != prior_clock
         )
+        if not keep_turn_proposal:
+            payload["_current_turn_has_time"] = False
+            payload.pop("_current_turn_time", None)
         saved_turn_proposal = (
             dict(payload["time_proposal"])
             if keep_turn_proposal and isinstance(payload.get("time_proposal"), dict)
@@ -282,6 +355,8 @@ def apply_confirmation_planning_mutations(
         )
         if saved_turn_proposal is not None:
             payload["time_proposal"] = saved_turn_proposal
+        elif not keep_turn_proposal:
+            _clear_rejected_restated_time(payload)
         slots = sync_working_slot_projections(
             payload, dict(payload.get("slots") or {})
         )
@@ -316,6 +391,10 @@ def apply_confirmation_planning_mutations(
                 reason=reject_reason,
             )
             session_state["_booking_confirmation_rejected"] = True
+            if not keep_turn_proposal:
+                session_state["_current_turn_has_time"] = False
+                session_state.pop("_current_turn_time", None)
+                _clear_rejected_restated_time(session_state)
         elif (
             (consume is not None and getattr(consume, "consume", False))
             or (
