@@ -110,6 +110,21 @@ def _assert_no_booking(conv, booking_client, _availability=None) -> None:
     )
 
 
+def _assert_booking_created_with_item_id(expected_item_id: int):
+    """Return a successful-booking assertion that also checks the API item ID."""
+
+    def assert_booking(conv, booking_client, availability=None) -> None:
+        _assert_booking_created(conv, booking_client, availability)
+        call = booking_client.create_booking.call_args
+        kwargs = call.kwargs if call else {}
+        assert kwargs.get("item_id") == expected_item_id, (
+            f"turn {conv.turn}: expected booking item_id {expected_item_id}, "
+            f"got {kwargs.get('item_id')!r}"
+        )
+
+    return assert_booking
+
+
 def _assert_no_booking_and_date_kept(conv, booking_client, _availability=None) -> None:
     _assert_no_booking(conv, booking_client)
     sess = conv.session() or {}
@@ -1164,6 +1179,7 @@ __all__ = [
     '_sess_presented',
     '_sess_cache',
     '_assert_booking_created',
+    '_assert_booking_created_with_item_id',
     '_assert_no_booking',
     '_assert_no_booking_and_date_kept',
     '_capture_searches',

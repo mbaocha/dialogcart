@@ -31,6 +31,7 @@ from core.session.session_manager import clear_session
 from core.tests.e2e.framework.conversation import (
     FROZEN_TIME,
     HAIRCUT_CATALOG,
+    HAIRCUT_ITEM_IDS,
     ORG_ID,
     BookingConversation,
     _offer_date_for_availability_request,
@@ -60,7 +61,7 @@ DEFAULT_BUSINESS_CATEGORY = "beauty_salon"
 
 BEAUTY_SALON_SERVICE_RECORDS = [
     {
-        "id": canonical_id,
+        "id": HAIRCUT_ITEM_IDS[display_name],
         "canonical": canonical_id,
         "name": display_name,
         "aliases": [display_name],

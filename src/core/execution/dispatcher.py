@@ -265,6 +265,11 @@ def _execute_confirm_appointment(
 
     sku_to_catalog_id = plan.get("sku_to_catalog_id") or {}
     catalog_item_id = resolve_catalog_item_id(service_id, sku_to_catalog_id)
+    if catalog_item_id is None:
+        raise ValueError(
+            f"service_id {service_id!r} does not resolve to an executable "
+            "catalog item ID"
+        )
 
     # Extract customer_id — never invent; require a resolved tenant customer.
     customer_id = _require_customer_id(slots)
@@ -315,13 +320,7 @@ def _execute_confirm_appointment(
             organization_id=organization_id,
             customer_id=customer_id,
             booking_type="service",
-            item_id=(
-                catalog_item_id
-                if catalog_item_id is not None
-                else service_id
-                if isinstance(service_id, int)
-                else int(service_id) if str(service_id).isdigit() else 1
-            ),
+            item_id=catalog_item_id,
             start_time=start_time,
             end_time=end_time,
             staff_id=staff_id,

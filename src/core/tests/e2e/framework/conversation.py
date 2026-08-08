@@ -296,6 +296,12 @@ from core.tests.harness.test_clock import FROZEN_TIME
 ORG_ID = int(os.getenv("ORG_ID", "1"))
 PREMIUM_SERVICE = "premium haircut"
 FLEXI_SERVICE = "flexi haircut + prunning"
+PREMIUM_SERVICE_ITEM_ID = 1001
+FLEXI_SERVICE_ITEM_ID = 1002
+HAIRCUT_ITEM_IDS = {
+    PREMIUM_SERVICE: PREMIUM_SERVICE_ITEM_ID,
+    FLEXI_SERVICE: FLEXI_SERVICE_ITEM_ID,
+}
 
 # Deterministic stand-in for the availability backend's "first available day"
 # when SEARCH_AVAILABILITY omits ``date`` (production parity under FROZEN_TIME).
