@@ -96,6 +96,39 @@ def test_reject_action_is_no_even_when_time_present():
     assert action == ConfirmationGateTurn.NO
 
 
+def test_reject_with_explicit_availability_date_is_another_request():
+    action = classify_confirmation_gate_turn(
+        {
+            "intent": {"name": "AVAILABILITY", "confidence": 0.95},
+            "response_act": "REJECT_ACTION",
+            "facts": {
+                "dates": ["2026-07-24"],
+                "times": [],
+                "service_id": "premium haircut",
+            },
+            "temporal": {
+                "mode": "single_day",
+                "start_date": "2026-07-24",
+                "start_date_expression": "24th",
+            },
+        },
+        _pending_session(),
+    )
+    assert action == ConfirmationGateTurn.ANOTHER_REQUEST
+
+
+def test_reject_with_irrelevant_trailing_content_remains_no():
+    action = classify_confirmation_gate_turn(
+        {
+            "intent": {"name": "FAQ"},
+            "response_act": "REJECT_ACTION",
+            "facts": {},
+        },
+        _pending_session(),
+    )
+    assert action == ConfirmationGateTurn.NO
+
+
 def test_correction_with_time_is_another_request():
     action = classify_confirmation_gate_turn(
         {

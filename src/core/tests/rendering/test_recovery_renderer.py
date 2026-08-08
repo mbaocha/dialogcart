@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from core.rendering.recovery_renderer import (
+    RECOVERY_ORPHANED_CONFIRMATION_ACTION,
     RECOVERY_UNRECOGNIZED_INPUT,
     build_recovery_context,
     build_recovery_render_request,
@@ -165,6 +166,90 @@ def test_interpreted_turn_does_not_trigger_recovery():
         )
         is False
     )
+
+
+def test_orphaned_confirmation_actions_trigger_distinct_recovery():
+    for operation in ("CONFIRM_ACTION", "REJECT_ACTION"):
+        outcome = {
+            "status": "READY",
+            "action": None,
+            "slots": {},
+            "turn": {"understanding": "UNDERSTOOD"},
+            "facts": {
+                "current_turn_planning_evidence": True,
+                "_raw_luma_response": {"intent": {"name": operation}},
+            },
+        }
+        assert should_render_recovery(
+            result={
+                "success": True,
+                "outcome": outcome,
+                "_merged_luma_response": {"intent": {"name": operation}},
+            },
+            plan={"status": "READY", "action": None, "turn_operation": "NONE"},
+            session_state={},
+            availability_client_present=True,
+        )
+
+
+def test_pending_confirmation_actions_remain_suppressed():
+    for operation in ("CONFIRM_ACTION", "REJECT_ACTION"):
+        outcome = {
+            "status": "READY",
+            "action": None,
+            "slots": {},
+            "turn": {"understanding": "UNDERSTOOD"},
+            "facts": {
+                "current_turn_planning_evidence": True,
+                "_raw_luma_response": {"intent": {"name": operation}},
+            },
+        }
+        assert not should_render_recovery(
+            result={"success": True, "outcome": outcome},
+            plan={"status": "READY", "action": None, "turn_operation": "NONE"},
+            session_state={"confirmation_state": "pending"},
+            availability_client_present=True,
+        )
+
+
+def test_orphaned_confirmation_action_uses_truthful_instruction(monkeypatch):
+    from core.rendering import recovery_renderer as rr
+
+    captured = {}
+
+    def _fake_render(request):
+        captured["reason"] = request.facts["recovery"]["reason"]
+        captured["instruction"] = request.render_instruction
+        return "There's nothing waiting for confirmation right now. What would you like to do next?"
+
+    monkeypatch.setattr(rr, "render_llm", _fake_render)
+    outcome = {
+        "status": "READY",
+        "action": None,
+        "slots": {},
+        "turn": {"understanding": "UNDERSTOOD"},
+        "facts": {
+            "current_turn_planning_evidence": True,
+            "_raw_luma_response": {"intent": {"name": "CONFIRM_ACTION"}},
+        },
+    }
+    result = {
+        "success": True,
+        "outcome": outcome,
+        "_merged_luma_response": {"intent": {"name": "CONFIRM_ACTION"}},
+    }
+    inject_recovery_text(
+        result,
+        plan={"status": "READY", "action": None, "turn_operation": "NONE"},
+        session_state={},
+        user_input="go on",
+        availability_client_present=True,
+    )
+
+    assert captured["reason"] == RECOVERY_ORPHANED_CONFIRMATION_ACTION
+    assert "was understood" in captured["instruction"]
+    assert "could not be understood" not in captured["instruction"]
+    assert result["text"]
 
 
 def test_should_render_recovery_for_unrecognized_ready():

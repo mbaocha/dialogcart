@@ -259,7 +259,11 @@ def assemble_planning_outcome(
     plan_status = plan.get("status", "READY")
     awaiting = plan.get("awaiting")
     intent_name = decision_plan.intent_name
-    missing_slots = list(slot_state.missing_slots)
+    missing_slots = list(
+        plan.get("missing_slots")
+        if working_turn.payload.get("_accepted_empty_availability_recovery")
+        else slot_state.missing_slots
+    )
 
     slots = dict(decision_plan.facts.get("slots", {}))
     if working_turn.payload.get("_booking_confirmation_rejected") or working_turn.payload.get(

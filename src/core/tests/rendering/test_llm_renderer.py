@@ -82,6 +82,53 @@ def test_handler_renderer_returns_complete_typed_result(monkeypatch, render_requ
     assert result.metadata == {"reason": "rattle"}
 
 
+def test_handler_renderer_accepts_json_code_fence(monkeypatch, render_request):
+    _patch_anthropic_response(
+        monkeypatch,
+        '```json\n{"text":"Premium Full Service is best.",'
+        '"selected_entities":[],"metadata":{}}\n```',
+    )
+
+    result = render_handler_response(render_request)
+
+    assert result.text == "Premium Full Service is best."
+    assert result.selected_entities == []
+    assert result.metadata == {}
+
+
+def test_handler_renderer_accepts_unlabelled_json_code_fence(monkeypatch, render_request):
+    _patch_anthropic_response(
+        monkeypatch,
+        '```\n{"text":"Premium Full Service is best.",'
+        '"selected_entities":[],"metadata":{}}\n```',
+    )
+
+    result = render_handler_response(render_request)
+
+    assert result.text == "Premium Full Service is best."
+
+
+@pytest.mark.parametrize(
+    "provider_text",
+    [
+        'Here is the result: {"text":"Hello"}',
+        '```json\n{"text":"First"}\n```\n```json\n{"text":"Second"}\n```',
+        '```json\n{"text":}\n```',
+        '```json\n[{"text":"Hello"}]\n```',
+        '```json\n{"text":"Hello"}\n``` trailing',
+    ],
+)
+def test_handler_renderer_rejects_non_single_object_payloads(
+    monkeypatch, render_request, provider_text
+):
+    _patch_anthropic_response(monkeypatch, provider_text)
+
+    result = render_handler_response(render_request)
+
+    assert result.text == provider_text
+    assert result.selected_entities == []
+
+
 def test_handler_renderer_unstructured_text_has_no_proposal(monkeypatch, render_request):
     _patch_anthropic_response(monkeypatch, "A normal legacy-style response.")
 

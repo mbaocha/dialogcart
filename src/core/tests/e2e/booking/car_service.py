@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import List
+from typing import Any, Dict, List
 
+from core.adapters.errors import AvailabilityRejectedError
 from core.tests.e2e.framework.conversation import (
     Expect,
     Scenario,
@@ -15,6 +16,8 @@ BUSINESS_CATEGORY = "car_service"
 EXECUTIVE_OIL_CHANGE_SKU = "executive oil change"
 EXECUTIVE_OIL_CHANGE_ID = 26
 PREMIUM_FULL_SERVICE_SKU = "premium full service"
+BRAKE_PAD_CHANGE_SKU = "brake pad change"
+BRAKE_PAD_CHANGE_ID = 28
 _RATTLE_RECOMMENDATION = (
     "For your rattling noise, the Premium Full Service would be the better choice "
     "since it includes the kind of checks that would help us pinpoint what's actually "
@@ -76,6 +79,69 @@ def _assert_engine_type_not_requested_again(conv, booking, availability) -> None
         f"turn {conv.turn}: engine_type must not be missing after petrol was accepted",
     )
 
+
+def _assert_service_identity_replaced(conv, booking, availability) -> None:
+    """A revised service replaces every identifier derived from the old service."""
+    session = conv.session() or {}
+    slots = ((session.get("planning") or {}).get("slots") or session.get("slots") or {})
+    conv._assert(
+        slots.get("service_id") == BRAKE_PAD_CHANGE_SKU,
+        f"turn {conv.turn}: expected revised service {BRAKE_PAD_CHANGE_SKU!r}, got {slots!r}",
+    )
+    conv._assert(
+        slots.get("_catalog_item_id") == BRAKE_PAD_CHANGE_ID,
+        f"turn {conv.turn}: revised catalog identity must be {BRAKE_PAD_CHANGE_ID}, got {slots!r}",
+    )
+    conv._assert(
+        slots.get("_catalog_item_id") != EXECUTIVE_OIL_CHANGE_ID
+        and slots.get("_canonical_service_id") not in (
+            EXECUTIVE_OIL_CHANGE_SKU,
+            EXECUTIVE_OIL_CHANGE_ID,
+        ),
+        f"turn {conv.turn}: stale Executive Oil Change identity survived: {slots!r}",
+    )
+    conv._assert(
+        availability.get_service_availability.call_args.kwargs.get("service_id")
+        == BRAKE_PAD_CHANGE_ID,
+        f"turn {conv.turn}: availability must use revised catalog identity",
+    )
+    conv._assert(
+        not booking.create_booking.called,
+        f"turn {conv.turn}: service revision must not create a booking",
+    )
+
+
+def _reject_closed_day(_conv, _booking, availability) -> None:
+    availability.get_service_availability.side_effect = AvailabilityRejectedError(
+        reason="business_closed"
+    )
+
+
+def _assert_closed_day_recovery(conv, booking, _availability) -> None:
+    """A business-closed result remains recoverable and keeps accepted evidence."""
+    session = conv.session() or {}
+    slots = ((session.get("planning") or {}).get("slots") or session.get("slots") or {})
+    conv._assert(
+        slots.get("service_id") == EXECUTIVE_OIL_CHANGE_SKU
+        and slots.get("engine_type") == "petrol",
+        f"turn {conv.turn}: accepted service/engine evidence was lost: {slots!r}",
+    )
+    conv._assert(
+        not booking.create_booking.called,
+        f"turn {conv.turn}: closed-day recovery must not create a booking",
+    )
+    text = _response_text(conv.last_body or {})
+    lowered = text.lower()
+    for marker in ("api returned error", "422", "execution_failed", "traceback"):
+        conv._assert(
+            marker not in lowered,
+            f"turn {conv.turn}: raw backend error marker {marker!r} was exposed: {text!r}",
+        )
+    conv._assert(
+        bool(text.strip()),
+        f"turn {conv.turn}: closed-day recovery must provide a helpful response",
+    )
+
     response = _response_text(conv.last_body or {}).lower()
     conv._assert(
         "engine type" not in response and "engine_type" not in response,
@@ -84,6 +150,65 @@ def _assert_engine_type_not_requested_again(conv, booking, availability) -> None
 
 
 SCENARIOS: List[Scenario] = [
+    Scenario(
+        "Car service revision replaces derived identifiers",
+        Turn(
+            "Book an Executive Oil Change for July 6 at 10am, petrol, registration AB12 CDE",
+            Expect(
+                response_status="succeeded",
+                planner="AWAITING_CONFIRMATION",
+                confirmation="pending",
+                session_slots={"service_id": EXECUTIVE_OIL_CHANGE_SKU},
+                response_text_present=True,
+            ),
+        ),
+        Turn(
+            "No, switch it to Brake Pad Change instead.",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                confirmation=None,
+                session_slots={"service_id": BRAKE_PAD_CHANGE_SKU},
+                execution="availability",
+                availability_request={"service_id": BRAKE_PAD_CHANGE_ID},
+                response_text_present=True,
+            ),
+            after=_assert_service_identity_replaced,
+        ),
+        fixture="scripted_confirm",
+        tags=["booking", "car-service", "service-revision", "identity", "regression"],
+        id="car-service-revision-replaces-derived-identifiers",
+    ),
+    Scenario(
+        "Car service closed-day recovery preserves accepted evidence",
+        Turn(
+            "Book an Executive Oil Change for Saturday July 4",
+            Expect(
+                response_status="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": EXECUTIVE_OIL_CHANGE_SKU},
+                date_proposal="2026-07-04",
+                response_text_present=True,
+                confirmation=None,
+            ),
+        ),
+        Turn(
+            "petrol",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                session_slots={
+                    "service_id": EXECUTIVE_OIL_CHANGE_SKU,
+                    "engine_type": "petrol",
+                },
+                confirmation=None,
+                response_text_present=True,
+            ),
+            before=_reject_closed_day,
+            after=_assert_closed_day_recovery,
+        ),
+        fixture="scripted_confirm",
+        tags=["booking", "car-service", "availability", "closed-day", "recovery", "regression"],
+        id="car-service-closed-day-recovery-preserves-evidence",
+    ),
     Scenario(
         "Car service accepts an assistant recommendation with next-week availability",
         Turn(

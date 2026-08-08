@@ -8,7 +8,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-from core.adapters.errors import UpstreamError
+from core.adapters.errors import AvailabilityRejectedError, UpstreamError
 from core.execution.clients.base_client import BaseClient
 from core.tracing.availability import (
     begin_availability_request,
@@ -69,11 +69,19 @@ class AvailabilityClient(BaseClient):
                 http_status=e.response.status_code,
                 raw_body=e.response.text or "",
             )
+            error_json = None
             try:
                 error_json = e.response.json()
                 error_text = str(error_json)
             except Exception:
                 pass
+            detail = error_json.get("detail") if isinstance(error_json, dict) else None
+            is_business_rejection = isinstance(detail, str) or (
+                isinstance(detail, dict)
+                and any(detail.get(key) for key in ("code", "type", "reason"))
+            )
+            if e.response.status_code == 422 and is_business_rejection:
+                raise AvailabilityRejectedError() from e
             raise UpstreamError(
                 f"API returned error {e.response.status_code}: {error_text}"
             ) from e

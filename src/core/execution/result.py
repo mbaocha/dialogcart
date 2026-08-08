@@ -219,6 +219,9 @@ def normalize_execution_result(
             "slots": list(raw_slots) if isinstance(raw_slots, list) else [],
             "time_resolution": _as_dict(raw.get("time_resolution")),
         }
+        unavailable_reason = raw.get("unavailable_reason")
+        if isinstance(unavailable_reason, str) and unavailable_reason:
+            availability["unavailable_reason"] = unavailable_reason
 
     error: Optional[ExecutionError] = None
     status = _status_from_raw(raw)

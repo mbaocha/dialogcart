@@ -1,0 +1,72 @@
+{
+  "key": {
+    "conversation_context": {
+      "last_date_proposal": {
+        "mode": "single_day",
+        "start": "2026-07-02"
+      },
+      "last_intent": "CREATE_APPOINTMENT",
+      "last_search_query": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "book me a premium haircut tomorrow"
+        },
+        {
+          "role": "assistant",
+          "text": "There are no available times for Premium Haircut. What date, day, or week would you like me to try instead?"
+        }
+      ],
+      "missing_slots": [
+        "time"
+      ],
+      "resolved_service_id": "premium haircut",
+      "turns": [
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "book me a premium haircut tomorrow"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": "haircut",
+        "premium haircut": "haircut"
+      },
+      "booking_mode": "service"
+    },
+    "text": "yes",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service_id": "premium haircut",
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CONFIRM_ACTION"
+    },
+    "temporal": {
+      "confidence": 0.0,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": null,
+      "mode": "none",
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

@@ -93,6 +93,18 @@ def _attach_service_candidates(
     return result
 
 
+def _attach_confirmation_state(
+    result: Dict[str, Any], session: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Expose the confirmation gate needed for contextual correction extraction."""
+    from ...session.confirmation_gate import get_confirmation_state
+
+    state = get_confirmation_state(session)
+    if state is None:
+        return result
+    return {**result, "confirmation_state": state}
+
+
 def build_conversation_context(
     session: Optional[Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
@@ -141,6 +153,7 @@ def build_conversation_context(
                     result["missing_slots"] = missing
                 result = _attach_resolved_service_id(result, session)
                 result = _attach_service_candidates(result, session)
+                result = _attach_confirmation_state(result, session)
                 return result
         return None
 
@@ -162,6 +175,7 @@ def build_conversation_context(
         result = {**result, "missing_slots": missing}
     result = _attach_resolved_service_id(result, session)
     result = _attach_service_candidates(result, session)
+    result = _attach_confirmation_state(result, session)
     if isinstance(pending_proposals, list) and pending_proposals:
         semantic_fields = (
             "proposal_type", "status", "entity_type", "slot_key",

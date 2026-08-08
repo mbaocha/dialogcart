@@ -9,6 +9,7 @@ import pytest
 from nlu.registry.intent_groups import get_stage2_group
 from nlu.stages.stage2 import dispatcher
 from nlu.stages.stage2.base_prompt import intent_validation_section
+from nlu.stages.stage2.groups.create import _merge as merge_create_output
 from nlu.stages.stage2.groups.create import _system_prompt as create_prompt
 from nlu.stages.stage2.groups.faq import _system_prompt as faq_prompt
 
@@ -66,6 +67,39 @@ _WORKFLOW_CORRECTIONS = (
     ("I meant tomorrow, not Friday.", "date"),
     ("My registration is AB12CDE, not AAABC123.", "registration"),
 )
+
+
+@pytest.mark.parametrize(
+    "text,confirmation_state,expected",
+    [
+        ("No, make it 11 instead.", "pending", ["11:00"]),
+        ("Actually, switch the time to 4 instead.", "pending", ["04:00"]),
+        ("No, use bay 11 instead.", "pending", []),
+        ("No, make it 11 instead.", None, []),
+    ],
+)
+def test_pending_confirmation_bare_hour_time_correction(
+    text, confirmation_state, expected
+):
+    """Repair only explicit bare-hour replacements while confirmation is pending."""
+    result = merge_create_output(
+        {
+            "validated_intent": "CORRECTION",
+            "confidence": 0.95,
+            "facts": {},
+            "temporal": {"mode": "none"},
+        },
+        "CORRECTION",
+        text=text,
+        conversation_context={
+            "last_intent": "CREATE_APPOINTMENT",
+            "active_booking_intent": "CREATE_APPOINTMENT",
+            "confirmation_state": confirmation_state,
+        },
+    )
+
+    assert result["facts"]["times"] == expected
+    assert result["temporal"]["start_time"] == (expected[0] if expected else None)
 
 
 def test_shared_contract_defines_correction_as_workflow_state_change():

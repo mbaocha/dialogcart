@@ -325,7 +325,11 @@ def _strip_unmentioned_dates(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
     return apply_temporal(slm, clear_temporal_dates(temporal))
 
 
-def _strip_unmentioned_times(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
+def _strip_unmentioned_times(
+    text: str,
+    slm: Dict[str, Any],
+    conversation_context: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """Remove times Haiku inferred from conversation context alone.
 
     Mirrors _strip_unmentioned_dates: clock / period language must appear in the
@@ -338,10 +342,24 @@ def _strip_unmentioned_times(text: str, slm: Dict[str, Any]) -> Dict[str, Any]:
         temporal_has_time_material,
     )
 
-    if _text_mentions_time(text):
-        return slm
     temporal = get_temporal(slm)
     facts = slm.get("facts", {}) or {}
+    if _text_mentions_time(text):
+        return slm
+
+    ctx = conversation_context if isinstance(conversation_context, dict) else {}
+    if slm.get("intent") == "CORRECTION" and ctx.get("confirmation_state") == "pending":
+        from .stages.stage2.groups.create import _PENDING_TIME_REPLACEMENT_RE
+
+        match = _PENDING_TIME_REPLACEMENT_RE.search(text or "")
+        if match:
+            recovered = f"{int(match.group('hour')):02d}:00"
+            if (
+                temporal.start_time == recovered
+                and facts.get("times") == [recovered]
+            ):
+                return slm
+
     if (
         not temporal_has_time_material(temporal)
         and not facts.get("times")
@@ -786,7 +804,7 @@ class NLUPipeline:
             compiled_entities=compiled,
         )
         slm = _strip_unmentioned_dates(text, slm)
-        slm = _strip_unmentioned_times(text, slm)
+        slm = _strip_unmentioned_times(text, slm, conversation_context)
         slm = _strip_unmentioned_service(text, slm)
         slm = _normalize_fuzzy_time(text, slm)
         slm = _normalize_booking_id(text, slm, effective_tc)

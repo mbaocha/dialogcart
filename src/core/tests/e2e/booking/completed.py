@@ -7,11 +7,11 @@
 # ✓ Revision
 # ✓ Interruptions
 # ✓ Invalid
+# ✓ Recovery
 #
 # TODO
 #
 # □ References
-# □ Recovery
 # ============================================================
 
 from __future__ import annotations
@@ -512,4 +512,138 @@ _register(
 # ============================================================
 # RECOVERY
 # ============================================================
-# (no scenarios in this section yet)
+_SERVICE_RETAIN_STATE: Dict[str, Any] = {}
+
+
+def _effective_service_id_completed(sess: Dict[str, Any]) -> Any:
+    slots = sess.get("slots") if isinstance(sess.get("slots"), dict) else {}
+    planning = sess.get("planning") if isinstance(sess.get("planning"), dict) else {}
+    planning_slots = (
+        planning.get("slots") if isinstance(planning.get("slots"), dict) else {}
+    )
+    return planning_slots.get("service_id") or slots.get("service_id")
+
+
+def _capture_service_before_recovery(conv, booking, availability) -> None:
+    """Service is established; availability has no slots."""
+    _assert_no_booking(conv, booking)
+    assert availability.get_service_availability.call_count >= 1
+    sess = conv.session() or {}
+    service_id = _effective_service_id_completed(sess)
+    assert service_id == PREMIUM_SERVICE, (
+        f"turn {conv.turn}: expected premium before recovery continue, got {service_id!r}"
+    )
+    text = _response_text(conv.last_body or {})
+    assert isinstance(text, str) and text.strip(), (
+        f"turn {conv.turn}: expected non-empty no-availability reply, got {text!r}"
+    )
+    _SERVICE_RETAIN_STATE["service_id"] = service_id
+    _SERVICE_RETAIN_STATE["text"] = text
+
+
+def _assert_service_retained_across_recovery(conv, booking, _availability=None) -> None:
+    """'different week' / 'continue' must keep service — never re-ask which service."""
+    _assert_no_booking(conv, booking)
+    text = _response_text(conv.last_body or {})
+    assert isinstance(text, str) and text.strip(), (
+        f"turn {conv.turn}: expected non-empty recovery reply, got {text!r}"
+    )
+    lowered = text.lower().replace("\u2019", "'").replace("\u2018", "'")
+    assert "which service" not in lowered, (
+        f"turn {conv.turn}: must not re-ask 'Which service?' after service was "
+        f"already selected, got {text!r}"
+    )
+    # Choice-list re-prompt is also a service re-ask.
+    lists_services = (
+        "premium haircut" in lowered
+        and "flexi" in lowered
+        and ("which" in lowered or "would you like" in lowered)
+    )
+    assert not lists_services, (
+        f"turn {conv.turn}: must not re-present service picker after service was "
+        f"selected, got {text!r}"
+    )
+
+    sess = conv.session() or {}
+    expected = _SERVICE_RETAIN_STATE.get("service_id") or PREMIUM_SERVICE
+    service_id = _effective_service_id_completed(sess)
+    assert service_id == expected, (
+        f"turn {conv.turn}: previously selected service must remain {expected!r}, "
+        f"got {service_id!r}"
+    )
+    missing = (
+        (conv.plan or {}).get("missing_slots")
+        or (conv.outcome or {}).get("missing_slots")
+        or sess.get("missing_slots")
+        or []
+    )
+    if isinstance(missing, list):
+        assert "service_id" not in missing, (
+            f"turn {conv.turn}: service_id must not be missing after recovery, "
+            f"got missing_slots={missing!r}"
+        )
+
+
+_register(
+    Scenario(
+        "Service retained across different-week recovery",
+        Turn(
+            "book me a premium haircut tomorrow",
+            Expect(
+                response_status="succeeded",
+                execution="availability",
+                has_availability_slots=False,
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_capture_service_before_recovery,
+        ),
+        Turn(
+            "different week",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_assert_service_retained_across_recovery,
+        ),
+        fixture="scripted_empty",
+        tags=["booking", "completed", "recovery", "service-retention", "regression"],
+        id="service-retained-across-different-week-recovery",
+    )
+)
+
+_register(
+    Scenario(
+        "Service retained across continue recovery",
+        Turn(
+            "book me a premium haircut tomorrow",
+            Expect(
+                response_status="succeeded",
+                execution="availability",
+                has_availability_slots=False,
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_capture_service_before_recovery,
+        ),
+        Turn(
+            "continue",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_assert_service_retained_across_recovery,
+        ),
+        fixture="scripted_empty",
+        tags=["booking", "completed", "recovery", "service-retention", "regression"],
+        id="service-retained-across-continue-recovery",
+    )
+)

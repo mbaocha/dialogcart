@@ -265,6 +265,15 @@ def run_planning_pipeline(
         apply_domain_filter=apply_domain_filter,
         entity_schema=entity_schema,
     )
+    from core.planning.planning_mutations import (
+        apply_empty_availability_recovery_acceptance,
+    )
+
+    apply_empty_availability_recovery_acceptance(
+        working_turn,
+        luma_response=luma_response,
+        session_state=original_session_state or session_state,
+    )
     if explicit_proposal_updates:
         working_turn.payload["_assistant_proposal_updates"] = explicit_proposal_updates
     if relationship is not None:

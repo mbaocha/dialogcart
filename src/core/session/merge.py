@@ -917,6 +917,17 @@ def _merge_slots_additive(
     raw_service_id_from_session = session_slots.get("service_id")
     canonical_service_id_from_session = session_slots.get("_canonical_service_id")
 
+    if (
+        luma_slots.get("service_id") is not None
+        and luma_slots.get("service_id") != raw_service_id_from_session
+    ):
+        replaced_service_ids = {"_canonical_service_id", "_catalog_item_id"}
+        merged_slots.pop("_canonical_service_id", None)
+        merged_slots.pop("_catalog_item_id", None)
+        merged.setdefault("_intentionally_dropped_slots", set()).update(
+            replaced_service_ids
+        )
+
     # Additively merge Luma slots into session slots
     # Luma slots are delta updates - they add new information or refine existing slots
     # But never delete slots that exist in session but not in Luma response
@@ -1513,13 +1524,31 @@ def _extract_raw_luma_slots(ctx: _MergeContext) -> Dict[str, Any]:
         else {}
     )
 
-    # Extract slots from facts.facts.slots if present (nested format)
-    # Otherwise fall back to legacy slots field
-    nested_slots: Dict[str, Any] = {}
+    # Persisted facts.slots may carry the previous turn's identity group after
+    # _merge_facts(). Merge it as a fallback only; current Stage 02 slots are
+    # authoritative for current-turn replacements and derived catalog identity.
+    nested_from_facts: Dict[str, Any] = {}
     if isinstance(facts_obj, dict) and "slots" in facts_obj:
-        nested_slots = facts_obj.get("slots", {})
-    else:
-        nested_slots = merged.get("slots", {})
+        nested_from_facts = facts_obj.get("slots", {})
+        if not isinstance(nested_from_facts, dict):
+            nested_from_facts = {}
+    current_slots = merged.get("slots", {})
+    if not isinstance(current_slots, dict):
+        current_slots = {}
+    current_service = current_slots.get("service_id")
+    nested_service = nested_from_facts.get("service_id")
+    if (
+        current_service is not None
+        and nested_service is not None
+        and current_service != nested_service
+    ):
+        nested_from_facts = {
+            key: value
+            for key, value in nested_from_facts.items()
+            if key
+            not in {"service_id", "_canonical_service_id", "_catalog_item_id"}
+        }
+    nested_slots = {**nested_from_facts, **current_slots}
 
     # Merge promoted slots; strip date keys when Fix 4 applies (flexible + same-turn service)
     raw_luma_slots = merge_promoted_luma_slots(

@@ -8,6 +8,7 @@ Legacy dates/times/time_constraint are projected from Temporal.
 """
 import logging
 import os
+import re
 from typing import Any, Dict, Optional
 
 import anthropic
@@ -56,6 +57,50 @@ _LEGACY_CREATE_TOOL_KWARGS = {
     "include_validated_intent": True,
     "include_operation": True,
 }
+
+_PENDING_TIME_REPLACEMENT_RE = re.compile(
+    r"\b(?:make\s+it|change(?:\s+(?:it|the\s+time))?\s+to|"
+    r"switch(?:\s+(?:it|the\s+time))?\s+to|move(?:\s+it)?\s+to)\s+"
+    r"(?P<hour>[1-9]|1\d|2[0-3])\b",
+    re.IGNORECASE,
+)
+
+
+def _repair_pending_confirmation_bare_hour(
+    raw: Dict[str, Any],
+    *,
+    candidate_intent: str,
+    text: str,
+    conversation_context: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Bind an explicit replacement bare hour only for pending confirmation."""
+    ctx = conversation_context if isinstance(conversation_context, dict) else {}
+    validated = raw.get("validated_intent") or candidate_intent
+    if validated != "CORRECTION" or ctx.get("confirmation_state") != "pending":
+        return raw
+
+    temporal = raw.get("temporal") if isinstance(raw.get("temporal"), dict) else {}
+    facts = raw.get("facts") if isinstance(raw.get("facts"), dict) else {}
+    if temporal.get("start_time") or temporal.get("end_time") or facts.get("times"):
+        return raw
+
+    match = _PENDING_TIME_REPLACEMENT_RE.search(text or "")
+    if not match:
+        return raw
+
+    expression = match.group("hour")
+    start_time = f"{int(expression):02d}:00"
+    return {
+        **raw,
+        "temporal": {
+            **temporal,
+            "expression": expression,
+            "start_time_expression": expression,
+            "start_time": start_time,
+            "mode": temporal.get("mode") or "none",
+            "confidence": temporal.get("confidence", raw.get("confidence")),
+        },
+    }
 
 
 def build_create_tool(
@@ -318,6 +363,12 @@ def _merge(
     conversation_context: Optional[Dict[str, Any]] = None,
     compiled: Optional[CompiledBusinessEntities] = None,
 ) -> Dict[str, Any]:
+    raw = _repair_pending_confirmation_bare_hour(
+        raw,
+        candidate_intent=candidate_intent,
+        text=text,
+        conversation_context=conversation_context,
+    )
     validated = raw.get("validated_intent") or candidate_intent
     validated = promote_in_flow_booking_intent(
         validated, text, conversation_context

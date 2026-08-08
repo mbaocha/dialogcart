@@ -26,7 +26,35 @@ from core.session.invalidation import (
     apply_invalidation,
     hydrate_working_slots_from_session,
     sync_working_slot_projections,
+    clear_booking_state,
 )
+
+
+def apply_empty_availability_recovery_acceptance(
+    working_turn: Any,
+    *,
+    luma_response: Dict[str, Any],
+    session_state: Optional[Dict[str, Any]],
+) -> bool:
+    """Accept a structured another-date offer without repeating stale criteria."""
+    from core.planning.recovery_actions import accepts_empty_availability_recovery
+
+    if not accepts_empty_availability_recovery(luma_response, session_state):
+        return False
+    clear_booking_state(
+        working_turn.payload,
+        clear_time=True,
+        clear_date=True,
+        clear_availability=True,
+        clear_confirmation=False,
+        clear_extra_state={"date_proposal", "time_proposal"},
+        reason="accepted_empty_availability_recovery",
+    )
+    working_turn.effective_collected_slots = dict(
+        working_turn.payload.get("slots") or {}
+    )
+    working_turn.payload["_accepted_empty_availability_recovery"] = True
+    return True
 
 
 def apply_assistant_proposal_promotion(working_turn: Any, relationship: Any) -> bool:

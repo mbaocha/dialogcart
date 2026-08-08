@@ -127,6 +127,28 @@ def _raw_luma_intent_name(luma_response: Optional[Dict[str, Any]]) -> str:
     return ""
 
 
+def _reject_starts_dated_availability_request(
+    luma_response: Optional[Dict[str, Any]],
+) -> bool:
+    """True for a rejection accompanied by a concrete dated search request."""
+    if not isinstance(luma_response, dict):
+        return False
+    intent = luma_response.get("intent")
+    intent_name = intent.get("name") if isinstance(intent, dict) else intent
+    if intent_name not in {"AVAILABILITY", "CHECK_AVAILABILITY"}:
+        return False
+
+    temporal = luma_response.get("temporal")
+    if isinstance(temporal, dict) and temporal.get("start_date"):
+        return True
+    facts = luma_response.get("facts")
+    return bool(
+        isinstance(facts, dict)
+        and isinstance(facts.get("dates"), list)
+        and facts["dates"]
+    )
+
+
 def classify_confirmation_gate_turn(
     luma_response: Optional[Dict[str, Any]],
     session_state: Optional[Dict[str, Any]],
@@ -148,6 +170,8 @@ def classify_confirmation_gate_turn(
     if raw_intent == "CONFIRM_ACTION":
         return ConfirmationGateTurn.YES
     if raw_intent == "REJECT_ACTION":
+        if _reject_starts_dated_availability_request(luma_response):
+            return ConfirmationGateTurn.ANOTHER_REQUEST
         return ConfirmationGateTurn.NO
 
     return ConfirmationGateTurn.ANOTHER_REQUEST

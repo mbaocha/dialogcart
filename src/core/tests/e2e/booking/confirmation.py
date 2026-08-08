@@ -991,6 +991,33 @@ def _assert_confirmation_time_revision(conv, booking, availability) -> None:
         assert_no_search_since(conv, availability, baseline)
 
 
+def _assert_rejected_time_replaced_with_eleven(conv, booking, _availability) -> None:
+    """Rejecting 10:00 with a bare-hour replacement proposes 11:00 instead."""
+    assert_returns_to_pending_confirmation(conv)
+    sess = conv.session() or {}
+    slots = ((sess.get("planning") or {}).get("slots") or sess.get("slots") or {})
+    time_value = str(slots.get("time") or "")
+    conv._assert(
+        time_value.startswith("11"),
+        f"turn {conv.turn}: replacement time must be 11:00, got {time_value!r}",
+    )
+    conv._assert(
+        not time_value.startswith("10"),
+        f"turn {conv.turn}: rejected 10:00 must not survive, got {time_value!r}",
+    )
+    outcome = conv.outcome or {}
+    proposal_slots = outcome.get("slots") if isinstance(outcome.get("slots"), dict) else {}
+    proposed_time = str(proposal_slots.get("time") or time_value)
+    conv._assert(
+        proposed_time.startswith("11"),
+        f"turn {conv.turn}: updated proposal must carry 11:00, got {proposal_slots!r}",
+    )
+    conv._assert(
+        not booking.create_booking.called,
+        f"turn {conv.turn}: time correction must not create a booking",
+    )
+
+
 _register(
     Scenario(
         "Correction time revision during pending confirmation",
@@ -1068,6 +1095,52 @@ _register(
         fixture="scripted_confirmation_time_revision",
         tags=["booking", "confirmation", "interruption", "time-revision", "bug1"],
         id="correction-time-revision-during-confirmation",
+    )
+)
+
+
+_register(
+    Scenario(
+        "Bare-hour correction replaces pending confirmation time",
+        Turn(
+            "book me a premium haircut",
+            Expect(
+                response_status="succeeded",
+                execution="availability",
+                has_availability_slots=True,
+                session_slots={"service_id": PREMIUM_SERVICE},
+                confirmation=None,
+            ),
+        ),
+        Turn(
+            "10am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "10"},
+            ),
+        ),
+        Turn(
+            "No, make it 11 instead.",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                planner="AWAITING_CONFIRMATION",
+                stage="CONFIRM",
+                awaiting="USER_CONFIRMATION",
+                action=None,
+                intent="CREATE_APPOINTMENT",
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "11"},
+                time_match=TIME_MATCH_EXACT,
+                response_text_present=True,
+            ),
+            after=_assert_rejected_time_replaced_with_eleven,
+        ),
+        fixture="scripted_confirm",
+        tags=["booking", "confirmation", "time-revision", "bare-hour", "regression"],
+        id="pending-confirmation-bare-hour-replaces-time",
     )
 )
 
@@ -2688,6 +2761,236 @@ _register(
         fixture="booking",
         tags=["booking", "execution", "retry", "audit"],
         id="execution-failure-then-safe-retry",
+        requires_customer_identity=True,
+    )
+)
+
+_BLANK_REPLY_STATE: Dict[str, Any] = {}
+
+
+def _effective_service_id_confirm(sess: Dict[str, Any]) -> Any:
+    slots = sess.get("slots") if isinstance(sess.get("slots"), dict) else {}
+    planning = sess.get("planning") if isinstance(sess.get("planning"), dict) else {}
+    planning_slots = (
+        planning.get("slots") if isinstance(planning.get("slots"), dict) else {}
+    )
+    return planning_slots.get("service_id") or slots.get("service_id")
+
+
+def _capture_booking_alive_baseline(conv, booking, availability) -> None:
+    """Remember active booking context before a continuation utterance."""
+    _assert_no_booking(conv, booking)
+    sess = conv.session() or {}
+    service_id = _effective_service_id_confirm(sess)
+    assert service_id == PREMIUM_SERVICE, (
+        f"turn {conv.turn}: expected premium in session before continuation, "
+        f"got {service_id!r}"
+    )
+    text = _response_text(conv.last_body or {})
+    assert isinstance(text, str) and text.strip(), (
+        f"turn {conv.turn}: expected non-empty baseline reply, got {text!r}"
+    )
+    _BLANK_REPLY_STATE["service_id"] = service_id
+    _BLANK_REPLY_STATE["intent"] = sess.get("intent_name")
+    _BLANK_REPLY_STATE["search_count"] = availability.get_service_availability.call_count
+
+
+def _assert_non_empty_reply_keeps_booking_alive(conv, booking, _availability=None) -> None:
+    """Continuation utterances must never return empty text or drop booking state."""
+    _assert_no_booking(conv, booking)
+    text = _response_text(conv.last_body or {})
+    assert isinstance(text, str) and text.strip(), (
+        f"turn {conv.turn}: assistant response must never be empty, got {text!r}"
+    )
+    sess = conv.session() or {}
+    service_id = _effective_service_id_confirm(sess)
+    expected = _BLANK_REPLY_STATE.get("service_id") or PREMIUM_SERVICE
+    assert service_id == expected, (
+        f"turn {conv.turn}: booking service must not be lost, expected {expected!r}, "
+        f"got {service_id!r}"
+    )
+    prior_intent = _BLANK_REPLY_STATE.get("intent")
+    if prior_intent:
+        assert sess.get("intent_name") in (prior_intent, "CREATE_APPOINTMENT"), (
+            f"turn {conv.turn}: booking intent must remain alive, "
+            f"prior={prior_intent!r} got={sess.get('intent_name')!r}"
+        )
+    missing = (
+        (conv.plan or {}).get("missing_slots")
+        or (conv.outcome or {}).get("missing_slots")
+        or sess.get("missing_slots")
+        or []
+    )
+    if isinstance(missing, list) and service_id:
+        assert "service_id" not in missing, (
+            f"turn {conv.turn}: established service must not become missing, "
+            f"got missing_slots={missing!r}"
+        )
+
+
+def _assert_non_empty_reply_only(conv, booking, _availability=None) -> None:
+    _assert_no_booking(conv, booking)
+    conv.assert_response_text_present()
+
+
+def _assert_non_empty_yes_at_confirmation(conv, booking, _availability=None) -> None:
+    """Pending-confirmation 'yes' must always produce user-facing text."""
+    conv.assert_response_text_present()
+    sess = conv.session() or {}
+    service_id = _effective_service_id_confirm(sess)
+    assert service_id == PREMIUM_SERVICE, (
+        f"turn {conv.turn}: service must remain after yes, got {service_id!r}"
+    )
+
+
+_register(
+    Scenario(
+        "Assistant reply never empty for book-it continuation",
+        Turn(
+            "book me a premium haircut",
+            Expect(
+                response_status="succeeded",
+                planner="READY",
+                stage="AVAILABILITY",
+                action="SEARCH_AVAILABILITY",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_capture_booking_alive_baseline,
+        ),
+        Turn(
+            "book it",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                response_text_present=True,
+            ),
+            after=_assert_non_empty_reply_keeps_booking_alive,
+        ),
+        fixture="scripted_confirm",
+        tags=["booking", "confirmation", "recovery", "non-empty-reply", "regression"],
+        id="non-empty-reply-book-it-mid-availability",
+    )
+)
+
+_register(
+    Scenario(
+        "Assistant reply never empty for go-on continuation",
+        Turn(
+            "tell me about premium haircut",
+            Expect(response_text_present=True),
+        ),
+        Turn(
+            "go on",
+            Expect(response_text_present=True),
+            after=_assert_non_empty_reply_only,
+        ),
+        Turn(
+            "book it",
+            Expect(response_text_present=True),
+            after=_assert_non_empty_reply_only,
+        ),
+        fixture="scripted_confirm",
+        tags=["booking", "confirmation", "recovery", "non-empty-reply", "regression"],
+        id="non-empty-reply-go-on-then-book-it",
+    )
+)
+
+_register(
+    Scenario(
+        "Assistant reply never empty for what-was-I-booking",
+        Turn(
+            "book me a premium haircut",
+            Expect(
+                response_status="succeeded",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                response_text_present=True,
+            ),
+            after=_capture_booking_alive_baseline,
+        ),
+        Turn(
+            "what was I booking?",
+            Expect(
+                session_slots={"service_id": PREMIUM_SERVICE},
+                response_text_present=True,
+            ),
+            after=_assert_non_empty_reply_keeps_booking_alive,
+        ),
+        fixture="scripted_confirm",
+        tags=["booking", "confirmation", "recovery", "non-empty-reply", "regression"],
+        id="non-empty-reply-what-was-i-booking",
+    )
+)
+
+_register(
+    Scenario(
+        "Assistant reply never empty for thumbs-up continuation",
+        Turn(
+            "book me a premium haircut",
+            Expect(
+                response_status="succeeded",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                response_text_present=True,
+            ),
+            after=_capture_booking_alive_baseline,
+        ),
+        Turn(
+            "👍",
+            Expect(
+                session_slots={"service_id": PREMIUM_SERVICE},
+                response_text_present=True,
+            ),
+            after=_assert_non_empty_reply_keeps_booking_alive,
+        ),
+        fixture="scripted_confirm",
+        tags=["booking", "confirmation", "recovery", "non-empty-reply", "regression"],
+        id="non-empty-reply-thumbs-up",
+    )
+)
+
+_register(
+    Scenario(
+        "Assistant reply never empty for yes after time selection prompt",
+        Turn(
+            "book me a premium haircut",
+            Expect(
+                response_status="succeeded",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                execution="availability",
+                has_availability_slots=True,
+                response_text_present=True,
+            ),
+            after=_capture_booking_alive_baseline,
+        ),
+        Turn(
+            "10am",
+            Expect(
+                response_status="AWAITING_CONFIRMATION",
+                planner="AWAITING_CONFIRMATION",
+                confirmation="pending",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                slot_contains={"time": "10"},
+                response_text_present=True,
+            ),
+            after=_assert_no_booking,
+        ),
+        # Affirmation while confirmation is pending must never return empty text.
+        Turn(
+            "yes",
+            Expect(response_text_present=True),
+            after=_assert_non_empty_yes_at_confirmation,
+        ),
+        fixture="scripted_confirm",
+        tags=["booking", "confirmation", "recovery", "non-empty-reply", "regression"],
+        id="non-empty-reply-yes-at-confirmation",
         requires_customer_identity=True,
     )
 )

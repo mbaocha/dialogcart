@@ -437,6 +437,66 @@ def test_strip_unmentioned_times_preserves_fuzzy_period():
     assert result["temporal"]["start_time_expression"] == "evening"
 
 
+@pytest.mark.parametrize(
+    "text,confirmation_state,stage2_time,expected_time",
+    [
+        ("No, make it 11 instead.", "pending", None, "11:00"),
+        ("Actually, switch the time to 4 instead.", "pending", None, "04:00"),
+        ("No, use bay 11 instead.", "pending", None, None),
+        ("No, make it 11 instead.", None, None, None),
+        ("No", "pending", None, None),
+        ("No, make it 3pm instead.", "pending", "15:00", "15:00"),
+    ],
+)
+def test_pipeline_pending_confirmation_time_replacement_guard(
+    text, confirmation_state, stage2_time, expected_time
+):
+    """Stage 2 replacement evidence survives only in pending correction context."""
+    from nlu.pipeline import NLUPipeline
+    from nlu.stages.stage2.groups.create import _merge
+
+    context = {
+        "last_intent": "CREATE_APPOINTMENT",
+        "active_booking_intent": "CREATE_APPOINTMENT",
+        "confirmation_state": confirmation_state,
+    }
+    temporal = {"mode": "none"}
+    if stage2_time:
+        temporal.update(
+            {
+                "expression": stage2_time,
+                "start_time": stage2_time,
+                "start_time_expression": stage2_time,
+            }
+        )
+    slm = _merge(
+        {
+            "validated_intent": "CORRECTION",
+            "confidence": 0.95,
+            "facts": {},
+            "temporal": temporal,
+        },
+        "CORRECTION",
+        text=text,
+        conversation_context=context,
+    )
+    pipeline = NLUPipeline()
+    pipeline._slm_extract = lambda *args, **kwargs: slm
+
+    result = pipeline.run(
+        text,
+        {"booking_mode": "service", "aliases": {}},
+        now="2026-08-03T12:00:00",
+        timezone="UTC",
+        conversation_context=context,
+    )
+
+    assert (result.temporal or {}).get("start_time") == expected_time
+    assert (result.facts.get("times") or []) == (
+        [expected_time] if expected_time else []
+    )
+
+
 def test_strip_unmentioned_times_keeps_date_clears_leaked_clock():
     slm = {
         "intent": "AVAILABILITY",

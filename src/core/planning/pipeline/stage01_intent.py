@@ -163,6 +163,12 @@ def reconcile_intent(
 
     confirm_booking_continuation = False
 
+    from core.planning.recovery_actions import accepts_empty_availability_recovery
+
+    accepts_availability_recovery = accepts_empty_availability_recovery(
+        luma_response, gate_session
+    )
+
 
 
     if gate_action == ConfirmationGateTurn.YES and gate_booking_intent:
@@ -223,8 +229,6 @@ def reconcile_intent(
                             confirm_booking_continuation = True
 
                         is_durable = True
-
-
 
                 _BOOKING_REFINEMENT = frozenset(
 
@@ -405,6 +409,10 @@ def reconcile_intent(
                 "Durability check failed for %r: %s", planning_intent, exc
 
             )
+
+    if accepts_availability_recovery and gate_booking_intent:
+        planning_intent = gate_booking_intent
+        confirm_booking_continuation = False
 
 
 

@@ -1,0 +1,96 @@
+{
+  "key": {
+    "conversation_context": {
+      "last_date_proposal": {
+        "mode": "single_day",
+        "start": "2026-07-22"
+      },
+      "last_intent": "CREATE_APPOINTMENT",
+      "last_search_query": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "show availability for 22nd july"
+        },
+        {
+          "role": "assistant",
+          "text": "What date or day would you like me to check availability for?"
+        }
+      ],
+      "missing_slots": [
+        "time"
+      ],
+      "resolved_service_id": "premium haircut",
+      "turns": [
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "book me haircut on 21st july"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "premium"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "11am"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "show availability for 22nd july"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": "haircut",
+        "premium haircut": "haircut"
+      },
+      "booking_mode": "service"
+    },
+    "text": "9am",
+    "timezone": "UTC"
+  },
+  "response": {
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service": "premium",
+      "service_id": "premium haircut",
+      "times": [
+        "09:00"
+      ]
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CREATE_APPOINTMENT"
+    },
+    "temporal": {
+      "confidence": 0.98,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": "09:00",
+      "mode": "none",
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": "09:00",
+      "start_time_expression": null
+    },
+    "time_constraint": {
+      "end": "09:00",
+      "label": null,
+      "mode": "exact",
+      "start": "09:00"
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

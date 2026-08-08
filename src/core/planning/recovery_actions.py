@@ -52,6 +52,32 @@ def has_action(
     return action_type in action_types(actions)
 
 
+def accepts_empty_availability_recovery(
+    luma_response: Optional[Mapping[str, Any]],
+    session_state: Optional[Mapping[str, Any]],
+) -> bool:
+    """Whether a bare affirmative accepts a structured another-date recovery."""
+    if not isinstance(luma_response, Mapping) or not isinstance(session_state, Mapping):
+        return False
+    response_act = luma_response.get("response_act")
+    intent = luma_response.get("intent")
+    intent_name = intent.get("name") if isinstance(intent, Mapping) else intent
+    if response_act != "CONFIRM_ACTION" and intent_name != "CONFIRM_ACTION":
+        return False
+    if session_state.get("confirmation_state") == "pending":
+        return False
+    availability = session_state.get("availability")
+    if not isinstance(availability, Mapping):
+        return False
+    presentation = availability.get("presentation")
+    presented = presentation.get("presented") if isinstance(presentation, Mapping) else None
+    if not isinstance(presented, Mapping):
+        return False
+    if presented.get("slots"):
+        return False
+    return has_action(presented.get("recovery_actions"), CHOOSE_ANOTHER_DATE)
+
+
 def _browse_nav_capabilities(
     browse_hints: Optional[Mapping[str, Any]],
 ) -> tuple[bool, bool]:

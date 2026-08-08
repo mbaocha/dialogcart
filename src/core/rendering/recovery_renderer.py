@@ -15,6 +15,9 @@ logger = logging.getLogger(__name__)
 
 # Extensible recovery reason codes (only UNRECOGNIZED_INPUT is wired today).
 RECOVERY_UNRECOGNIZED_INPUT = "UNRECOGNIZED_INPUT"
+RECOVERY_ORPHANED_CONFIRMATION_ACTION = "ORPHANED_CONFIRMATION_ACTION"
+
+_CONFIRMATION_ACTIONS = frozenset({"CONFIRM_ACTION", "REJECT_ACTION"})
 
 _INTERPRETED_TURN_OPERATIONS = frozenset(
     {
@@ -169,6 +172,7 @@ def should_render_recovery(
     *,
     result: Dict[str, Any],
     plan: Optional[Dict[str, Any]] = None,
+    session_state: Optional[Dict[str, Any]] = None,
     availability_client_present: bool = True,
 ) -> bool:
     """Deterministic gate: no-evidence turns need recovery text.
@@ -190,6 +194,13 @@ def should_render_recovery(
         return False
     if outcome.get("text"):
         return False
+
+    if _is_orphaned_confirmation_action(
+        result=result,
+        plan=plan,
+        session_state=session_state,
+    ):
+        return True
 
     from core.planning.planning_evidence import read_planning_evidence
 
@@ -224,6 +235,66 @@ def should_render_recovery(
     if outcome.get("message_applied") is False:
         return True
     return turn_op in (None, "", "NONE")
+
+
+def _is_orphaned_confirmation_action(
+    *,
+    result: Dict[str, Any],
+    plan: Optional[Dict[str, Any]],
+    session_state: Optional[Dict[str, Any]],
+) -> bool:
+    """True for an understood confirmation act with no applicable gate."""
+    if not isinstance(session_state, dict):
+        return False
+    if _current_confirmation_action(result=result, plan=plan) is None:
+        return False
+    if isinstance(plan, dict):
+        action = plan.get("action")
+        nested = plan.get("plan")
+        if action is None and isinstance(nested, dict):
+            action = nested.get("action")
+        if action is not None:
+            return False
+    if result.get("_execution_result") is not None:
+        return False
+
+    from core.session.confirmation_gate import get_confirmation_state
+
+    return get_confirmation_state(session_state) != "pending"
+
+
+def _current_confirmation_action(
+    *,
+    result: Dict[str, Any],
+    plan: Optional[Dict[str, Any]],
+) -> Optional[str]:
+    """Read the typed operation or canonical raw NLU dialogue act."""
+    turn_operation = _plan_turn_operation(plan)
+    if turn_operation in _CONFIRMATION_ACTIONS:
+        return turn_operation
+
+    outcome = _outcome_from_result(result) or {}
+    candidates: List[Any] = [result.get("_merged_luma_response")]
+    facts = outcome.get("facts")
+    if isinstance(facts, dict):
+        candidates.append(facts.get("_raw_luma_response"))
+    if isinstance(plan, dict):
+        candidates.append(plan.get("_merged_luma_response"))
+        candidates.append(plan.get("_raw_luma_response"))
+        decision = plan.get("_decision")
+        if isinstance(decision, dict):
+            decision_facts = decision.get("facts")
+            if isinstance(decision_facts, dict):
+                candidates.append(decision_facts.get("_raw_luma_response"))
+
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        intent = candidate.get("intent")
+        raw_intent = intent.get("name") if isinstance(intent, dict) else intent
+        if raw_intent in _CONFIRMATION_ACTIONS:
+            return str(raw_intent)
+    return None
 
 
 def build_recovery_context(
@@ -288,6 +359,16 @@ def _has_active_workflow_evidence(context: Dict[str, Any]) -> bool:
 def _recovery_instruction(context: Dict[str, Any]) -> str:
     """Instruction for wording only — must not invent facts beyond evidence."""
     reason = context.get("reason") or RECOVERY_UNRECOGNIZED_INPUT
+
+    if reason == RECOVERY_ORPHANED_CONFIRMATION_ACTION:
+        return (
+            f"Conversation recovery is required (reason={reason}). "
+            "The latest user message was understood as a confirmation or rejection, "
+            "but there is no action awaiting confirmation. Tell the user briefly "
+            "that nothing is waiting for confirmation and ask what they would like "
+            "to do next. Do not say that their message was misunderstood. "
+            "Do not invent booking details or imply that an action was performed."
+        )
 
     if not _has_active_workflow_evidence(context):
         # Cold-start / no active workflow: stay intent-neutral.
@@ -398,6 +479,7 @@ def inject_recovery_text(
     if not should_render_recovery(
         result=result,
         plan=plan,
+        session_state=session_state,
         availability_client_present=availability_client_present,
     ):
         return
@@ -417,8 +499,17 @@ def inject_recovery_text(
             if isinstance(session_state, dict)
             else []
         )
+        reason = (
+            RECOVERY_ORPHANED_CONFIRMATION_ACTION
+            if _is_orphaned_confirmation_action(
+                result=result,
+                plan=plan,
+                session_state=session_state,
+            )
+            else RECOVERY_UNRECOGNIZED_INPUT
+        )
         request = build_recovery_render_request(
-            reason=RECOVERY_UNRECOGNIZED_INPUT,
+            reason=reason,
             outcome=outcome,
             plan=plan,
             session_state=session_state,

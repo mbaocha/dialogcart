@@ -214,6 +214,22 @@ def _execute_search_availability(
         )
 
 
+def _recoverable_availability_rejection(exc: Exception) -> Optional[Dict[str, Any]]:
+    """Normalize a typed/structured availability 422 into an empty result."""
+    from core.adapters.errors import AvailabilityRejectedError
+
+    if not isinstance(exc, AvailabilityRejectedError) and getattr(
+        exc, "status_code", None
+    ) != 422:
+        return None
+    return {
+        "type": "availability",
+        "status": "success",
+        "slots": [],
+        "unavailable_reason": getattr(exc, "reason", "availability_rejected"),
+    }
+
+
 def _execute_confirm_appointment(
     plan: Dict[str, Any], booking_client: Any
 ) -> Dict[str, Any]:
@@ -1298,6 +1314,11 @@ def _execute_service_availability(
         raise AttributeError(
             f"availability_client must have get_service_availability method: {e}"
         ) from e
+    except Exception as e:
+        rejected = _recoverable_availability_rejection(e)
+        if rejected is None:
+            raise
+        response = rejected
 
     # Normalize response
     return _finalize_availability_search(response)
@@ -1338,6 +1359,11 @@ def _execute_reservation_availability(
         raise AttributeError(
             f"availability_client must have get_reservation_availability method: {e}"
         ) from e
+    except Exception as e:
+        rejected = _recoverable_availability_rejection(e)
+        if rejected is None:
+            raise
+        response = rejected
 
     # Normalize response
     return _finalize_availability_search(response)
@@ -1521,4 +1547,8 @@ def _normalize_availability_response(response: Dict[str, Any]) -> Dict[str, Any]
         normalized_slot = {"starts_at": str(starts_at), "ends_at": str(ends_at)}
         normalized_slots.append(normalized_slot)
 
-    return {"type": "availability", "status": "success", "slots": normalized_slots}
+    result = {"type": "availability", "status": "success", "slots": normalized_slots}
+    unavailable_reason = payload.get("unavailable_reason")
+    if isinstance(unavailable_reason, str) and unavailable_reason:
+        result["unavailable_reason"] = unavailable_reason
+    return result

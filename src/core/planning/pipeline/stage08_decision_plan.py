@@ -210,7 +210,22 @@ def build_decision_plan_from_evidence(
     allow_availability_reshow = presentation_early.availability_reshow_allowed
     cache_satisfiable_browse = presentation_early.cache_satisfiable_browse_dict()
 
-    if allow_availability_reshow:
+    if payload.get("_accepted_empty_availability_recovery"):
+        missing_slots = [
+            key for key in missing_slots if effective_slots.get(key) is None
+        ]
+        if "date" not in missing_slots:
+            missing_slots.insert(0, "date")
+        status = "NEEDS_CLARIFICATION"
+        awaiting = "date"
+        action = None
+        stage = "AVAILABILITY"
+        ask_next = "date"
+        action_branch = "accepted_empty_availability_recovery"
+        policy_client = None
+        flags = {}
+        candidate_evidence = []
+    elif allow_availability_reshow:
         status = "READY"
         awaiting = None
         action = None

@@ -13,6 +13,7 @@ Uses the shared rendering LLM client (``core.rendering.llm_client``).
 
 import json
 import logging
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -23,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 _FALLBACK_TEXT = "I'm unable to respond right now. Please try again."
 _MAX_TOKENS = 512
+_HANDLER_JSON_FENCE = re.compile(
+    r"```(?:json)?[ \t]*\r?\n(?P<payload>[\s\S]*?)\r?\n```"
+)
 
 # Conversational principles for answers drawn from Business Knowledge.
 # Does not alter structured_context — guidance only; the model owns presentation.
@@ -389,8 +393,10 @@ def render_handler_response(request: LlmRenderRequest) -> HandlerRenderResult:
             messages=[{"role": "user", "content": _build_user_message(request)}],
         )
         raw = _provider_text_or_fallback(response.content[0].text)
+        fenced = _HANDLER_JSON_FENCE.fullmatch(raw)
+        payload = fenced.group("payload") if fenced else raw
         try:
-            return coerce_handler_render_result(json.loads(raw))
+            return coerce_handler_render_result(json.loads(payload))
         except (json.JSONDecodeError, TypeError, ValueError):
             logger.warning("Handler renderer returned unstructured output; ignoring selections")
             return HandlerRenderResult(text=raw)

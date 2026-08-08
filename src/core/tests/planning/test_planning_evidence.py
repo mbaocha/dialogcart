@@ -144,6 +144,42 @@ def _run_turn(
     return working, slot_state
 
 
+def test_service_revision_rebuilds_service_identity_group_before_merge():
+    session = _session(
+        slots={
+            "service_id": "old service",
+            "_canonical_service_id": "old-canonical",
+            "_catalog_item_id": 101,
+        },
+        facts={
+            "slots": {
+                "service_id": "old service",
+                "_canonical_service_id": "old-canonical",
+                "_catalog_item_id": 101,
+            }
+        },
+    )
+    luma = _luma(facts={"service_id": "new service"})
+
+    working = build_working_turn(
+        luma_response={**deepcopy(luma), "_entity_schema": _MULTI_SCHEMA},
+        raw_luma_response_deep_copy=deepcopy(luma),
+        attached_request=_attached(),
+        session_state=deepcopy(session),
+        original_session_state=deepcopy(session),
+        source_text="new service",
+        tenant_context={"aliases": {"new service": 202}},
+        apply_domain_filter=True,
+        entity_schema=_MULTI_SCHEMA,
+    )
+    apply_revision_policy(working, session)
+
+    assert working.payload["slots"] == {
+        "service_id": "new service",
+        "_catalog_item_id": 202,
+    }
+
+
 def test_helper_schema_enum_is_planning_evidence():
     payload = _luma(facts={"engine_type": "petrol"})
     payload["_entity_schema"] = _MULTI_SCHEMA

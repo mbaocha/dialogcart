@@ -336,6 +336,15 @@ class AvailabilityWorkflow:
             date_proposal=_exec_proposals.get("date_proposal"),
             fingerprint_slots=fingerprint_slots,
         )
+        if not offers:
+            from core.planning.recovery_actions import (
+                CHOOSE_ANOTHER_DATE,
+                recovery_action,
+            )
+
+            presented_payload["recovery_actions"] = [
+                recovery_action(CHOOSE_ANOTHER_DATE)
+            ]
         presentation_payload = presentation_meta_from_presented(presented_payload)
         workflow_result.update(
             {

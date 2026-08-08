@@ -150,6 +150,106 @@ _register(
         id="date-request-after-availability-searches",
     )
 )
+
+# Next Monday relative to shared E2E clock (2026-07-01) — NLU-verified as 2026-07-06.
+_NEXT_MONDAY = "2026-07-06"
+_DATE_CORR_STATE: Dict[str, Any] = {}
+
+
+def _effective_service_id(sess: Dict[str, Any]) -> Any:
+    slots = sess.get("slots") if isinstance(sess.get("slots"), dict) else {}
+    planning = sess.get("planning") if isinstance(sess.get("planning"), dict) else {}
+    planning_slots = (
+        planning.get("slots") if isinstance(planning.get("slots"), dict) else {}
+    )
+    return planning_slots.get("service_id") or slots.get("service_id")
+
+
+def _capture_empty_tomorrow_search(conv, booking, availability) -> None:
+    """Baseline after tomorrow search returns no slots."""
+    _assert_no_booking(conv, booking)
+    assert availability.get_service_availability.call_count >= 1, (
+        f"turn {conv.turn}: expected SEARCH_AVAILABILITY for tomorrow"
+    )
+    call = availability.get_service_availability.call_args
+    kwargs = call.kwargs if call else {}
+    searched = _resolve_search_date(str(kwargs.get("date") or ""))
+    _DATE_CORR_STATE["search_count"] = availability.get_service_availability.call_count
+    _DATE_CORR_STATE["prior_date"] = searched or _TOMORROW
+    sess = conv.session() or {}
+    assert _effective_service_id(sess) == PREMIUM_SERVICE, (
+        f"turn {conv.turn}: expected premium service before date correction, "
+        f"got {_effective_service_id(sess)!r}"
+    )
+    text = _response_text(conv.last_body or {})
+    assert isinstance(text, str) and text.strip(), (
+        f"turn {conv.turn}: expected non-empty no-availability reply, got {text!r}"
+    )
+
+
+def _assert_next_monday_date_correction(conv, booking, availability) -> None:
+    """Correction phrase must drive a new search on next Monday, not tomorrow."""
+    _assert_no_booking(conv, booking)
+    baseline = int(_DATE_CORR_STATE.get("search_count") or 0)
+    assert availability.get_service_availability.call_count > baseline, (
+        f"turn {conv.turn}: date correction must run SEARCH_AVAILABILITY "
+        f"(baseline={baseline}, got={availability.get_service_availability.call_count})"
+    )
+    call = availability.get_service_availability.call_args
+    kwargs = call.kwargs if call else {}
+    searched = _resolve_search_date(str(kwargs.get("date") or ""))
+    assert searched == _NEXT_MONDAY, (
+        f"turn {conv.turn}: corrected search must use {_NEXT_MONDAY!r}, got {searched!r} "
+        f"(kwargs.date={kwargs.get('date')!r})"
+    )
+    prior = _resolve_search_date(str(_DATE_CORR_STATE.get("prior_date") or ""))
+    assert searched != prior, (
+        f"turn {conv.turn}: previous date {prior!r} must no longer drive availability"
+    )
+    conv.assert_date_proposal(_NEXT_MONDAY)
+    sess = conv.session() or {}
+    assert _effective_service_id(sess) == PREMIUM_SERVICE, (
+        f"turn {conv.turn}: service must remain premium after date correction, "
+        f"got {_effective_service_id(sess)!r}"
+    )
+    text = _response_text(conv.last_body or {})
+    assert isinstance(text, str) and text.strip(), (
+        f"turn {conv.turn}: expected non-empty reply after corrected search, got {text!r}"
+    )
+
+
+_register(
+    Scenario(
+        "Date correction after no availability searches next Monday",
+        Turn(
+            "book me a premium haircut tomorrow",
+            Expect(
+                response_status="succeeded",
+                execution="availability",
+                has_availability_slots=False,
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_capture_empty_tomorrow_search,
+        ),
+        Turn(
+            "what about next monday instead",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                confirmation=None,
+                date_proposal=_NEXT_MONDAY,
+                response_text_present=True,
+            ),
+            after=_assert_next_monday_date_correction,
+        ),
+        fixture="scripted_empty",
+        tags=["booking", "availability", "revisions", "date-correction", "regression"],
+        id="date-correction-after-no-availability-next-monday",
+    )
+)
 # ============================================================
 # INTERRUPTIONS
 # ============================================================
@@ -918,5 +1018,131 @@ _register(
         fixture="scripted_dotted_time_selection",
         tags=["booking", "availability", "recovery", "faq"],
         id="faq-after-times-then-valid-time",
+    )
+)
+
+_NO_AVAIL_YES_STATE: Dict[str, Any] = {}
+_DAY_ELICIT_PHRASES = (
+    "which day",
+    "what day",
+    "which date",
+    "what date",
+    "which week",
+    "what week",
+    "what day works",
+    "which day works",
+    "which date works",
+)
+_ANOTHER_DAY_REINVITE_PHRASES = (
+    "another day",
+    "different day",
+    "different date",
+    "another date",
+    "different week",
+    "another week",
+    "try a different",
+    "try another",
+)
+
+
+def _capture_no_availability_another_day_offer(conv, booking, availability) -> None:
+    """After empty search: remember no-avail reply so 'yes' must not loop it."""
+    _assert_no_booking(conv, booking)
+    assert availability.get_service_availability.call_count >= 1
+    sess = conv.session() or {}
+    assert _effective_service_id(sess) == PREMIUM_SERVICE, (
+        f"turn {conv.turn}: expected premium before recovery yes, "
+        f"got {_effective_service_id(sess)!r}"
+    )
+    text = _response_text(conv.last_body or {})
+    assert isinstance(text, str) and text.strip(), (
+        f"turn {conv.turn}: expected non-empty no-availability reply, got {text!r}"
+    )
+    _NO_AVAIL_YES_STATE["text"] = text
+    _NO_AVAIL_YES_STATE["search_count"] = availability.get_service_availability.call_count
+
+
+def _assert_yes_advances_after_another_day_offer(conv, booking, availability) -> None:
+    """'yes' after 'would another day work?' must advance, not re-invite forever."""
+    _assert_no_booking(conv, booking)
+    text = _response_text(conv.last_body or {})
+    assert isinstance(text, str) and text.strip(), (
+        f"turn {conv.turn}: expected non-empty recovery reply, got {text!r}"
+    )
+    prior = str(_NO_AVAIL_YES_STATE.get("text") or "").strip()
+    assert text.strip() != prior, (
+        f"turn {conv.turn}: 'yes' must not repeat the identical no-availability "
+        f"reply forever, got {text!r}"
+    )
+
+    lowered = text.lower().replace("\u2019", "'").replace("\u2018", "'")
+    asks_which_day = any(p in lowered for p in _DAY_ELICIT_PHRASES)
+    offers_concrete = (
+        "here are the available" in lowered
+        or "which time" in lowered
+        or "which would you like" in lowered
+        or (":" in text and ("am" in lowered or "pm" in lowered))
+    )
+    mere_reinvite = (
+        any(p in lowered for p in _ANOTHER_DAY_REINVITE_PHRASES)
+        and not asks_which_day
+        and not offers_concrete
+    )
+    assert not mere_reinvite, (
+        f"turn {conv.turn}: 'yes' must ask which day/week or offer the next "
+        f"available period — not only re-invite another day. got {text!r}"
+    )
+    assert asks_which_day or offers_concrete, (
+        f"turn {conv.turn}: expected day elicitation or a concrete next period, "
+        f"got {text!r}"
+    )
+
+    sess = conv.session() or {}
+    assert _effective_service_id(sess) == PREMIUM_SERVICE, (
+        f"turn {conv.turn}: service must remain selected during recovery, "
+        f"got {_effective_service_id(sess)!r}"
+    )
+    missing = (
+        (conv.plan or {}).get("missing_slots")
+        or (conv.outcome or {}).get("missing_slots")
+        or sess.get("missing_slots")
+        or []
+    )
+    if isinstance(missing, list):
+        assert "service_id" not in missing, (
+            f"turn {conv.turn}: service must not become missing after 'yes', "
+            f"got missing_slots={missing!r}"
+        )
+
+
+_register(
+    Scenario(
+        "Yes after another-day offer advances availability recovery",
+        Turn(
+            "book me a premium haircut tomorrow",
+            Expect(
+                response_status="succeeded",
+                execution="availability",
+                has_availability_slots=False,
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_capture_no_availability_another_day_offer,
+        ),
+        Turn(
+            "yes",
+            Expect(
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": PREMIUM_SERVICE},
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_assert_yes_advances_after_another_day_offer,
+        ),
+        fixture="scripted_empty",
+        tags=["booking", "availability", "recovery", "regression"],
+        id="yes-after-another-day-offer-advances",
     )
 )
