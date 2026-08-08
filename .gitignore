@@ -106,5 +106,18 @@ _classify_*.json
 
 _investigate_*/
 _live_http_verify/
+_prompt_cache_baseline/
+_reference_resolution*
+
+# Local exploration / probe scripts (do not commit)
+src/_*.py
+src/_*.json
+!src/__init__.py
+
+# Snapshot archives
+*.zip
+
+# Tooling caches
+.ruff_cache/
 
 *.txt
