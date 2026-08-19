@@ -460,6 +460,34 @@ def build_decision_plan_from_evidence(
     action_branch = finalization.action_branch
     allow_availability_reshow = finalization.availability_reshow
 
+    customer_prerequisite = confirmation.customer_name_prerequisite
+    customer_name_ready = (
+        customer_prerequisite.satisfied
+        if customer_prerequisite is not None
+        else True
+    )
+    otherwise_confirmation_ready = bool(
+        intent_name == "CREATE_APPOINTMENT"
+        and not missing_slots
+        and not needs_clarification
+        and availability_resolved
+        and readiness.datetime_bound
+        and not availability_op
+    )
+    # Customer identification is a confirmation-readiness gate, not a slot.
+    # Apply it whether Stage 06 entered confirmation or readiness was reached
+    # during this Decision.
+    if (
+        otherwise_confirmation_ready
+        and not customer_name_ready
+    ):
+        status = "NEEDS_CLARIFICATION"
+        action = None
+        awaiting = "CUSTOMER_CONTACT_NAME"
+        ask_next = "customer_contact_name"
+        stage = "CONFIRM"
+        action_branch = "customer_contact_name_required"
+
     allowed_actions: List[str] = []
     blocked_actions: List[str] = []
     if missing_slots:
@@ -490,6 +518,23 @@ def build_decision_plan_from_evidence(
     allowed_actions = list(set(allowed_actions))
     blocked_actions = list(set(blocked_actions))
 
+    from core.session.booking_lifecycle import BookingLifecycle, derive_booking_lifecycle
+
+    if (
+        intent_name == "CREATE_APPOINTMENT"
+        and derive_booking_lifecycle(session_state) == BookingLifecycle.COMMITTED
+    ):
+        action = None
+        policy_client = None
+        allowed_actions = []
+        if commit_action:
+            blocked_actions = list(set([*blocked_actions, commit_action]))
+        if awaiting == "USER_CONFIRMATION" or status == "AWAITING_CONFIRMATION":
+            awaiting = None
+            status = "READY"
+        stage = None
+        action_branch = "committed_workflow_closed"
+
     plan: Dict[str, Any] = {
         "status": status,
         "stage": stage,
@@ -503,6 +548,9 @@ def build_decision_plan_from_evidence(
         "promptable_slots": list(promptable_slots),
         "declined_slots": list(declined_slots),
     }
+    if customer_prerequisite is not None:
+        plan["_customer_name_prerequisite"] = customer_prerequisite.to_dict()
+    plan["_otherwise_confirmation_ready"] = otherwise_confirmation_ready
     plan["execution_proposal_context"] = dict(readiness.execution_proposal_context)
     # Carry Stage 03 flag onto the Decision plan so execution proposal resolution
     # sees criteria invalidation even if _merged_luma_response is absent.
@@ -542,10 +590,36 @@ def build_decision_plan_from_evidence(
         "declined_slots": list(declined_slots),
         "context": effective_context,
     }
+    from core.session.freshness import (
+        AVAILABILITY_REFRESH_REASON_EXPIRED,
+        AVAILABILITY_REFRESH_REASON_KEY,
+    )
+
+    refresh_reason = (
+        session_state.get(AVAILABILITY_REFRESH_REASON_KEY)
+        if isinstance(session_state, dict)
+        else None
+    )
+    expiry_refresh_for_time_selection = bool(
+        payload.get("_current_turn_has_time")
+        and not payload.get("_current_turn_has_date")
+        and not payload.get("_current_turn_has_service")
+    )
+    if (
+        action == "SEARCH_AVAILABILITY"
+        and refresh_reason == AVAILABILITY_REFRESH_REASON_EXPIRED
+        and expiry_refresh_for_time_selection
+    ):
+        plan["availability_refresh_reason"] = refresh_reason
+        facts["availability_refresh_reason"] = refresh_reason
     if entity_schema is not None:
         facts["_entity_schema"] = entity_schema
         # Execution/workflow read the Decision plan dict (not DecisionPlan.facts).
         plan["_entity_schema"] = entity_schema
+    if isinstance(payload.get("_pending_entity_resolutions"), list):
+        pending_entity_resolutions = list(payload["_pending_entity_resolutions"])
+        facts["pending_entity_resolutions"] = pending_entity_resolutions
+        plan["pending_entity_resolutions"] = pending_entity_resolutions
     for key in ("date_proposal", "time_proposal", "time_match_outcome", "time_resolution"):
         if payload.get(key) is not None:
             facts[key] = payload[key]

@@ -49,7 +49,8 @@ def test_shared_contract_rejects_preserve_by_default():
 def test_shared_contract_includes_confirm_dialog_act_rule():
     section = intent_validation_section("CONFIRM_ACTION")
     assert "CONFIRM_ACTION (dialog act — all workflows)" in section
-    assert "HARD CONSTRAINT: CONFIRM_ACTION is valid only when CONVERSATION CONTEXT contains an" in section
+    assert "HARD CONSTRAINT: CONFIRM_ACTION requires BOTH a genuine pending assistant" in section
+    assert "CURRENT USER MESSAGE" in section
     assert "Meta-questions are never CONFIRM_ACTION" in section
     assert "HARD CONSTRAINT: If CONVERSATION CONTEXT has no assistant confirmation ask" in section
     assert confirm_action_dialog_act_section() in section

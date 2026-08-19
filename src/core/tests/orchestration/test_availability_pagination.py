@@ -62,19 +62,13 @@ class TestTryHandleAvailabilityBrowseTurn:
         def save_session(self, organization_id, user_id, session):
             self.sessions[(organization_id, user_id)] = dict(session)
 
-    def _plan(self, operation=None, *, availability_browse=None, source_text=None, raw_intent=None):
+    def _plan(self, operation=None):
         merged = {
             "intent": {"name": "CREATE_APPOINTMENT"},
             "slots": {"service_id": "premium haircut"},
         }
         if operation:
             merged["operation"] = operation
-        if availability_browse is not None:
-            merged["availability_browse"] = availability_browse
-        if source_text is not None:
-            merged["_source_text"] = source_text
-        if raw_intent is not None:
-            merged["_raw_luma_response"] = {"intent": {"name": raw_intent}}
         return {
             "_merged_luma_response": merged,
             "_decision": {
@@ -244,29 +238,15 @@ class TestTryHandleAvailabilityBrowseTurn:
             is None
         )
 
-    def test_advances_page_via_availability_browse_field(self):
+    def test_source_text_without_structured_operation_does_not_browse(self):
         store = self._Store(self._session())
+        plan = self._plan()
+        plan["_merged_luma_response"]["_source_text"] = "show more"
         response = try_handle_availability_browse_turn(
-            plan=self._plan(availability_browse={"direction": "next"}),
+            plan=plan,
             session_state=store.get_session(1, "u1"),
             session_store=store,
             organization_id=1,
             user_id="u1",
         )
-        assert response is not None
-        assert response["availability_pagination"]["page_index"] == 1
-
-    def test_advances_page_via_text_fallback(self):
-        store = self._Store(self._session())
-        response = try_handle_availability_browse_turn(
-            plan=self._plan(
-                source_text="show more",
-                raw_intent="AVAILABILITY",
-            ),
-            session_state=store.get_session(1, "u1"),
-            session_store=store,
-            organization_id=1,
-            user_id="u1",
-        )
-        assert response is not None
-        assert response["availability_pagination"]["page_index"] == 1
+        assert response is None

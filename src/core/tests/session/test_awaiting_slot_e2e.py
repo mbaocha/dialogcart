@@ -73,6 +73,7 @@ def _reservation_response(
 
     response: Dict[str, Any] = {
         "success": True,
+        "entity_resolutions": {},
         "intent": {"name": "CREATE_RESERVATION", "confidence": 0.95},
         "needs_clarification": bool(missing_slots),
         "booking": {
@@ -84,6 +85,13 @@ def _reservation_response(
         "missing_slots": list(missing_slots),
         "context": {},
     }
+    if "service_id" in durable_slots:
+        response["entity_resolutions"] = {
+            "room_type": {
+                "resolution": "RESOLVED",
+                "value": "lodging.room_type.deluxe",
+            }
+        }
     if date_range:
         facts["date_range"] = date_range
         response["date_proposal"] = {

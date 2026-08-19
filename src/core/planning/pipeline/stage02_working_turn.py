@@ -44,6 +44,51 @@ def build_working_turn(
     if schema is not None:
         payload["_entity_schema"] = schema
 
+    entity_resolution_evidence: Dict[str, Any] = {}
+    if schema is not None:
+        from core.adapters.nlu.entity_resolution_contract import (
+            parse_entity_resolutions,
+            serialize_entity_resolution_evidence,
+        )
+
+        parsed = parse_entity_resolutions(luma_response, entity_schema=schema)
+        entity_resolution_evidence = dict(parsed)
+        payload["_entity_resolutions_authoritative"] = True
+        payload["_entity_resolution_evidence"] = serialize_entity_resolution_evidence(parsed)
+        # Remove compatibility projections for every schema-owned planning slot,
+        # then restore only canonical RESOLVED values. An omitted key is a
+        # semantic no-op and must never become a current-turn slot via legacy facts.
+        from core.adapters.nlu.entity_resolution_contract import EntityResolutionState
+        from core.adapters.nlu.entity_schema_builder import (
+            planning_slot_key_for_field,
+            promotable_slot_keys_from_entity_schema,
+        )
+
+        authoritative_facts = dict(payload.get("facts") or {})
+        authoritative_slots = dict(payload.get("slots") or {})
+        promotable_slot_keys = promotable_slot_keys_from_entity_schema(schema)
+        for field in schema.get("fields", []):
+            if not isinstance(field, dict):
+                continue
+            slot_key = planning_slot_key_for_field(field)
+            if not slot_key:
+                continue
+            authoritative_facts.pop(slot_key, None)
+            authoritative_slots.pop(slot_key, None)
+            if field.get("type") == "catalog" and isinstance(field.get("name"), str):
+                authoritative_facts.pop(field["name"], None)
+                authoritative_slots.pop(field["name"], None)
+            item = entity_resolution_evidence.get(field.get("name"))
+            if (
+                slot_key in promotable_slot_keys
+                and item is not None
+                and item.resolution == EntityResolutionState.RESOLVED
+            ):
+                authoritative_facts[slot_key] = item.value
+                authoritative_slots[slot_key] = item.value
+        payload["facts"] = authoritative_facts
+        payload["slots"] = authoritative_slots
+
     _updated = update_conversation(
         session_state or {},
         user_text=source_text,
@@ -52,7 +97,7 @@ def build_working_turn(
     )
     payload["_conversation"] = get_conversation_memory(_updated)
 
-    facts_obj = luma_response.get("facts", {})
+    facts_obj = payload.get("facts", {})
     promoted_slots = (
         facts_to_slots(
             facts_obj,
@@ -63,7 +108,7 @@ def build_working_turn(
         if isinstance(facts_obj, dict)
         else {}
     )
-    merged_authoritative_slots = luma_response.get("slots") or {}
+    merged_authoritative_slots = payload.get("slots") or {}
     if not isinstance(merged_authoritative_slots, dict):
         merged_authoritative_slots = {}
     nested_from_facts: Dict[str, Any] = {}
@@ -190,11 +235,23 @@ def build_working_turn(
     )
 
     payload["date_proposal"] = merged_proposals["date_proposal"]
+    temporal_resolution = temporal.get("resolution") if isinstance(temporal, dict) else None
+    resolution_kind = (
+        temporal_resolution.get("kind")
+        if isinstance(temporal_resolution, dict)
+        else None
+    )
     # Availability ops must not rebind a stale session time when this turn
     # did not mention a time. Current-turn time evidence is preserved.
     from core.planning.pipeline.requests import is_availability_turn_operation
 
-    if (
+    if resolution_kind in (
+        "ambiguous_meridiem",
+        "presented_option",
+        "invalid_option_reference",
+    ):
+        payload["time_proposal"] = None
+    elif (
         is_availability_turn_operation(attached_request.turn_operation)
         and not current_turn_has_time
     ):
@@ -269,4 +326,5 @@ def build_working_turn(
         payload=payload,
         effective_collected_slots=dict(effective_collected),
         raw_luma_response_deep_copy=raw_luma_response_deep_copy,
+        entity_resolution_evidence=entity_resolution_evidence,
     )

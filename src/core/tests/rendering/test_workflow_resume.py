@@ -1,6 +1,11 @@
 """Workflow-owned resume instructions from persisted session state."""
 
-from core.rendering.workflow_resume import build_resume_instruction
+from copy import deepcopy
+
+from core.rendering.workflow_resume import (
+    build_resume_instruction,
+    compose_pending_confirmation_resume,
+)
 
 
 def test_cold_start_resume_invites_booking():
@@ -74,3 +79,82 @@ def test_confirmation_pending_resume():
     )
     assert resume is not None
     assert "confirm" in resume.text.lower()
+
+
+def test_pending_confirmation_composes_canonical_prompt_from_planning(monkeypatch):
+    session = {
+        "confirmation_state": "pending",
+        "planning": {
+            "intent_name": "CREATE_APPOINTMENT",
+            "slots": {
+                "service_id": "integration spa treatment",
+                "date": "2026-08-28",
+                "time": "11:00",
+            },
+        },
+        "conversation": {
+            "history": [
+                {
+                    "role": "assistant",
+                    "text": "The booking is for Thursday at 4:00 PM.",
+                }
+            ]
+        },
+    }
+    original = deepcopy(session)
+    calls = []
+
+    def canonical(slots, *, entity_schema=None):
+        calls.append((dict(slots), entity_schema))
+        return (
+            "You're about to book an Integration Spa Treatment on August 28 "
+            "at 11:00 AM. Would you like me to go ahead?"
+        )
+
+    monkeypatch.setattr(
+        "core.rendering.booking_confirmation_renderer.render_booking_confirmation_prompt",
+        canonical,
+    )
+    rendered = compose_pending_confirmation_resume(
+        session, "We're closed on weekends."
+    )
+
+    assert rendered == (
+        "We're closed on weekends.\n\n"
+        "You're about to book an Integration Spa Treatment on August 28 at "
+        "11:00 AM. Would you like me to go ahead?"
+    )
+    assert calls == [(session["planning"]["slots"], None)]
+    assert rendered.count("Would you like me to go ahead?") == 1
+    assert "Thursday" not in rendered
+    assert "is booked" not in rendered.lower()
+    assert session == original
+
+
+def test_pending_confirmation_missing_authoritative_evidence_uses_safe_fallback():
+    session = {
+        "confirmation_state": "pending",
+        "planning": {"slots": {"service_id": 17}},
+        "conversation": {
+            "history": [{"role": "assistant", "text": "Booked for Thursday."}]
+        },
+    }
+    assert compose_pending_confirmation_resume(session, "FAQ answer") == (
+        "FAQ answer\n\nWould you like me to go ahead?"
+    )
+
+
+def test_pending_confirmation_composition_is_absent_for_other_states():
+    assert compose_pending_confirmation_resume(
+        {
+            "confirmation_state": None,
+            "planning": {
+                "slots": {
+                    "service_id": "spa",
+                    "date": "2026-08-28",
+                    "time": "11:00",
+                }
+            },
+        },
+        "FAQ answer",
+    ) is None

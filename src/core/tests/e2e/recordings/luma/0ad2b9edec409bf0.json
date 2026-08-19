@@ -1,0 +1,82 @@
+{
+  "key": {
+    "conversation_context": {
+      "customer_contact": {
+        "authoritative_name": "E2E Commit Customer",
+        "customer_id": 91001,
+        "name_status": "authoritative"
+      }
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "book haircut tomorrow at 10am",
+    "timezone": "UTC"
+  },
+  "response": {
+    "entity_resolutions": {
+      "service": {
+        "candidate_values": [
+          1001,
+          1002
+        ],
+        "resolution": "AMBIGUOUS"
+      }
+    },
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [
+        {
+          "date": "2026-07-02",
+          "time": "10:00"
+        }
+      ],
+      "dates": [
+        "2026-07-02"
+      ],
+      "service": "haircut",
+      "service_id": null,
+      "times": [
+        "10:00"
+      ]
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CREATE_APPOINTMENT"
+    },
+    "service_candidates": [
+      "premium haircut",
+      "flexi haircut + prunning"
+    ],
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": "tomorrow at 10am",
+      "mode": "single_day",
+      "resolution": {
+        "kind": "explicit"
+      },
+      "start_date": "2026-07-02",
+      "start_date_expression": "tomorrow",
+      "start_time": "10:00",
+      "start_time_expression": null
+    },
+    "time_constraint": {
+      "end": "10:00",
+      "label": null,
+      "mode": "exact",
+      "start": "10:00"
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

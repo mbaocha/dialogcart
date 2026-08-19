@@ -23,7 +23,6 @@ from core.tracing.planner import PLANNER_SELECT_ACTION_ID
 from core.tracing.reason_codes import (
     BIND_EXACT_TIME_MATCH,
     BIND_TIME_MISMATCH,
-    BROWSE_NEXT,
     PAGINATION_HANDLED,
     PAGINATION_SHORT_CIRCUIT,
 )
@@ -95,7 +94,7 @@ def test_decision_trace_explains_show_more_pagination(traced_pagination_harness)
     browse = _decision(trace, "decision.browse.resolve_direction")
     assert browse is not None
     assert browse.get("winner") == "next"
-    assert browse.get("reason_code") in {BROWSE_NEXT, "BROWSE_OPERATION_DETECTED", "BROWSE_TEXT_INFERRED"}
+    assert browse.get("reason_code") == "BROWSE_OPERATION_DETECTED"
 
     execution = _decision(trace, SPINE_EXECUTION_ID)
     assert execution is not None

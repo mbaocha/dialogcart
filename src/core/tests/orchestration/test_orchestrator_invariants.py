@@ -48,6 +48,7 @@ def test_rendered_ui_appears_at_api_boundary_clarification():
         # Mock Luma client (response with missing slots - triggers clarification)
         mock_luma_response = {
             "success": True,
+            "entity_resolutions": {},
             "intent": {"name": "CREATE_RESERVATION", "confidence": 0.85},
             "needs_clarification": True,
             "booking": {"booking_state": "INCOMPLETE"},

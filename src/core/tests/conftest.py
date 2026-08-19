@@ -33,6 +33,19 @@ def _reset_decision_trace_isolation():
     reset_decision_trace_state()
 
 
+@pytest.fixture(autouse=True)
+def _reset_process_local_business_caches():
+    """Keep organization/catalog doubles isolated across test cases."""
+    from core.adapters.cache.catalog_cache import catalog_cache
+    from core.adapters.cache.org_domain_cache import org_domain_cache
+
+    catalog_cache._mem_cache.clear()
+    org_domain_cache._mem_cache.clear()
+    yield
+    catalog_cache._mem_cache.clear()
+    org_domain_cache._mem_cache.clear()
+
+
 def pytest_configure(config):
     if os.getenv(TRACE_ENV_VAR, "").strip().lower() in {"1", "true", "yes", "on"}:
         pass

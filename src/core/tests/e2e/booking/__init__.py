@@ -14,8 +14,10 @@ from core.tests.e2e.booking import (
     availability,
     browse,
     car_service,
+    category_discovery,
     completed,
     confirmation,
+    customer_identification,
     service_selection,
 )
 
@@ -25,7 +27,9 @@ for _mod in (
     availability,
     browse,
     car_service,
+    category_discovery,
     confirmation,
+    customer_identification,
     completed,
 ):
     # Module-level BUSINESS_CATEGORY (default beauty_salon). Not per-Scenario.

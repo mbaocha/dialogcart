@@ -354,6 +354,12 @@ def assemble_planning_outcome(
         entity_schema = decision_plan.facts.get("_entity_schema")
     if isinstance(entity_schema, dict):
         populated_plan["_entity_schema"] = entity_schema
+    for prerequisite_key in (
+        "_customer_name_prerequisite",
+        "_otherwise_confirmation_ready",
+    ):
+        if prerequisite_key in plan:
+            populated_plan[prerequisite_key] = plan[prerequisite_key]
 
     outcome_facts = {
         **decision_plan.facts,
@@ -504,7 +510,10 @@ def assemble_planning_outcome(
 
             confirm_slots = outcome_dict.get("slots") or outcome_facts.get("slots", {})
             if isinstance(confirm_slots, dict):
-                confirmation_text = render_booking_confirmation_prompt(confirm_slots)
+                confirmation_text = render_booking_confirmation_prompt(
+                    confirm_slots,
+                    entity_schema=entity_schema,
+                )
                 revision_summary = working_turn.payload.get("_revision_summary")
                 confirmation_text = prefix_with_revision_acknowledgement(
                     confirmation_text, revision_summary

@@ -14,6 +14,7 @@ from core.tests.harness.car_service_catalog import (
     CAR_SERVICE_SERVICES,
 )
 from core.tests.harness.clients import TestCatalogClient
+from core.planning.planner.turn_planner import build_nlu_request_context
 
 
 def setup_function(_fn=None):
@@ -89,7 +90,60 @@ def test_entity_schema_builds_staff_from_projected_catalog():
     schema = build_entity_schema("car_service", projected_collections=projected)
     assert schema is not None
     by_name = {f["name"]: f for f in schema["fields"]}
-    assert "Oil Change" in by_name["service"]["catalog"]
+    assert "executive oil change" in by_name["service"]["catalog"]
     assert "John" in by_name["staff"]["catalog"]
     assert by_name["engine_type"]["type"] == "enum"
     assert by_name["registration_number"]["type"] == "text"
+
+
+def test_flat_catalogue_without_optional_metadata_preserves_request_shape():
+    client = TestCatalogClient(service_records=[{"id": "1001", "name": "Cut"}])
+    tenant_context, schema = build_nlu_request_context(
+        9101, "beauty_salon", "service", client
+    )
+    assert tenant_context == {"booking_mode": "service", "aliases": {"cut": 1001}}
+    assert "catalog" not in tenant_context
+    service_field = next(field for field in schema["fields"] if field["name"] == "service")
+    assert "items" not in service_field
+
+
+def test_optional_description_and_category_are_additive_semantic_context():
+    records = [
+        {"id": "1001", "name": "Cut", "description": "Wash and styling", "category": "Hair"},
+        {"id": "2001", "name": "Manicure", "category": "Nails"},
+    ]
+    client = TestCatalogClient(service_records=records)
+    tenant_context, schema = build_nlu_request_context(
+        9102, "beauty_salon", "service", client
+    )
+    assert tenant_context["catalog"]["services"] == records
+    service_field = next(field for field in schema["fields"] if field["name"] == "service")
+    assert service_field["items"] == [
+        {"id": 1001, "name": "Cut", "description": "Wash and styling", "category": "Hair"},
+        {"id": 2001, "name": "Manicure", "category": "Nails"},
+    ]
+    assert set(service_field["catalog"].values()) == {1001, 2001}
+
+
+def test_pending_confirmation_schema_allows_authoritative_contact_name_revision():
+    client = TestCatalogClient(service_records=[{"id": "1001", "name": "Cut"}])
+    session = {
+        "confirmation_state": "pending",
+        "planning": {"pending_profile_request": None},
+        "customer_id": 91,
+        "customer_contact": {
+            "customer_id": 91,
+            "authoritative_name": "Godswill Mbaocha",
+            "name_status": "authoritative",
+        },
+    }
+
+    _, schema = build_nlu_request_context(
+        9103, "beauty_salon", "service", client, session_state=session
+    )
+
+    contact_field = next(
+        field for field in schema["fields"]
+        if field["name"] == "customer_contact_name"
+    )
+    assert contact_field["type"] == "text"

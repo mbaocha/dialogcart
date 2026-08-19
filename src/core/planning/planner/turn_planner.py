@@ -23,6 +23,7 @@ from core.config.business_category_loader import (
     get_catalog_collection_keys,
     is_configured_category,
 )
+from core.catalogue import derive_service_catalogue, nlu_catalog_context
 from core.planning.pipeline.orchestrator import run_planning_pipeline
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ def build_nlu_request_context(
     business_category: str,
     booking_domain: str,
     catalog_client: CatalogClient,
+    session_state: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """Build tenant_context and entity_schema from one catalog projection.
 
@@ -63,10 +65,34 @@ def build_nlu_request_context(
         collection_keys=collection_keys or None,
     )
     tenant_context = _build_tenant_context_from_projection(booking_domain, projected)
+    if booking_domain == "service":
+        # Additive structured catalogue evidence.  The legacy aliases remain for
+        # older NLU deployments and flat-catalogue behaviour.
+        service_catalogue = derive_service_catalogue(catalog_data.get("services"))
+        if service_catalogue.services and any(
+            service.description is not None or service.category is not None
+            for service in service_catalogue.services
+        ):
+            tenant_context["catalog"] = nlu_catalog_context(service_catalogue)
     entity_schema = build_entity_schema(
         business_category,
+        catalog_data=catalog_data,
         projected_collections=projected,
     )
+    if isinstance(session_state, dict):
+        planning = session_state.get("planning")
+        pending = planning.get("pending_profile_request") if isinstance(planning, dict) else None
+        contact = session_state.get("customer_contact")
+        contact_name_revision_available = (
+            session_state.get("confirmation_state") == "pending"
+            and isinstance(contact, dict)
+            and contact.get("name_status") == "authoritative"
+            and isinstance(contact.get("authoritative_name"), str)
+            and bool(contact.get("authoritative_name").strip())
+        )
+        if pending == "CUSTOMER_CONTACT_NAME" or contact_name_revision_available:
+            from core.adapters.nlu.entity_schema_builder import with_customer_contact_name_request
+            entity_schema = with_customer_contact_name_request(entity_schema)
     return tenant_context, entity_schema
 
 
@@ -101,7 +127,7 @@ def plan_turn(
         organization_id, organization_client, force_refresh=False
     )
     tenant_context, entity_schema = build_nlu_request_context(
-        organization_id, business_category, booking_domain, catalog_client
+        organization_id, business_category, booking_domain, catalog_client, session_state
     )
 
     return run_planning_pipeline(

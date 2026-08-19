@@ -233,6 +233,10 @@ class Scenario:
     requires_customer_identity: bool = False
     # When True, runner hard-reloads Session V2 via public store APIs after each turn.
     force_session_reload: bool = False
+    # Optional scenario-local catalog used by focused discovery E2Es.
+    catalog_service_records: Optional[List[Dict[str, Any]]] = None
+    # Scenario-local environment restored automatically by pytest monkeypatch.
+    environment: Dict[str, str] = field(default_factory=dict)
 
     def __init__(
         self,
@@ -245,6 +249,8 @@ class Scenario:
         id: Optional[str] = None,
         requires_customer_identity: bool = False,
         force_session_reload: bool = False,
+        catalog_service_records: Optional[Sequence[Dict[str, Any]]] = None,
+        environment: Optional[Dict[str, str]] = None,
     ) -> None:
         self.name = name
         self.turns = [coerce_turn(t) for t in turns]
@@ -255,6 +261,12 @@ class Scenario:
         self.id = id or _slugify(name)
         self.requires_customer_identity = requires_customer_identity
         self.force_session_reload = force_session_reload
+        self.catalog_service_records = (
+            [dict(record) for record in catalog_service_records]
+            if catalog_service_records is not None
+            else None
+        )
+        self.environment = dict(environment or {})
         # Set by booking package aggregation from the owning module's
         # BUSINESS_CATEGORY (default beauty_salon). Not a Scenario() kwarg.
         self.business_category = "beauty_salon"
@@ -286,21 +298,22 @@ def _slugify(name: str) -> str:
 
 os.environ.setdefault("CORE_EXECUTION_MODE", "test")
 
-HAIRCUT_CATALOG = {
-    "premium haircut": "haircut",
-    "flexi haircut + prunning": "haircut",
-}
-
 from core.tests.harness.test_clock import FROZEN_TIME
 
 ORG_ID = int(os.getenv("ORG_ID", "1"))
-PREMIUM_SERVICE = "premium haircut"
-FLEXI_SERVICE = "flexi haircut + prunning"
+PREMIUM_SERVICE_LABEL = "premium haircut"
+FLEXI_SERVICE_LABEL = "flexi haircut + prunning"
 PREMIUM_SERVICE_ITEM_ID = 1001
 FLEXI_SERVICE_ITEM_ID = 1002
+PREMIUM_SERVICE = PREMIUM_SERVICE_ITEM_ID
+FLEXI_SERVICE = FLEXI_SERVICE_ITEM_ID
 HAIRCUT_ITEM_IDS = {
-    PREMIUM_SERVICE: PREMIUM_SERVICE_ITEM_ID,
-    FLEXI_SERVICE: FLEXI_SERVICE_ITEM_ID,
+    PREMIUM_SERVICE_LABEL: PREMIUM_SERVICE_ITEM_ID,
+    FLEXI_SERVICE_LABEL: FLEXI_SERVICE_ITEM_ID,
+}
+HAIRCUT_CATALOG = {
+    PREMIUM_SERVICE_LABEL: "haircut",
+    FLEXI_SERVICE_LABEL: "haircut",
 }
 
 # Deterministic stand-in for the availability backend's "first available day"

@@ -9,6 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from copy import deepcopy
 from datetime import datetime
+import hashlib
+import json
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 from core.workflows.availability.contracts import (
@@ -218,6 +220,75 @@ def format_display_time(iso_start: str) -> str:
         if "T" in iso_start:
             return iso_start.split("T", 1)[1][:5]
         return iso_start
+
+
+def compute_presented_options_reference(
+    presented: Optional[PresentedAvailability],
+    fingerprint: Optional[str],
+) -> Optional[str]:
+    """Identify the exact visible availability window without persisting an ID."""
+    if not fingerprint or not isinstance(presented, dict):
+        return None
+    slots = presented.get("slots")
+    labels = presented.get("times")
+    if not isinstance(slots, list) or not slots or not isinstance(labels, list):
+        return None
+    if len(slots) != len(labels):
+        return None
+    starts = [_slot_start_iso(slot) for slot in slots if isinstance(slot, dict)]
+    if len(starts) != len(slots) or any(not start for start in starts):
+        return None
+    identity = {
+        "version": 1,
+        "fingerprint": str(fingerprint),
+        "visible_slot_starts": starts,
+    }
+    encoded = json.dumps(identity, sort_keys=True, separators=(",", ":"))
+    return "avp1_" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:24]
+
+
+def presented_options_for_nlu(
+    presented: Optional[PresentedAvailability],
+    fingerprint: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """Project only the visible semantic option labels into NLU context."""
+    reference = compute_presented_options_reference(presented, fingerprint)
+    if reference is None or not isinstance(presented, dict):
+        return None
+    labels = presented.get("times")
+    if not isinstance(labels, list):
+        return None
+    return {
+        "reference": reference,
+        "options": [
+            {"index": index, "label": str(label)}
+            for index, label in enumerate(labels, start=1)
+        ],
+    }
+
+
+def trusted_presented_option(
+    presented: Optional[PresentedAvailability],
+    fingerprint: Optional[str],
+    *,
+    presentation_ref: Any,
+    option: Any,
+) -> Optional[Dict[str, Any]]:
+    """Validate an untrusted NLU reference and return its current visible slot."""
+    expected = compute_presented_options_reference(presented, fingerprint)
+    if expected is None or str(presentation_ref or "") != expected:
+        return None
+    if isinstance(option, bool):
+        return None
+    try:
+        index = int(option)
+    except (TypeError, ValueError):
+        return None
+    slots = presented.get("slots") if isinstance(presented, dict) else None
+    if not isinstance(slots, list) or index < 1 or index > len(slots):
+        return None
+    slot = slots[index - 1]
+    return dict(slot) if isinstance(slot, dict) and _slot_start_iso(slot) else None
 
 
 def dedupe_availability_slots(

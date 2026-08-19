@@ -7,6 +7,7 @@ from unittest.mock import patch
 import httpx
 import pytest
 
+from core.adapters.errors import AvailabilityRejectedError, UpstreamError
 from core.execution.clients.availability_client import AvailabilityClient
 from core.execution.dispatcher import (
     _finalize_availability_search,
@@ -136,6 +137,72 @@ def test_availability_client_emits_error_response_trace():
     assert response["facts"]["normalized_slot_count"] == 0
 
     reset_decision_trace_state()
+
+
+def test_availability_client_normalizes_top_level_message_422_as_rejection():
+    client = AvailabilityClient(base_url="http://availability.test")
+    mock_response = httpx.Response(
+        422,
+        json={
+            "success": False,
+            "data": None,
+            "message": "Business is closed on the selected date.",
+        },
+        request=httpx.Request(
+            "GET",
+            "http://availability.test/api/internal/availability/services",
+        ),
+    )
+
+    with patch.object(client._client, "request", return_value=mock_response):
+        with pytest.raises(AvailabilityRejectedError):
+            client.get_service_availability(
+                organization_id=1,
+                service_id=18,
+                date="2026-08-22",
+            )
+
+
+def test_availability_client_preserves_structured_business_closed_reason():
+    client = AvailabilityClient(base_url="http://availability.test")
+    mock_response = httpx.Response(
+        422,
+        json={"detail": {"code": "BUSINESS_CLOSED"}},
+        request=httpx.Request(
+            "GET",
+            "http://availability.test/api/internal/availability/services",
+        ),
+    )
+
+    with patch.object(client._client, "request", return_value=mock_response):
+        with pytest.raises(AvailabilityRejectedError) as captured:
+            client.get_service_availability(
+                organization_id=1,
+                service_id=18,
+                date="2026-08-30",
+            )
+
+    assert captured.value.reason == "business_closed"
+
+
+def test_availability_client_keeps_unstructured_422_as_upstream_error():
+    client = AvailabilityClient(base_url="http://availability.test")
+    mock_response = httpx.Response(
+        422,
+        content=b"",
+        request=httpx.Request(
+            "GET",
+            "http://availability.test/api/internal/availability/services",
+        ),
+    )
+
+    with patch.object(client._client, "request", return_value=mock_response):
+        with pytest.raises(UpstreamError):
+            client.get_service_availability(
+                organization_id=1,
+                service_id=18,
+                date="2026-08-22",
+            )
 
 
 def test_normalize_only_does_not_emit_response_without_client():

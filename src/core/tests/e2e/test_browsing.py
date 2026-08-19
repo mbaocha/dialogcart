@@ -45,6 +45,8 @@ from core.tests.harness.mock_clients import (
 from core.tests.harness.org_setup import setup_test_org_domain
 from core.tests.mocks import reset_booking_counter
 
+_BROWSING_SERVICE_ID = HAIRCUT_CATALOG["premium haircut"]
+
 JULY_9 = "2026-07-09"
 FULL_SLOT_COUNT = 9
 PAGE_SIZE = 6
@@ -194,11 +196,11 @@ def _browse_next_probe_payload() -> Dict[str, Any]:
         "intent": {"name": "AVAILABILITY"},
         "operation": "browse_next",
         "facts": {
-            "service_id": PREMIUM_SERVICE,
-            "slots": {"service_id": PREMIUM_SERVICE},
+            "service_id": _BROWSING_SERVICE_ID,
+            "slots": {"service_id": _BROWSING_SERVICE_ID},
             "missing_slots": ["time"],
         },
-        "slots": {"service_id": PREMIUM_SERVICE},
+        "slots": {"service_id": _BROWSING_SERVICE_ID},
         "missing_slots": ["time"],
     }
 
@@ -255,18 +257,11 @@ def _presented_slot_count(session: Dict[str, Any]) -> int:
 def test_browse_pagination_full_api_path_validation(browse_api_conversation):
     conv, booking_client, availability_client, luma_client = browse_api_conversation
 
-    conv.send("book haircut")
-    conv.assert_http_ok()
-    conv.assert_turn(
-        response_status="NEEDS_CLARIFICATION",
-        intent="CREATE_APPOINTMENT",
-    )
-
-    conv.send("premium")
+    conv.send("book premium haircut")
     conv.assert_http_ok()
     sess2 = conv.session() or {}
     assert conv.outcome.get("status") != "NEEDS_CLARIFICATION"
-    assert sess2.get("slots", {}).get("service_id") == PREMIUM_SERVICE
+    assert sess2.get("slots", {}).get("service_id") == _BROWSING_SERVICE_ID
     searches_after_turn2 = availability_client.get_service_availability.call_count
     assert searches_after_turn2 >= 1
 
@@ -282,7 +277,7 @@ def test_browse_pagination_full_api_path_validation(browse_api_conversation):
     search_fp = compute_availability_fingerprint(
         {
             "organization_id": ORG_ID,
-            "service_id": PREMIUM_SERVICE,
+            "service_id": _BROWSING_SERVICE_ID,
             "date": JULY_9,
         }
     )

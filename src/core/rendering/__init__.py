@@ -18,7 +18,11 @@ from .recovery_renderer import (
     RECOVERY_UNRECOGNIZED_INPUT,
     build_recovery_render_request,
 )
-from .workflow_resume import ResumeInstruction, build_resume_instruction
+from .workflow_resume import (
+    ResumeInstruction,
+    build_resume_instruction,
+    compose_pending_confirmation_resume,
+)
 
 __all__ = [
     "LlmRenderRequest",
@@ -30,6 +34,7 @@ __all__ = [
     "build_off_topic_render_request",
     "build_recovery_render_request",
     "build_resume_instruction",
+    "compose_pending_confirmation_resume",
     "render_llm",
     "resolve_browse_status_text",
     "resolve_time_mismatch_text",

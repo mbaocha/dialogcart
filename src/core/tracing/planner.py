@@ -19,6 +19,7 @@ from core.tracing.decision_trace import (
 )
 from core.tracing.reason_codes import (
     CLARIFICATION_REQUIRED,
+    CUSTOMER_CONTACT_NAME_REQUIRED,
     CONFIRMATION_REQUIRED,
     EXECUTION_ROUTE_BROWSE,
     EXECUTION_ROUTE_PLAN,
@@ -122,6 +123,11 @@ def _final_status_trace(
 ) -> Tuple[str, str]:
     """Reason code/text for the finalized Stage 08 plan status."""
     if status == "NEEDS_CLARIFICATION":
+        if action_branch == "customer_contact_name_required":
+            return (
+                CUSTOMER_CONTACT_NAME_REQUIRED,
+                "Authoritative customer contact name is required before confirmation",
+            )
         return CLARIFICATION_REQUIRED, "NEEDS_CLARIFICATION"
     if status == "AWAITING_CONFIRMATION":
         return CONFIRMATION_REQUIRED, "AWAITING_CONFIRMATION"

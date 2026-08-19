@@ -18,11 +18,18 @@ import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
-from .catalog import infer_service_term_from_utterance, resolve_service
+from .catalog import (
+    _NOISE_TOKENS, _term_coverage, _tokenize,
+    eligible_catalog_reference, infer_service_term_from_utterance, resolve_service,
+    unique_prefix_catalog_pick,
+)
 from .stages.stage1.extractor import Stage1IntentExtractor
-from .stages.stage2.dispatcher import extract_slots as _stage2_extract
+from .stages.stage2.dispatcher import (
+    extract_slots as _stage2_extract,
+    supports_schema_entity_extraction,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +60,32 @@ _DATE_TIME_TOKENS = _WEEKDAYS | _MONTHS | {
     "morning", "afternoon", "evening", "night", "noon", "midnight",
     "am", "pm",
 }
+
+
+def _project_offered_candidate_aliases(
+    candidates: List[Any], aliases: Dict[str, Any]
+) -> List[str]:
+    """Project offered typed canonical values or legacy keys to textual aliases."""
+    projected: List[str] = []
+    seen = set()
+
+    def add(alias: str) -> None:
+        if alias not in seen:
+            seen.add(alias)
+            projected.append(alias)
+
+    for candidate in candidates:
+        # A string can legitimately be a legacy alias key, a canonical value,
+        # or both. Preserve both interpretations in deterministic catalog order.
+        if isinstance(candidate, str) and candidate in aliases:
+            add(candidate)
+        for alias, catalog_value in aliases.items():
+            if (
+                type(catalog_value) is type(candidate)
+                and catalog_value == candidate
+            ):
+                add(alias)
+    return projected
 
 _RELATIVE_DATE_PHRASES = (
     "today", "tomorrow", "yesterday", "next week", "this weekend", "next weekend",
@@ -225,7 +258,6 @@ def _ground_service_term_in_text(
     if not text_tokens:
         return None
 
-    text_joined = " ".join(text_tokens)
     term_tokens = [
         t
         for t in _tokenize_utterance(str(service_term))
@@ -235,7 +267,11 @@ def _ground_service_term_in_text(
         return None
 
     term_norm = " ".join(term_tokens)
-    if term_norm and term_norm in text_joined:
+    term_length = len(term_tokens)
+    if any(
+        text_tokens[index:index + term_length] == term_tokens
+        for index in range(len(text_tokens) - term_length + 1)
+    ):
         return term_norm
 
     grounded = [t for t in term_tokens if t in text_tokens]
@@ -298,6 +334,94 @@ def _strip_unmentioned_service(text: str, slm: Dict[str, Any]) -> Dict[str, Any]
     updated = {**slm, "service_term": None, "service_candidates": []}
     if facts_service_id is not None:
         updated["facts"] = {**facts, "service_id": None}
+    return updated
+
+
+def _strip_ungrounded_schema_entity_values(
+    text: str, slm: Dict[str, Any], compiled: Optional[Any] = None
+) -> Dict[str, Any]:
+    """Remove generated entity values not evidenced by the current utterance.
+
+    Atomic Stage 2 output prevents internally contradictory status/value pairs,
+    but the model can still copy a contextual value and label it MENTIONED_VALUE.
+    Schema entity values are raw current-utterance phrases, so every token must
+    be grounded in this turn. Contextual state remains Core-owned.
+    """
+    from .entity_resolution import EntityMentionEvidence, MentionState
+
+    mentions = slm.get("_entity_mentions")
+    if not isinstance(mentions, dict):
+        return slm
+    text_tokens = set(_tokenize_utterance(text or ""))
+    updated_mentions = dict(mentions)
+    updated_facts = dict(slm.get("facts") or {})
+    catalog_fields = {
+        field.name: field
+        for field in (getattr(compiled, "fields", ()) or ())
+        if getattr(field, "type", None) == "catalog"
+    }
+    changed = False
+    stripped_values = set()
+    for name, evidence in mentions.items():
+        if not isinstance(evidence, EntityMentionEvidence):
+            continue
+        if evidence.state != MentionState.MENTIONED_VALUE:
+            continue
+        catalog_field = catalog_fields.get(name)
+        if catalog_field is not None and not eligible_catalog_reference(
+            evidence.raw_value or "", tuple(catalog_field.catalog.keys())
+        ):
+            logger.info(
+                "Dropping ineligible catalog entity phrase entity=%r value=%r",
+                name,
+                evidence.raw_value,
+            )
+            if evidence.raw_value:
+                stripped_values.add(evidence.raw_value)
+            updated_mentions[name] = EntityMentionEvidence(
+                entity_name=name,
+                state=MentionState.NOT_MENTIONED,
+            )
+            updated_facts[name] = None
+            changed = True
+            continue
+        value_tokens = _tokenize_utterance(evidence.raw_value or "")
+        if value_tokens and all(token in text_tokens for token in value_tokens):
+            continue
+        grounded = _ground_service_term_in_text(text, evidence.raw_value)
+        if grounded:
+            updated_mentions[name] = EntityMentionEvidence(
+                entity_name=name,
+                state=MentionState.MENTIONED_VALUE,
+                raw_value=grounded,
+            )
+            updated_facts[name] = grounded
+            changed = True
+            continue
+        logger.info(
+            "Dropping ungrounded schema entity value entity=%r value=%r text=%r",
+            name,
+            evidence.raw_value,
+            text,
+        )
+        if evidence.raw_value:
+            stripped_values.add(evidence.raw_value)
+        updated_mentions[name] = EntityMentionEvidence(
+            entity_name=name,
+            state=MentionState.NOT_MENTIONED,
+        )
+        updated_facts[name] = None
+        changed = True
+    if not changed:
+        return slm
+    updated = {
+        **slm,
+        "facts": updated_facts,
+        "_entity_mentions": updated_mentions,
+    }
+    if slm.get("service_term") in stripped_values:
+        updated["service_term"] = None
+        updated["service_candidates"] = []
     return updated
 
 
@@ -372,6 +496,126 @@ def _strip_unmentioned_times(
         temporal.to_dict(),
     )
     return apply_temporal(slm, clear_temporal_times(temporal))
+
+
+_BARE_CLOCK_ONLY_RE = re.compile(
+    r"^\s*(?:book\s+me\s+(?:at\s+)?)?(\d{1,2})(?:(?::|\.)(\d{2}))?\s*[.!]?\s*$",
+    re.I,
+)
+_EXPLICIT_MERIDIEM_RE = re.compile(r"(?i)(?:\b|\d)(am|pm)\b")
+_ORDINAL_OPTION_RE = re.compile(r"(?i)^\s*(?:the\s+)?(first|second|third)\s+(?:one|option)?\s*[.!]?\s*$")
+_ORDINAL_OPTION_INDEX = {"first": 1, "second": 2, "third": 3}
+
+
+def _apply_presented_temporal_resolution(
+    text: str,
+    slm: Dict[str, Any],
+    conversation_context: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Ground current-turn clock/ordinal language in structured visible options."""
+    from .temporal.pipeline_sync import apply_temporal, get_temporal
+
+    temporal = get_temporal(slm)
+    ctx = conversation_context if isinstance(conversation_context, dict) else {}
+    presented = ctx.get("presented_options") if ctx.get("temporal_context_version") == 1 else None
+    presented = presented if isinstance(presented, dict) else None
+    temporal_changed = False
+
+    # A model may copy the resolution enum onto date-only temporal output.
+    # ``explicit`` is a resolved clock claim and is invalid without start_time.
+    if (
+        isinstance(temporal.resolution, dict)
+        and temporal.resolution.get("kind") == "explicit"
+        and not temporal.start_time
+    ):
+        temporal.resolution = None
+        temporal_changed = True
+
+    # ``presented_option`` is a typed reference, not a marker that options
+    # merely exist in conversation context. Models can copy the presentation
+    # reference onto an unrelated turn while leaving ``option`` null. Do not
+    # emit that internally inconsistent reference to Core.
+    if (
+        isinstance(temporal.resolution, dict)
+        and temporal.resolution.get("kind") == "presented_option"
+        and (
+            not isinstance(temporal.resolution.get("option"), int)
+            or isinstance(temporal.resolution.get("option"), bool)
+            or temporal.resolution.get("option") < 1
+            or not isinstance(temporal.resolution.get("presentation_ref"), str)
+            or not temporal.resolution.get("presentation_ref")
+        )
+    ):
+        temporal.resolution = None
+        temporal_changed = True
+
+    if _EXPLICIT_MERIDIEM_RE.search(text or "") or re.search(
+        r"(?i)\b(?:morning|afternoon|evening|night|noon|midnight)\b", text or ""
+    ):
+        temporal.resolution = {"kind": "explicit"} if temporal.start_time else None
+        return apply_temporal(slm, temporal)
+
+    clock = _BARE_CLOCK_ONLY_RE.match(text or "")
+    if clock and int(clock.group(1)) >= 13:
+        temporal.resolution = {"kind": "explicit"}
+        return apply_temporal(slm, temporal)
+
+    ordinal = _ORDINAL_OPTION_RE.match(text or "")
+    option_index = _ORDINAL_OPTION_INDEX.get(ordinal.group(1).lower()) if ordinal else None
+
+    if clock:
+        hour = int(clock.group(1)) % 12
+        minute = int(clock.group(2) or 0)
+        matches: List[int] = []
+        if presented is not None:
+            for option in presented.get("options") or []:
+                if not isinstance(option, dict):
+                    continue
+                match = re.search(r"(?i)\b(\d{1,2}):(\d{2})\s*(am|pm)\b", str(option.get("label") or ""))
+                if match and int(match.group(1)) % 12 == hour and int(match.group(2)) == minute:
+                    try:
+                        matches.append(int(option.get("index")))
+                    except (TypeError, ValueError):
+                        continue
+        if len(matches) == 1:
+            option_index = matches[0]
+        elif len(matches) > 1:
+            temporal.start_time = None
+            temporal.end_time = None
+            temporal.resolution = {"kind": "invalid_option_reference"}
+            return apply_temporal(slm, temporal)
+        elif presented is None:
+            temporal.start_time = None
+            temporal.end_time = None
+            temporal.resolution = {"kind": "ambiguous_meridiem"}
+            return apply_temporal(slm, temporal)
+        else:
+            # An explicit time not displayed remains an exact request. A bare
+            # omitted-meridiem value, however, still has no authoritative hour.
+            temporal.start_time = None
+            temporal.end_time = None
+            temporal.resolution = {"kind": "ambiguous_meridiem"}
+            return apply_temporal(slm, temporal)
+
+    if option_index is not None:
+        options = presented.get("options") if presented is not None else None
+        valid = isinstance(options, list) and 1 <= option_index <= len(options)
+        temporal.start_time = None
+        temporal.end_time = None
+        if valid:
+            temporal.resolution = {
+                "kind": "presented_option",
+                "presentation_ref": presented.get("reference"),
+                "option": option_index,
+            }
+        else:
+            temporal.resolution = {"kind": "invalid_option_reference"}
+        return apply_temporal(slm, temporal)
+
+    if temporal.start_time:
+        temporal.resolution = {"kind": "explicit"}
+        return apply_temporal(slm, temporal)
+    return apply_temporal(slm, temporal) if temporal_changed else slm
 
 
 def _apply_booking_mode_intent(
@@ -509,7 +753,10 @@ class PipelineResult:
     search_query: Optional[str] = None
     date_constraint: Optional[Dict[str, Any]] = None
     service_candidates: List[str] = field(default_factory=list)
+    entity_resolutions: Dict[str, Any] = field(default_factory=dict)
     operation: Optional[str] = None
+    service_category: Optional[Dict[str, Any]] = None
+    catalog_selection: Optional[Dict[str, Any]] = None
     response_act: Optional[str] = None
     # Top-level Stage2 dialogue acts: schema field names explicitly declined.
     declined_entities: List[str] = field(default_factory=list)
@@ -795,6 +1042,158 @@ def _resolve_calendar_binding_intent(
 
 
 
+def _apply_service_catalogue_evidence(
+    text: str,
+    slm: Dict[str, Any],
+    tenant_context: Mapping[str, Any],
+    conversation_context: Optional[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """Emit narrow category/ordinal semantics from trusted structured context.
+
+    Exact normalized label evidence is intentionally required here.  Richer
+    description-based service grounding remains with the model-backed entity
+    extraction path; this fallback never treats descriptions as identifiers.
+    """
+    import re
+
+    updated = dict(slm)
+    facts = slm.get("facts") if isinstance(slm.get("facts"), dict) else {}
+
+    def clear_service_evidence(payload: Dict[str, Any]) -> Dict[str, Any]:
+        cleaned = dict(payload)
+        cleaned_facts = dict(facts)
+        cleaned_facts["service"] = None
+        cleaned_facts["service_id"] = None
+        cleaned["facts"] = cleaned_facts
+        resolutions = cleaned.get("entity_resolutions")
+        if isinstance(resolutions, dict) and "service" in resolutions:
+            cleaned_resolutions = dict(resolutions)
+            cleaned_resolutions.pop("service", None)
+            cleaned["entity_resolutions"] = cleaned_resolutions
+        return cleaned
+
+    context = conversation_context if isinstance(conversation_context, Mapping) else {}
+    presented = context.get("catalogue_presentation")
+    if isinstance(presented, Mapping):
+        normalized = text.strip().casefold()
+        number_words = {
+            "first": 1, "one": 1, "second": 2, "two": 2,
+            "third": 3, "three": 3, "fourth": 4, "four": 4,
+            "fifth": 5, "five": 5,
+        }
+        ordinal_label = normalized
+        if ordinal_label.startswith("the "):
+            ordinal_label = ordinal_label[4:]
+        for suffix in (" one", " option"):
+            if ordinal_label.endswith(suffix):
+                ordinal_label = ordinal_label[:-len(suffix)]
+                break
+        option = number_words.get(ordinal_label)
+        if option is None and re.fullmatch(r"[1-9][0-9]*", normalized):
+            option = int(normalized)
+        if option is not None:
+            updated = clear_service_evidence(updated)
+            updated["catalog_selection"] = {
+                "presentation_ref": presented.get("reference"),
+                "kind": presented.get("kind"),
+                "option": option,
+            }
+            options = presented.get("options")
+            chosen = (
+                options[option - 1]
+                if isinstance(options, list) and 1 <= option <= len(options)
+                else None
+            )
+            aliases = tenant_context.get("aliases")
+            if (
+                presented.get("kind") == "service"
+                and isinstance(chosen, Mapping)
+                and isinstance(chosen.get("label"), str)
+                and isinstance(aliases, Mapping)
+            ):
+                label = str(chosen["label"])
+                canonical = aliases.get(label.casefold())
+                if canonical is not None:
+                    from .entity_resolution import Resolution, ResolvedEntity
+
+                    selected_facts = dict(updated.get("facts") or {})
+                    selected_facts["service"] = label
+                    selected_facts["service_id"] = canonical
+                    updated["facts"] = selected_facts
+                    resolutions = dict(updated.get("entity_resolutions") or {})
+                    resolutions["service"] = ResolvedEntity(
+                        resolution=Resolution.RESOLVED,
+                        value=canonical,
+                    )
+                    updated["entity_resolutions"] = resolutions
+            temporal = updated.get("temporal")
+            resolution = temporal.get("resolution") if isinstance(temporal, dict) else None
+            if (
+                isinstance(resolution, dict)
+                and resolution.get("kind") == "invalid_option_reference"
+            ):
+                updated["temporal"] = {**temporal, "resolution": None}
+            return updated
+
+    catalog = tenant_context.get("catalog")
+    services = catalog.get("services") if isinstance(catalog, Mapping) else None
+    if not isinstance(services, list):
+        return updated
+    labels: dict[str, str] = {}
+    all_categorized = bool(services)
+    for service in services:
+        category = service.get("category") if isinstance(service, Mapping) else None
+        if not isinstance(category, str) or not category.strip():
+            all_categorized = False
+            break
+        labels.setdefault(category.strip().casefold(), category.strip())
+    if not all_categorized:
+        return updated
+
+    normalized_question = " ".join(re.findall(r"[\w'-]+", text.casefold()))
+    if normalized_question in {
+        "what service categories do you have",
+        "what types of services do you offer",
+        "what categories of services do you offer",
+        "what services do you offer",
+        "show me your service categories",
+        "list service categories",
+    }:
+        updated["operation"] = "list_service_categories"
+        return updated
+
+    # An exact trusted category label is category evidence even when the model
+    # incorrectly projected that word as a service entity.
+    exact_category = labels.get(normalized_question)
+    if exact_category is not None:
+        updated = clear_service_evidence(updated)
+        updated["service_category"] = {
+            "name": exact_category, "resolution": "RESOLVED"
+        }
+        return updated
+
+    if facts.get("service_id"):
+        return updated
+
+    utterance_tokens = re.findall(r"[\w'-]+", text.casefold())
+    matches = [
+        label for key, label in labels.items()
+        if re.findall(r"[\w'-]+", key) and _contains_token_window(utterance_tokens, re.findall(r"[\w'-]+", key))
+    ]
+    if len(matches) == 1:
+        updated["service_category"] = {"name": matches[0], "resolution": "RESOLVED"}
+    elif len(matches) > 1:
+        updated["service_category"] = {
+            "resolution": "AMBIGUOUS", "candidate_values": matches
+        }
+    return updated
+
+
+def _contains_token_window(tokens: Sequence[str], phrase: Sequence[str]) -> bool:
+    width = len(phrase)
+    return any(list(tokens[index:index + width]) == list(phrase) for index in range(len(tokens) - width + 1))
+
+
 class NLUPipeline:
     """Two-stage NLU pipeline: Stage 1 (intent) → Stage 2 (slots) → normalise → calendar."""
 
@@ -811,6 +1210,7 @@ class NLUPipeline:
         entity_schema: Optional[Dict[str, Any]] = None,
     ) -> PipelineResult:
         from .stages.stage2.entity_schema import (
+            apply_unique_catalog_mention_to_slm,
             compile_business_entities,
             effective_tenant_context,
         )
@@ -837,25 +1237,42 @@ class NLUPipeline:
         )
         slm = _strip_unmentioned_dates(text, slm)
         slm = _strip_unmentioned_times(text, slm, conversation_context)
+        slm = _apply_presented_temporal_resolution(text, slm, conversation_context)
+        slm = _strip_ungrounded_schema_entity_values(text, slm, compiled)
         slm = _strip_unmentioned_service(text, slm)
+        slm = apply_unique_catalog_mention_to_slm(text, slm, compiled)
         slm = _normalize_fuzzy_time(text, slm)
         slm = _normalize_booking_id(text, slm, effective_tc)
         slm = _apply_booking_mode_intent(text, slm, effective_tc)
         slm = self._correct_bare_weekday_dates(text, slm)
         slm = _fix_iso_weekday_mismatch(text, slm, conversation_context)
-        slm = self._resolve_service_ambiguity(
-            slm,
-            effective_tc,
-            conversation_context,
-            compiled=compiled,
-            text=text,
-        )
+        if compiled is None or supports_schema_entity_extraction(
+            str(slm.get("intent") or "UNKNOWN")
+        ):
+            slm = self._resolve_service_ambiguity(
+                slm,
+                effective_tc,
+                conversation_context,
+                compiled=compiled,
+                text=text,
+            )
+        else:
+            # Non-schema-aware Stage 2 contracts do not owe typed mention
+            # evidence. They still expose the stable object-valued response field.
+            slm = {**slm, "entity_resolutions": {}}
         slm = _resolve_slot_fill_intent(slm, text, conversation_context)
+        slm = _apply_service_catalogue_evidence(
+            text, slm, effective_tc, conversation_context
+        )
         from .temporal.bare_ordinal import inject_bare_ordinal_expression
 
         slm = inject_bare_ordinal_expression(text, slm)
+        from .stages.stage2.browse_operation import apply_deterministic_browse_operation
         from .stages.shared.turn_understanding import derive_turn_understanding
 
+        slm = apply_deterministic_browse_operation(
+            text, slm, conversation_context
+        )
         understanding = derive_turn_understanding(slm, conversation_context)
         result = self._bind_calendar(
             slm,
@@ -993,89 +1410,197 @@ class NLUPipeline:
         compiled: Any,
         text: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Resolve each catalog entity against only that entity's catalog."""
+        """Build authoritative resolutions, validate them, then project legacy fields."""
+        from .entity_resolution import (
+            AmbiguousEntity, EntityExtractionValidationError, MentionState,
+            ResolvedEntity, usable_customer_contact_name,
+            validate_entity_resolutions,
+        )
         from .stages.stage2.entity_schema import resolved_id_key
 
         facts = dict(slm.get("facts") or {})
+        mentions = slm.get("_entity_mentions")
+        if not isinstance(mentions, dict):
+            raise EntityExtractionValidationError("typed entity mention evidence is missing")
         ctx = conversation_context if isinstance(conversation_context, dict) else {}
-        awaiting_service_id = "service_id" in ctx.get("missing_slots", [])
-
-        prior_text: Optional[str] = None
-        bookable_candidates: Optional[List[str]] = None
-        resolved_service_id: Optional[str] = None
+        awaiting = "service_id" in ctx.get("missing_slots", [])
+        prior_text = None
+        bookable_candidates = None
+        resolved_service_id = None
         if ctx:
             cands = ctx.get("service_candidates")
             if isinstance(cands, list) and cands:
                 bookable_candidates = cands
-            if awaiting_service_id:
-                turns = ctx.get("turns") or []
-                joined = " ".join(t.get("user", "") for t in turns).strip()
+            if awaiting:
+                joined = " ".join(t.get("user", "") for t in (ctx.get("turns") or [])).strip()
                 prior_text = joined or None
-            raw_resolved = ctx.get("resolved_service_id")
-            if isinstance(raw_resolved, str) and raw_resolved:
-                resolved_service_id = raw_resolved
+            if isinstance(ctx.get("resolved_service_id"), str):
+                resolved_service_id = ctx["resolved_service_id"] or None
 
-        service_candidates: List[str] = []
+        raw_resolutions: Dict[str, Dict[str, Any]] = {}
+        projection: Dict[str, Dict[str, Any]] = {}
         bookable = compiled.bookable_item_field
-
         for entity in compiled.fields:
+            evidence = mentions.get(entity.name)
+            if evidence is None:
+                raise EntityExtractionValidationError(
+                    f"typed mention evidence missing entity {entity.name!r}"
+                )
+            projection[entity.name] = {
+                "raw_value": evidence.raw_value, "resolved_alias": None,
+                "candidate_aliases": [],
+            }
+            if evidence.state == MentionState.NOT_MENTIONED:
+                continue
+            if evidence.state == MentionState.MENTIONED_UNRESOLVED:
+                raw_resolutions[entity.name] = {"resolution": "UNRESOLVED"}
+                continue
+            phrase = evidence.raw_value
+            if entity.type == "enum":
+                canonical = next(
+                    (item for item in entity.values if item.lower() == phrase.lower()), None
+                )
+                raw_resolutions[entity.name] = (
+                    {"resolution": "RESOLVED", "value": canonical}
+                    if canonical is not None else {"resolution": "UNRESOLVED"}
+                )
+                continue
+            if entity.type == "text":
+                if entity.name == "customer_contact_name":
+                    phrase = usable_customer_contact_name(phrase)
+                    if phrase is None:
+                        raw_resolutions[entity.name] = {"resolution": "UNRESOLVED"}
+                        continue
+                raw_resolutions[entity.name] = {
+                    "resolution": "RESOLVED", "value": phrase,
+                }
+                continue
+
+            is_bookable = bookable is not None and entity.name == bookable.name
+            aliases = dict(entity.catalog)
+            offered_aliases = None
+            if (
+                is_bookable
+                and bookable_candidates is not None
+            ):
+                # A presented candidate set is an authoritative restriction.
+                # Even an exact or unique-prefix full-catalog match must remain
+                # unresolved when it is outside that offered set.
+                offered_aliases = _project_offered_candidate_aliases(
+                    bookable_candidates, aliases
+                )
+            if offered_aliases == []:
+                # An offered list that has no member in this catalog remains
+                # restrictive; never fall back to searching the full catalog.
+                grounded = {"service_id": None, "service_candidates": []}
+            else:
+                grounded = resolve_service(
+                    service_term=phrase, aliases=aliases,
+                    prior_text=prior_text if is_bookable else None,
+                    awaiting_service_id=awaiting if is_bookable else False,
+                    candidate_keys=offered_aliases,
+                    resolved_service_id=resolved_service_id if is_bookable else None,
+                )
+            # A lone generic overlap (for example "spaceship room") is not safe
+            # catalogue grounding. Candidate-list picks have their own structured
+            # contextual selection rules and are left intact.
+            if not bookable_candidates:
+                tokens = [token for token in _tokenize(phrase) if token not in _NOISE_TOKENS]
+                best_coverage = max(
+                    (_term_coverage(tokens, _tokenize(alias)) for alias in aliases),
+                    default=0.0,
+                )
+                unique_pick = unique_prefix_catalog_pick(phrase, list(aliases))
+                if best_coverage <= 0.5 and not unique_pick:
+                    grounded = {"service_id": None, "service_candidates": []}
+                elif unique_pick and unique_pick in aliases:
+                    grounded = {
+                        "service_id": unique_pick,
+                        "service_candidates": [],
+                    }
+            if grounded["service_id"] is not None:
+                alias = str(grounded["service_id"]).lower()
+                raw_resolutions[entity.name] = {
+                    "resolution": "RESOLVED", "value": aliases.get(alias),
+                }
+                projection[entity.name]["resolved_alias"] = alias
+                continue
+            canonical_candidates: List[Any] = []
+            candidate_aliases: List[str] = []
+            for candidate in grounded["service_candidates"] or []:
+                alias = str(candidate).lower()
+                canonical = aliases.get(alias)
+                duplicate = any(
+                    type(canonical) is type(existing) and canonical == existing
+                    for existing in canonical_candidates
+                )
+                if canonical is not None and not duplicate:
+                    canonical_candidates.append(canonical)
+                    candidate_aliases.append(alias)
+            if len(canonical_candidates) >= 2:
+                raw_resolutions[entity.name] = {
+                    "resolution": "AMBIGUOUS",
+                    "candidate_values": canonical_candidates,
+                }
+                projection[entity.name]["candidate_aliases"] = candidate_aliases
+            elif len(canonical_candidates) == 1:
+                raw_resolutions[entity.name] = {
+                    "resolution": "RESOLVED", "value": canonical_candidates[0],
+                }
+                projection[entity.name]["resolved_alias"] = candidate_aliases[0]
+            else:
+                raw_resolutions[entity.name] = {"resolution": "UNRESOLVED"}
+
+        entity_resolutions = validate_entity_resolutions(raw_resolutions, compiled)
+        service_candidates: List[str] = []
+        for entity in compiled.fields:
+            evidence = mentions[entity.name]
+            result = entity_resolutions.get(entity.name)
+            meta = projection[entity.name]
+            if evidence.state == MentionState.NOT_MENTIONED:
+                facts[entity.name] = None
+            elif entity.type == "text" and not isinstance(result, ResolvedEntity):
+                facts[entity.name] = None
+            elif entity.type == "enum" and isinstance(result, ResolvedEntity):
+                facts[entity.name] = result.value
+            else:
+                facts[entity.name] = evidence.raw_value
             if entity.type != "catalog":
                 continue
-
-            phrase = facts.get(entity.name)
-            if isinstance(phrase, str):
-                phrase = phrase.strip() or None
-            else:
-                phrase = None
-
-            id_key = resolved_id_key(entity)
-            is_bookable = bookable is not None and entity.name == bookable.name
-
-            # resolve_service treats alias keys as the resolved service_id values
-            # Core already consumes (display phrases). Per-field catalogs stay isolated.
-            aliases = dict(entity.catalog)
-            if not aliases:
-                facts.setdefault(id_key, None)
-                continue
-
-            if is_bookable and not phrase and text:
-                phrase = infer_service_term_from_utterance(text, aliases)
-
-            candidate_keys = bookable_candidates if is_bookable else None
-            resolved = resolve_service(
-                service_term=phrase,
-                aliases=aliases,
-                prior_text=prior_text if is_bookable else None,
-                awaiting_service_id=awaiting_service_id if is_bookable else False,
-                candidate_keys=candidate_keys,
-                resolved_service_id=resolved_service_id if is_bookable else None,
+            # Preserve the public compatibility projection as the grounded
+            # catalogue alias. The typed resolution remains the sole canonical
+            # identifier projection.
+            facts[resolved_id_key(entity)] = (
+                meta["resolved_alias"]
+                if isinstance(result, ResolvedEntity)
+                else None
             )
-            facts[id_key] = resolved["service_id"]
-            if is_bookable:
-                service_candidates = list(resolved["service_candidates"] or [])
-
-            logger.debug(
-                "_resolve_schema_entities: field=%r phrase=%r → %s=%r candidates=%r",
-                entity.name,
-                phrase,
-                id_key,
-                resolved["service_id"],
-                resolved["service_candidates"] if is_bookable else [],
-            )
-
-        # Ensure platform keys exist even when schema has no bookable catalog field.
+            if bookable is not None and entity.name == bookable.name:
+                service_candidates = (
+                    list(meta["candidate_aliases"])
+                    if isinstance(result, AmbiguousEntity) else []
+                )
         facts.setdefault("service_id", None)
         facts.setdefault("booking_id", facts.get("booking_id"))
-
         out = {
-            **slm,
-            "facts": facts,
-            "service_candidates": service_candidates,
+            **slm, "facts": facts, "service_candidates": service_candidates,
+            "entity_resolutions": entity_resolutions,
         }
-        # Keep legacy service_term aligned with bookable phrase for grounding helpers.
         if bookable is not None:
-            out["service_term"] = facts.get(bookable.name)
+            out["service_term"] = projection[bookable.name]["raw_value"]
         return out
+
+    def _resolve_schema_entities_pre_authoritative_legacy(
+        self,
+        slm: Dict[str, Any],
+        conversation_context: Optional[Dict[str, Any]],
+        compiled: Any,
+        text: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Deprecated private shim retained only for local callers during migration."""
+        return self._resolve_schema_entities(
+            slm, conversation_context, compiled, text=text
+        )
 
     def _slm_extract(
         self,
@@ -1128,7 +1653,11 @@ class NLUPipeline:
             result = {**result, "service_candidates": []}
         if "service_term" not in result:
             result = {**result, "service_term": None}
-        if response_act in ("CONFIRM_ACTION", "REJECT_ACTION"):
+        # A live Stage 2 proposal decision is final. Preserve the Stage 1 candidate
+        # only for legacy/no-Stage-2 paths where the new field is absent.
+        if "response_act" in result:
+            pass
+        elif response_act in ("CONFIRM_ACTION", "REJECT_ACTION"):
             result = {**result, "response_act": response_act}
         elif intent in ("CONFIRM_ACTION", "REJECT_ACTION"):
             result = {**result, "response_act": intent}
@@ -1165,6 +1694,8 @@ class NLUPipeline:
         answer = decision.get("answer")
         service_candidates = decision.get("service_candidates") or []
         operation = decision.get("operation")
+        service_category = decision.get("service_category")
+        catalog_selection = decision.get("catalog_selection")
         response_act = decision.get("response_act")
         raw_declined = decision.get("declined_entities")
         declined_entities: List[str] = []
@@ -1263,7 +1794,14 @@ class NLUPipeline:
             search_query=search_query,
             date_constraint=date_constraint,
             service_candidates=service_candidates,
+            entity_resolutions=decision.get("entity_resolutions") or {},
             operation=operation if isinstance(operation, str) else None,
+            service_category=(
+                service_category if isinstance(service_category, dict) else None
+            ),
+            catalog_selection=(
+                catalog_selection if isinstance(catalog_selection, dict) else None
+            ),
             response_act=(response_act if response_act in (
                 "CONFIRM_ACTION", "REJECT_ACTION"
             ) else None),

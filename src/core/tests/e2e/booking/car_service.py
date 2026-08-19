@@ -13,11 +13,13 @@ from core.tests.e2e.framework.conversation import (
 )
 
 BUSINESS_CATEGORY = "car_service"
-EXECUTIVE_OIL_CHANGE_SKU = "executive oil change"
 EXECUTIVE_OIL_CHANGE_ID = 26
-PREMIUM_FULL_SERVICE_SKU = "premium full service"
-BRAKE_PAD_CHANGE_SKU = "brake pad change"
+PREMIUM_FULL_SERVICE_ID = 27
 BRAKE_PAD_CHANGE_ID = 28
+# Session/planner service_id is the schema's typed canonical catalog value.
+EXECUTIVE_OIL_CHANGE_SKU = EXECUTIVE_OIL_CHANGE_ID
+PREMIUM_FULL_SERVICE_SKU = PREMIUM_FULL_SERVICE_ID
+BRAKE_PAD_CHANGE_SKU = BRAKE_PAD_CHANGE_ID
 _RATTLE_RECOMMENDATION = (
     "For your rattling noise, the Premium Full Service would be the better choice "
     "since it includes the kind of checks that would help us pinpoint what's actually "
@@ -80,30 +82,151 @@ def _assert_engine_type_not_requested_again(conv, booking, availability) -> None
     )
 
 
+def _assert_booking_subject_sent(conv, booking, _availability) -> None:
+    conv._assert(
+        booking.create_booking.call_count == 1,
+        f"turn {conv.turn}: expected exactly one service booking creation, "
+        f"got {booking.create_booking.call_count}",
+    )
+    kwargs = booking.create_booking.call_args.kwargs
+    conv._assert(
+        kwargs.get("booking_type") == "service",
+        f"turn {conv.turn}: booking_subject must be sent only on service create: {kwargs!r}",
+    )
+    conv._assert(
+        kwargs.get("booking_subject") == {
+            "engine_type": "petrol",
+            "registration_number": "AB12 CDE",
+        },
+        f"turn {conv.turn}: unexpected booking_subject payload: {kwargs!r}",
+    )
+    conv._assert(
+        "booked_for" not in kwargs,
+        f"turn {conv.turn}: legacy booked_for must never be sent: {kwargs!r}",
+    )
+    conv._assert(
+        "staff" not in kwargs["booking_subject"]
+        and "staff_id" not in kwargs["booking_subject"],
+        f"turn {conv.turn}: staff must remain outside booking_subject: {kwargs!r}",
+    )
+
+
+def _anonymous_contact_channel(conv) -> None:
+    conv.customer_phone = "+15551234002"
+    conv.customer_email = "unnamed.car.customer@dialogcart.test"
+    conv.customer_name = None
+    conv.customer_id = None
+
+
+def _assert_customer_name_requested(conv, booking, _availability) -> None:
+    session = conv.session() or {}
+    planning = session.get("planning") or {}
+    conv._assert(
+        planning.get("pending_profile_request") == "CUSTOMER_CONTACT_NAME",
+        f"turn {conv.turn}: expected customer contact name gate: {planning!r}",
+    )
+    conv._assert(
+        not booking.create_booking.called,
+        f"turn {conv.turn}: booking must wait for name and confirmation",
+    )
+
+
+def _assert_car_contact_ready_for_confirmation(conv, booking, _availability) -> None:
+    session = conv.session() or {}
+    planning = session.get("planning") or {}
+    contact = session.get("customer_contact") or {}
+    conv._assert(
+        planning.get("bound_datetime", {}).get("start"),
+        f"turn {conv.turn}: selected start_time was lost after contact collection",
+    )
+    conv._assert(
+        contact.get("authoritative_name") == "Godswill Mbaocha",
+        f"turn {conv.turn}: customer name was not persisted: {contact!r}",
+    )
+    response = _response_text(conv.last_body or {})
+    conv._assert(
+        "Executive Oil Change" in response and "book a 26" not in response,
+        f"turn {conv.turn}: confirmation exposed catalog ID: {response!r}",
+    )
+    conv._assert(
+        not booking.create_booking.called,
+        f"turn {conv.turn}: booking must wait for explicit confirmation",
+    )
+
+
+def _assert_car_contact_correction_acknowledged(
+    conv, booking, _availability
+) -> None:
+    session = conv.session() or {}
+    contact = session.get("customer_contact") or {}
+    response = _response_text(conv.last_body or {})
+    conv._assert(
+        contact.get("authoritative_name") == "Godin Nnem",
+        f"turn {conv.turn}: corrected customer name was not persisted: {contact!r}",
+    )
+    conv._assert(
+        "updated the contact name to Godin Nnem" in response,
+        f"turn {conv.turn}: contact correction was not acknowledged: {response!r}",
+    )
+    conv._assert(
+        not booking.create_booking.called,
+        f"turn {conv.turn}: correction must not consume confirmation",
+    )
+
+
+def _assert_car_booking_uses_start_only(conv, booking, availability) -> None:
+    _assert_booking_subject_sent(conv, booking, availability)
+    kwargs = booking.create_booking.call_args.kwargs
+    conv._assert(
+        bool(kwargs.get("start_time")),
+        f"turn {conv.turn}: selected start_time missing from service booking: {kwargs!r}",
+    )
+    conv._assert(
+        "end_time" not in kwargs,
+        f"turn {conv.turn}: Commerce must derive service end_time: {kwargs!r}",
+    )
+    response = _response_text(conv.last_body or {})
+    conv._assert(
+        "Executive Oil Change" in response and "Service:** 26" not in response,
+        f"turn {conv.turn}: success response exposed catalog ID: {response!r}",
+    )
+
+
 def _assert_service_identity_replaced(conv, booking, availability) -> None:
     """A revised service replaces every identifier derived from the old service."""
     session = conv.session() or {}
     slots = ((session.get("planning") or {}).get("slots") or session.get("slots") or {})
+    service_id = slots.get("service_id")
+    catalog_item_id = slots.get("_catalog_item_id")
+    canonical_service_id = slots.get("_canonical_service_id")
     conv._assert(
-        slots.get("service_id") == BRAKE_PAD_CHANGE_SKU,
-        f"turn {conv.turn}: expected revised service {BRAKE_PAD_CHANGE_SKU!r}, got {slots!r}",
+        service_id == BRAKE_PAD_CHANGE_ID,
+        (
+            f"turn {conv.turn}: revised catalog identity service_id must be "
+            f"{BRAKE_PAD_CHANGE_ID!r}, got {service_id!r}"
+        ),
     )
     conv._assert(
-        slots.get("_catalog_item_id") == BRAKE_PAD_CHANGE_ID,
-        f"turn {conv.turn}: revised catalog identity must be {BRAKE_PAD_CHANGE_ID}, got {slots!r}",
-    )
-    conv._assert(
-        slots.get("_catalog_item_id") != EXECUTIVE_OIL_CHANGE_ID
-        and slots.get("_canonical_service_id") not in (
+        catalog_item_id != EXECUTIVE_OIL_CHANGE_ID
+        and canonical_service_id not in (
             EXECUTIVE_OIL_CHANGE_SKU,
             EXECUTIVE_OIL_CHANGE_ID,
         ),
-        f"turn {conv.turn}: stale Executive Oil Change identity survived: {slots!r}",
+        (
+            f"turn {conv.turn}: stale Executive Oil Change identity survived: "
+            f"_catalog_item_id={catalog_item_id!r}, "
+            f"_canonical_service_id={canonical_service_id!r}"
+        ),
+    )
+    searched_service_id = availability.get_service_availability.call_args.kwargs.get(
+        "service_id"
     )
     conv._assert(
-        availability.get_service_availability.call_args.kwargs.get("service_id")
-        == BRAKE_PAD_CHANGE_ID,
-        f"turn {conv.turn}: availability must use revised catalog identity",
+        searched_service_id == BRAKE_PAD_CHANGE_ID,
+        (
+            f"turn {conv.turn}: availability must use revised catalog identity "
+            f"{BRAKE_PAD_CHANGE_ID!r}, got {searched_service_id!r}"
+        ),
     )
     conv._assert(
         not booking.create_booking.called,
@@ -151,6 +274,138 @@ def _assert_closed_day_recovery(conv, booking, _availability) -> None:
 
 SCENARIOS: List[Scenario] = [
     Scenario(
+        "Anonymous car-service customer completes booking with start time only",
+        Turn(
+            "Book me an Executive Oil Change",
+            Expect(
+                planner="NEEDS_CLARIFICATION",
+                intent="CREATE_APPOINTMENT",
+                session_slots={"service_id": EXECUTIVE_OIL_CHANGE_SKU},
+                response_text_present=True,
+            ),
+        ),
+        Turn(
+            "petrol",
+            Expect(
+                planner="READY",
+                action="SEARCH_AVAILABILITY",
+                execution="availability",
+                session_slots={
+                    "service_id": EXECUTIVE_OIL_CHANGE_SKU,
+                    "engine_type": "petrol",
+                },
+                response_text_present=True,
+            ),
+        ),
+        Turn(
+            "10am",
+            Expect(
+                planner="NEEDS_CLARIFICATION",
+                missing_slots=["registration_number"],
+                slot_contains={"time": "10"},
+                response_text_present=True,
+            ),
+        ),
+        Turn(
+            "AB12 CDE",
+            Expect(
+                planner="NEEDS_CLARIFICATION",
+                stage="CONFIRM",
+                awaiting="CUSTOMER_CONTACT_NAME",
+                missing_slots=[],
+                confirmation=None,
+                response_text_present=True,
+            ),
+            after=_assert_customer_name_requested,
+        ),
+        Turn(
+            "Godswill Mbaocha",
+            Expect(
+                planner="AWAITING_CONFIRMATION",
+                stage="CONFIRM",
+                awaiting="USER_CONFIRMATION",
+                confirmation="pending",
+                missing_slots=[],
+                response_text_present=True,
+            ),
+            after=_assert_car_contact_ready_for_confirmation,
+        ),
+        Turn(
+            "Sorry, the contact name is Godin Nnem",
+            Expect(
+                planner="AWAITING_CONFIRMATION",
+                stage="CONFIRM",
+                awaiting="USER_CONFIRMATION",
+                confirmation="pending",
+                missing_slots=[],
+                response_text_present=True,
+            ),
+            after=_assert_car_contact_correction_acknowledged,
+        ),
+        Turn(
+            "yes",
+            Expect(
+                planner="READY",
+                stage="CONFIRM",
+                action="CONFIRM_APPOINTMENT",
+                confirmation=None,
+                missing_slots=[],
+            ),
+            after=_assert_car_booking_uses_start_only,
+        ),
+        fixture="scripted_confirm",
+        before=_anonymous_contact_channel,
+        tags=[
+            "booking",
+            "car-service",
+            "customer-identification",
+            "start-time",
+            "booking-subject",
+            "regression",
+        ],
+        id="car-service-anonymous-customer-start-time-only",
+        environment={"BOOKING_SUBJECT_ENABLED": "true"},
+    ),
+    Scenario(
+        "Completed car service sends booking subject",
+        Turn(
+            "Book an Executive Oil Change for July 6 at 10am, petrol, registration AB12 CDE",
+            Expect(
+                response_status="succeeded",
+                planner="AWAITING_CONFIRMATION",
+                stage="CONFIRM",
+                awaiting="USER_CONFIRMATION",
+                action=None,
+                intent="CREATE_APPOINTMENT",
+                session_slots={
+                    "service_id": EXECUTIVE_OIL_CHANGE_SKU,
+                    "engine_type": "petrol",
+                    "registration_number": "AB12 CDE",
+                },
+                slot_contains={"time": "10"},
+                missing_slots=[],
+                confirmation="pending",
+                response_text_present=True,
+            ),
+        ),
+        Turn(
+            "yes",
+            Expect(
+                planner="READY",
+                stage="CONFIRM",
+                action="CONFIRM_APPOINTMENT",
+                confirmation=None,
+                missing_slots=[],
+            ),
+            after=_assert_booking_subject_sent,
+        ),
+        fixture="scripted_confirm",
+        tags=["booking", "car-service", "booking-subject", "confirm", "regression"],
+        id="car-service-completed-sends-booking-subject",
+        requires_customer_identity=True,
+        environment={"BOOKING_SUBJECT_ENABLED": "true"},
+    ),
+    Scenario(
         "Car service revision replaces derived identifiers",
         Turn(
             "Book an Executive Oil Change for July 6 at 10am, petrol, registration AB12 CDE",
@@ -177,6 +432,7 @@ SCENARIOS: List[Scenario] = [
         fixture="scripted_confirm",
         tags=["booking", "car-service", "service-revision", "identity", "regression"],
         id="car-service-revision-replaces-derived-identifiers",
+        requires_customer_identity=True,
     ),
     Scenario(
         "Car service closed-day recovery preserves accepted evidence",
@@ -309,6 +565,7 @@ SCENARIOS: List[Scenario] = [
             after=_assert_engine_type_not_requested_again,
         ),
         fixture="scripted_confirm",
+        requires_customer_identity=True,
         tags=["booking", "car-service", "engine-type", "regression"],
         id="car-service-engine-type-persists-through-confirmation",
     ),

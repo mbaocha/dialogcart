@@ -108,6 +108,7 @@ def _merge(
     )
     return {
         "intent": validated,
+        "proposal_response": raw.get("proposal_response"),
         "confidence": confidence,
         "facts": {
             **temporal_facts,
@@ -123,6 +124,7 @@ def _merge(
 def _empty(candidate_intent: str) -> Dict[str, Any]:
     return {
         "intent": candidate_intent,
+        "proposal_response": None,
         "confidence": 0.0,
         "facts": {
             "dates": [],

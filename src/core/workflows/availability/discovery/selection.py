@@ -11,7 +11,6 @@ from core.workflows.availability.selection import (
     _match_offers,
     _normalize_user_time,
     classify_selection_mode,
-    user_time_omits_meridiem,
 )
 
 
@@ -80,16 +79,6 @@ class AvailabilitySelectionPolicy:
         if location is None and user_facts.get("location_from_current_turn"):
             location = user_facts.get("location")
 
-        allow_clock_face = user_time_omits_meridiem(
-            user_time_raw,
-            time_proposal=criteria.get("time_proposal")
-            if isinstance(criteria.get("time_proposal"), dict)
-            else None,
-            temporal=criteria.get("temporal")
-            if isinstance(criteria.get("temporal"), dict)
-            else None,
-        )
-
         offers = [dict(item) for item in items if isinstance(item, Mapping)]
         return _match_offers(
             offers,
@@ -97,7 +86,6 @@ class AvailabilitySelectionPolicy:
             expected_date=expected_date,
             staff=str(staff) if staff else None,
             location=str(location) if location else None,
-            allow_clock_face_match=allow_clock_face,
         )
 
 

@@ -13,6 +13,12 @@
     "timezone": "UTC"
   },
   "response": {
+    "entity_resolutions": {
+      "service": {
+        "resolution": "RESOLVED",
+        "value": 1001
+      }
+    },
     "facts": {
       "booking_id": null,
       "date_time_pairs": [],
@@ -22,11 +28,11 @@
       "times": []
     },
     "intent": {
-      "confidence": 0.75,
+      "confidence": 0.85,
       "name": "CREATE_APPOINTMENT"
     },
     "temporal": {
-      "confidence": 0.75,
+      "confidence": 0.85,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,

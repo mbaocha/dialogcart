@@ -3,14 +3,28 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Mapping, Optional
 
 
-def _format_service_label(service_id: Any) -> str:
+def _format_service_label(
+    service_id: Any,
+    entity_schema: Optional[Mapping[str, Any]] = None,
+) -> str:
     if not service_id:
         return "appointment"
+    from core.adapters.nlu.entity_schema_builder import (
+        catalog_label_for_planning_value,
+    )
+
+    catalog_label = catalog_label_for_planning_value(
+        entity_schema, "service_id", service_id
+    )
+    if catalog_label:
+        return catalog_label
     text = str(service_id).strip()
     if not text:
+        return "appointment"
+    if text.isdigit():
         return "appointment"
     # Title-case simple SKU labels (e.g. "premium haircut" → "Premium Haircut").
     return text.title()
@@ -25,6 +39,10 @@ def _format_date_label(date_value: Any) -> str:
         return f"{parsed.strftime('%B')} {parsed.day}"
     except ValueError:
         return raw
+
+
+def _indefinite_article(label: str) -> str:
+    return "an" if label[:1].casefold() in {"a", "e", "i", "o", "u"} else "a"
 
 
 def _format_time_label(time_value: Any) -> str:
@@ -49,14 +67,17 @@ def _format_time_label(time_value: Any) -> str:
 
 def render_booking_confirmation_prompt(
     slots: Optional[Dict[str, Any]] = None,
+    *,
+    entity_schema: Optional[Mapping[str, Any]] = None,
 ) -> str:
     """Build a short confirmation prompt from durable booking slots."""
     slots = slots or {}
-    service = _format_service_label(slots.get("service_id"))
+    service = _format_service_label(slots.get("service_id"), entity_schema)
+    article = _indefinite_article(service)
     date_label = _format_date_label(slots.get("date"))
     time_label = _format_time_label(slots.get("time"))
     return (
-        f"You're about to book a {service} on {date_label} at {time_label}. "
+        f"You're about to book {article} {service} on {date_label} at {time_label}. "
         "Would you like me to go ahead?"
     )
 

@@ -1,0 +1,111 @@
+{
+  "key": {
+    "conversation_context": {
+      "customer_contact": {
+        "authoritative_name": "E2E Commit Customer",
+        "customer_id": 91001,
+        "name_status": "authoritative"
+      },
+      "last_date_proposal": {
+        "mode": "single_day",
+        "start": "2026-07-10"
+      },
+      "last_intent": "CREATE_APPOINTMENT",
+      "last_search_query": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "book me a premium haircut July 10"
+        },
+        {
+          "role": "assistant",
+          "text": "premium haircut selected.\n\nHere are the available times for 2026-07-10:\n- 9:00 AM\n- 10:00 AM\n- 11:00 AM\n- 12:00 PM\nWhich would you like?"
+        }
+      ],
+      "missing_slots": [
+        "time"
+      ],
+      "presented_options": {
+        "options": [
+          {
+            "index": 1,
+            "label": "9:00 AM"
+          },
+          {
+            "index": 2,
+            "label": "10:00 AM"
+          },
+          {
+            "index": 3,
+            "label": "11:00 AM"
+          },
+          {
+            "index": 4,
+            "label": "12:00 PM"
+          }
+        ],
+        "reference": "avp1_cf1afc264d8c2da1a0bc6e56"
+      },
+      "temporal_context_version": 1,
+      "turns": [
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "book me a premium haircut July 10"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "10am",
+    "timezone": "UTC"
+  },
+  "response": {
+    "entity_resolutions": {},
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service": null,
+      "service_id": null,
+      "times": [
+        "10:00"
+      ]
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CREATE_APPOINTMENT"
+    },
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": "10:00",
+      "mode": "none",
+      "resolution": {
+        "kind": "explicit"
+      },
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": "10:00",
+      "start_time_expression": null
+    },
+    "time_constraint": {
+      "end": "10:00",
+      "label": null,
+      "mode": "exact",
+      "start": "10:00"
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

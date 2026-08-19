@@ -13,6 +13,15 @@
     "timezone": "UTC"
   },
   "response": {
+    "entity_resolutions": {
+      "service": {
+        "candidate_values": [
+          1001,
+          1002
+        ],
+        "resolution": "AMBIGUOUS"
+      }
+    },
     "facts": {
       "booking_id": null,
       "date_time_pairs": [
@@ -39,13 +48,16 @@
       "flexi haircut + prunning"
     ],
     "temporal": {
-      "confidence": 0.98,
+      "confidence": 0.95,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,
       "end_time_expression": null,
       "expression": "tomorrow at 10am",
       "mode": "single_day",
+      "resolution": {
+        "kind": "explicit"
+      },
       "start_date": "2026-07-02",
       "start_date_expression": "tomorrow",
       "start_time": "10:00",

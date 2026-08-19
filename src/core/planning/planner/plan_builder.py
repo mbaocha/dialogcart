@@ -48,9 +48,22 @@ def overlay_post_execution_planning_on_outcome(
     if time_match not in (TIME_MATCH_EXACT, TIME_MATCH_MISMATCH):
         return
 
-    for key in ("awaiting", "stage", "time_match_outcome", "time_resolution"):
+    for key in (
+        "awaiting",
+        "ask_next",
+        "stage",
+        "time_match_outcome",
+        "time_resolution",
+    ):
         if plan.get(key) is not None:
             outcome[key] = plan.get(key)
+
+    nested = outcome.get("plan")
+    outcome_plan = dict(nested) if isinstance(nested, dict) else {}
+    for key in ("status", "stage", "action", "awaiting", "ask_next"):
+        if key in plan:
+            outcome_plan[key] = plan.get(key)
+    outcome["plan"] = outcome_plan
 
     missing = plan.get("missing_slots")
     if isinstance(missing, list):

@@ -131,3 +131,30 @@ def test_readiness_revision_flag_invalidates_availability():
     assert evidence.revision_invalidated_availability is True
     assert evidence.availability_invalidated is True
     assert evidence.availability_resolved is False
+
+
+def test_committed_create_has_no_execution_readiness():
+    session = {
+        "booking": {"booking_id": "bk-1", "booking_code": "ORG-1"},
+        "planning": {
+            "intent_name": "CREATE_APPOINTMENT",
+            "slots": _base_slots(),
+        },
+        "confirmation_state": "pending",
+    }
+    evidence = build_execution_readiness_evidence(
+        intent_name="CREATE_APPOINTMENT",
+        effective_slots=_base_slots(),
+        payload={},
+        session_state=session,
+        missing_slots=[],
+        needs_clarification=False,
+        availability_ready=True,
+        confirmation_state="pending",
+        organization_id=1,
+        confirm_booking_continuation=True,
+    )
+
+    assert evidence.executable_actions == ()
+    assert evidence.flags["availability_ready"] is False
+    assert evidence.flags["booking_not_committed"] is False

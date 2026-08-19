@@ -104,6 +104,58 @@ def browse_navigation_hint_text(
     )
 
 
+def render_successful_fresh_availability(
+    decision: Optional[Dict[str, Any]],
+    request: LlmRenderRequest,
+) -> Optional[str]:
+    """Render a non-empty fresh availability window from authoritative facts.
+
+    This bounded path deliberately ignores conversation history. The finalized
+    Decision and its presented availability are the only workflow authority.
+    """
+    facts = request.facts if isinstance(request.facts, dict) else {}
+    availability = facts.get("availability")
+    resolution = facts.get("time_resolution")
+    if not isinstance(availability, dict) or not isinstance(resolution, dict):
+        return None
+    outcome = resolution.get("outcome") or resolution.get("status")
+    if outcome != TIME_MATCH_NOT_APPLICABLE:
+        return None
+    times = [str(value) for value in availability.get("times") or [] if value]
+    if not times or availability.get("empty"):
+        return None
+
+    plan = decision.get("plan") if isinstance(decision, dict) else None
+    if not isinstance(plan, dict):
+        plan = decision if isinstance(decision, dict) else {}
+    ask_next = plan.get("ask_next")
+    awaiting = plan.get("awaiting")
+    selection_authorized = bool(
+        ask_next == "time"
+        or awaiting in ("time", "TIME_SELECTION")
+    )
+
+    search_date = availability.get("date")
+    heading = (
+        f"Available times for {search_date}:"
+        if search_date
+        else "Available times:"
+    )
+    lines = [heading, *(f"- {value}" for value in times)]
+    more_count = int(availability.get("more_count") or 0)
+    if more_count:
+        lines.append(f"({more_count} more times available)")
+    if selection_authorized:
+        lines.extend(["", "Which time works best for you?"])
+    navigation = browse_navigation_hint_text(
+        availability.get("browse_hints"),
+        recovery_actions=availability.get("recovery_actions"),
+    )
+    if navigation:
+        lines.append(navigation)
+    return "\n".join(lines)
+
+
 def _browse_guidance_clause(
     browse_hints: Optional[Dict[str, Any]],
     *,
@@ -496,6 +548,14 @@ def build_availability_render_request(
         "browse_hints": browse_hints,
         "recovery_actions": recovery_actions,
     }
+    decision_facts = decision.get("facts") if isinstance(decision, dict) else None
+    refresh_reason = (
+        decision_facts.get("availability_refresh_reason")
+        if isinstance(decision_facts, dict)
+        else None
+    )
+    if refresh_reason == "expired":
+        availability_facts["refresh_reason"] = refresh_reason
 
     if total_unique == 0 and outcome != TIME_MATCH_MISMATCH:
         backend_message = _backend_availability_message(execution_result)
@@ -773,6 +833,8 @@ def resolve_time_mismatch_text(
     search_date: Optional[str] = None,
     browse_hints: Optional[Dict[str, Any]] = None,
     recovery_actions: Optional[Any] = None,
+    refresh_reason: Optional[str] = None,
+    unavailable_reason: Optional[str] = None,
 ) -> str:
     """Deterministic wording when a requested time is not among presented offers.
 
@@ -798,6 +860,30 @@ def resolve_time_mismatch_text(
             browse_hints=browse_hints,
         )
     recovery = format_mismatch_recovery_text(actions)
+    refresh_prefix = (
+        "I rechecked availability because the previous results had expired. "
+        if refresh_reason == "expired"
+        else ""
+    )
+
+    if unavailable_reason == "business_closed" and not (times or alternatives):
+        date_label = _format_exhaustion_date_label(
+            str(search_date) if search_date else None
+        )
+        closure = (
+            f"We're closed on {date_label}"
+            if date_label
+            else "We're closed that day"
+        )
+        if requested_label:
+            return (
+                f"{closure}, so {requested_label} isn't available. "
+                "Would you like to try a different date?"
+            )
+        return (
+            f"{closure}, so there are no appointment times available that day. "
+            "Would you like to try a different date?"
+        )
 
     if location == MISMATCH_LOCATION_EARLIER_PAGE:
         base = (
@@ -834,9 +920,10 @@ def resolve_time_mismatch_text(
         else:
             unavailable = "That time isn't available"
         if recovery:
-            return f"{unavailable}. {recovery}"
+            return f"{refresh_prefix}{unavailable}. {recovery}"
         return (
-            f"{unavailable}. Please choose one of the times currently shown, "
+            f"{refresh_prefix}{unavailable}. "
+            "Please choose one of the times currently shown, "
             "or ask for another date."
         )
 
@@ -851,9 +938,8 @@ def resolve_time_mismatch_text(
         if requested_label
         else "That time isn't available"
     )
-
     if not labels:
-        return f"{unavailable}. Please choose another time."
+        return f"{refresh_prefix}{unavailable}. Please choose another time."
 
     if len(labels) == 1:
         times_clause = labels[0]
@@ -861,8 +947,13 @@ def resolve_time_mismatch_text(
         times_clause = f"{labels[0]} and {labels[1]}"
     else:
         times_clause = ", ".join(labels[:-1]) + f" and {labels[-1]}"
+    availability_clause = (
+        "The current available times are"
+        if refresh_reason == "expired"
+        else "The available times are"
+    )
     return (
-        f"{unavailable}. The available times are {times_clause}. "
+        f"{refresh_prefix}{unavailable}. {availability_clause} {times_clause}. "
         "Which one would you prefer?"
     )
 

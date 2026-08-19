@@ -1,0 +1,109 @@
+{
+  "key": {
+    "conversation_context": {
+      "customer_contact": {
+        "authoritative_name": "E2E Commit Customer",
+        "customer_id": 91001,
+        "name_status": "authoritative"
+      }
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "brake pad change": 28,
+        "executive oil change": 26,
+        "john": 201,
+        "mike": 202,
+        "premium full service": 27
+      },
+      "booking_mode": "service",
+      "catalog": {
+        "services": [
+          {
+            "description": "We use the best oil type for your car.",
+            "id": "26",
+            "name": "Executive Oil Change"
+          },
+          {
+            "description": "A comprehensive full service, premium style.",
+            "id": "27",
+            "name": "Premium Full Service"
+          },
+          {
+            "description": "We supply and fit the right brake pads for your vehicle.",
+            "id": "28",
+            "name": "Brake Pad Change"
+          }
+        ]
+      }
+    },
+    "text": "Book an Executive Oil Change for July 6 at 10am, petrol, registration AB12 CDE",
+    "timezone": "UTC"
+  },
+  "response": {
+    "entity_resolutions": {
+      "engine_type": {
+        "resolution": "RESOLVED",
+        "value": "petrol"
+      },
+      "registration_number": {
+        "resolution": "RESOLVED",
+        "value": "AB12 CDE"
+      },
+      "service": {
+        "resolution": "RESOLVED",
+        "value": 26
+      }
+    },
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [
+        {
+          "date": "2026-07-06",
+          "time": "10:00"
+        }
+      ],
+      "dates": [
+        "2026-07-06"
+      ],
+      "engine_type": "petrol",
+      "registration_number": "AB12 CDE",
+      "service": "Executive Oil Change",
+      "service_id": "executive oil change",
+      "staff": null,
+      "staff_id": null,
+      "times": [
+        "10:00"
+      ]
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CREATE_APPOINTMENT"
+    },
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": "July 6 at 10am",
+      "mode": "single_day",
+      "resolution": {
+        "kind": "explicit"
+      },
+      "start_date": "2026-07-06",
+      "start_date_expression": "July 6",
+      "start_time": "10:00",
+      "start_time_expression": null
+    },
+    "time_constraint": {
+      "end": "10:00",
+      "label": null,
+      "mode": "exact",
+      "start": "10:00"
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

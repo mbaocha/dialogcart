@@ -41,6 +41,19 @@ class BookingWorkflow:
             plan["action"] = "CONFIRM_APPOINTMENT"
             booking_id = refs.get("booking_id")
             booking_code = refs.get("booking_code")
+            from core.session.booking_lifecycle import (
+                BookingLifecycle,
+                build_post_commit_transition,
+                derive_booking_lifecycle,
+            )
+
+            had_booking_identifier = bool(
+                slots.get("booking_id") or slots.get("booking_code")
+            )
+            was_committed = had_booking_identifier or (
+                derive_booking_lifecycle(session_state)
+                == BookingLifecycle.COMMITTED
+            )
             if booking_id:
                 slots["booking_id"] = booking_id
             if booking_code:
@@ -65,6 +78,12 @@ class BookingWorkflow:
                     plan.get("_merged_luma_response"),
                     reason="create_appointment_committed",
                 )
+                if not was_committed:
+                    plan["_post_commit_transition"] = build_post_commit_transition(
+                        booking_id=booking_id,
+                        booking_code=booking_code,
+                        completed_slot_keys=slots.keys(),
+                    )
                 logger.debug(
                     "Persisted booking_id=%s booking_code=%s to slots for idempotency",
                     booking_id,

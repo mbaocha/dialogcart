@@ -17,6 +17,11 @@ beauty_salon:
       role: bookable_item
       description: The requested service.
       catalog: services
+    - name: service_recipient
+      type: text
+      role: booking_subject
+      required: true
+      description: The name of the person for whom the service is being booked.
 
 car_service:
   booking_domain: service
@@ -29,6 +34,7 @@ car_service:
       catalog: services
     - name: engine_type
       type: enum
+      role: booking_subject
       required: true
       availability_criteria: true
       description: Vehicle engine type.
@@ -39,6 +45,7 @@ car_service:
         - ev
     - name: registration_number
       type: text
+      role: booking_subject
       required: true
       description: Vehicle registration number.
     - name: staff

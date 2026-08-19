@@ -62,6 +62,12 @@ def test_stage06_preserves_pending_for_unrecognized_no_evidence():
     session = {
         "intent_name": "CREATE_APPOINTMENT",
         "confirmation_state": "pending",
+        "customer_id": 91,
+        "customer_contact": {
+            "customer_id": 91,
+            "authoritative_name": "Test Customer",
+            "name_status": "authoritative",
+        },
         "slots": dict(payload["slots"]),
     }
     attached = AttachedRequest(
@@ -214,18 +220,23 @@ def test_workflow_resume_pending_confirmation_shared_by_digression_paths():
 
 
 def test_handler_and_off_topic_resume_same_pending_confirmation():
-    """HANDLER_DELEGATED and OFF_TOPIC both resume via workflow_resume."""
+    """Pending confirmation is withheld from both LLM resume instructions."""
     from core.rendering.off_topic_renderer import build_off_topic_render_request
-    from core.rendering.workflow_resume import attach_resume_to_handler_render
+    from core.rendering.workflow_resume import (
+        attach_resume_to_handler_render,
+        compose_pending_confirmation_resume,
+    )
 
     session = {
         "intent_name": "CREATE_APPOINTMENT",
         "confirmation_state": "pending",
         "awaiting": "USER_CONFIRMATION",
-        "slots": {
-            "service_id": "premium haircut",
-            "date": "2026-07-06",
-            "time": "09:00",
+        "planning": {
+            "slots": {
+                "service_id": "premium haircut",
+                "date": "2026-07-06",
+                "time": "09:00",
+            },
         },
         "messages": [],
     }
@@ -243,12 +254,13 @@ def test_handler_and_off_topic_resume_same_pending_confirmation():
         session_state=session,
         facts={"chunks": [{"content": "We open Sundays 10–4."}]},
     )
-    assert ot.facts.get("resume_instruction")
-    assert handler_facts.get("resume_instruction")
-    assert ot.facts["resume_instruction"] == handler_facts["resume_instruction"]
-    assert "confirm" in handler_facts["resume_instruction"].lower()
-    assert "resume" in handler_instruction.lower()
-    assert "Answer the FAQ using Facts only." in handler_instruction
+    assert "resume_instruction" not in ot.facts
+    assert "resume_instruction" not in handler_facts
+    assert handler_instruction == "Answer the FAQ using Facts only."
+    suffix = compose_pending_confirmation_resume(session)
+    assert suffix is not None
+    assert "about to book" in suffix.lower()
+    assert "Would you like me to go ahead?" in suffix
 
 
 def test_slot_ask_resume_unchanged_for_handler_digression():

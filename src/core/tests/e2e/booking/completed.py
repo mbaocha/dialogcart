@@ -76,6 +76,7 @@ _register(
                 confirmation=None,
                 missing_slots=["service_id", "date", "time"],
             ),
+            after=_assert_no_search_yet,
         ),
         Turn(
             "premium",
@@ -117,7 +118,13 @@ _register(
                 slot_contains={"time": "10"},
                 session_slots={"service_id": PREMIUM_SERVICE},
             ),
-            after=_assert_booking_created_with_item_id(PREMIUM_SERVICE_ITEM_ID),
+            after=_assert_booking_created_with_exact_payload(
+                expected_item_id=PREMIUM_SERVICE_ITEM_ID,
+                expected_service_id=PREMIUM_SERVICE,
+                expected_date=FIRST_AVAILABLE_DATE,
+                expected_time="10:00",
+                abandoned_values=(FLEXI_SERVICE,),
+            ),
         ),
         tags=["booking", "happy-path"],
         requires_customer_identity=True,
@@ -221,8 +228,6 @@ _register(
                 action="CONFIRM_APPOINTMENT",
                 confirmation=None,
                 missing_slots=[],
-                session_slots={"service_id": PREMIUM_SERVICE},
-                slot_contains={"time": "10"},
             ),
             after=_assert_booking_created,
         ),
@@ -267,7 +272,6 @@ _register(
             Expect(
                 action="CONFIRM_APPOINTMENT",
                 confirmation=None,
-                session_slots={"service_id": PREMIUM_SERVICE},
             ),
             after=_capture_committed_booking,
         ),
@@ -373,8 +377,6 @@ _register(
             Expect(
                 action="CONFIRM_APPOINTMENT",
                 confirmation=None,
-                session_slots={"service_id": PREMIUM_SERVICE},
-                slot_contains={"time": "10"},
             ),
             after=_assert_final_multi_revision_booking,
         ),
@@ -580,8 +582,6 @@ _register(
                 stage="CONFIRM",
                 action="CONFIRM_APPOINTMENT",
                 confirmation=None,
-                session_slots={"service_id": PREMIUM_SERVICE},
-                slot_contains={"time": "10"},
             ),
             after=_assert_booking_created,
         ),
@@ -628,14 +628,12 @@ _register(
             Expect(
                 action="CONFIRM_APPOINTMENT",
                 confirmation=None,
-                session_slots={"service_id": PREMIUM_SERVICE},
             ),
             after=_capture_committed_booking,
         ),
         Turn(
             "asdfghjkl",
             Expect(
-                intent="CREATE_APPOINTMENT",
                 confirmation=None,
                 response_text_present=True,
             ),

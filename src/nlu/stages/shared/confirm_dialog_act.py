@@ -8,15 +8,24 @@ Stage 2 pass, and Stage 2 may independently select CONFIRM_ACTION when validatin
 def confirm_action_dialog_act_section() -> str:
     """Semantic rule: authorization vs questions about a pending proposed action."""
     return """CONFIRM_ACTION (dialog act — all workflows):
-HARD CONSTRAINT: CONFIRM_ACTION is valid only when CONVERSATION CONTEXT contains an
-assistant confirmation ask (go ahead / confirm / proceed). If that ask is absent
-or context is empty, CONFIRM_ACTION is invalid — do not emit or promote to it.
+HARD CONSTRAINT: CONFIRM_ACTION requires BOTH a genuine pending assistant
+confirmation ask in CONVERSATION CONTEXT AND semantic acceptance evidence in the
+CURRENT USER MESSAGE. Words such as "confirm" in assistant text, system instructions,
+formatted history, or a pending-request description are context only and never user
+acceptance evidence. If either requirement is absent, do not emit or promote to it.
+
+A pending profile request (including CUSTOMER_CONTACT_NAME) is slot-fill context,
+not a confirmation ask. A plausible answer to it retains the active booking intent
+and extracts the requested entity. A genuine competing user act keeps its own intent.
+Names such as "Godswill Mbaocha" or "Maya", unrelated questions such as "Who is the
+prime minister?", and questions such as "What are you confirming?" are not acceptance.
 
 With a pending confirmation ask, authorize that proposal:
   yes, yes please, go ahead, proceed, confirm, okay, sounds good, that's fine, do it.
   Pending-only override of booking verbs: "book it", "reserve it", "schedule it"
   → CONFIRM_ACTION (not CREATE_APPOINTMENT / CREATE_RESERVATION) for this turn only.
-  Empty context + "book it" + Stage 1 CREATE_* → keep CREATE_* (not CONFIRM_ACTION).
+  Empty context + "book it" → not CONFIRM_ACTION. If booking type (appointment vs
+  reservation) is not identifiable, emit UNKNOWN — do not keep or guess a CREATE_*.
 
 CORRECTION OVERRIDES AN AFFIRMATIVE PREFIX:
 When an affirmative opening is followed by an explicit replacement or correction

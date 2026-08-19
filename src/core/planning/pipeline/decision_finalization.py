@@ -22,6 +22,7 @@ from core.planning.pipeline.presentation_readiness import (
 from core.planning.time_resolution import (
     TIME_MATCH_EXACT,
     TIME_MATCH_MISMATCH,
+    TIME_MATCH_NOT_APPLICABLE,
     _patch_plan_container,
 )
 from core.session.confirmation_gate import (
@@ -165,7 +166,7 @@ class TimeResolutionEvidence:
     """Evidence for Decision finalization after time resolution."""
 
     outcome: str
-    """TIME_MATCH_EXACT or TIME_MATCH_MISMATCH."""
+    """TIME_MATCH_EXACT, TIME_MATCH_MISMATCH, or applicable N/A presentation."""
 
     time_resolution: Optional[Dict[str, Any]] = None
     bind_result: Optional[Dict[str, Any]] = None
@@ -176,11 +177,111 @@ class TimeResolutionEvidence:
     apply_confirmation_transition: bool = True
     """When True, also apply confirmation_state / missing_slots finalization."""
 
+    presented_options: Optional[List[Dict[str, Any]]] = None
+    """Authoritative options presented by the completed fresh search."""
+
 
 def _composed_planning_incomplete(plan: Dict[str, Any]) -> bool:
     """True when composed planning missing_slots still need clarification."""
     missing = plan.get("missing_slots")
     return isinstance(missing, list) and bool(missing)
+
+
+def _customer_name_prerequisite_satisfied(plan: Dict[str, Any]) -> bool:
+    evidence = plan.get("_customer_name_prerequisite")
+    nested = plan.get("plan")
+    if not isinstance(evidence, dict) and isinstance(nested, dict):
+        evidence = nested.get("_customer_name_prerequisite")
+    if not isinstance(evidence, dict):
+        return True
+    return evidence.get("satisfied") is True
+
+
+def _finalize_customer_name_clarification(
+    plan: Dict[str, Any], evidence: TimeResolutionEvidence
+) -> None:
+    """Finalize without creating confirmation authorization."""
+    bind_result = evidence.bind_result or {}
+    bound_slots = bind_result.get("slots")
+    resolved_range = bind_result.get("resolved_datetime_range")
+    _patch_plan_container(
+        plan,
+        status="NEEDS_CLARIFICATION",
+        stage="CONFIRM",
+        action=None,
+        awaiting="CUSTOMER_CONTACT_NAME",
+        time_match_outcome=TIME_MATCH_EXACT,
+        time_resolution=evidence.time_resolution,
+        bound_slots=bound_slots if isinstance(bound_slots, dict) else None,
+        resolved_range=resolved_range if isinstance(resolved_range, dict) else None,
+    )
+    plan["ask_next"] = "customer_contact_name"
+    plan["action_branch"] = "customer_contact_name_required"
+    nested = plan.get("plan")
+    if isinstance(nested, dict):
+        nested["ask_next"] = "customer_contact_name"
+    decision = plan.get("_decision")
+    if isinstance(decision, dict):
+        decision["ask_next"] = "customer_contact_name"
+        facts = decision.get("facts")
+        if isinstance(facts, dict):
+            facts["ask_next"] = "customer_contact_name"
+
+
+def finalize_decision_after_customer_name_persisted(
+    plan: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Resume an otherwise-ready customer-name clarification after persistence."""
+    nested = plan.get("plan")
+    otherwise_ready = plan.get("_otherwise_confirmation_ready")
+    if otherwise_ready is None and isinstance(nested, dict):
+        otherwise_ready = nested.get("_otherwise_confirmation_ready")
+    if not otherwise_ready:
+        return plan
+    evidence = plan.get("_customer_name_prerequisite")
+    if not isinstance(evidence, dict) and isinstance(nested, dict):
+        evidence = nested.get("_customer_name_prerequisite")
+    if isinstance(evidence, dict):
+        evidence["satisfied"] = True
+        evidence["required_input"] = None
+    _patch_plan_container(
+        plan,
+        status="AWAITING_CONFIRMATION",
+        stage="CONFIRM",
+        action=None,
+        awaiting="USER_CONFIRMATION",
+    )
+    # The customer-name clarification installed prompt metadata across the
+    # runtime plan and Decision projections. Persistence has satisfied that
+    # request, so none of those containers may continue to render it.
+    plan.pop("text", None)
+    plan["ask_next"] = None
+    if plan.get("action_branch") == "customer_contact_name_required":
+        plan.pop("action_branch", None)
+    if isinstance(nested, dict):
+        nested["ask_next"] = None
+        if nested.get("action_branch") == "customer_contact_name_required":
+            nested.pop("action_branch", None)
+    decision = plan.get("_decision")
+    if isinstance(decision, dict):
+        decision["awaiting"] = "USER_CONFIRMATION"
+        decision["ask_next"] = None
+        decision_plan = decision.get("plan")
+        if isinstance(decision_plan, dict):
+            decision_plan["ask_next"] = None
+            if decision_plan.get("action_branch") == "customer_contact_name_required":
+                decision_plan.pop("action_branch", None)
+        facts = decision.get("facts")
+        if isinstance(facts, dict):
+            facts["awaiting"] = "USER_CONFIRMATION"
+            facts["ask_next"] = None
+    merged = plan.get("_merged_luma_response")
+    if not isinstance(merged, dict):
+        merged = {}
+        plan["_merged_luma_response"] = merged
+    set_confirmation_state(merged, "pending")
+    set_confirmation_state(plan, "pending")
+    return plan
 
 
 def _ask_next_from_plan(plan: Dict[str, Any]) -> Optional[str]:
@@ -237,6 +338,8 @@ def finalize_decision_after_time_resolution(
             _prune_missing_slots_filled_by_bind(plan, bound_slots)
         if enter_confirmation:
             enter_confirmation = not _composed_planning_incomplete(plan)
+        if enter_confirmation:
+            enter_confirmation = _customer_name_prerequisite_satisfied(plan)
 
     if outcome == TIME_MATCH_EXACT:
         _finalize_exact(
@@ -246,6 +349,8 @@ def finalize_decision_after_time_resolution(
         )
     elif outcome == TIME_MATCH_MISMATCH:
         _finalize_mismatch(plan, evidence)
+    elif outcome == TIME_MATCH_NOT_APPLICABLE:
+        _finalize_presented_time_selection(plan, evidence)
     else:
         return plan
 
@@ -260,7 +365,82 @@ def finalize_decision_after_time_resolution(
         else:
             _finalize_confirmation_transition(plan, time_match=outcome)
 
+    if outcome == TIME_MATCH_EXACT and not enter_confirmation:
+        _emit_decision_finalization_trace(plan, time_match=outcome)
+
     return plan
+
+
+def _plan_slots(plan: Dict[str, Any]) -> Dict[str, Any]:
+    slots = plan.get("slots")
+    if isinstance(slots, dict):
+        return slots
+    decision = plan.get("_decision")
+    facts = decision.get("facts") if isinstance(decision, dict) else None
+    slots = facts.get("slots") if isinstance(facts, dict) else None
+    return slots if isinstance(slots, dict) else {}
+
+
+def _supports_presented_time_selection(
+    plan: Dict[str, Any], evidence: TimeResolutionEvidence
+) -> bool:
+    """Gate the normal post-search transition to trusted booking-time selection."""
+    if (plan.get("intent_name") or plan.get("intent")) != "CREATE_APPOINTMENT":
+        return False
+    if plan.get("action") != "SEARCH_AVAILABILITY":
+        return False
+    if plan.get("availability_browse"):
+        return False
+    slots = _plan_slots(plan)
+    if slots.get("time") or plan.get("resolved_datetime_range"):
+        return False
+    missing = plan.get("missing_slots")
+    if not isinstance(missing, list) or "time" not in missing:
+        return False
+    options = evidence.presented_options
+    if not isinstance(options, list) or not options:
+        return False
+    from core.planning.temporal_proposal import _parse_offer_start_parts
+
+    return any(
+        isinstance(option, dict)
+        and _parse_offer_start_parts(option.get("starts_at") or option.get("start"))
+        is not None
+        for option in options
+    )
+
+
+def _sync_time_selection_ask(plan: Dict[str, Any]) -> None:
+    ask_next = "time"
+    plan["ask_next"] = ask_next
+    nested = plan.get("plan")
+    if isinstance(nested, dict):
+        nested["ask_next"] = ask_next
+    decision = plan.get("_decision")
+    if isinstance(decision, dict):
+        decision["ask_next"] = ask_next
+        decision_plan = decision.get("plan")
+        if isinstance(decision_plan, dict):
+            decision_plan["ask_next"] = ask_next
+        facts = decision.get("facts")
+        if isinstance(facts, dict):
+            facts["ask_next"] = ask_next
+
+
+def _finalize_presented_time_selection(
+    plan: Dict[str, Any], evidence: TimeResolutionEvidence
+) -> None:
+    if not _supports_presented_time_selection(plan, evidence):
+        return
+    _patch_plan_container(
+        plan,
+        status=str(plan.get("status") or "READY"),
+        awaiting=awaiting_from_ask_next("time"),
+        time_match_outcome=TIME_MATCH_NOT_APPLICABLE,
+        time_resolution=evidence.time_resolution,
+    )
+    _sync_time_selection_ask(plan)
+    _emit_decision_finalization_trace(plan, time_match=TIME_MATCH_NOT_APPLICABLE)
 
 
 def _finalize_exact(
@@ -288,6 +468,8 @@ def _finalize_exact(
             bound_slots=bound_slots,
             resolved_range=resolved_range,
         )
+    elif not _customer_name_prerequisite_satisfied(plan):
+        _finalize_customer_name_clarification(plan, evidence)
     elif _composed_planning_incomplete(plan):
         # Bind the selected time but continue required-slot clarification.
         ask_next = _ask_next_from_plan(plan)
@@ -655,10 +837,19 @@ def _emit_decision_finalization_trace(plan: Dict[str, Any], *, time_match: str) 
     action = plan.get("action")
     awaiting = plan.get("awaiting")
     reason_text = (
-        "Exact time match after availability; awaiting user confirmation"
-        if time_match == TIME_MATCH_EXACT
-        else "Requested time unavailable; clarification required"
+        "Authoritative customer contact name required before confirmation"
+        if awaiting == "CUSTOMER_CONTACT_NAME"
+        else (
+            "Exact time match after availability; awaiting user confirmation"
+            if time_match == TIME_MATCH_EXACT
+            else "Requested time unavailable; clarification required"
+        )
     )
+    reason_code = time_match
+    if awaiting == "CUSTOMER_CONTACT_NAME":
+        from core.tracing.reason_codes import CUSTOMER_CONTACT_NAME_REQUIRED
+
+        reason_code = CUSTOMER_CONTACT_NAME_REQUIRED
 
     if not trace.has_record("evidence.planning.post_execution"):
         emit_evidence(
@@ -704,7 +895,7 @@ def _emit_decision_finalization_trace(plan: Dict[str, Any], *, time_match: str) 
             field="plan.status",
             previous="READY",
             new=status,
-            reason_code=time_match,
+            reason_code=reason_code,
             reason_text=reason_text,
             presentation_only=True,
         )

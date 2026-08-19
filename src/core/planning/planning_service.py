@@ -128,9 +128,25 @@ def plan_message(
         plan_structure.setdefault("_entity_schema", entity_schema)
 
     # Preserve explicit degraded-turn metadata through the engine boundary.
-    for fallback_key in ("recovered", "recovery_reason", "message_applied"):
+    for fallback_key in (
+        "recovered",
+        "nlu_failure_recovery",
+        "recovery_reason",
+        "message_applied",
+    ):
         if fallback_key in outcome:
             planning_result[fallback_key] = outcome[fallback_key]
+
+    # Admission failures cannot authorize execution. Keep this normalization
+    # independent of fallback construction so a malformed recovery outcome also
+    # reaches the engine as non-executable.
+    if (
+        planning_result.get("message_applied") is False
+        or planning_result.get("nlu_failure_recovery") is True
+    ):
+        planning_result["action"] = None
+        plan_structure["action"] = None
+        plan_structure["executable_actions"] = []
 
     # Carry digression / RAG routing fields — stripped by standard planning_result construction
     if outcome.get("status") in ("HANDLER_DELEGATED", "OFF_TOPIC"):

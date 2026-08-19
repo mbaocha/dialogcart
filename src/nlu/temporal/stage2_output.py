@@ -84,6 +84,9 @@ def parse_temporal_dict(
     mode = _opt_str(raw.get("mode"))
     if mode and mode not in ("none", "single_day", "range", "flexible"):
         mode = None
+    resolution = raw.get("resolution")
+    if not isinstance(resolution, dict):
+        resolution = None
 
     if expression is None:
         from .from_stage2 import _build_expression
@@ -111,6 +114,7 @@ def parse_temporal_dict(
         end_time=end_time,
         mode=mode,
         confidence=conf,
+        resolution=dict(resolution) if resolution is not None else None,
     )
     return apply_by_from_exact_contract(temporal, source_text=source_text)
 

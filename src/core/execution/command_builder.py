@@ -28,6 +28,15 @@ def build_execution_command(
     if not isinstance(plan, Mapping):
         return None
 
+    # Execution authorization requires semantic evidence from the current turn.
+    # This is deliberately independent of planner fallback construction so even
+    # a malformed or synthetic plan cannot replay a durable executable action.
+    if (
+        plan.get("message_applied") is False
+        or plan.get("nlu_failure_recovery") is True
+    ):
+        return None
+
     action = plan.get("action")
     if not action:
         return None

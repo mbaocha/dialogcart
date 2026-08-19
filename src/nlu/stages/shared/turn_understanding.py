@@ -114,6 +114,8 @@ def derive_turn_understanding(
     UNRECOGNIZED_INPUT — active booking continuation with no extractable content
     (e.g. gibberish), or UNKNOWN with no evidence.
     """
+    if slm.get("_entity_extraction_failed") is True:
+        return UNRECOGNIZED_INPUT
     if _has_utterance_evidence(slm, conversation_context):
         return UNDERSTOOD
 

@@ -18,6 +18,23 @@ from core.tracing.availability import (
 )
 
 
+_AVAILABILITY_REJECTION_REASONS = {
+    "BUSINESS_CLOSED": "business_closed",
+}
+
+
+def _availability_rejection_reason(detail: Any) -> str:
+    """Normalize only recognized structured provider rejection codes."""
+    if not isinstance(detail, dict):
+        return "availability_rejected"
+    code = detail.get("code")
+    if not isinstance(code, str):
+        return "availability_rejected"
+    return _AVAILABILITY_REJECTION_REASONS.get(
+        code.strip().upper(), "availability_rejected"
+    )
+
+
 class AvailabilityClient(BaseClient):
     """HTTP client for availability endpoints."""
 
@@ -76,12 +93,15 @@ class AvailabilityClient(BaseClient):
             except Exception:
                 pass
             detail = error_json.get("detail") if isinstance(error_json, dict) else None
+            message = error_json.get("message") if isinstance(error_json, dict) else None
             is_business_rejection = isinstance(detail, str) or (
                 isinstance(detail, dict)
                 and any(detail.get(key) for key in ("code", "type", "reason"))
-            )
+            ) or (isinstance(message, str) and bool(message.strip()))
             if e.response.status_code == 422 and is_business_rejection:
-                raise AvailabilityRejectedError() from e
+                raise AvailabilityRejectedError(
+                    reason=_availability_rejection_reason(detail)
+                ) from e
             raise UpstreamError(
                 f"API returned error {e.response.status_code}: {error_text}"
             ) from e

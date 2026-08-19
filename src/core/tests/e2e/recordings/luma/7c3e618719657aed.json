@@ -1,0 +1,106 @@
+{
+  "key": {
+    "conversation_context": {
+      "last_date_proposal": {
+        "mode": "single_day",
+        "start": "2026-07-02"
+      },
+      "last_intent": "CREATE_APPOINTMENT",
+      "last_search_query": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "book me a premium haircut tomorrow"
+        },
+        {
+          "role": "assistant",
+          "text": "Here are the available times for 2026-07-02:\n- 9:00 AM\n- 10:00 AM\n- 11:00 AM\n- 12:00 PM\n- 1:00 PM\nWhich would you like? You can also say \"show more\" to see additional times."
+        }
+      ],
+      "missing_slots": [
+        "time"
+      ],
+      "presented_options": {
+        "options": [
+          {
+            "index": 1,
+            "label": "9:00 AM"
+          },
+          {
+            "index": 2,
+            "label": "10:00 AM"
+          },
+          {
+            "index": 3,
+            "label": "11:00 AM"
+          },
+          {
+            "index": 4,
+            "label": "12:00 PM"
+          },
+          {
+            "index": 5,
+            "label": "1:00 PM"
+          },
+          {
+            "index": 6,
+            "label": "2:00 PM"
+          }
+        ],
+        "reference": "avp1_a7f9d75a30a4e5221aa04aec"
+      },
+      "temporal_context_version": 1,
+      "turns": [
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "book me a premium haircut tomorrow"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "Does a lion lay eggs?",
+    "timezone": "UTC"
+  },
+  "response": {
+    "answer": "No, lions are mammals and do not lay eggs. They give birth to live young.",
+    "answerable": true,
+    "entity_resolutions": {},
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service_id": null,
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.99,
+      "name": "OFF_TOPIC"
+    },
+    "off_topic_query": "Does a lion lay eggs?",
+    "temporal": {
+      "confidence": 0.99,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": null,
+      "mode": "none",
+      "resolution": null,
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

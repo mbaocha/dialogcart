@@ -239,7 +239,7 @@ def _times(result):
         ),
     ],
 )
-def test_live_clock_1_30_resumes_booking_after_digression(label, ctx):
+def test_live_bare_clock_after_digression_preserves_intent_but_is_ambiguous(label, ctx):
     pipeline = _prepare_live_nlu()
     result = pipeline.run(
         "1.30",
@@ -249,7 +249,13 @@ def test_live_clock_1_30_resumes_booking_after_digression(label, ctx):
     )
     assert _intent_name(result) == "CREATE_APPOINTMENT", (label, result)
     assert _intent_name(result) != "CONFIRM_ACTION", label
-    assert "01:30" in _times(result), (label, _times(result))
+    assert _times(result) == [], (label, _times(result))
+    temporal = result.temporal
+    assert temporal["start_time"] is None, (label, temporal)
+    assert temporal["resolution"] == {"kind": "ambiguous_meridiem"}, (
+        label,
+        temporal,
+    )
 
 
 @pytest.mark.skipif(not _HAS_ANTHROPIC, reason="ANTHROPIC_API_KEY not set")

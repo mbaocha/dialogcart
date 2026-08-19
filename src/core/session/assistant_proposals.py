@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List
 
 from core.rendering.llm_renderer import HandlerEntitySelection, HandlerRenderResult
+from core.clock import utc_now_iso
 
 PROPOSAL_TYPE = "ENTITY_RECOMMENDATION"
 PENDING_STATUS = "PENDING"
@@ -147,5 +148,6 @@ def create_assistant_proposals(
             "source": {"handler": handler_name, "transaction_id": transaction_id},
             "expected_responses": list(EXPECTED_RESPONSES),
             "expiry_policy": EXPIRY_POLICY,
+            "created_at": utc_now_iso(),
         })
     return proposals

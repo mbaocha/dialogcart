@@ -28,6 +28,7 @@ from core.planning.pipeline.requests import (
     build_legacy_attachment_read_report,
 )
 from core.planning.planning_mutations import (
+    apply_authoritative_entity_resolution_mutations,
     apply_assistant_proposal_promotion,
     apply_assistant_proposal_rejection,
     apply_confirmation_planning_mutations,
@@ -184,6 +185,26 @@ def run_planning_pipeline(
     if entity_schema is not None:
         # Request-scoped allowlist for fact→slot promotion (not persisted).
         luma_response = {**luma_response, "_entity_schema": entity_schema}
+        from core.adapters.nlu.entity_resolution_contract import (
+            project_authoritative_entity_values,
+        )
+
+        luma_response = project_authoritative_entity_values(
+            luma_response,
+            entity_schema=entity_schema,
+        )
+    catalog_context = (
+        tenant_context.get("catalog") if isinstance(tenant_context, dict) else None
+    )
+    if derived_domain == "service" and isinstance(catalog_context, dict):
+        from core.catalogue import apply_catalogue_turn, derive_service_catalogue
+
+        catalogue = derive_service_catalogue(catalog_context.get("services"))
+        luma_response = apply_catalogue_turn(
+            luma_response,
+            catalogue=catalogue,
+            session=session_state,
+        )
     original_session_state = session_state
 
     current_request = build_current_request(luma_response, source_text=text)
@@ -265,6 +286,7 @@ def run_planning_pipeline(
         apply_domain_filter=apply_domain_filter,
         entity_schema=entity_schema,
     )
+    apply_authoritative_entity_resolution_mutations(working_turn)
     from core.planning.planning_mutations import (
         apply_empty_availability_recovery_acceptance,
     )

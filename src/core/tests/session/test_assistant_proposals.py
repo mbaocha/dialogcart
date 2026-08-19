@@ -34,6 +34,7 @@ def test_valid_catalog_selection_becomes_non_booking_pending_proposal() -> None:
     assert proposal["slot_key"] == "service_id"
     assert proposal["status"] == "PENDING"
     assert proposal["source"] == {"handler": "rag", "transaction_id": "turn-1"}
+    assert proposal["created_at"].endswith("Z")
 
 
 def test_unavailable_catalog_selection_is_rejected() -> None:

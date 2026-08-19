@@ -102,6 +102,9 @@ def _create_appointment_response(
 
     response: Dict[str, Any] = {
         "success": True,
+        "entity_resolutions": {
+            "service": {"resolution": "RESOLVED", "value": service_id}
+        },
         "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
         "needs_clarification": False,
         "booking": {

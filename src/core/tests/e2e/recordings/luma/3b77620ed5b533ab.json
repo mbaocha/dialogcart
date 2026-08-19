@@ -1,0 +1,111 @@
+{
+  "key": {
+    "conversation_context": {
+      "customer_contact": {
+        "authoritative_name": "E2E Commit Customer",
+        "customer_id": 91001,
+        "name_status": "authoritative"
+      },
+      "last_intent": "CREATE_APPOINTMENT",
+      "last_search_query": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "book haircut"
+        },
+        {
+          "role": "assistant",
+          "text": "Which service would you like me to check availability for?\n- Premium haircut\n- Flexi haircut + pruning"
+        },
+        {
+          "role": "user",
+          "text": "premium"
+        },
+        {
+          "role": "assistant",
+          "text": "premium haircut selected.\n\nHere are the available times for 2026-07-03:\n- 10:00 AM\n- 11:00 AM\nWhich would you like?"
+        },
+        {
+          "role": "user",
+          "text": "10am"
+        },
+        {
+          "role": "assistant",
+          "text": "You're about to book a premium haircut on July 3 at 10:00 AM. Would you like me to go ahead?"
+        },
+        {
+          "role": "user",
+          "text": "yes"
+        },
+        {
+          "role": "assistant",
+          "text": "Your appointment is confirmed!\n\n**Service:** premium haircut\n\n**Booking reference:** MOCK-BOOKING-001"
+        }
+      ],
+      "turns": [
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "book haircut"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "premium"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "10am"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "yes"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "asdfghjkl",
+    "timezone": "UTC"
+  },
+  "response": {
+    "entity_resolutions": {},
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service": null,
+      "service_id": null,
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.1,
+      "name": "CREATE_APPOINTMENT"
+    },
+    "temporal": {
+      "confidence": 0.1,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": null,
+      "mode": "none",
+      "resolution": null,
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNRECOGNIZED_INPUT"
+    }
+  }
+}

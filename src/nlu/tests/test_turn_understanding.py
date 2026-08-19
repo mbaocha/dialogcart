@@ -51,6 +51,20 @@ def test_in_flow_gibberish_is_unrecognized():
     assert derive_turn_understanding(slm, ctx) == UNRECOGNIZED_INPUT
 
 
+def test_entity_extraction_failure_overrides_independent_booking_id_evidence():
+    slm = {
+        "intent": "CREATE_APPOINTMENT",
+        "facts": {"booking_id": "aa1239", "registration_number": None},
+        "_entity_extraction_failed": True,
+    }
+    ctx = {
+        "last_intent": "CREATE_APPOINTMENT",
+        "missing_slots": ["registration_number"],
+    }
+
+    assert derive_turn_understanding(slm, ctx) == UNRECOGNIZED_INPUT
+
+
 def test_sticky_resolved_service_id_alone_is_not_understood():
     """Session reuse of resolved_service_id must not imply the utterance was understood."""
     slm = {

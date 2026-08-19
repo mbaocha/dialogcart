@@ -15,7 +15,6 @@ import anthropic
 
 from ..base_prompt import (
     build_tool,
-    declined_entities_rules,
     intent_candidate_section,
     intent_validation_instructions,
     service_rules,
@@ -25,15 +24,28 @@ from ..base_prompt import (
 from ..browse_operation import normalize_operation, operation_rules
 from ..entity_schema import (
     CompiledBusinessEntities,
+    apply_exact_enum_utterance_ownership,
+    apply_unique_catalog_utterance_mention,
+    atomic_entity_prompt_rules,
     bookable_item_phrase,
-    extract_declared_facts,
 )
 from ..in_flow_validation import in_flow_act_validation_rules
 from ..prompt_cache import cache_eligibility, log_usage, system_blocks
 from ...shared.context import format_conversation_context
-from ...shared.in_flow_act import promote_in_flow_booking_intent
+from ...shared.in_flow_act import (
+    active_booking_intent_from_context,
+    promote_in_flow_booking_intent,
+)
 from ...shared.slot_fill_continuation import slot_fill_continuation_section
 from ....catalog import _try_pick_from_candidate_list
+from ....entity_resolution import (
+    EntityExtractionValidationError,
+    EntityMentionEvidence,
+    MentionState,
+    usable_customer_contact_name,
+    validate_generated_entity_evidence,
+    validate_generated_entity_results,
+)
 from ....temporal.stage2_output import (
     empty_temporal_dict,
     materialize_temporal_ownership,
@@ -64,6 +76,71 @@ _PENDING_TIME_REPLACEMENT_RE = re.compile(
     r"(?P<hour>[1-9]|1\d|2[0-3])\b",
     re.IGNORECASE,
 )
+
+_EXPLICIT_CONTACT_NAME_CORRECTION_RE = re.compile(
+    r"^\s*(?:sorry\s*[,—-]?\s*)?(?:the\s+|my\s+)?contact\s+name\s+is\s+"
+    r"(?P<name>.+?)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _apply_explicit_contact_name_correction(
+    text: str,
+    validated_intent: str,
+    mentions: Dict[str, EntityMentionEvidence],
+    compiled: CompiledBusinessEntities,
+) -> Dict[str, EntityMentionEvidence]:
+    """Recover an explicit contact-name replacement missed by generated evidence."""
+    if validated_intent != "CORRECTION":
+        return mentions
+    field = next(
+        (item for item in compiled.fields if item.name == "customer_contact_name"),
+        None,
+    )
+    if field is None or field.type != "text":
+        return mentions
+    match = _EXPLICIT_CONTACT_NAME_CORRECTION_RE.fullmatch(text or "")
+    if match is None:
+        return mentions
+    name = usable_customer_contact_name(match.group("name").strip())
+    if name is None:
+        return mentions
+    updated = dict(mentions)
+    updated[field.name] = EntityMentionEvidence(
+        entity_name=field.name,
+        state=MentionState.MENTIONED_VALUE,
+        raw_value=name,
+    )
+    return updated
+
+
+def _reconcile_pending_contact_name_intent(
+    validated_intent: str,
+    mentions: Dict[str, EntityMentionEvidence],
+    conversation_context: Optional[Dict[str, Any]],
+) -> str:
+    """Reject confirmation when this turn supplies the requested contact name.
+
+    The generated intent and typed entity evidence describe the same utterance.
+    Under a structured pending profile request, a resolved contact-name mention is
+    slot-fill evidence and therefore cannot simultaneously authorize confirmation.
+    """
+    if validated_intent != "CONFIRM_ACTION":
+        return validated_intent
+    ctx = conversation_context if isinstance(conversation_context, dict) else {}
+    pending = ctx.get("pending_profile_request")
+    if isinstance(pending, dict):
+        pending = pending.get("kind")
+    if pending != "CUSTOMER_CONTACT_NAME":
+        return validated_intent
+    evidence = mentions.get("customer_contact_name")
+    if (
+        evidence is None
+        or evidence.state != MentionState.MENTIONED_VALUE
+        or usable_customer_contact_name(evidence.raw_value) is None
+    ):
+        return validated_intent
+    return active_booking_intent_from_context(ctx) or validated_intent
 
 
 def _repair_pending_confirmation_bare_hour(
@@ -112,7 +189,7 @@ def build_create_tool(
     return build_tool(
         name=_CREATE_TOOL_NAME,
         description=_CREATE_TOOL_DESCRIPTION,
-        facts_schema=compiled.facts_schema,
+        entity_results_schema=compiled.entity_results_schema,
         include_temporal=True,
         include_validated_intent=True,
         include_operation=True,
@@ -200,8 +277,8 @@ def _prompt_blocks(
     ctx_block = format_conversation_context(conversation_context or {})
     ctx_section = f"\n{ctx_block}\n" if ctx_block else ""
     if compiled is not None:
-        business_block = compiled.prompt_rules
-        declined_block = declined_entities_rules()
+        business_block = atomic_entity_prompt_rules(compiled)
+        declined_block = ""
     else:
         business_block = service_rules(aliases)
         declined_block = ""
@@ -317,13 +394,26 @@ class CreateGroupExtractor:
 
         for block in response.content:
             if block.type == "tool_use" and block.name == _CREATE_TOOL_NAME:
-                return _merge(
-                    block.input,
-                    candidate_intent,
-                    text=text,
-                    conversation_context=conversation_context,
-                    compiled=compiled,
-                )
+                try:
+                    return _merge(
+                        block.input,
+                        candidate_intent,
+                        text=text,
+                        conversation_context=conversation_context,
+                        compiled=compiled,
+                    )
+                except EntityExtractionValidationError as exc:
+                    logger.warning(
+                        "CreateGroupExtractor rejected malformed entity_results: %s",
+                        exc,
+                    )
+                    return _malformed_entity_results_fallback(
+                        block.input,
+                        candidate_intent,
+                        text=text,
+                        conversation_context=conversation_context,
+                        compiled=compiled,
+                    )
 
         logger.warning("CreateGroupExtractor: no tool_use block")
         return _empty(candidate_intent, text, conversation_context)
@@ -374,17 +464,33 @@ def _merge(
         validated, text, conversation_context
     )
     confidence = float(raw.get("confidence", 0.8))
-    facts = raw.get("facts") or {}
+    facts = raw.get("facts")
     temporal, temporal_facts, time_constraint = materialize_temporal_ownership(
         raw, confidence=confidence, source_text=text
     )
     operation = normalize_operation(raw.get("operation"))
-    if not isinstance(facts, dict):
-        facts = {}
-
     entity_facts: Dict[str, Any] = {}
+    entity_mentions: Dict[str, EntityMentionEvidence] = {}
     if compiled is not None:
-        entity_facts = extract_declared_facts(facts, compiled)
+        if "entity_results" in raw:
+            entity_mentions = validate_generated_entity_results(
+                raw.get("entity_results"), compiled
+            )
+        else:
+            # Compatibility for existing direct callers; contradictions remain rejected.
+            entity_mentions = validate_generated_entity_evidence(
+                facts, raw.get("entity_mentions"), compiled
+            )
+        validated = _reconcile_pending_contact_name_intent(
+            validated, entity_mentions, conversation_context
+        )
+        entity_mentions = _apply_explicit_contact_name_correction(
+            text, validated, entity_mentions, compiled
+        )
+        entity_facts = {
+            name: evidence.raw_value
+            for name, evidence in entity_mentions.items()
+        }
         # Clarification short-pick fills the bookable phrase when Stage 2 left it null.
         bookable = compiled.bookable_item_field
         if bookable is not None:
@@ -393,8 +499,25 @@ def _merge(
             )
             if filled is not None:
                 entity_facts[bookable.name] = filled
+                entity_mentions[bookable.name] = EntityMentionEvidence(
+                    entity_name=bookable.name,
+                    state=MentionState.MENTIONED_VALUE,
+                    raw_value=filled,
+                )
+        entity_mentions = apply_exact_enum_utterance_ownership(
+            text, entity_mentions, compiled, conversation_context
+        )
+        entity_mentions = apply_unique_catalog_utterance_mention(
+            text, entity_mentions, compiled
+        )
+        entity_facts = {
+            name: evidence.raw_value
+            for name, evidence in entity_mentions.items()
+        }
         service_term = bookable_item_phrase(entity_facts, compiled)
     else:
+        if not isinstance(facts, dict):
+            facts = {}
         service_term = facts.get("service_term")
         service_term = _service_term_from_clarification_reply(
             text, service_term, conversation_context
@@ -407,9 +530,14 @@ def _merge(
     for name in declined_entities:
         if name in entity_facts:
             entity_facts[name] = None
+            entity_mentions[name] = EntityMentionEvidence(
+                entity_name=name,
+                state=MentionState.MENTIONED_UNRESOLVED,
+            )
 
     result = {
         "intent": validated,
+        "proposal_response": raw.get("proposal_response"),
         "confidence": confidence,
         "facts": {
             **temporal_facts,
@@ -426,6 +554,8 @@ def _merge(
     }
     if operation is not None:
         result["operation"] = operation
+    if compiled is not None:
+        result["_entity_mentions"] = entity_mentions
     return result
 
 
@@ -442,6 +572,7 @@ def _empty(
     )
     return {
         "intent": intent,
+        "proposal_response": None,
         "confidence": 0.0,
         "facts": {
             "dates": [],
@@ -457,3 +588,49 @@ def _empty(
         "temporal": empty_temporal_dict(0.0),
         "declined_entities": [],
     }
+
+
+def _malformed_entity_results_fallback(
+    raw: Any,
+    candidate_intent: str,
+    *,
+    text: str,
+    conversation_context: Optional[Dict[str, Any]],
+    compiled: Optional[CompiledBusinessEntities],
+) -> Dict[str, Any]:
+    """Convert rejected generated evidence into safe structured uncertainty."""
+    fallback = _empty(candidate_intent, text, conversation_context)
+    if compiled is None:
+        fallback["_entity_extraction_failed"] = True
+        return fallback
+
+    raw_results = raw.get("entity_results") if isinstance(raw, dict) else None
+    raw_results = raw_results if isinstance(raw_results, dict) else {}
+    facts = dict(fallback.get("facts") or {})
+    mentions: Dict[str, EntityMentionEvidence] = {}
+    for entity in compiled.fields:
+        item = raw_results.get(entity.name)
+        item = item if isinstance(item, dict) else {}
+        status = item.get("status")
+        mentioned = status in {
+            MentionState.MENTIONED_VALUE.value,
+            MentionState.MENTIONED_UNRESOLVED.value,
+        } or "value" in item
+        mentions[entity.name] = EntityMentionEvidence(
+            entity_name=entity.name,
+            state=(
+                MentionState.MENTIONED_UNRESOLVED
+                if mentioned
+                else MentionState.NOT_MENTIONED
+            ),
+        )
+        facts[entity.name] = None
+
+    fallback.update(
+        {
+            "facts": facts,
+            "_entity_mentions": mentions,
+            "_entity_extraction_failed": True,
+        }
+    )
+    return fallback

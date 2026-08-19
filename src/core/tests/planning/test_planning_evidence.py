@@ -24,7 +24,7 @@ _MULTI_SCHEMA: Dict[str, Any] = {
             "type": "catalog",
             "role": "bookable_item",
             "required": True,
-            "catalog": {"Oil Change": 101, "Premium Haircut": 18},
+            "catalog": {"Oil Change": 101, "Premium Haircut": 18, "New Service": 202},
         },
         {
             "name": "engine_type",
@@ -91,10 +91,12 @@ def _luma(
     declined_entities: Optional[list] = None,
     operation: Optional[str] = None,
     temporal: Optional[Dict[str, Any]] = None,
+    entity_resolutions: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     payload: Dict[str, Any] = {
         "intent": {"name": intent, "confidence": 0.9},
         "facts": dict(facts or {}),
+        "entity_resolutions": dict(entity_resolutions or {}),
         "turn": {"understanding": understanding},
         "temporal": temporal
         or {
@@ -159,7 +161,12 @@ def test_service_revision_rebuilds_service_identity_group_before_merge():
             }
         },
     )
-    luma = _luma(facts={"service_id": "new service"})
+    luma = _luma(
+        facts={"service_id": "New Service"},
+        entity_resolutions={
+            "service": {"resolution": "RESOLVED", "value": 202},
+        },
+    )
 
     working = build_working_turn(
         luma_response={**deepcopy(luma), "_entity_schema": _MULTI_SCHEMA},
@@ -174,10 +181,7 @@ def test_service_revision_rebuilds_service_identity_group_before_merge():
     )
     apply_revision_policy(working, session)
 
-    assert working.payload["slots"] == {
-        "service_id": "new service",
-        "_catalog_item_id": 202,
-    }
+    assert working.payload["slots"] == {"service_id": 202}
 
 
 def test_helper_schema_enum_is_planning_evidence():
@@ -244,7 +248,13 @@ def test_engine_type_unrecognized_merges_into_effective_slots():
     """Live bug: facts.engine_type + UNRECOGNIZED_INPUT must still collect."""
     session = _session()
     working, slot_state = _run_turn(
-        _luma(facts={"engine_type": "petrol"}, understanding="UNRECOGNIZED_INPUT"),
+        _luma(
+            facts={"engine_type": "petrol"},
+            understanding="UNRECOGNIZED_INPUT",
+            entity_resolutions={
+                "engine_type": {"resolution": "RESOLVED", "value": "petrol"},
+            },
+        ),
         session,
         text="petrol",
     )
@@ -261,7 +271,13 @@ def test_hair_length_unrecognized_merges_identically():
         ask_next="hair_length",
     )
     working, slot_state = _run_turn(
-        _luma(facts={"hair_length": "long"}, understanding="UNRECOGNIZED_INPUT"),
+        _luma(
+            facts={"hair_length": "long"},
+            understanding="UNRECOGNIZED_INPUT",
+            entity_resolutions={
+                "hair_length": {"resolution": "RESOLVED", "value": "long"},
+            },
+        ),
         session,
         text="Long",
     )
@@ -280,6 +296,12 @@ def test_registration_text_unrecognized_counts():
         _luma(
             facts={"registration_number": "AB12CDE"},
             understanding="UNRECOGNIZED_INPUT",
+            entity_resolutions={
+                "registration_number": {
+                    "resolution": "RESOLVED",
+                    "value": "AB12CDE",
+                },
+            },
         ),
         session,
         text="AB12CDE",
@@ -451,14 +473,17 @@ def test_confirm_survives_planning_intent_rewrite():
 
 def test_same_value_service_restatement_is_not_evidence():
     session = _session(
-        slots={"service_id": "oil-change", "_catalog_item_id": 101},
+        slots={"service_id": 101},
         missing_slots=["date", "time", "engine_type"],
         ask_next="engine_type",
     )
     working, _ = _run_turn(
         _luma(
-            facts={"service_id": "oil-change"},
+            facts={"service_id": "Oil Change"},
             understanding="UNDERSTOOD",
+            entity_resolutions={
+                "service": {"resolution": "RESOLVED", "value": 101},
+            },
         ),
         session,
         text="oil change",

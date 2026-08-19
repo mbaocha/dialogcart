@@ -16,6 +16,7 @@ from core.api.compat import handle_message
 from core.config.business_category_loader import clear_business_category_cache
 from core.execution.clients.availability_client import AvailabilityClient
 from core.session.session_manager import clear_session, get_session, save_session
+from core.session.session_schema_v2 import empty_session_v2
 from core.tests.harness.car_service_catalog import (
     CAR_SERVICE_COLLECTIONS,
     CAR_SERVICE_SERVICES,
@@ -50,14 +51,22 @@ def _luma(
     facts: Optional[Dict[str, Any]] = None,
     temporal: Optional[Dict[str, Any]] = None,
     service_candidates: Optional[List[Any]] = None,
+    entity_resolutions: Optional[Dict[str, Dict[str, Any]]] = None,
     needs_clarification: bool = False,
     understanding: str = "UNDERSTOOD",
 ) -> Dict[str, Any]:
+    legacy_facts = dict(facts or {})
+    resolutions = (
+        dict(entity_resolutions)
+        if entity_resolutions is not None
+        else _resolved_entities_from_facts(legacy_facts)
+    )
     payload: Dict[str, Any] = {
         "success": True,
         "intent": {"name": intent, "confidence": 0.95},
         "needs_clarification": needs_clarification,
-        "facts": dict(facts or {}),
+        "facts": legacy_facts,
+        "entity_resolutions": resolutions,
         "turn": {"understanding": understanding},
     }
     if temporal is not None:
@@ -66,6 +75,23 @@ def _luma(
         payload["service_candidates"] = list(service_candidates)
         payload["needs_clarification"] = True
     return payload
+
+
+def _resolved_entities_from_facts(
+    facts: Dict[str, Any],
+) -> Dict[str, Dict[str, Any]]:
+    """Build authoritative current-turn entity evidence from compatibility facts."""
+    fact_keys = {
+        "service": "service_id",
+        "engine_type": "engine_type",
+        "registration_number": "registration_number",
+        "staff": "staff_id",
+    }
+    return {
+        entity_name: {"resolution": "RESOLVED", "value": facts[fact_key]}
+        for entity_name, fact_key in fact_keys.items()
+        if facts.get(fact_key) is not None
+    }
 
 
 def _temporal_day(date: str, *, expression: str = "tomorrow") -> Dict[str, Any]:
@@ -85,6 +111,7 @@ def _temporal_time(time_hhmm: str, *, expression: str = "10am") -> Dict[str, Any
         "start_time_expression": expression,
         "expression": expression,
         "confidence": 0.95,
+        "resolution": {"kind": "explicit"},
     }
 
 
@@ -95,6 +122,14 @@ def _wire(
     start_hours: tuple[int, ...] = (9, 10, 11),
 ):
     clear_session(ORG_ID, user_id)
+    seeded_session = empty_session_v2()
+    seeded_session["customer_id"] = 501
+    seeded_session["customer_contact"] = {
+        "customer_id": 501,
+        "authoritative_name": "Existing Customer",
+        "name_status": "authoritative",
+    }
+    save_session(ORG_ID, user_id, seeded_session)
     reset_booking_counter()
     setup_test_org_category("car_service")
     catalog_cache._mem_cache.pop((ORG_ID, "service"), None)
@@ -107,7 +142,6 @@ def _wire(
     )
     org = create_mock_organization_client(business_category_id=3)
     booking = create_mock_booking_client()
-
     availability = Mock(spec=AvailabilityClient)
 
     def _avail(**kwargs):
@@ -253,6 +287,7 @@ def test_car_service_happy_path_collects_attrs_then_confirms():
                         "mode": "exact",
                         "expression": "10am",
                         "confidence": 0.95,
+                        "resolution": {"kind": "explicit"},
                     },
                 },
             ),
@@ -260,6 +295,7 @@ def test_car_service_happy_path_collects_attrs_then_confirms():
                 "success": True,
                 "intent": {"name": "CONFIRMATION", "confidence": 0.99},
                 "facts": {},
+                "entity_resolutions": {},
                 "turn": {"understanding": "UNDERSTOOD"},
             },
         },
@@ -301,7 +337,7 @@ def test_car_service_happy_path_collects_attrs_then_confirms():
 
 
 def test_car_service_time_selection_asks_required_before_confirmation():
-    """Collect availability criteria → SEARCH → time → reg → confirmation (not before)."""
+    """Collect availability criteria, time, and registration before confirmation."""
     from core.session.confirmation_gate import get_confirmation_state
 
     user_id = "car-confirm-gate-001"
@@ -325,6 +361,7 @@ def test_car_service_time_selection_asks_required_before_confirmation():
                 "success": True,
                 "intent": {"name": "CONFIRMATION", "confidence": 0.99},
                 "facts": {},
+                "entity_resolutions": {},
                 "turn": {"understanding": "UNDERSTOOD"},
             },
         },
@@ -354,6 +391,7 @@ def test_car_service_time_selection_asks_required_before_confirmation():
     plan_reg = _plan(r_reg)
     assert _slots(user_id).get("registration_number") == "AB12 XYZ"
     assert plan_reg.get("status") == "AWAITING_CONFIRMATION"
+    assert plan_reg.get("awaiting") == "USER_CONFIRMATION"
     assert not _missing(r_reg, user_id)
     text = (r_reg.get("text") or plan_reg.get("text") or "").lower()
     assert "book" in text or "confirm" in text or "go ahead" in text
@@ -509,6 +547,12 @@ def test_car_service_clarification_then_resume():
             "book me service": _luma(
                 facts={},
                 service_candidates=["Oil Change", "Full Service", "Brake Inspection"],
+                entity_resolutions={
+                    "service": {
+                        "resolution": "AMBIGUOUS",
+                        "candidate_values": [26, 27, 28],
+                    }
+                },
                 needs_clarification=True,
             ),
             "full service": _luma(

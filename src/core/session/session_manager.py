@@ -18,25 +18,30 @@ They are computed fresh from intent contract + collected slots.
 
 Constraints:
 - Uses JSON serialization only (no pickles, no model objects)
-- TTL: 20 minutes (reset on save)
+- TTL: ``DIALOGCART_SESSION_TTL_SECONDS`` (default 20 minutes; reset on save)
 - Stateless session logic at API boundary only
 - Keys are scoped by organization and user: session:{organization_id}:{user_id}
 - Legacy session:{user_id} keys are intentionally ignored; active sessions reset once
+
+Deployments may set ``DIALOGCART_SESSION_TTL_SECONDS=172800`` only after artifact
+freshness invalidation is verified. Increasing it changes customer-data retention
+and Redis capacity requirements, not merely cache performance.
 """
 
 import json
 import os
 import sys
-import time
 from typing import Any, Dict, Optional
 
-SESSION_TTL_SECONDS = 20 * 60  # 20 minutes (middle of 15-30 range)
+from core.config.session_freshness import DEFAULT_SESSION_TTL_SECONDS
+
+SESSION_TTL_SECONDS = DEFAULT_SESSION_TTL_SECONDS
 REDIS_ENV_VAR = "REDIS_URL"
 SESSION_KEY_PREFIX = "session:"
 
 # In-memory session store (fallback when Redis is not available)
 _in_memory_sessions: Dict[str, Dict[str, Any]] = {}
-SESSION_TTL_SECONDS_FALLBACK = 30 * 60  # 30 minutes for in-memory fallback
+SESSION_TTL_SECONDS_FALLBACK = DEFAULT_SESSION_TTL_SECONDS
 
 
 def _normalize_loaded_session(session_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -48,12 +53,21 @@ def _normalize_loaded_session(session_state: Dict[str, Any]) -> Dict[str, Any]:
     except Exception:
         pass
 
-    try:
-        from core.session.session_schema_v2 import prepare_session_for_load
+    from core.session.freshness import apply_load_freshness
+    from core.session.session_schema_v2 import (
+        hydrate_v1_compat_shims,
+        normalize_session_to_v2,
+    )
 
-        return prepare_session_for_load(session_state)
-    except Exception:
-        return session_state
+    canonical = normalize_session_to_v2(session_state)
+    apply_load_freshness(canonical)
+    hydrated = hydrate_v1_compat_shims(canonical)
+    from core.session.freshness import AVAILABILITY_REFRESH_REASON_KEY
+
+    refresh_reason = canonical.get(AVAILABILITY_REFRESH_REASON_KEY)
+    if refresh_reason is not None:
+        hydrated[AVAILABILITY_REFRESH_REASON_KEY] = refresh_reason
+    return hydrated
 
 
 def _get_redis_url():
@@ -147,7 +161,9 @@ def validate_redis_connection():
 
         # Test write
         test_key = f"{SESSION_KEY_PREFIX}__health_check__"
-        test_value = json.dumps({"test": True, "timestamp": time.time()})
+        from core.clock import utc_now
+
+        test_value = json.dumps({"test": True, "timestamp": utc_now().timestamp()})
         client.setex(test_key, 10, test_value)  # 10 second TTL
 
         # Test read
@@ -241,7 +257,10 @@ def get_session(organization_id: int, user_id: str) -> Optional[Dict[str, Any]]:
     if key in _in_memory_sessions:
         session_data = _in_memory_sessions[key]
         stored_at = session_data.get("_stored_at", 0)
-        if time.time() - stored_at > SESSION_TTL_SECONDS_FALLBACK:
+        from core.clock import utc_now
+        from core.config.session_freshness import load_session_freshness_settings
+
+        if utc_now().timestamp() - stored_at > load_session_freshness_settings().session_ttl_seconds:
             del _in_memory_sessions[key]
             logger.debug("[SESSION_LOAD] expired in-memory: user_id=%s", user_id)
             return None
@@ -265,7 +284,7 @@ def save_session(
     """
     Save session state for a user.
 
-    Resets TTL on each save (20 minutes for Redis, 30 minutes for in-memory).
+    Resets the configured TTL on each save for Redis and the in-memory fallback.
 
     Args:
         user_id: Unique identifier for the user
@@ -294,6 +313,9 @@ def save_session(
     )
 
     session_state = prepare_session_for_persist(session_state)
+    from core.session.freshness import stamp_last_activity
+
+    stamp_last_activity(session_state)
 
     # Legacy guard: in-memory compat may still carry facts; pure V2 persist does not.
     if not is_session_v2(session_state):
@@ -343,7 +365,13 @@ def save_session(
         try:
             key = _get_session_key(organization_id, user_id)
             serialized = json.dumps(session_state)
-            redis_client.setex(key, SESSION_TTL_SECONDS, serialized)
+            from core.config.session_freshness import load_session_freshness_settings
+
+            redis_client.setex(
+                key,
+                load_session_freshness_settings().session_ttl_seconds,
+                serialized,
+            )
             logger.debug("[SESSION_SAVE] saved to Redis: user_id=%s", user_id)
             return
         except Exception as e:
@@ -357,7 +385,9 @@ def save_session(
 
     # In-memory fallback
     session_data = session_state.copy()
-    session_data["_stored_at"] = time.time()
+    from core.clock import utc_now
+
+    session_data["_stored_at"] = utc_now().timestamp()
     key = _get_session_key(organization_id, user_id)
     _in_memory_sessions[key] = session_data
     logger.debug("[SESSION_SAVE] saved to in-memory: user_id=%s", user_id)

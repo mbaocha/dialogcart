@@ -13,11 +13,12 @@
     "timezone": "UTC"
   },
   "response": {
+    "entity_resolutions": {},
     "facts": {
       "booking_id": null,
       "date_time_pairs": [],
       "dates": [],
-      "service_id": "premium haircut",
+      "service_id": null,
       "times": []
     },
     "intent": {

@@ -11,6 +11,7 @@ import pytest
 from core.adapters.clients.catalog_client import CatalogClient
 from core.adapters.clients.organization_client import OrganizationClient
 from core.adapters.errors import ContractViolation, UpstreamError
+from core.execution.clients.availability_client import AvailabilityClient
 from core.execution.clients.booking_client import BookingClient
 from core.adapters.nlu import LumaClient
 from core.api.compat import handle_message
@@ -36,6 +37,9 @@ def test_resolved_flow_calls_booking_client():
     """Test that resolved booking flow calls booking client."""
     luma_response = {
         "success": True,
+        "entity_resolutions": {
+            "service": {"resolution": "RESOLVED", "value": "haircut"}
+        },
         "intent": {
             "name": "CREATE_APPOINTMENT"
         },  # CREATE_BOOKING is not durable - use CREATE_APPOINTMENT
@@ -62,7 +66,7 @@ def test_resolved_flow_calls_booking_client():
     services_response = {
         "catalog_last_updated_at": "2024-01-01T00:00:00Z",
         "business_category_id": 10,
-        "services": [{"id": 1, "name": "Haircut", "canonical": "haircut"}],
+        "services": [{"id": "haircut", "name": "Haircut", "canonical": "haircut"}],
     }
     reservation_response = {"room_types": [], "extras": []}
     booking_response = {"booking_code": "ABC123", "code": "ABC123", "status": "pending"}
@@ -106,6 +110,9 @@ def test_partial_flow_returns_template_key():
     """Partial booking with service only is READY to SEARCH (executable_with)."""
     luma_response = {
         "success": True,
+        "entity_resolutions": {
+            "service": {"resolution": "RESOLVED", "value": "haircut"}
+        },
         "intent": {
             "name": "CREATE_APPOINTMENT"
         },  # CREATE_BOOKING is not durable - use CREATE_APPOINTMENT
@@ -152,6 +159,7 @@ def test_contract_violation_returns_error_structure():
     # Missing datetime_range.start for RESOLVED booking
     invalid_luma_response = {
         "success": True,
+        "entity_resolutions": {},
         "intent": {"name": "CREATE_BOOKING"},
         "needs_clarification": False,
         "booking": {
@@ -210,7 +218,7 @@ def test_luma_error_handled():
 
 
 def test_luma_error_resumes_durable_session():
-    """With a durable session, upstream NLU failure replays session without applying the utterance."""
+    """NLU failure preserves a pending booking without executing its action."""
     user_id = "test_luma_error_durable_resume"
     clear_session(ORG_ID, user_id)
 
@@ -239,11 +247,15 @@ def test_luma_error_resumes_durable_session():
     session_store = _SessionStore(durable_session)
     mock_luma_client = Mock(spec=LumaClient)
     mock_luma_client.resolve.side_effect = UpstreamError("Luma service unavailable")
+    mock_booking_client = Mock(spec=BookingClient)
+    mock_availability_client = Mock(spec=AvailabilityClient)
 
     result = handle_message(
         user_id=user_id,
         text="book haircut",
         luma_client=mock_luma_client,
+        booking_client=mock_booking_client,
+        availability_client=mock_availability_client,
         catalog_client=_catalog(),
         organization_client=_org(),
         organization_id=ORG_ID,
@@ -257,6 +269,58 @@ def test_luma_error_resumes_durable_session():
     assert outcome.get("intent_name") == "CREATE_APPOINTMENT"
     assert outcome.get("status") == "AWAITING_CONFIRMATION"
     assert outcome.get("slots") == durable_session["slots"]
+    assert outcome.get("action") is None
+    assert outcome.get("nlu_failure_recovery") is True
+    mock_booking_client.create_booking.assert_not_called()
+    mock_availability_client.get_service_availability.assert_not_called()
+    assert session_store._state.get("slots") == durable_session["slots"]
+
+
+def test_luma_error_does_not_replay_availability_action():
+    """An availability-stage session remains non-executable on NLU failure."""
+    durable_session = {
+        "intent_name": "CREATE_APPOINTMENT",
+        "status": "READY",
+        "stage": "AVAILABILITY",
+        "action": "SEARCH_AVAILABILITY",
+        "slots": {"service_id": "premium haircut", "date": "2026-07-16"},
+        "missing_slots": ["time"],
+    }
+
+    class _SessionStore:
+        def __init__(self, state):
+            self._state = dict(state)
+
+        def get_session(self, organization_id, user_id):
+            return dict(self._state)
+
+        def save_session(self, organization_id, user_id, state):
+            self._state = dict(state)
+
+    session_store = _SessionStore(durable_session)
+    mock_luma_client = Mock(spec=LumaClient)
+    mock_luma_client.resolve.side_effect = UpstreamError("NLU unavailable")
+    mock_booking_client = Mock(spec=BookingClient)
+    mock_availability_client = Mock(spec=AvailabilityClient)
+
+    result = handle_message(
+        user_id="test_luma_error_availability",
+        text="show me times",
+        luma_client=mock_luma_client,
+        booking_client=mock_booking_client,
+        availability_client=mock_availability_client,
+        catalog_client=_catalog(),
+        organization_client=_org(),
+        organization_id=ORG_ID,
+        session_store=session_store,
+    )
+
+    outcome = result.get("outcome") or result.get("result") or {}
+    assert outcome.get("message_applied") is False
+    assert outcome.get("action") is None
+    mock_availability_client.get_service_availability.assert_not_called()
+    mock_booking_client.create_booking.assert_not_called()
+    assert session_store._state.get("slots") == durable_session["slots"]
 
 
 def test_success_false_returns_error():
@@ -302,6 +366,9 @@ def test_unsupported_intent_returns_error():
     mock_luma_client = Mock(spec=LumaClient)
     mock_luma_client.resolve.return_value = {
         "success": True,
+        "entity_resolutions": {
+            "service": {"resolution": "RESOLVED", "value": "haircut"}
+        },
         "intent": {"name": "CREATE_APPOINTMENT"},
         "needs_clarification": True,
         "facts": {"service_id": "haircut"},
@@ -326,6 +393,7 @@ def test_unsupported_intent_returns_error():
 
     mock_luma_client.resolve.return_value = {
         "success": True,
+        "entity_resolutions": {},
         "intent": {"name": "UNSUPPORTED_INTENT"},
         "needs_clarification": False,
         "booking": {

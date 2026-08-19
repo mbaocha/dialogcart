@@ -94,10 +94,10 @@ def session_fingerprint(session: Optional[dict]) -> Any:
     return availability_fingerprint_from_session(session)
 
 
-def session_service_id(session: Optional[dict]) -> Optional[str]:
+def session_service_id(session: Optional[dict]) -> Any:
     if not isinstance(session, dict):
         return None
     slots = session.get("slots")
     if isinstance(slots, dict) and slots.get("service_id"):
-        return str(slots.get("service_id"))
+        return slots.get("service_id")
     return None

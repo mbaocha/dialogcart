@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional, TypedDict, Union
+from typing_extensions import NotRequired
 
 
 ExecutionStatus = Literal["succeeded", "failed", "partial"]
@@ -34,6 +35,7 @@ class ExecutionSubject(TypedDict):
 class ExecutionAvailability(TypedDict):
     slots: List[Any]
     time_resolution: Optional[Dict[str, Any]]
+    unavailable_reason: NotRequired[str]
 
 
 class ExecutionError(TypedDict):
@@ -166,7 +168,16 @@ def normalize_execution_result(
         if service_name is None and isinstance(service, dict):
             service_name = _first(service, "name", "display_name")
     if service_name is None:
-        service_name = _first(slots, "service_name", "service_id")
+        service_name = slots.get("service_name")
+    if service_name is None:
+        from core.adapters.nlu.entity_schema_builder import (
+            catalog_label_for_planning_value,
+        )
+
+        service_id = slots.get("service_id")
+        service_name = catalog_label_for_planning_value(
+            plan.get("_entity_schema"), "service_id", service_id
+        ) or service_id
 
     datetime_range = (
         slots.get("datetime_range")

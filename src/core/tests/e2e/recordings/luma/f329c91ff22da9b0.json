@@ -16,26 +16,21 @@
     "timezone": "UTC"
   },
   "response": {
+    "entity_resolutions": {},
     "facts": {
       "booking_id": null,
       "date_time_pairs": [],
       "dates": [],
       "service_id": null,
-      "staff_id": null,
       "times": []
     },
     "intent": {
-      "confidence": 0.78,
+      "confidence": 0.85,
       "name": "GENERAL_INQUIRY"
     },
-    "search_query": "rattling noise when starting car diagnosis",
-    "service_candidates": [
-      "executive oil change",
-      "premium full service",
-      "brake pad change"
-    ],
+    "search_query": "car rattling noise on startup diagnosis",
     "temporal": {
-      "confidence": 0.78,
+      "confidence": 0.85,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,

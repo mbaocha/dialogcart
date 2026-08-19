@@ -67,6 +67,7 @@ _V1_TOP_LEVEL_MIRRORS = frozenset(
         "awaiting_slot",
         "active_capability",
         "service_candidates",
+        "catalogue_presentation",
         "_modification_context",
         "temporal",
         "context",

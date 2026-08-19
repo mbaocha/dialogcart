@@ -1,0 +1,87 @@
+{
+  "key": {
+    "conversation_context": {
+      "last_intent": "CREATE_APPOINTMENT",
+      "last_search_query": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "Book me a premium haircut"
+        },
+        {
+          "role": "assistant",
+          "text": "Here are the available times for July 23:\n- 9:00 AM\n- 10:00 AM\nWhich would you like? You can also say \"show more\" to see additional times."
+        }
+      ],
+      "missing_slots": [
+        "date",
+        "time"
+      ],
+      "presented_options": {
+        "options": [
+          {
+            "index": 1,
+            "label": "9:00 AM"
+          },
+          {
+            "index": 2,
+            "label": "10:00 AM"
+          }
+        ],
+        "reference": "avp1_7c860d05083ac68f45b39599"
+      },
+      "temporal_context_version": 1,
+      "turns": [
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "Book me a premium haircut"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "July 25",
+    "timezone": "UTC"
+  },
+  "response": {
+    "entity_resolutions": {},
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [
+        "2026-07-25"
+      ],
+      "service": null,
+      "service_id": null,
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "CREATE_APPOINTMENT"
+    },
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": "July 25",
+      "mode": "single_day",
+      "resolution": null,
+      "start_date": "2026-07-25",
+      "start_date_expression": "July 25",
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

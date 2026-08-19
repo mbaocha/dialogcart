@@ -8,6 +8,7 @@ from unittest.mock import patch
 from core.session.session_projector import SessionProjectorV2
 from core.session.session_schema_v2 import (
     empty_session_v2,
+    prepare_session_for_load,
     prepare_session_for_persist,
 )
 from core.session.session_v2_projection import (
@@ -130,6 +131,34 @@ def test_direct_projection_preserves_customer_id():
     assert v2["customer_id"] == 42
 
 
+def test_projector_preserves_channel_bound_customer_contact_from_working_session():
+    working = prepare_session_for_load(None)
+    working["customer_id"] = 42
+    working["customer_contact"] = {
+        "customer_id": 42,
+        "authoritative_name": "Persisted Customer",
+        "name_status": "authoritative",
+        "channel_fingerprint": "a" * 64,
+    }
+    projected = SessionProjectorV2().project(
+        outcome={
+            "intent_name": "CREATE_APPOINTMENT",
+            "slots": {"service_id": "premium haircut"},
+            "missing_slots": ["date", "time"],
+            "facts": {},
+        },
+        outcome_status="NEEDS_CLARIFICATION",
+        organization_id=1,
+        merged_luma_response={"slots": {"service_id": "premium haircut"}},
+        working_session_state=working,
+        user_id="u1",
+    )
+    assert projected is not None
+    assert projected["customer_contact"] == working["customer_contact"]
+    persisted = prepare_session_for_persist(projected)
+    assert persisted["customer_contact"] == working["customer_contact"]
+
+
 def test_session_clear_lifecycle_returns_none():
     outcome = {"intent_name": "UNKNOWN", "slots": {}, "facts": {}}
     assert (
@@ -214,6 +243,41 @@ def test_projector_persists_confirmation_from_merged():
     pure = prepare_session_for_persist(projected)
     assert pure["confirmation_state"] == "pending"
     assert pure["planning"]["bound_datetime"]["start"] == "2026-07-10T10:00:00Z"
+
+
+def test_projector_preserves_bound_datetime_when_unrelated_turn_has_no_temporal_delta():
+    bound = {
+        "start": "2026-07-10T10:00:00Z",
+        "end": "2026-07-10T10:30:00Z",
+    }
+    previous = empty_session_v2()
+    previous["planning"]["slots"] = {
+        "service_id": "premium haircut",
+        "date": "2026-07-10",
+        "time": "10:00",
+    }
+    previous["planning"]["bound_datetime"] = bound
+
+    projected = SessionProjectorV2().project(
+        outcome={
+            "intent_name": "CREATE_APPOINTMENT",
+            "slots": dict(previous["planning"]["slots"]),
+            "missing_slots": [],
+            "facts": {},
+        },
+        outcome_status="AWAITING_CONFIRMATION",
+        organization_id=1,
+        merged_luma_response={
+            "slots": dict(previous["planning"]["slots"]),
+            "confirmation_state": "pending",
+        },
+        previous_session_state=previous,
+        working_session_state=previous,
+        user_id="u1",
+    )
+
+    assert projected is not None
+    assert projected["planning"]["bound_datetime"] == bound
 
 
 def test_projector_availability_from_workflow_result():
@@ -372,6 +436,68 @@ def test_persisted_successful_booking_commit():
     assert pure is not None
     assert pure["booking"]["booking_id"] == "b-99"
     assert pure["booking"]["booking_code"] == "ZZ"
+
+
+def test_post_commit_transition_closes_draft_and_preserves_committed_identity():
+    previous = empty_session_v2()
+    previous["customer_id"] = 7
+    previous["conversation"]["history"] = [{"role": "user", "content": "book"}]
+    previous["conversation"]["pending_proposals"] = [
+        {"proposal_id": "p1", "slot_key": "service_id", "status": "PENDING"},
+        {"proposal_id": "p2", "slot_key": "unrelated_id", "status": "PENDING"},
+    ]
+    previous["planning"].update(
+        {
+            "intent_name": "CREATE_APPOINTMENT",
+            "status": "AWAITING_CONFIRMATION",
+            "slots": {"service_id": "oil-change", "date": "2026-08-17"},
+            "bound_datetime": {"start": "2026-08-17T09:00:00Z"},
+            "missing_slots": [],
+            "ask_next": "customer_contact_name",
+            "pending_profile_request": "CUSTOMER_CONTACT_NAME",
+        }
+    )
+    previous["confirmation_state"] = "pending"
+    previous["availability"]["fingerprint"] = "old"
+    previous["availability"]["cache"]["search_result"] = {"slots": [{}]}
+
+    projected = SessionProjectorV2().project(
+        outcome={
+            "intent_name": "CREATE_APPOINTMENT",
+            "status": "succeeded",
+            "refs": {"booking_id": "bk-7", "booking_code": "ORG-7"},
+            "slots": {"service_id": "oil-change", "date": "2026-08-17"},
+            "missing_slots": [],
+        },
+        outcome_status="EXECUTED",
+        organization_id=1,
+        previous_session_state=previous,
+        working_session_state=prepare_session_for_load(previous),
+        post_commit_transition={
+            "kind": "CREATE_APPOINTMENT_COMMITTED",
+            "booking_id": "bk-7",
+            "booking_code": "ORG-7",
+            "completed_slot_keys": ["service_id", "date"],
+        },
+    )
+
+    assert projected is not None
+    assert projected["booking"] == {
+        "booking_id": "bk-7",
+        "booking_code": "ORG-7",
+    }
+    assert projected["confirmation_state"] is None
+    assert projected["planning"]["intent_name"] is None
+    assert projected["planning"]["slots"] == {}
+    assert projected["planning"]["bound_datetime"] is None
+    assert projected["planning"]["pending_profile_request"] is None
+    assert projected["availability"]["fingerprint"] is None
+    assert projected["availability"]["cache"]["search_result"] is None
+    assert projected["customer_id"] == 7
+    assert projected["conversation"]["history"]
+    proposals = projected["conversation"]["pending_proposals"]
+    assert proposals[0]["status"] == "EXPIRED"
+    assert proposals[1]["status"] == "PENDING"
 
 
 def test_persisted_existing_persisted_v2_input():

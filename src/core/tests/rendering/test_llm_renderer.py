@@ -96,6 +96,28 @@ def test_handler_renderer_accepts_json_code_fence(monkeypatch, render_request):
     assert result.metadata == {}
 
 
+def test_handler_renderer_normalizes_fenced_entity_type_alias(
+    monkeypatch, render_request
+):
+    _patch_anthropic_response(
+        monkeypatch,
+        '```json\n{"text":"We offer an Executive Oil Change.",'
+        '"selected_entities":[{"type":"service","catalog_id":"oil_change",'
+        '"display_name":"Executive Oil Change"}],"metadata":{}}\n```',
+    )
+
+    result = render_handler_response(render_request)
+
+    assert result.text == "We offer an Executive Oil Change."
+    assert result.selected_entities == [
+        HandlerEntitySelection(
+            entity_type="service",
+            catalog_id="oil_change",
+            display_name="Executive Oil Change",
+        )
+    ]
+
+
 def test_handler_renderer_accepts_unlabelled_json_code_fence(monkeypatch, render_request):
     _patch_anthropic_response(
         monkeypatch,
@@ -111,16 +133,27 @@ def test_handler_renderer_accepts_unlabelled_json_code_fence(monkeypatch, render
 @pytest.mark.parametrize(
     "provider_text",
     [
-        'Here is the result: {"text":"Hello"}',
         '```json\n{"text":"First"}\n```\n```json\n{"text":"Second"}\n```',
         '```json\n{"text":}\n```',
         '```json\n[{"text":"Hello"}]\n```',
         '```json\n{"text":"Hello"}\n``` trailing',
+        '```json\n{"text":"A useful answer","selected_entities":',
+        '{"text":"A useful answer","selected_entities":',
     ],
 )
-def test_handler_renderer_rejects_non_single_object_payloads(
+def test_handler_renderer_never_exposes_invalid_structured_payloads(
     monkeypatch, render_request, provider_text
 ):
+    _patch_anthropic_response(monkeypatch, provider_text)
+
+    result = render_handler_response(render_request)
+
+    assert result.text == llm_renderer._FALLBACK_TEXT
+    assert result.selected_entities == []
+
+
+def test_handler_renderer_preserves_non_json_legacy_text(monkeypatch, render_request):
+    provider_text = 'Here is the result: {"text":"Hello"}'
     _patch_anthropic_response(monkeypatch, provider_text)
 
     result = render_handler_response(render_request)

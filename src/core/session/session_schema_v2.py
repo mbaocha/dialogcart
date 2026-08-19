@@ -41,6 +41,13 @@ def empty_session_v2() -> Dict[str, Any]:
 
 _EMPTY_SESSION_V2: Dict[str, Any] = {
     "schema_version": SESSION_SCHEMA_VERSION,
+    "metadata": {
+        "last_activity_at": None,
+        "artifacts": {
+            "availability": None,
+            "confirmation": None,
+        },
+    },
     "conversation": {
         "history": [],
         "memory": {},
@@ -68,6 +75,9 @@ _EMPTY_SESSION_V2: Dict[str, Any] = {
         },
         "temporal": None,
         "service_candidates": None,
+        "catalogue_presentation": None,
+        "pending_entity_resolutions": [],
+        "pending_profile_request": None,
         "modification_context": None,
         "context": {
             "date_roles": None,
@@ -90,6 +100,7 @@ _EMPTY_SESSION_V2: Dict[str, Any] = {
     },
     "confirmation_state": None,
     "customer_id": None,
+    "customer_contact": None,
     "capability": {
         "active": None,
         "results": {},
@@ -130,6 +141,11 @@ def validate_session_v2_sections(session: Mapping[str, Any]) -> None:
         raise TypeError("conversation.memory must be a dict")
     if not isinstance(conversation.get("pending_proposals"), list):
         raise TypeError("conversation.pending_proposals must be a list")
+    metadata = session.get("metadata")
+    if not isinstance(metadata, dict):
+        raise TypeError("metadata must be a dict")
+    if not isinstance(metadata.get("artifacts"), dict):
+        raise TypeError("metadata.artifacts must be a dict")
 
     planning = session.get("planning")
     if not isinstance(planning, dict):
@@ -154,6 +170,9 @@ def validate_session_v2_sections(session: Mapping[str, Any]) -> None:
         raise TypeError("planning.missing_slots must be a list")
     if not isinstance(planning.get("declined_slots"), list):
         raise TypeError("planning.declined_slots must be a list")
+    pending_profile = planning.get("pending_profile_request")
+    if pending_profile not in (None, "CUSTOMER_CONTACT_NAME"):
+        raise ValueError("planning.pending_profile_request is invalid")
 
     booking = session.get("booking")
     if not isinstance(booking, dict):
@@ -174,6 +193,10 @@ def validate_session_v2_sections(session: Mapping[str, Any]) -> None:
         raise TypeError("capability must be a dict")
     if not isinstance(capability.get("results"), dict):
         raise TypeError("capability.results must be a dict")
+    if session.get("customer_contact") is not None and not isinstance(
+        session.get("customer_contact"), dict
+    ):
+        raise TypeError("customer_contact must be a dict or null")
 
 
 def normalize_session_to_v2(session: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
@@ -187,6 +210,20 @@ def normalize_session_to_v2(session: Optional[Mapping[str, Any]]) -> Dict[str, A
 
     working = defensive_copy_session(session)
     v2 = empty_session_v2()
+
+    nested_metadata = working.get("metadata") if isinstance(working.get("metadata"), dict) else {}
+    nested_artifacts = (
+        nested_metadata.get("artifacts")
+        if isinstance(nested_metadata.get("artifacts"), dict)
+        else {}
+    )
+    v2["metadata"] = {
+        "last_activity_at": _pick_scalar(nested_metadata.get("last_activity_at")),
+        "artifacts": {
+            "availability": _pick_scalar(nested_artifacts.get("availability")),
+            "confirmation": _pick_scalar(nested_artifacts.get("confirmation")),
+        },
+    }
 
     planning = v2["planning"]
     booking = v2["booking"]
@@ -385,6 +422,8 @@ def normalize_session_to_v2(session: Optional[Mapping[str, Any]]) -> Dict[str, A
 
     v2["confirmation_state"] = _resolve_confirmation_state(working)
     v2["customer_id"] = _pick_scalar(working.get("customer_id"))
+    contact = working.get("customer_contact")
+    v2["customer_contact"] = copy.deepcopy(contact) if isinstance(contact, dict) else None
 
     capability["active"] = _pick_scalar(
         working.get("active_capability"),
@@ -419,7 +458,21 @@ def normalize_session_to_v2(session: Optional[Mapping[str, Any]]) -> Dict[str, A
     conversation["pending_proposals"] = _pick_list(
         nested_conversation.get("pending_proposals")
     )
+    planning["catalogue_presentation"] = _pick_scalar(
+        working.get("catalogue_presentation"),
+        nested_planning.get("catalogue_presentation"),
+    )
+    planning["pending_entity_resolutions"] = _pick_list(
+        working.get("pending_entity_resolutions"),
+        nested_planning.get("pending_entity_resolutions"),
+    )
+    planning["pending_profile_request"] = _pick_scalar(
+        nested_planning.get("pending_profile_request")
+    )
 
+    from core.session.booking_lifecycle import sanitize_committed_booking_v2
+
+    sanitize_committed_booking_v2(v2)
     validate_session_v2_sections(v2)
     return v2
 
@@ -460,6 +513,14 @@ def hydrate_v1_compat_shims(v2_session: Mapping[str, Any]) -> Dict[str, Any]:
     working.pop("time_constraint", None)
     if planning.get("service_candidates") is not None:
         working["service_candidates"] = planning.get("service_candidates")
+    if planning.get("catalogue_presentation") is not None:
+        working["catalogue_presentation"] = copy.deepcopy(
+            planning.get("catalogue_presentation")
+        )
+    if planning.get("pending_entity_resolutions"):
+        working["pending_entity_resolutions"] = copy.deepcopy(
+            planning["pending_entity_resolutions"]
+        )
     if planning.get("modification_context") is not None:
         working["_modification_context"] = planning.get("modification_context")
 
@@ -484,6 +545,8 @@ def hydrate_v1_compat_shims(v2_session: Mapping[str, Any]) -> Dict[str, Any]:
 
     working["confirmation_state"] = v2.get("confirmation_state")
     working["customer_id"] = v2.get("customer_id")
+    if isinstance(v2.get("customer_contact"), dict):
+        working["customer_contact"] = copy.deepcopy(v2["customer_contact"])
 
     if capability.get("active") is not None:
         working["active_capability"] = capability.get("active")

@@ -20,7 +20,7 @@ Request body (POST /resolve):
                     "name": str,
                     "type": "catalog" | "enum" | "text",
                     "description": str,
-                    "role": "bookable_item" | "staff",  # optional; catalog mapping hint
+                    "role": "bookable_item" | "staff" | "booking_subject",  # optional metadata
                     "catalog": {str: str},    # required for catalog — phrase → id
                     "values": [str]           # required for enum
                 }
@@ -60,6 +60,13 @@ Response contract (mirrors luma /resolve):
             "service_id": str | null,
             "booking_id": str | null
         },
+        "entity_resolutions": {             # always present; authoritative business entities
+            "<schema field name>": {
+                "resolution": "RESOLVED" | "AMBIGUOUS" | "UNRESOLVED",
+                "value": object,            # RESOLVED only
+                "candidate_values": [object] # AMBIGUOUS only, >= 2 distinct
+            }
+        },
         "time_constraint": {...} | null,    # only when a time window is present
         "date_constraint": {...} | null,    # only when date mode is flexible
         "search_query": str | null,         # only for RAG intents
@@ -67,8 +74,17 @@ Response contract (mirrors luma /resolve):
         "answerable": bool | null,          # only for OFF_TOPIC (Core digression evidence)
         "answer": str | null,               # only for OFF_TOPIC (brief evidence answer)
         "operation": str | null,            # structured interaction subtype (e.g. browse_next)
+        "service_category": {               # optional category semantic evidence
+            "name": str,
+            "resolution": "RESOLVED" | "AMBIGUOUS" | "UNRESOLVED"
+        },
+        "catalog_selection": {              # optional presented catalogue ordinal
+            "presentation_ref": str,
+            "kind": "category" | "service",
+            "option": int
+        },
         "declined_entities": [str, ...],    # schema field names explicitly declined (optional)
-        "temporal": {...} | null,           # additive Stage2 canonical temporal (unused by Core yet)
+        "temporal": {...} | null,           # canonical temporal with optional nested resolution
         "turn": {"understanding": "UNDERSTOOD" | "UNRECOGNIZED_INPUT"}
     }
 
@@ -87,6 +103,7 @@ load_dotenv(Path(__file__).parent / ".env")
 from flask import Flask, jsonify, request
 
 from .pipeline import NLUPipeline
+from .entity_resolution import serialize_entity_resolutions
 from .stages.stage2.entity_schema import EntitySchemaValidationError
 
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
@@ -126,6 +143,7 @@ def resolve():
     response = {
         "intent": result.intent,
         "facts": result.facts,
+        "entity_resolutions": serialize_entity_resolutions(result.entity_resolutions),
     }
     if result.time_constraint is not None:
         response["time_constraint"] = result.time_constraint
@@ -143,6 +161,10 @@ def resolve():
         response["service_candidates"] = result.service_candidates
     if result.operation is not None:
         response["operation"] = result.operation
+    if result.service_category is not None:
+        response["service_category"] = result.service_category
+    if result.catalog_selection is not None:
+        response["catalog_selection"] = result.catalog_selection
     if result.response_act is not None:
         response["response_act"] = result.response_act
     if result.declined_entities:

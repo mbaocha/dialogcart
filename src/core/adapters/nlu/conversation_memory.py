@@ -93,6 +93,22 @@ def _attach_service_candidates(
     return result
 
 
+def _attach_catalogue_presentation(
+    result: Dict[str, Any], session: Dict[str, Any]
+) -> Dict[str, Any]:
+    presentation = session.get("catalogue_presentation")
+    if not isinstance(presentation, dict):
+        planning = session.get("planning")
+        presentation = (
+            planning.get("catalogue_presentation")
+            if isinstance(planning, dict)
+            else None
+        )
+    if not isinstance(presentation, dict):
+        return result
+    return {**result, "catalogue_presentation": presentation}
+
+
 def _attach_confirmation_state(
     result: Dict[str, Any], session: Dict[str, Any]
 ) -> Dict[str, Any]:
@@ -105,8 +121,33 @@ def _attach_confirmation_state(
     return {**result, "confirmation_state": state}
 
 
+def _attach_presented_options(
+    result: Dict[str, Any], session: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Expose the current trusted visible option labels, never provider objects."""
+    from core.workflows.availability.presentation import (
+        availability_fingerprint_from_session,
+        presented_availability_from_session,
+        presented_options_for_nlu,
+    )
+
+    projected = presented_options_for_nlu(
+        presented_availability_from_session(session),
+        availability_fingerprint_from_session(session),
+    )
+    if projected is None:
+        return result
+    return {
+        **result,
+        "temporal_context_version": 1,
+        "presented_options": projected,
+    }
+
+
 def build_conversation_context(
     session: Optional[Dict[str, Any]],
+    *,
+    tenant_context: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Return the NLU conversation_context dict from session, or None.
 
@@ -123,6 +164,9 @@ def build_conversation_context(
         if isinstance(conversation, dict)
         else None
     )
+    planning = session.get("planning") if isinstance(session.get("planning"), dict) else {}
+    pending_profile = planning.get("pending_profile_request")
+    customer_contact = session.get("customer_contact")
 
     has_conv = (
         isinstance(conv, dict)
@@ -130,7 +174,13 @@ def build_conversation_context(
     )
     has_messages = isinstance(messages, list) and len(messages) > 0
 
-    if not has_conv and not has_messages and not pending_proposals:
+    if (
+        not has_conv
+        and not has_messages
+        and not pending_proposals
+        and not pending_profile
+        and not customer_contact
+    ):
         # Durable booking sessions may lack session["conversation"] when the prior
         # turn's merged Luma response was not persisted (e.g. handle_message strips
         # _merged_luma_response). Synthesize last_intent so NLU can bind slot-fill
@@ -153,11 +203,23 @@ def build_conversation_context(
                     result["missing_slots"] = missing
                 result = _attach_resolved_service_id(result, session)
                 result = _attach_service_candidates(result, session)
+                result = _attach_current_catalogue_presentation(
+                    result, session, tenant_context
+                )
                 result = _attach_confirmation_state(result, session)
+                result = _attach_presented_options(result, session)
                 return result
         return None
 
     result: Dict[str, Any] = dict(conv) if has_conv else {}
+    if isinstance(customer_contact, dict):
+        result["customer_contact"] = {
+            key: customer_contact.get(key)
+            for key in ("customer_id", "authoritative_name", "name_status")
+            if customer_contact.get(key) is not None
+        }
+    if pending_profile:
+        result["pending_profile_request"] = pending_profile
     if has_messages:
         result["messages"] = messages
 
@@ -175,11 +237,14 @@ def build_conversation_context(
         result = {**result, "missing_slots": missing}
     result = _attach_resolved_service_id(result, session)
     result = _attach_service_candidates(result, session)
+    result = _attach_current_catalogue_presentation(result, session, tenant_context)
     result = _attach_confirmation_state(result, session)
+    result = _attach_presented_options(result, session)
     if isinstance(pending_proposals, list) and pending_proposals:
         semantic_fields = (
             "proposal_type", "status", "entity_type", "slot_key",
             "canonical_id", "display_name", "expected_responses", "expiry_policy",
+            "workflow_intent", "underlying_intent", "intent", "operation",
         )
         result["pending_assistant_proposals"] = [
             {key: proposal.get(key) for key in semantic_fields if key in proposal}
@@ -187,6 +252,30 @@ def build_conversation_context(
             if isinstance(proposal, dict) and proposal.get("status") == "PENDING"
         ]
     return result
+
+
+def _attach_current_catalogue_presentation(
+    result: Dict[str, Any],
+    session: Dict[str, Any],
+    tenant_context: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Expose a stored presentation only when it matches the current catalogue."""
+    catalog = (
+        tenant_context.get("catalog")
+        if isinstance(tenant_context, dict)
+        else None
+    )
+    if not isinstance(catalog, dict):
+        return result
+    from core.catalogue import derive_service_catalogue, is_valid_presentation
+
+    catalogue = derive_service_catalogue(catalog.get("services"))
+    candidate = _attach_catalogue_presentation({}, session).get(
+        "catalogue_presentation"
+    )
+    if not is_valid_presentation(candidate, catalogue=catalogue):
+        return result
+    return {**result, "catalogue_presentation": candidate}
 
 
 def update_conversation(

@@ -8,16 +8,21 @@ as part of the orchestration layer's contract enforcement.
 Fail fast on violations - no recovery, no fixing.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Mapping, Optional
 
 from core.adapters.errors import ContractViolation
 
 
-def assert_luma_contract(response: Dict[str, Any]) -> None:
+def assert_luma_contract(
+    response: Dict[str, Any],
+    *,
+    entity_schema: Optional[Mapping[str, Any]] = None,
+) -> None:
     """
     Assert strict contract on Luma /resolve response.
 
-    FACT-ONLY CONTRACT: Only requires intent.name to exist.
+    Base contract requires intent.name. Schema turns additionally require and
+    strictly validate authoritative entity_resolutions.
     - intent.name MUST exist (required for planning)
     - facts MAY be empty or partial (missing facts are NOT errors)
     - Missing slots are NOT errors (planner computes missing_slots)
@@ -57,6 +62,70 @@ def assert_luma_contract(response: Dict[str, Any]) -> None:
         raise ContractViolation(
             "Contract violation: intent.name is missing (required for planning)"
         )
+
+    if entity_schema is not None:
+        from core.adapters.nlu.entity_resolution_contract import (
+            parse_entity_resolutions,
+        )
+
+        parse_entity_resolutions(response, entity_schema=entity_schema)
+
+    category = response.get("service_category")
+    if category is not None:
+        if not isinstance(category, dict) or category.get("resolution") not in {
+            "RESOLVED", "AMBIGUOUS", "UNRESOLVED"
+        }:
+            raise ContractViolation("Contract violation: malformed service_category")
+        if category.get("resolution") == "RESOLVED":
+            name = category.get("name")
+            if not isinstance(name, str) or not name.strip():
+                raise ContractViolation(
+                    "Contract violation: resolved service_category requires name"
+                )
+        if category.get("resolution") == "AMBIGUOUS":
+            candidates = category.get("candidate_values")
+            if not isinstance(candidates, list) or len(candidates) < 2:
+                raise ContractViolation(
+                    "Contract violation: ambiguous service_category requires candidates"
+                )
+    selection = response.get("catalog_selection")
+    if selection is not None:
+        if not isinstance(selection, dict):
+            raise ContractViolation("Contract violation: catalog_selection must be an object")
+        if selection.get("kind") not in {"category", "service"}:
+            raise ContractViolation("Contract violation: invalid catalog_selection.kind")
+        if not isinstance(selection.get("presentation_ref"), str):
+            raise ContractViolation(
+                "Contract violation: catalog_selection requires presentation_ref"
+            )
+        option = selection.get("option")
+        if isinstance(option, bool) or not isinstance(option, int) or option < 1:
+            raise ContractViolation("Contract violation: catalog_selection.option must be positive integer")
+
+    temporal = response.get("temporal")
+    if isinstance(temporal, dict) and temporal.get("resolution") is not None:
+        resolution = temporal.get("resolution")
+        if not isinstance(resolution, dict):
+            raise ContractViolation("Contract violation: temporal.resolution must be an object")
+        kind = resolution.get("kind")
+        allowed = {"explicit", "ambiguous_meridiem", "presented_option", "invalid_option_reference"}
+        if kind not in allowed:
+            raise ContractViolation("Contract violation: invalid temporal.resolution.kind")
+        start_time = temporal.get("start_time")
+        if kind == "explicit":
+            if not start_time or resolution.get("presentation_ref") or resolution.get("option") is not None:
+                raise ContractViolation("Contract violation: malformed explicit temporal resolution")
+        elif start_time is not None:
+            raise ContractViolation("Contract violation: non-explicit temporal resolution cannot carry start_time")
+        if kind == "presented_option":
+            if not resolution.get("presentation_ref") or isinstance(resolution.get("option"), bool):
+                raise ContractViolation("Contract violation: malformed presented option reference")
+            try:
+                option = int(resolution.get("option"))
+            except (TypeError, ValueError) as exc:
+                raise ContractViolation("Contract violation: presented option must be an integer") from exc
+            if option < 1:
+                raise ContractViolation("Contract violation: presented option must be positive")
 
     # facts is optional - empty or partial facts are valid
     # Missing slots are NOT errors - planner will compute missing_slots

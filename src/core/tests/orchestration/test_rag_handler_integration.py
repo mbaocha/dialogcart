@@ -24,7 +24,13 @@ os.environ.setdefault("CORE_EXECUTION_MODE", "test")
 
 
 def _catalog():
-    return stub_catalog_client()
+    return stub_catalog_client(
+        aliases={
+            "haircut": "haircut",
+            "premium haircut": "premium haircut",
+            "flexi haircut": "flexi haircut",
+        }
+    )
 
 
 _FAQ_DATA = {
@@ -59,6 +65,7 @@ def _rag_luma_mock(
     mock = Mock(spec=LumaClient)
     mock.resolve.return_value = {
         "success": True,
+        "entity_resolutions": {},
         "intent": {"name": intent_name, "confidence": 0.95},
         "facts": {
             "dates": [],
@@ -234,6 +241,9 @@ class TestRagHandlerIntegration:
         mock_luma = Mock(spec=LumaClient)
         mock_luma.resolve.return_value = {
             "success": True,
+            "entity_resolutions": {
+                "service": {"resolution": "RESOLVED", "value": "haircut"}
+            },
             "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
             "facts": {
                 "dates": [],
@@ -274,6 +284,7 @@ class TestRagHandlerIntegration:
         scripts = {
             "book haircut": {
                 "success": True,
+                "entity_resolutions": {},
                 "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
                 "facts": {
                     "dates": [],
@@ -289,6 +300,9 @@ class TestRagHandlerIntegration:
             },
             "premium": {
                 "success": True,
+                "entity_resolutions": {
+                    "service": {"resolution": "RESOLVED", "value": premium}
+                },
                 "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
                 "facts": {
                     "service_id": premium,
@@ -305,6 +319,7 @@ class TestRagHandlerIntegration:
             },
             "how much does it cost?": {
                 "success": True,
+                "entity_resolutions": {},
                 "intent": {"name": "QUOTE", "confidence": 0.95},
                 "facts": {
                     "dates": [],
@@ -318,6 +333,7 @@ class TestRagHandlerIntegration:
             },
             "explain reservation fee": {
                 "success": True,
+                "entity_resolutions": {},
                 "intent": {"name": "GENERAL_INQUIRY", "confidence": 0.95},
                 "facts": {
                     "dates": [],
@@ -331,6 +347,7 @@ class TestRagHandlerIntegration:
             },
             "why is it 105?": {
                 "success": True,
+                "entity_resolutions": {},
                 "intent": {"name": "PAYMENT_STATUS", "confidence": 0.95},
                 "facts": {
                     "dates": [],

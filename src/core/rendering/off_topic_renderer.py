@@ -12,7 +12,10 @@ from typing import Any, Dict, Optional
 
 from core.planning.policy.base_intents import is_core_intent
 from core.rendering.llm_renderer import LlmRenderRequest, render_llm
-from core.rendering.workflow_resume import build_resume_instruction
+from core.rendering.workflow_resume import (
+    build_resume_instruction,
+    compose_pending_confirmation_resume,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -109,9 +112,11 @@ def build_off_topic_render_request(
         "answer": answer,
         "answerable": answerable,
     }
-    resume = build_resume_instruction(session)
-    if resume and resume.text:
-        facts["resume_instruction"] = resume.text
+    confirmation_suffix = compose_pending_confirmation_resume(session)
+    if confirmation_suffix is None:
+        resume = build_resume_instruction(session)
+        if resume and resume.text:
+            facts["resume_instruction"] = resume.text
 
     conversation_history = session.get("messages", [])
     if not isinstance(conversation_history, list):
@@ -152,6 +157,9 @@ def inject_off_topic_text(
             user_input=user_input,
         )
         rendered = render_llm(request) or _FALLBACK_TEXT
+        composed = compose_pending_confirmation_resume(session_state, rendered)
+        if composed is not None:
+            rendered = composed
         result["text"] = rendered
         if isinstance(result.get("outcome"), dict):
             result["outcome"]["text"] = rendered

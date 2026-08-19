@@ -170,6 +170,23 @@ def test_no_match_returns_alternatives():
     assert result["bind_result"] is None
 
 
+def test_no_match_preserves_authoritative_unavailable_reason():
+    result = resolve_time_after_availability(
+        offers=[],
+        time_proposal={"mode": "exact", "value": "09:00"},
+        search_date="2026-08-30",
+        slots={"service_id": "haircut"},
+        unavailable_reason="business_closed",
+    )
+
+    assert result["time_resolution"] == {
+        "outcome": TIME_MATCH_MISMATCH,
+        "requested_time": "09:00",
+        "alternatives": [],
+        "unavailable_reason": "business_closed",
+    }
+
+
 def test_not_applicable_without_exact_time_proposal():
     result = resolve_time_after_availability(
         offers=[

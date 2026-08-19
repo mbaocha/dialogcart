@@ -163,6 +163,50 @@ class ConversationEngine:
             decision = (
                 gate.plan.get("_decision") if isinstance(gate.plan, dict) else None
             )
+            if (
+                gate.plan_status == "NEEDS_CLARIFICATION"
+                and isinstance(decision, dict)
+                and not (
+                    isinstance(gate.response.get("text"), str)
+                    and gate.response["text"].strip()
+                )
+            ):
+                renderer.render_clarification(
+                    gate.response,
+                    decision,
+                    session_state=session_state,
+                )
+            if gate.plan_status == "AWAITING_CONFIRMATION":
+                _customer_name_change = (
+                    gate.plan.get("_customer_contact_name_change")
+                    if isinstance(
+                        gate.plan.get("_customer_contact_name_change"), dict
+                    )
+                    else None
+                )
+                # TEMPORARY_CUSTOMER_NAME_FLOW_DIAGNOSTIC — remove after capture review
+                try:
+                    from core.diagnostics.temporary_customer_name_flow_diagnostic import (
+                        record_confirmation_render,
+                    )
+
+                    record_confirmation_render(
+                        customer_name_change=_customer_name_change,
+                        plan_status=gate.plan_status,
+                    )
+                except Exception:
+                    pass
+                renderer.render_confirmation(
+                    gate.response,
+                    decision if isinstance(decision, dict) else None,
+                    session_state=session_state,
+                    entity_schema=(
+                        gate.plan.get("_entity_schema")
+                        if isinstance(gate.plan.get("_entity_schema"), dict)
+                        else None
+                    ),
+                    customer_name_change=_customer_name_change,
+                )
             renderer.render_recovery(
                 gate.response,
                 plan=gate.plan,
@@ -238,7 +282,10 @@ class ConversationEngine:
         ``frozen_time`` is accepted for API compatibility but is not forwarded
         to planning (unused by ``plan_turn``).
         """
-        from core.rendering.response_renderer import ResponseRenderer
+        from core.rendering.response_renderer import (
+            CUSTOMER_CONTACT_NAME_PROMPT,
+            ResponseRenderer,
+        )
         from core.workflows.availability.workflow import AvailabilityWorkflow
         from core.workflows.booking.workflow import BookingWorkflow
         from core.workflows.router import WorkflowRouter
@@ -277,6 +324,34 @@ class ConversationEngine:
                 organization_client=organization_client,
                 organization_id=organization_id,
             )
+
+            if plan and not self._execution_coordinator.persist_customer_contact_evidence(
+                plan=plan, session_state=session_state,
+                organization_id=organization_id, kwargs=kwargs,
+            ):
+                # External customer persistence is a hard confirmation gate.
+                identity_conflict = bool(
+                    isinstance(plan.get("_customer_contact_identity_conflict"), dict)
+                    and plan["_customer_contact_identity_conflict"].get("detected")
+                )
+                plan["status"] = "NEEDS_CLARIFICATION"
+                plan["stage"] = "CONFIRM"
+                plan["action"] = None
+                plan["awaiting"] = "CUSTOMER_CONTACT_NAME"
+                plan["text"] = (
+                    "I couldn't verify the contact name safely. Please check the "
+                    "name and try again before we confirm."
+                    if identity_conflict
+                    else "I couldn't save your contact name. "
+                    + CUSTOMER_CONTACT_NAME_PROMPT
+                )
+                nested = plan.get("plan")
+                if isinstance(nested, dict):
+                    nested.update({
+                        "status": "NEEDS_CLARIFICATION", "stage": "CONFIRM",
+                        "action": None, "awaiting": "CUSTOMER_CONTACT_NAME",
+                        "ask_next": "customer_contact_name",
+                    })
 
             if not plan or plan.get("error"):
                 failure = {

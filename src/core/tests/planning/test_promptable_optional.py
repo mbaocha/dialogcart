@@ -299,6 +299,10 @@ def test_renderer_includes_no_preference_for_promptable(monkeypatch):
     instruction = captured.get("instruction") or ""
     assert "No preference" in instruction
     assert "staff_id" in instruction
+    assert "This field is optional" in instruction
+    assert "may skip or decline it" in instruction
+    assert "Core Planning will determine the next step" in instruction
+    assert "cannot proceed without it" not in instruction
 
 
 def test_renderer_required_clarification_unchanged(monkeypatch):

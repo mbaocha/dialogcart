@@ -10,9 +10,27 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from core.execution.catalog_resolver import resolve_catalog_item_id
+from core.execution.booking_subject import (
+    booking_subject_enabled,
+    build_booking_subject,
+)
 from core.execution.result import ExecutionResult, normalize_execution_result
 
 logger = logging.getLogger(__name__)
+
+
+def _service_booking_subject_args(
+    plan: Dict[str, Any], slots: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Return gated client kwargs from the finalized execution plan."""
+    if not booking_subject_enabled():
+        return {}
+    schema = plan.get("_entity_schema")
+    subject = build_booking_subject(
+        slots=slots,
+        entity_schema=schema if isinstance(schema, dict) else None,
+    )
+    return {"booking_subject": subject} if subject is not None else {}
 
 
 def _validate_booking_organization(
@@ -274,12 +292,12 @@ def _execute_confirm_appointment(
     # Extract customer_id — never invent; require a resolved tenant customer.
     customer_id = _require_customer_id(slots)
 
-    # Extract start_time and end_time from slots or temporal
-    start_time, end_time = _extract_datetime_from_slots(slots, temporal)
-    if not start_time or not end_time:
+    # Commerce derives the service appointment end from catalog duration.
+    start_time, _end_time = _extract_datetime_from_slots(slots, temporal)
+    if not start_time:
         raise ValueError(
-            "start_time and end_time are required for appointment confirmation. "
-            "Provide datetime_range in slots or Temporal with start/end."
+            "start_time is required for appointment confirmation. "
+            "Provide datetime_range.start or Temporal start_time."
         )
 
     # IDEMPOTENCY CHECK: If booking_id already exists in slots, return existing booking
@@ -298,7 +316,6 @@ def _execute_confirm_appointment(
             "organization_id": organization_id,
             "service_id": service_id,
             "start_time": start_time,
-            "end_time": end_time,
         }
         facts = {"slots": slots, "intent_name": intent_name}
         if temporal:
@@ -313,6 +330,7 @@ def _execute_confirm_appointment(
     # Extract optional fields
     staff_id = slots.get("staff_id")
     addons = slots.get("addons")
+    booking_subject_args = _service_booking_subject_args(plan, slots)
 
     # Call booking client
     try:
@@ -322,9 +340,9 @@ def _execute_confirm_appointment(
             booking_type="service",
             item_id=catalog_item_id,
             start_time=start_time,
-            end_time=end_time,
             staff_id=staff_id,
             addons=addons,
+            **booking_subject_args,
         )
     except AttributeError as e:
         raise AttributeError(
@@ -884,16 +902,17 @@ def _execute_create_booking_hold(
         if not service_id:
             raise ValueError("service_id is required in slots for service booking hold")
 
-        # Extract start_time and end_time from slots or temporal
-        start_time, end_time = _extract_datetime_from_slots(slots, temporal)
-        if not start_time or not end_time:
+        # Commerce derives the service appointment end from catalog duration.
+        start_time, _end_time = _extract_datetime_from_slots(slots, temporal)
+        if not start_time:
             raise ValueError(
-                "start_time and end_time are required for service booking hold. "
-                "Provide datetime_range in slots or Temporal with start/end."
+                "start_time is required for service booking hold. "
+                "Provide datetime_range.start or Temporal start_time."
             )
 
         staff_id = slots.get("staff_id")
         addons = slots.get("addons")
+        booking_subject_args = _service_booking_subject_args(plan, slots)
 
         # Call booking client to create booking in pending state
         try:
@@ -907,9 +926,9 @@ def _execute_create_booking_hold(
                     else int(service_id) if str(service_id).isdigit() else 1
                 ),
                 start_time=start_time,
-                end_time=end_time,
                 staff_id=staff_id,
                 addons=addons,
+                **booking_subject_args,
             )
         except AttributeError as e:
             raise AttributeError(
@@ -1519,15 +1538,19 @@ def _normalize_availability_response(response: Dict[str, Any]) -> Dict[str, Any]
         payload = response["data"]
 
     # Extract slots from response (mock shape or internal API available_slots)
-    raw_slots = payload.get("slots") or payload.get("available_slots") or []
-    if not isinstance(raw_slots, list):
+    raw_slots = payload.get("slots")
+    if raw_slots is None:
+        raw_slots = payload.get("available_slots")
+    if raw_slots is None:
         raw_slots = []
+    if not isinstance(raw_slots, list):
+        raise ValueError("Availability response slots must be a list")
 
     # Normalize each slot
     normalized_slots: List[Dict[str, str]] = []
     for slot in raw_slots:
         if not isinstance(slot, dict):
-            continue
+            raise ValueError("Availability response slot must be an object")
 
         # Extract start/end times (mock + internal API field names)
         starts_at = (
@@ -1540,8 +1563,7 @@ def _normalize_availability_response(response: Dict[str, Any]) -> Dict[str, Any]
         )
 
         if not starts_at or not ends_at:
-            logger.warning(f"Skipping slot missing start/end times: {slot}")
-            continue
+            raise ValueError("Availability response slot requires start and end times")
 
         normalized_slot = {"starts_at": str(starts_at), "ends_at": str(ends_at)}
         normalized_slots.append(normalized_slot)

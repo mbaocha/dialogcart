@@ -23,11 +23,14 @@ or off-topic digression:
 
 AVAILABILITY BROWSE EXCEPTION (overrides in-flow continuation):
 When the user is navigating previously presented times ("next", "show more",
-"more", "previous", "show previous", "back", or equivalent more-times phrasing),
+"more", "show more times", "show me additional times", "previous",
+"show previous", "back", or equivalent more-times phrasing),
 including after an assistant exhaustion / no-more-times reply:
 → validated_intent = AVAILABILITY and set operation = browse_next or browse_previous.
   Do NOT treat as unrecognized in-flow gibberish.
   Do NOT leave operation null for these utterances.
+  Do NOT set browse for date language ("next Tuesday", "next week",
+  "the next available Tuesday", "go back to Tuesday").
 
 Do NOT invent booking slots the user did not mention.
 Do NOT refuse slot-fill solely because last_intent is QUOTE/FAQ when

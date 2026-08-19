@@ -104,6 +104,29 @@ def _assert_booking_created(conv, booking_client, _availability=None) -> None:
         f"turn {conv.turn}: expected booking_code in session "
         f"(booking={booking!r}, slots_keys={list(slots.keys())})"
     )
+    planning = sess.get("planning") or {}
+    assert sess.get("confirmation_state") is None, (
+        f"turn {conv.turn}: successful commit must consume confirmation"
+    )
+    assert planning.get("intent_name") is None, (
+        f"turn {conv.turn}: successful commit must close CREATE_APPOINTMENT intent"
+    )
+    assert planning.get("slots") == {}, (
+        f"turn {conv.turn}: successful commit must clear planning slots, "
+        f"got {planning.get('slots')!r}"
+    )
+    assert planning.get("missing_slots") == [], (
+        f"turn {conv.turn}: successful commit must clear missing slots, "
+        f"got {planning.get('missing_slots')!r}"
+    )
+    assert _sess_fp(sess) is None, (
+        f"turn {conv.turn}: successful commit must clear availability fingerprint"
+    )
+    availability = sess.get("availability") or {}
+    cache = availability.get("cache") or {}
+    assert cache.get("search_result") is None, (
+        f"turn {conv.turn}: successful commit must clear cached availability"
+    )
 
 
 def _assert_no_booking(conv, booking_client, _availability=None) -> None:
@@ -130,7 +153,7 @@ def _assert_booking_created_with_item_id(expected_item_id: int):
 def _assert_booking_created_with_exact_payload(
     *,
     expected_item_id: int,
-    expected_service_id: str,
+    expected_service_id: Any,
     expected_date: str,
     expected_time: str,
     abandoned_values=(),
@@ -142,7 +165,8 @@ def _assert_booking_created_with_exact_payload(
         call = booking_client.create_booking.call_args
         kwargs = call.kwargs if call else {}
         assert kwargs.get("item_id") == expected_item_id, (
-            f"turn {conv.turn}: expected item_id {expected_item_id}, "
+            f"turn {conv.turn}: expected service {expected_service_id!r} "
+            f"as item_id {expected_item_id}, "
             f"got {kwargs.get('item_id')!r}"
         )
         start_time = str(kwargs.get("start_time") or "")
@@ -156,13 +180,6 @@ def _assert_booking_created_with_exact_payload(
                 f"turn {conv.turn}: abandoned value {abandoned!r} reached "
                 f"create_booking start_time={start_time!r}"
             )
-        sess = conv.session() or {}
-        slots = (sess.get("planning") or {}).get("slots") or sess.get("slots") or {}
-        assert slots.get("service_id") == expected_service_id, (
-            f"turn {conv.turn}: expected final service {expected_service_id!r}, "
-            f"got {slots.get('service_id')!r}"
-        )
-
     return assert_booking
 
 
@@ -330,9 +347,6 @@ def _assert_authoritative_time_replaced(
 
 
 def _assert_service_revision(conv, booking, availability) -> None:
-    assert availability.get_service_availability.call_count > _SEARCH_STATE.get(
-        "count", 0)
-    conv.assert_execution(has_availability_slots=True)
     sess = conv.session() or {}
     slots = sess.get("slots") or {}
     assert slots.get("time") in (None, ""), (
@@ -341,8 +355,8 @@ def _assert_service_revision(conv, booking, availability) -> None:
     assert slots.get("date") in (None, ""), (
         f"expected prior date discarded on service revision, got {slots.get('date')!r}"
     )
-    # New SEARCH_AVAILABILITY may write fresh presented/fingerprint; bound
-    # datetime from the prior confirmation must not survive.
+    # This scenario owns invalidation only. Whether a new search is immediately
+    # eligible is covered by availability-service-revision-flexi.
     assert not sess.get("resolved_datetime_range"), (
         f"expected resolved_datetime_range cleared, "
         f"got {sess.get('resolved_datetime_range')!r}"
@@ -1046,6 +1060,9 @@ def _assert_identity_blocked_yes(conv, booking, _availability=None) -> None:
 
 def _attach_identity_before_resume(conv, _booking=None, _availability=None) -> None:
     attach_commit_customer_identity(conv)
+    # Supply an addressable commerce identity while leaving the requested name
+    # to current-turn NLU evidence.
+    conv.customer_name = None
 
 
 def _assert_identity_resolved_pending(conv, booking, _availability=None) -> None:
@@ -1154,6 +1171,26 @@ def _assert_retry_single_success(conv, booking, _availability=None) -> None:
         f"turn {conv.turn}: confirmation must be consumed after successful commit, "
         f"got {_confirmation_state(sess)!r}"
     )
+    planning = sess.get("planning") or {}
+    assert planning.get("intent_name") is None, (
+        f"turn {conv.turn}: successful retry must close CREATE_APPOINTMENT intent"
+    )
+    assert planning.get("slots") == {}, (
+        f"turn {conv.turn}: successful retry must clear planning slots, "
+        f"got {planning.get('slots')!r}"
+    )
+    assert planning.get("missing_slots") == [], (
+        f"turn {conv.turn}: successful retry must clear missing slots, "
+        f"got {planning.get('missing_slots')!r}"
+    )
+    assert _sess_fp(sess) is None, (
+        f"turn {conv.turn}: successful retry must clear availability fingerprint"
+    )
+    availability = sess.get("availability") or {}
+    cache = availability.get("cache") or {}
+    assert cache.get("search_result") is None, (
+        f"turn {conv.turn}: successful retry must clear cached availability"
+    )
 
 
 def _capture_committed_booking(conv, booking, _availability=None) -> None:
@@ -1257,27 +1294,6 @@ def _assert_premium_rerevision(conv, booking, availability) -> None:
 
 
 def _assert_final_multi_revision_booking(conv, booking, _availability=None) -> None:
-    _assert_booking_created(conv, booking)
-    sess = conv.session() or {}
-    slots = sess.get("slots") or {}
-    planning = sess.get("planning") if isinstance(sess.get("planning"), dict) else {}
-    planning_slots = (
-        planning.get("slots") if isinstance(planning.get("slots"), dict) else {}
-    )
-    service_id = planning_slots.get("service_id") or slots.get("service_id")
-    assert service_id == PREMIUM_SERVICE, (
-        f"turn {conv.turn}: final booking service must be Premium (latest criteria), "
-        f"got {service_id!r}"
-    )
-    time_value = str(planning_slots.get("time") or slots.get("time") or "")
-    assert "10" in time_value, (
-        f"turn {conv.turn}: final booking time must be 10am (latest selection), "
-        f"got {time_value!r}"
-    )
-    # Intermediate Flexi 11am bind must not survive.
-    assert "11:00" not in time_value and not time_value.strip().startswith("11"), (
-        f"turn {conv.turn}: stale Flexi 11am must not remain, got {time_value!r}"
-    )
     _assert_booking_created_with_exact_payload(
         expected_item_id=PREMIUM_SERVICE_ITEM_ID,
         expected_service_id=PREMIUM_SERVICE,

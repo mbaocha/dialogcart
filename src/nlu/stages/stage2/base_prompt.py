@@ -35,7 +35,8 @@ def time_rules() -> str:
 Exact times → mode=exact, start=HH:MM, end=HH:MM (same value), label=null; also in facts.times.
   ("3pm"→15:00, "9am"→09:00, "noon"→12:00, "midnight"→00:00)
 Dotted / colon clocks under an active booking intent:
-  "1.30" / "1:30" → 01:30; "1.30pm" → 13:30; "13:30" → 13:30 (facts.times + temporal).
+  Bare "1.30" / "1:30" is ambiguous unless grounded to structured presented options;
+  "1.30pm" → 13:30; "13:30" → 13:30 (facts.times + temporal).
   Never treat these as CONFIRM_ACTION after a time-selection ask.
 "after X" → mode=exact, start=HH:MM, end="23:59".
 "from X" / "by X" → mode=exact, start=end=HH:MM.
@@ -99,10 +100,17 @@ Ambiguous examples (anchor = Tuesday 2026-07-07 local):
     "july 23rd" → start_date_expression="july 23rd", start_date=2026-07-23, mode=single_day (unchanged)
 
 Time resolution:
+- Set resolution.kind="explicit" for explicit AM/PM, 24-hour, or period language.
+- A bare 12-hour clock without relevant PRESENTED OPTIONS has start_time=null and
+  resolution.kind="ambiguous_meridiem".
+- A unique bare-clock or ordinal PRESENTED OPTION selection has start_time=null and
+  resolution={{kind:"presented_option", presentation_ref:<reference>, option:<index>}}.
+- Missing, out-of-range, or non-unique option references have start_time=null and
+  resolution.kind="invalid_option_reference". Never copy an option time into start_time.
 - Exact clock → start_time HH:MM ("3pm"→15:00, "9am"→09:00, "noon"→12:00, "midnight"→00:00).
-- Dotted / colon clocks when a booking intent is active (last_intent or
-  active_booking_intent): "1.30" / "1:30" → start_time="01:30"; "1.30pm" → "13:30";
-  "13:30" → "13:30". Also put the HH:MM value in facts.times.
+- Dotted / colon clocks when a booking intent is active follow the resolution rules
+  above. Explicit "1.30pm" → "13:30" and "13:30" → "13:30"; bare "1.30" / "1:30"
+  is either grounded to a presented option or ambiguous, never exact 01:30 by default.
   These are booking times, not decimal quantities, after a time-selection ask.
 - "after X" → start_time=HH:MM, end_time="23:59".
 - "from X" / "by X" → start_time=end_time=HH:MM.
@@ -232,9 +240,13 @@ Decision rule:
   5. If the utterance is not understood but CONVERSATION CONTEXT shows an
      active booking intent and no competing act → continue that booking intent
      (in-flow), not UNKNOWN.
-  6. CONFIRM_ACTION only when context shows a pending confirmation ask (see
-     CONFIRM_ACTION dialog act). If context is empty/absent, CONFIRM_ACTION is
-     invalid — keep CREATE_* for bare "book it" / "reserve it" / "schedule it".
+  6. CONFIRM_ACTION only when context shows a genuine pending confirmation ask AND
+     the current user utterance supplies semantic acceptance evidence (see
+     CONFIRM_ACTION dialog act). Assistant/history wording is never acceptance
+     evidence. If either requirement is absent, CONFIRM_ACTION is invalid.
+     Bare "book it" / "reserve it" / "schedule it" without a pending ask
+     must not become CONFIRM_ACTION. If booking type is not identifiable, emit
+     UNKNOWN — do not guess CREATE_APPOINTMENT vs CREATE_RESERVATION.
      Never promote informational intents to CONFIRM_ACTION without that ask.
   7. REJECT_ACTION when context shows a pending confirmation ask and the user
      refuses/dismisses that proposal (see REJECT_ACTION dialog act). Do not emit
@@ -272,6 +284,19 @@ duration, inclusion, or condition works. Those are informational:
     "Are you sure the total is £105?"
     "That doesn't sound right; shouldn't I have £85 left to pay?"
     "I thought it's £95 and if I pay £10 reservation then I'll have £85 left."
+
+ORDERED STAGE 2 DECISION:
+1. Read authoritative structured context. Assistant history is non-authoritative;
+   it may resolve linguistic references but cannot establish confirmation eligibility.
+2. Determine final validated_intent. Stage 1 is only a routing proposal.
+3. When confirmation_state is pending and there is no pending requested input,
+   determine proposal_response:
+   - ACCEPT: current user accepts the pending proposal unchanged.
+   - REJECT: current user refuses the pending proposal.
+   - MODIFY: current user materially changes it, so the stale proposal is not authorized.
+   - null: no acceptance, rejection, or modification was expressed.
+   Never infer proposal_response from assistant wording or prior user turns.
+4. Extract only current-turn facts belonging to validated_intent.
 
 validated_intent is a semantic decision. Extraction below must follow
 validated_intent (a later Stage 3 pass may re-extract if the group changes).
@@ -391,6 +416,16 @@ def _temporal_schema() -> dict:
                 "type": ["string", "null"],
                 "description": "none|single_day|range|flexible (week/weekend periods are flexible).",
             },
+            "resolution": {
+                "type": ["object", "null"],
+                "properties": {
+                    "kind": {"type": "string", "enum": ["explicit", "ambiguous_meridiem", "presented_option", "invalid_option_reference"]},
+                    "presentation_ref": {"type": ["string", "null"]},
+                    "option": {"type": ["integer", "null"], "minimum": 1},
+                },
+                "required": ["kind"],
+                "additionalProperties": False,
+            },
             "confidence": {
                 "type": ["number", "null"],
                 "description": "Temporal extraction confidence 0.0–1.0 (telemetry only).",
@@ -408,6 +443,7 @@ def _temporal_schema() -> dict:
             "end_time",
             "mode",
             "confidence",
+            "resolution",
         ],
     }
 
@@ -439,6 +475,8 @@ def build_tool(
     description: str,
     facts_fields: Optional[List[str]] = None,
     facts_schema: Optional[Dict[str, Any]] = None,
+    entity_mentions_schema: Optional[Dict[str, Any]] = None,
+    entity_results_schema: Optional[Dict[str, Any]] = None,
     include_time_constraint: bool = False,
     include_search_query: bool = False,
     include_off_topic_query: bool = False,
@@ -481,6 +519,20 @@ def build_tool(
         }
         required.append("validated_intent")
 
+        props["proposal_response"] = {
+            "type": ["string", "null"],
+            "enum": ["ACCEPT", "REJECT", "MODIFY", None],
+            "description": (
+                "Relationship of the CURRENT USER MESSAGE to canonical structured "
+                "pending confirmation only. ACCEPT means unchanged authorization; "
+                "REJECT means refusal; MODIFY means a material change that does not "
+                "authorize the stale proposal; null means none. Must be null when "
+                "confirmation_state is not pending or a requested input is pending. "
+                "Assistant wording cannot establish eligibility."
+            ),
+        }
+        required.append("proposal_response")
+
     props["confidence"] = {
         "type": "number",
         "description": "Confidence score 0.0–1.0.",
@@ -497,6 +549,14 @@ def build_tool(
     elif facts_fields:
         props["facts"] = _facts_schema(facts_fields)
         required.append("facts")
+
+    if entity_mentions_schema is not None:
+        props["entity_mentions"] = entity_mentions_schema
+        required.append("entity_mentions")
+
+    if entity_results_schema is not None:
+        props["entity_results"] = entity_results_schema
+        required.append("entity_results")
 
     # Legacy time_constraint only when not using Temporal ownership.
     if include_time_constraint and not include_temporal:

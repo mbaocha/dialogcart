@@ -488,6 +488,7 @@ def build_recorded_bundle(
     start_hours: tuple[int, ...] = (9, 10),
     trace_availability: bool = False,
     handler_render_recordings: Optional[Dict[str, Any]] = None,
+    catalog_service_records: Optional[List[Dict[str, Any]]] = None,
     **_ignored: Any,
 ) -> Tuple[BookingConversation, Any, Any, str]:
     """E2E booking bundle: RecordingLumaClient + configurable availability.
@@ -522,6 +523,7 @@ def build_recorded_bundle(
         availability_client=availability_client,
         business_category=category,
         handler_render_recordings=handler_render_recordings,
+        catalog_service_records=catalog_service_records,
     )
     conv = BookingConversation(api_client, user_id, domain=booking_domain)
     conv.structured_business_context = copy.deepcopy(
@@ -545,13 +547,24 @@ def _wire_booking_deps(
     availability_client,
     business_category: Optional[str] = None,
     handler_render_recordings: Optional[Dict[str, Any]] = None,
+    catalog_service_records: Optional[List[Dict[str, Any]]] = None,
 ):
     """Wire RecordingLumaClient + catalog/org/booking mocks into the engine."""
     category = business_category or DEFAULT_BUSINESS_CATEGORY
     cat_fx = resolve_category_fixture(category)
     aliases = cat_fx["aliases"]
     collections = cat_fx.get("collections") or {}
-    service_records = cat_fx.get("service_records") or []
+    service_records = (
+        catalog_service_records
+        if catalog_service_records is not None
+        else (cat_fx.get("service_records") or [])
+    )
+    if catalog_service_records is not None:
+        aliases = {
+            str(record["name"]): str(record["id"])
+            for record in catalog_service_records
+            if record.get("id") is not None and record.get("name")
+        }
     catalog_collection_keys = cat_fx.get("catalog_collection_keys") or []
     primary_catalog_collection = cat_fx.get("primary_catalog_collection")
     booking_domain = str(cat_fx["booking_domain"])
@@ -620,6 +633,7 @@ class _FakeE2ECustomerClient:
         self._next_id = 91001
         self._by_contact: Dict[tuple, int] = {}
         self._org_ids: Dict[int, int] = {}
+        self.update_name_by_id_calls = []
 
     def upsert(
         self,
@@ -639,10 +653,47 @@ class _FakeE2ECustomerClient:
         self._org_ids[customer_id] = int(organization_id)
         return {"id": customer_id, "name": name, "phone": phone, "email": email}
 
+    def lookup_by_contact(
+        self,
+        *,
+        organization_id: int,
+        phone: Optional[str] = None,
+        email: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        key = (int(organization_id), phone or "", email or "")
+        customer_id = self._by_contact.get(key)
+        if customer_id is None:
+            return None
+        return {
+            "id": customer_id,
+            "organizationId": int(organization_id),
+            "name": "Existing Customer",
+            "phone": phone,
+            "email": email,
+        }
+
     def belongs_to_organization(
         self, customer_id: int, organization_id: int
     ) -> bool:
         return self._org_ids.get(int(customer_id)) == int(organization_id)
+
+    def update_name_by_id(
+        self, *, organization_id: int, customer_id: int, name: str
+    ) -> Dict[str, Any]:
+        self.update_name_by_id_calls.append(
+            {
+                "organization_id": organization_id,
+                "customer_id": customer_id,
+                "name": name,
+            }
+        )
+        if self._org_ids.get(int(customer_id)) != int(organization_id):
+            raise RuntimeError("customer not found in organization")
+        return {
+            "id": int(customer_id),
+            "organizationId": int(organization_id),
+            "name": name,
+        }
 
 
 @pytest.fixture

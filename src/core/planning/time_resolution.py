@@ -91,6 +91,7 @@ def resolve_time_after_availability(
     date_proposal: Optional[Dict[str, Any]] = None,
     search_date: Optional[str] = None,
     slots: Optional[Dict[str, Any]] = None,
+    unavailable_reason: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Resolve whether an exact ``time_proposal`` is satisfied by search offers.
 
@@ -163,6 +164,8 @@ def resolve_time_after_availability(
         "requested_time": requested_norm,
         "alternatives": alternatives,
     }
+    if isinstance(unavailable_reason, str) and unavailable_reason:
+        resolution["unavailable_reason"] = unavailable_reason
     logger.info(
         "[TIME_RESOLUTION] %s requested=%s alternatives=%s expected_date=%s",
         TIME_MATCH_MISMATCH,
@@ -224,6 +227,7 @@ def _patch_plan_container(
         if action is not _UNSET:
             decision_plan["action"] = action
         if awaiting is not _UNSET:
+            decision["awaiting"] = awaiting
             decision_plan["awaiting"] = awaiting
         if time_match_outcome is not None:
             decision["time_match_outcome"] = time_match_outcome

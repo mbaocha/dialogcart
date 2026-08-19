@@ -1109,7 +1109,16 @@ def _merge_slots_additive(
     )
     if _merged_proposals["date_proposal"] is not None:
         merged["date_proposal"] = _merged_proposals["date_proposal"]
-    if _merged_proposals["time_proposal"] is not None:
+    _temporal = merged.get("temporal")
+    _resolution = _temporal.get("resolution") if isinstance(_temporal, dict) else None
+    _resolution_kind = _resolution.get("kind") if isinstance(_resolution, dict) else None
+    if _resolution_kind in (
+        "ambiguous_meridiem",
+        "presented_option",
+        "invalid_option_reference",
+    ):
+        merged.pop("time_proposal", None)
+    elif _merged_proposals["time_proposal"] is not None:
         merged["time_proposal"] = _merged_proposals["time_proposal"]
 
     # Assertion: All session slots must be preserved in merged slots
@@ -1582,7 +1591,10 @@ def _extract_raw_luma_slots(ctx: _MergeContext) -> Dict[str, Any]:
     # If raw Luma facts have service_id, use that as the raw tenant value
     # Store normalized value (if any) as canonical
     raw_luma_response = merged.get("_raw_luma_response", {})
-    if isinstance(raw_luma_response, dict):
+    if (
+        isinstance(raw_luma_response, dict)
+        and not merged.get("_entity_resolutions_authoritative")
+    ):
         raw_luma_facts = raw_luma_response.get("facts", {})
         if isinstance(raw_luma_facts, dict) and "service_id" in raw_luma_facts:
             # Raw Luma facts contain service_id - use as raw tenant value

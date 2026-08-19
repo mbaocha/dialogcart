@@ -45,7 +45,12 @@ def apply_execution_blocked_text(
 
 def _copy_fallback_metadata(source: Dict[str, Any], target: Dict[str, Any]) -> None:
     """Preserve explicit NLU-fallback markers through response shaping."""
-    for key in ("recovered", "recovery_reason", "message_applied"):
+    for key in (
+        "recovered",
+        "nlu_failure_recovery",
+        "recovery_reason",
+        "message_applied",
+    ):
         if key in source:
             target[key] = source[key]
 

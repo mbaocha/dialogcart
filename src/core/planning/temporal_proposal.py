@@ -394,6 +394,52 @@ def try_bind_offered_time_selection(
     presented = presented_availability_from_session(session_state)
     cache = availability_cache_from_session(session_state)
     offers = get_presented_availability_offers(session_state)
+
+    resolution = temporal.get("resolution") if isinstance(temporal, dict) else None
+    if isinstance(resolution, dict) and resolution.get("kind") == "presented_option":
+        from core.workflows.availability.presentation import (
+            availability_fingerprint_from_session,
+            trusted_presented_option,
+        )
+
+        selected = trusted_presented_option(
+            presented,
+            availability_fingerprint_from_session(session_state),
+            presentation_ref=resolution.get("presentation_ref"),
+            option=resolution.get("option"),
+        )
+        trusted_slots = cache.get("slots") if isinstance(cache, dict) else None
+        selected_start = (
+            selected.get("starts_at") or selected.get("start")
+            if isinstance(selected, dict)
+            else None
+        )
+        trusted = (
+            isinstance(trusted_slots, list)
+            and selected_start is not None
+            and any(
+                isinstance(item, dict)
+                and (item.get("starts_at") or item.get("start")) == selected_start
+                for item in trusted_slots
+            )
+        )
+        parsed = _parse_offer_start_parts(selected_start) if trusted else None
+        if not isinstance(selected, dict) or parsed is None:
+            if isinstance(turn_payload, dict):
+                turn_payload["_selection_resolution"] = {
+                    "status": "not_found",
+                    "source": "presentation",
+                    "reason_code": "invalid_presented_option_reference",
+                }
+            return None
+        offer_date, offer_time = parsed
+        return create_bound_datetime_from_offer(
+            slots=slots,
+            offer=selected,
+            offer_date=offer_date,
+            user_time_norm=offer_time,
+            execution_result=cache,
+        )
     logger.debug(
         "[TIME_SELECTION_BIND] attempt user_time_raw=%r time_proposal=%s "
         "temporal=%s date_proposal=%s slots.date=%s "

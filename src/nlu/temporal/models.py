@@ -29,6 +29,7 @@ class Temporal:
     end_time: Optional[str] = None
     mode: Optional[str] = None
     confidence: Optional[float] = None
+    resolution: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         """JSON-serializable dict (nulls preserved)."""

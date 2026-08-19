@@ -70,6 +70,12 @@ def test_switch_rejects_unknown_category():
         pass
 
 
+def test_switch_command_parser_does_not_capture_booking_correction():
+    assert chat_mod.parse_switch_command("switch car_service") == "car_service"
+    assert chat_mod.parse_switch_command("switch time to 10am") is None
+    assert chat_mod.parse_switch_command("switch not_a_vertical") is None
+
+
 def test_catalog_beauty_salon_collections():
     data = {
         "services": [

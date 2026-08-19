@@ -169,6 +169,12 @@ def reconcile_intent(
         luma_response, gate_session
     )
 
+    # Structured catalogue discovery must reach service-slot planning before
+    # generic DISCOVERY/GENERAL_INQUIRY handler delegation. NLU owns the
+    # language interpretation; Core only applies the workflow consequence.
+    if luma_response.get("operation") == "list_service_categories":
+        planning_intent = "CREATE_APPOINTMENT"
+
 
 
     if gate_action == ConfirmationGateTurn.YES and gate_booking_intent:

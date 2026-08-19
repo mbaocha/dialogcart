@@ -80,6 +80,29 @@ def test_no_action_produces_no_command():
     assert build_execution_command(plan=plan, organization_id=2) is None
 
 
+@pytest.mark.parametrize(
+    "recovery_marker",
+    [
+        {"message_applied": False},
+        {"nlu_failure_recovery": True},
+        {"message_applied": False, "nlu_failure_recovery": True},
+    ],
+)
+def test_unapplied_or_nlu_failure_plan_never_produces_command(recovery_marker):
+    plan = {**_confirm_plan(), **recovery_marker}
+
+    assert build_execution_command(plan=plan, organization_id=2) is None
+
+
+def test_successfully_applied_plan_retains_normal_execution():
+    plan = {**_availability_plan(), "message_applied": True}
+
+    command = build_execution_command(plan=plan, organization_id=2)
+
+    assert command is not None
+    assert command.action == "SEARCH_AVAILABILITY"
+
+
 def test_unknown_selected_action_fails_closed():
     plan = {
         "status": "READY",

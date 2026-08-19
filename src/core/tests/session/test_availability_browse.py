@@ -4,7 +4,6 @@ import pytest
 
 from core.workflows.availability.browse import (
     extract_availability_browse,
-    infer_browse_direction_from_text,
     normalize_availability_operation,
     resolve_availability_browse,
 )
@@ -36,8 +35,10 @@ class TestNormalizeAvailabilityOperation:
         [
             ("browse_next", {"direction": "next", "axis_hint": "any"}),
             ("browse_previous", {"direction": "previous", "axis_hint": "any"}),
-            ("BROWSE_NEXT", {"direction": "next", "axis_hint": "any"}),
-            ("browse-next", {"direction": "next", "axis_hint": "any"}),
+            ("BROWSE_NEXT", None),
+            ("browse-next", None),
+            ("next", None),
+            ("browse_next_times", None),
             ("search", None),
             (None, None),
             ("", None),
@@ -55,49 +56,37 @@ class TestExtractAvailabilityBrowse:
         }
         assert extract_availability_browse(response) == {"direction": "next", "axis_hint": "any"}
 
-    def test_reads_facts_operation(self):
+    def test_does_not_read_facts_operation(self):
         response = {
             "intent": {"name": "AVAILABILITY"},
             "facts": {"operation": "browse_previous"},
         }
-        assert extract_availability_browse(response) == {"direction": "previous", "axis_hint": "any"}
+        assert extract_availability_browse(response) is None
 
-    def test_reads_availability_browse_field(self):
+    def test_does_not_read_derived_availability_browse_field(self):
         response = {
             "intent": {"name": "AVAILABILITY"},
             "availability_browse": {"direction": "next"},
         }
-        assert extract_availability_browse(response) == {"direction": "next", "axis_hint": "any"}
+        assert extract_availability_browse(response) is None
 
-    def test_resolve_falls_back_to_text_with_availability_intent(self):
+    def test_resolves_structured_browse_next(self):
         merged = {
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "_raw_luma_response": {"intent": {"name": "AVAILABILITY"}},
-            "_source_text": "show more",
+            "intent": {"name": "AVAILABILITY"},
+            "operation": "browse_next",
         }
-        session = {
-            "last_execution_result": {
-                "type": "availability",
-                "status": "success",
-                "slots": [{"starts_at": "2026-07-09T09:00:00Z"}],
-            }
-        }
-        assert resolve_availability_browse(merged, session)["direction"] == "next"
+        assert resolve_availability_browse(merged)["direction"] == "next"
 
-    def test_resolve_does_not_infer_without_cached_availability(self):
+    def test_resolves_structured_browse_previous(self):
         merged = {
-            "_raw_luma_response": {"intent": {"name": "AVAILABILITY"}},
-            "_source_text": "show more",
+            "intent": {"name": "AVAILABILITY"},
+            "operation": "browse_previous",
         }
-        assert resolve_availability_browse(merged, {}) is None
+        assert resolve_availability_browse(merged)["direction"] == "previous"
 
-    def test_resolve_falls_back_to_text_with_create_appointment_live_luma_shape(self):
-        """Live Luma browse: CREATE_APPOINTMENT intent, no operation, cached availability."""
-        merged = {
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "_raw_luma_response": {"intent": {"name": "CREATE_APPOINTMENT"}},
-            "_source_text": "show more",
-        }
+    @pytest.mark.parametrize("source_text", ("show more", "previous"))
+    def test_missing_operation_never_infers_from_source_text(self, source_text):
+        merged = {"intent": {"name": "AVAILABILITY"}, "_source_text": source_text}
         session = {
             "intent_name": "CREATE_APPOINTMENT",
             "last_execution_result": {
@@ -106,40 +95,26 @@ class TestExtractAvailabilityBrowse:
                 "slots": [{"starts_at": "2026-07-09T09:00:00Z"}],
             },
         }
-        assert resolve_availability_browse(merged, session)["direction"] == "next"
-
-    def test_resolve_does_not_infer_create_appointment_without_cached_availability(self):
-        merged = {
-            "intent": {"name": "CREATE_APPOINTMENT"},
-            "_raw_luma_response": {"intent": {"name": "CREATE_APPOINTMENT"}},
-            "_source_text": "show more",
-        }
-        session = {"intent_name": "CREATE_APPOINTMENT"}
         assert resolve_availability_browse(merged, session) is None
-        assert resolve_availability_browse(merged, {}) is None
 
     @pytest.mark.parametrize(
-        "text,expected",
+        "operation",
         [
-            ("show more", "next"),
-            ("more", "next"),
-            ("next", "next"),
-            ("previous", "previous"),
-            ("show previous", "previous"),
-            ("back", "previous"),
-            ("next day", None),
-            ("previous day", None),
-            ("later date", None),
-            ("book premium", None),
+            "search",
+            "next",
+            "browse-next",
+            "browse_next_times",
+            "unrelated",
+            None,
         ],
     )
-    def test_infer_browse_direction_from_text(self, text, expected):
-        inferred = infer_browse_direction_from_text(text)
-        if expected is None:
-            assert inferred is None
-        else:
-            assert inferred is not None and inferred["direction"] == expected
-            assert inferred.get("axis_hint") == "any"
+    def test_invalid_or_unrelated_operation_does_not_browse(self, operation):
+        merged = {
+            "intent": {"name": "AVAILABILITY"},
+            "operation": operation,
+            "_source_text": "show more",
+        }
+        assert resolve_availability_browse(merged) is None
 
 
 class TestMergeAvailabilityBrowse:

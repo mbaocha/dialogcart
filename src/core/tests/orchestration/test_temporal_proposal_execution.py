@@ -23,6 +23,7 @@ from core.planning.temporal_proposal import (
     try_bind_offered_time_selection,
 )
 from core.workflows.availability.discovery.bridge import present_via_discovery
+from core.workflows.availability.presentation import compute_presented_options_reference
 
 
 def _cache_and_presented(slots, *, search_date: str):
@@ -32,6 +33,7 @@ def _cache_and_presented(slots, *, search_date: str):
         "status": "success",
         "slots": list(slots),
         "search_date": search_date,
+        "fingerprint": "test-fingerprint",
     }
     return cache, present_via_discovery(cache, search_date=search_date)
 
@@ -317,7 +319,7 @@ class TestTryBindOfferedTimeSelection:
         assert result["slots"]["time"] == "09:00"
 
 
-    def test_clock_face_binds_presented_pm_when_nlu_emits_am(self):
+    def test_presented_option_reference_binds_canonical_pm_offer(self):
         """Bare 1.30 → NLU 01:30 binds unique presented 13:30 (canonical offer time)."""
         slots = [
             {
@@ -333,24 +335,29 @@ class TestTryBindOfferedTimeSelection:
         session = {
             "last_execution_result": cache,
             "presented_availability": presented,
+            "availability_fingerprint": "test-fingerprint",
         }
+        reference = compute_presented_options_reference(presented, "test-fingerprint")
         result = try_bind_offered_time_selection(
             {"service_id": "premium haircut"},
             session,
-            time_proposal={"mode": "exact", "value": "01:30"},
             temporal={
                 "expression": "1.30",
-                "start_time": "01:30",
+                "start_time": None,
                 "mode": "none",
+                "resolution": {
+                    "kind": "presented_option",
+                    "presentation_ref": reference,
+                    "option": 1,
+                },
             },
-            user_facts={"time": "01:30", "time_from_current_turn": True},
         )
         assert result is not None
         assert result["slots"]["date"] == "2026-07-03"
         assert result["slots"]["time"] == "13:30"
         assert result["resolved_datetime_range"]["start"] == "2026-07-03T13:30:00Z"
 
-    def test_explicit_am_does_not_clock_face_to_pm(self):
+    def test_explicit_am_exact_match_does_not_bind_pm(self):
         """Explicit 1.30am must not bind a presented 13:30-only window."""
         slots = [
             {
@@ -378,7 +385,7 @@ class TestTryBindOfferedTimeSelection:
             is None
         )
 
-    def test_clock_face_ambiguous_when_multiple_face_matches(self):
+    def test_explicit_am_does_not_bind_duplicate_pm_offers(self):
         """Two presented offers sharing a clock face → do not guess."""
         slots = [
             {

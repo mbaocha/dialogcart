@@ -374,6 +374,7 @@ def resolve_temporal(temporal: Temporal, now: datetime, timezone: str = "UTC") -
         end_time=temporal.end_time,
         mode=temporal.mode if temporal.mode in TEMPORAL_MODES else None,
         confidence=temporal.confidence,
+        resolution=temporal.resolution,
     )
     if temporal.start_date and out.start_date is None:
         logger.warning(
@@ -544,6 +545,7 @@ def apply_bare_ordinal_revision(
         end_time=temporal.end_time,
         mode="single_day",
         confidence=temporal.confidence,
+        resolution=temporal.resolution,
     )
 
 

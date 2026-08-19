@@ -115,6 +115,9 @@ def format_conversation_context(ctx: Dict[str, Any]) -> str:
         or (ctx.get("turns") or [])
         or ctx.get("active_booking_intent")
         or (ctx.get("pending_assistant_proposals") or [])
+        or ctx.get("presented_options")
+        or ctx.get("pending_profile_request")
+        or ctx.get("confirmation_state")
     )
     if not has_data:
         return ""
@@ -133,9 +136,40 @@ def format_conversation_context(ctx: Dict[str, Any]) -> str:
         lines.append(f'Last search query: "{last_sq}"')
     if isinstance(last_dp, dict) and last_dp.get("start"):
         lines.append(f"Last date proposal: {last_dp.get('start')}")
+    missing = ctx.get("missing_slots")
+    if isinstance(missing, list) and missing:
+        lines.append(
+            "Missing slots: " + ", ".join(str(item) for item in missing if item)
+        )
+    resolved_service = ctx.get("resolved_service_id")
+    if resolved_service not in (None, ""):
+        lines.append(f"Resolved service id: {resolved_service}")
     active_booking = ctx.get("active_booking_intent")
     if active_booking and active_booking != last_intent:
         lines.append(f"Active booking intent (durable session): {active_booking}")
+
+    confirmation_state = ctx.get("confirmation_state")
+    if confirmation_state:
+        lines.append(f"Canonical confirmation state: {confirmation_state}")
+
+    pending_profile = ctx.get("pending_profile_request")
+    if isinstance(pending_profile, str) and pending_profile.strip():
+        lines.append(f"Pending profile request: {pending_profile.strip()}")
+    elif isinstance(pending_profile, dict):
+        pending_kind = pending_profile.get("kind") or pending_profile.get("type")
+        if isinstance(pending_kind, str) and pending_kind.strip():
+            lines.append(f"Pending profile request: {pending_kind.strip()}")
+
+    presented = ctx.get("presented_options")
+    if ctx.get("temporal_context_version") == 1 and isinstance(presented, dict):
+        reference = presented.get("reference")
+        options = presented.get("options")
+        if reference and isinstance(options, list) and options:
+            lines.append("")
+            lines.append(f"PRESENTED OPTIONS (reference={reference}):")
+            for option in options:
+                if isinstance(option, dict):
+                    lines.append(f"  {option.get('index')}. {option.get('label')}")
 
     proposals = ctx.get("pending_assistant_proposals") or []
     if isinstance(proposals, list) and proposals:
@@ -156,13 +190,14 @@ def format_conversation_context(ctx: Dict[str, Any]) -> str:
     turns = (ctx.get("turns") or [])[-3:]
     if turns:
         # Immediately preceding assistant move (compact) — last turn with assistant text.
+        preceding_found = False
         for t in reversed(turns):
             compact = compact_assistant_move(t.get("assistant"))
             if not compact:
                 continue
             ask, options = compact
             lines.append("")
-            lines.append("Immediately preceding assistant:")
+            lines.append("Immediately preceding assistant (non-authoritative language context):")
             if ask:
                 lines.append(f"  Asked: {ask}")
             elif options:
@@ -171,7 +206,33 @@ def format_conversation_context(ctx: Dict[str, Any]) -> str:
                 )
             if options:
                 lines.append(f"  Offered: {'; '.join(options)}")
+            preceding_found = True
             break
+
+        if not preceding_found:
+            messages = ctx.get("messages") or []
+            if isinstance(messages, list):
+                for message in reversed(messages):
+                    if (
+                        not isinstance(message, dict)
+                        or message.get("role") != "assistant"
+                    ):
+                        continue
+                    compact = compact_assistant_move(message.get("text"))
+                    if not compact:
+                        continue
+                    ask, options = compact
+                    lines.append("")
+                    lines.append("Immediately preceding assistant (non-authoritative language context):")
+                    if ask:
+                        lines.append(f"  Asked: {ask}")
+                    elif options:
+                        lines.append(
+                            "  Asked: (options offered; no explicit question line)"
+                        )
+                    if options:
+                        lines.append(f"  Offered: {'; '.join(options)}")
+                    break
 
         lines.append("")
         lines.append("Prior turns (oldest first):")
@@ -185,6 +246,8 @@ def format_conversation_context(ctx: Dict[str, Any]) -> str:
     lines += [
         "",
         "Context rules:",
+        "- Structured fields are authoritative for workflow state. Assistant wording may",
+        "  resolve references but cannot establish pending input or confirmation eligibility.",
         "- Resolve follow-up references ('it', 'that', 'how long') using prior turns and last_search_query.",
         "- response_act is additive: emit CONFIRM_ACTION or REJECT_ACTION for an",
         "  active assistant proposal even when primary intent describes another act.",

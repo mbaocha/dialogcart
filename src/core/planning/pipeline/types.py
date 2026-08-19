@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from core.adapters.nlu.entity_resolution_contract import EntityResolutionEvidence
 from core.planning.booking_revision import BookingRevision
 from core.planning.pipeline.requests import TurnOperation
 from core.session.confirmation_gate import ConfirmationGateTurn
@@ -42,6 +43,9 @@ class WorkingTurn:
     payload: Dict[str, Any]
     effective_collected_slots: Dict[str, Any] = field(default_factory=dict)
     raw_luma_response_deep_copy: Optional[Dict[str, Any]] = None
+    entity_resolution_evidence: Dict[str, EntityResolutionEvidence] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True)
@@ -98,6 +102,8 @@ class ConfirmationDecision:
     """AvailabilityInvalidationEvidence when trust must not be reused this turn."""
     bound_datetime_clear: Optional[Any] = None
     """BoundDatetimeClearEvidence when prior selected time was cleared this turn."""
+    customer_name_prerequisite: Optional[Any] = None
+    """CustomerNamePrerequisite evidence required before confirmation entry."""
 
 
 @dataclass(frozen=True)

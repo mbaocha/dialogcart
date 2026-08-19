@@ -78,15 +78,56 @@ HTTP: `POST /resolve` (`nlu/api.py`). Core validates only `intent.name` as requi
 | `facts.dates` | Date mentions (raw or ISO after bind) | Luma | Extracted facts | `temporal_proposal` → date proposals |
 | `facts.times` | Clock times (HH:MM) | Luma | Extracted facts | `temporal_proposal` → time proposals |
 | `facts.date_time_pairs` | Same-utterance date+time pairs | Luma | Extracted facts | Temporal proposal / binding |
-| `facts.service_id` | Resolved catalog service (or null) | Luma | Extracted facts + entity resolution | `facts_to_slots`, merge, revision |
+| `entity_resolutions` | Sparse, authoritative schema-defined entity meaning for this turn | Luma | Schema extraction + deterministic grounding | Entity-aware consumers |
+| `facts.service_id` | Legacy resolved bookable item (or null) | Luma | Projection from authoritative entity grounding when `entity_schema` is supplied | `facts_to_slots`, merge, revision |
 | `facts.booking_id` | Booking reference token | Luma | Extracted facts | `facts_to_slots`, modify/cancel flows |
 | `time_constraint` | Exact / fuzzy / window time structure | Luma | Extracted facts | `temporal_proposal`, revision detection, missing-slot satisfaction |
 | `date_constraint` | Date mode structure when present | Luma | Extracted facts | `temporal_proposal`, flexible-utterance rules |
 | `search_query` | RAG noun phrase for informational intents | Luma | Conversational / retrieval hint | RAG handler delegation |
-| `service_candidates` | Ambiguous service options | Luma | Clarification support | Clarification / decision plan |
+| `service_candidates` | Legacy ambiguous bookable-item options | Luma | Projection from authoritative entity grounding when `entity_schema` is supplied | Clarification / decision plan |
 | `operation` | Interaction subtype under an intent (today: browse) | Luma | Conversational operation | `availability/browse.py`, pagination workflows |
 
 **Not returned (by design):** `slots` as Core planning slots, `missing_slots`, `status`, execution actions. Core promotes a subset of facts into slots (`luma_facts_adapter.facts_to_slots` promotes only `service_id` / `booking_id`; dates/times stay as proposals until Core binds them).
+
+### Schema-driven entity resolution
+
+Every successful `/resolve` response includes `entity_resolutions`; an empty object
+means that no business-schema entity was mentioned in the current utterance. The
+map is sparse and uses the entity's declared schema name. Each entry is exactly one
+of `RESOLVED` with `value`, `AMBIGUOUS` with at least two distinct
+`candidate_values`, or `UNRESOLVED` with neither value field.
+
+This map is authoritative when `entity_schema` is supplied. Catalog values are the
+canonical values from the field's phrase-to-value catalog. Enum values must be an
+allowed member. Text fields are free-form strings and do not undergo catalog
+membership checks. Unknown entity names, invalid canonical values or types, extra
+fields, and invalid resolution/field combinations are contract failures rather
+than being repaired as `UNRESOLVED`.
+
+Schema-driven Stage 2 output also contains an internal required
+`entity_mentions` boolean for every declared field. At the extraction boundary,
+NLU validates the facts object, its exact field set, every string/null value, and
+the exact boolean mention map before adding defaults. The resulting typed evidence
+distinguishes not mentioned, mentioned with a raw value, and mentioned without a
+safe raw value. The mention evidence is internal and is not returned by `/resolve`.
+
+Grounding constructs canonical resolution results from this typed evidence. The
+complete `entity_resolutions` map is validated before compatibility fields are
+projected. An absent bookable entity therefore produces neither a resolution nor
+catalogue-wide candidates. When several highest-ranked aliases map to one exact
+canonical value, the result is `RESOLVED`; compatibility deterministically uses
+the first highest-ranked alias and emits no candidates. `AMBIGUOUS` is reserved
+for at least two distinct canonical values.
+
+For compatibility, declared raw entity facts remain present. A resolved catalog
+field still projects its legacy `facts.<role>_id`/`facts.<name>_id` lookup key; a
+bookable item additionally projects `facts.service_id`, and its ambiguity projects
+`service_candidates`. These legacy values retain their established display-key
+representation, while the authoritative contract carries schema canonical values.
+`declined_entities`, temporal facts, booking IDs, intents, and response acts remain
+independent contracts. The absent-`entity_schema` service resolver also remains a
+temporary independent legacy path because it has no business schema against which
+generic entity names and canonical values can be validated.
 
 ---
 

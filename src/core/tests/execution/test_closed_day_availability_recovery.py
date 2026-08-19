@@ -1,6 +1,6 @@
 from unittest.mock import Mock
 
-from core.adapters.errors import UpstreamError
+from core.adapters.errors import AvailabilityRejectedError
 from core.engine.execution_coordinator import ExecutionCoordinator, ExecutionGateResult
 from core.rendering.response_renderer import ResponseRenderer
 from core.session.turn_persistence import project_and_persist_turn_result
@@ -23,9 +23,7 @@ def test_closed_day_is_recoverable_and_preserves_current_turn_engine_type(monkey
         "missing_slots": ["time", "registration_number"],
         "facts": {"slots": {"engine_type": "petrol"}},
     }
-    closed = UpstreamError("raw backend detail must not be shown")
-    closed.status_code = 422
-    closed.payload = {"detail": {"code": "BUSINESS_CLOSED"}}
+    closed = AvailabilityRejectedError(reason="business_closed")
     availability_client = Mock()
     availability_client.get_service_availability.side_effect = closed
     gate = ExecutionGateResult(
@@ -58,7 +56,7 @@ def test_closed_day_is_recoverable_and_preserves_current_turn_engine_type(monkey
     assert run.execution_result["availability"]["slots"] == []
     assert (
         run.execution_result["availability"]["unavailable_reason"]
-        == "availability_rejected"
+        == "business_closed"
     )
 
     monkeypatch.setattr(
@@ -82,7 +80,6 @@ def test_closed_day_is_recoverable_and_preserves_current_turn_engine_type(monkey
     )
 
     assert result["success"] is True
-    assert "raw backend detail" not in result.get("text", "")
     assert "another date" in result["text"].lower()
     assert projected["planning"]["slots"]["engine_type"] == "petrol"
     assert "unavailable_reason" not in projected["planning"]["slots"]

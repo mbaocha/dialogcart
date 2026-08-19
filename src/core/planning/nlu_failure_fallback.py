@@ -2,9 +2,8 @@
 
 **Planner admission boundary (Phase 5):** This module is intentionally outside
 Decision ownership. It runs before Attach when NLU fails; there is no
-``AttachedRequest`` or Evaluate evidence. It replays recoverable session state
-so downstream systems keep a valid result shape and marks the outcome as
-degraded.
+``AttachedRequest`` or Evaluate evidence. It preserves recoverable session
+state for response shaping but never replays an executable action.
 
 This module does not recover or apply the user's current message.
 """
@@ -34,12 +33,13 @@ def _session_intent_str(session_state: Dict[str, Any]) -> str:
 def _fallback_metadata(error_code: str) -> Dict[str, Any]:
     return {
         "recovered": True,
+        "nlu_failure_recovery": True,
         "recovery_reason": error_code,
         "message_applied": False,
     }
 
 
-def _durable_session_replay_outcome(
+def _durable_session_recovery_outcome(
     session_state: Dict[str, Any],
     session_intent_str: str,
     error_code: str,
@@ -51,12 +51,6 @@ def _durable_session_replay_outcome(
     if not isinstance(session_missing_slots, list):
         session_missing_slots = []
     session_stage = session_state.get("stage", "AVAILABILITY")
-    session_action = session_state.get("action")
-    # Derive action from stage if missing (for empty response fallback)
-    if not session_action and session_stage == "AVAILABILITY":
-        session_action = "SEARCH_AVAILABILITY"
-    elif not session_action and session_stage == "CONFIRM":
-        session_action = "CONFIRM_APPOINTMENT"
     session_status = session_state.get("status", "NEEDS_CLARIFICATION")
     # Status must be NEEDS_CLARIFICATION if there are missing slots.
     final_status = (
@@ -71,18 +65,18 @@ def _durable_session_replay_outcome(
     outcome = {
         "intent_name": session_intent_str,
         "stage": session_stage,
-        "action": session_action,
+        "action": None,
         "slots": session_slots,
         "missing_slots": session_missing_slots,
         "status": final_status,
         "plan": {
             "intent": session_intent_str,
             "stage": session_stage,
-            "action": session_action,
+            "action": None,
             "missing_slots": session_missing_slots,
             "slots": session_slots,
             "status": final_status,
-            "executable_actions": ([session_action] if session_action else []),
+            "executable_actions": [],
         },
         "facts": {
             "slots": session_slots,
@@ -119,14 +113,12 @@ def _needs_clarification_session_outcome(
         missing_slots = turn_state.get("missing_slots") or []
 
     session_stage = session_state.get("stage", "AVAILABILITY")
-    session_action = session_state.get("action")
-
     return {
         "success": True,
         "outcome": {
             "intent_name": session_intent_str,
             "stage": session_stage,
-            "action": session_action,
+            "action": None,
             "slots": session_slots,
             "missing_slots": missing_slots,
             "status": "NEEDS_CLARIFICATION" if missing_slots else "READY",
@@ -165,7 +157,7 @@ def build_nlu_failure_fallback(
         )
 
         if is_durable:
-            return _durable_session_replay_outcome(
+            return _durable_session_recovery_outcome(
                 session_state,
                 session_intent_str,
                 recovery_reason,

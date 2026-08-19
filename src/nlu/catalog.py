@@ -13,7 +13,7 @@ Public API:
 """
 import difflib
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Sequence
 
 # Date/time tokens to strip from service terms before scoring.
 # Copied from pipeline._DATE_TIME_TOKENS to avoid a circular import.
@@ -34,10 +34,38 @@ _NOISE_TOKENS = _WEEKDAYS | _MONTHS | frozenset({
 # Minimum character-level similarity to treat two tokens as a match.
 _FUZZY_THRESHOLD = 0.80
 
+_CATALOG_PREFIX_NOISE = _NOISE_TOKENS | frozenset({
+    "a", "an", "the", "to", "for", "me", "my", "i", "we", "you",
+    "yes", "yeah", "yep", "no", "want", "need", "please", "another",
+    "new", "book", "booking", "appointment", "appointments", "schedule",
+    "reserve", "service", "services",
+})
+_MIN_NON_EXACT_PREFIX_CHARACTERS = 3
+
 
 def _tokenize(s: str) -> List[str]:
     """Lowercase, strip punctuation, return tokens."""
     return re.sub(r"[^\w\s]", " ", s.lower()).split()
+
+
+def eligible_catalog_reference(
+    service_term: str, candidate_keys: Sequence[str]
+) -> bool:
+    """Whether a phrase may enter deterministic catalogue matching.
+
+    Exact aliases remain eligible regardless of length. Non-exact references
+    require at least one non-noise token and three normalized characters.
+    """
+    tokens = _tokenize(service_term or "")
+    if not tokens:
+        return False
+    normalized = " ".join(tokens)
+    if any(" ".join(_tokenize(key)) == normalized for key in candidate_keys):
+        return True
+    meaningful = [token for token in tokens if token not in _CATALOG_PREFIX_NOISE]
+    return bool(meaningful) and sum(len(token) for token in meaningful) >= (
+        _MIN_NON_EXACT_PREFIX_CHARACTERS
+    )
 
 
 def _term_coverage(service_tokens: List[str], alias_tokens: List[str]) -> float:
@@ -84,6 +112,9 @@ def _try_pick_from_candidate_list(
         if " ".join(_tokenize(key)) == term_norm:
             return key
 
+    if not eligible_catalog_reference(service_term, candidate_keys):
+        return None
+
     # Unique prefix: "premium" → "premium haircut"
     prefix_hits = [k for k in candidate_keys if k.lower().startswith(term_norm)]
     if len(prefix_hits) == 1:
@@ -97,6 +128,89 @@ def _try_pick_from_candidate_list(
         if len(containing) == 1:
             return containing[0]
 
+    return None
+
+
+def unique_prefix_catalog_pick(
+    service_term: str, candidate_keys: List[str]
+) -> Optional[str]:
+    """Return a catalog key when a spoken phrase uniquely prefixes one alias.
+
+    Used for informal replies such as ``premium``, ``premium trim``, or
+    ``flexi haircut``. Contained generic tokens (``room`` in ``King Room``)
+    are not enough — that is the unsafe ``spaceship room`` case.
+    """
+    if not service_term or not candidate_keys:
+        return None
+    tokens = _tokenize(service_term)
+    if not tokens:
+        return None
+    normalized = " ".join(tokens)
+    for key in candidate_keys:
+        if " ".join(_tokenize(key)) == normalized:
+            return key
+    if not eligible_catalog_reference(service_term, candidate_keys):
+        return None
+    phrases: List[str] = []
+    for width in range(len(tokens), 0, -1):
+        for index in range(len(tokens) - width + 1):
+            phrases.append(" ".join(tokens[index : index + width]))
+    found: List[str] = []
+    for phrase in phrases:
+        hits = [
+            key
+            for key in candidate_keys
+            if " ".join(_tokenize(key)).startswith(phrase)
+        ]
+        if len(hits) == 1:
+            found.append(hits[0])
+    unique = list(dict.fromkeys(found))
+    if len(unique) == 1:
+        return unique[0]
+    return None
+
+
+_NEGATION_PREFIX_TOKENS = frozenset({"not", "no", "never", "without", "except"})
+_QUESTION_MARK = "?"
+
+
+def spoken_unique_catalog_mention(
+    text: str, catalog_phrases: Sequence[str]
+) -> Optional[str]:
+    """Return the spoken token window that uniquely prefixes one catalog phrase.
+
+    Recovers informal mentions such as ``flexi haircut`` or ``premium`` only when
+    the current utterance uniquely identifies one catalog item. Negated windows
+    (``not premium``) and interrogatives are left unassigned. The returned value
+    is the spoken subset, never an unspoken catalog label.
+    """
+    utterance = (text or "").strip()
+    phrases = [str(phrase) for phrase in catalog_phrases if str(phrase).strip()]
+    if not utterance or not phrases or _QUESTION_MARK in utterance:
+        return None
+    picked = unique_prefix_catalog_pick(utterance, phrases)
+    if not picked:
+        return None
+    tokens = _tokenize(utterance)
+    if not tokens:
+        return None
+    picked_norm = " ".join(_tokenize(picked))
+    for width in range(len(tokens), 0, -1):
+        for index in range(len(tokens) - width + 1):
+            if index > 0 and tokens[index - 1] in _NEGATION_PREFIX_TOKENS:
+                continue
+            spoken = " ".join(tokens[index : index + width])
+            if not picked_norm.startswith(spoken):
+                continue
+            other_hits = [
+                key
+                for key in phrases
+                if " ".join(_tokenize(key)) != picked_norm
+                and " ".join(_tokenize(key)).startswith(spoken)
+            ]
+            if other_hits:
+                continue
+            return spoken
     return None
 
 
@@ -182,6 +296,9 @@ def resolve_service(
             "service_candidates": active_keys or list(aliases.keys()),
         }
 
+    if not eligible_catalog_reference(service_term, active_keys):
+        return {"service_id": None, "service_candidates": []}
+
     if candidate_keys:
         picked = _try_pick_from_candidate_list(service_term, active_keys)
         if picked and picked in aliases:
@@ -211,6 +328,13 @@ def resolve_service(
     for alias_key in active_keys:
         if alias_key in aliases and " ".join(_tokenize(alias_key)) == joined:
             return {"service_id": alias_key, "service_candidates": []}
+
+    # Unique prefix pick: "premium", "premium trim", "flexi haircut".
+    picked = unique_prefix_catalog_pick(
+        service_term, [key for key in active_keys if key in aliases]
+    )
+    if picked and picked in aliases:
+        return {"service_id": picked, "service_candidates": []}
 
     # Score each alias by what fraction of the combined service tokens it explains.
     score_keys = [k for k in active_keys if k in aliases]

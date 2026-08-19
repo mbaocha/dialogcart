@@ -288,6 +288,7 @@ def test_existing_stage2_tool_contracts_remain_present():
     assert create_tool["name"] == _LEGACY_CREATE_TOOL_KWARGS["name"]
     assert set(create_tool["input_schema"]["properties"]) == {
         "validated_intent",
+        "proposal_response",
         "confidence",
         "temporal",
         "facts",

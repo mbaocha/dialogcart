@@ -19,6 +19,40 @@ from core.adapters.errors import ContractViolation
 from core.adapters.nlu.luma_contracts import assert_luma_contract
 
 
+def test_unknown_nested_resolution_is_tolerated_when_absent():
+    assert_luma_contract({"intent": {"name": "CREATE_APPOINTMENT"}, "temporal": {"start_time": "13:30"}})
+
+
+def test_presented_option_cannot_carry_copied_time():
+    response = {
+        "intent": {"name": "CREATE_APPOINTMENT"},
+        "temporal": {
+            "start_time": "13:30",
+            "resolution": {
+                "kind": "presented_option",
+                "presentation_ref": "avp1_test",
+                "option": 1,
+            },
+        },
+    }
+    with pytest.raises(ContractViolation):
+        assert_luma_contract(response)
+
+
+def test_valid_presented_option_shape_is_accepted():
+    assert_luma_contract({
+        "intent": {"name": "CREATE_APPOINTMENT"},
+        "temporal": {
+            "start_time": None,
+            "resolution": {
+                "kind": "presented_option",
+                "presentation_ref": "avp1_test",
+                "option": 1,
+            },
+        },
+    })
+
+
 def test_success_requires_intent_name():
     """Test that success=true requires intent.name."""
     response = {"success": True, "intent": {}}  # Missing name
@@ -122,3 +156,91 @@ def test_valid_partial_booking():
 
     # Should not raise
     assert_luma_contract(response)
+
+
+ENTITY_SCHEMA = {
+    "version": 1,
+    "fields": [{
+        "name": "service",
+        "type": "catalog",
+        "role": "bookable_item",
+        "description": "Service",
+        "catalog": {"premium": 101, "basic": 102},
+    }],
+}
+
+
+def test_authoritative_entity_resolutions_are_strictly_validated():
+    assert_luma_contract(
+        {
+            "intent": {"name": "CREATE_APPOINTMENT"},
+            "entity_resolutions": {
+                "service": {"resolution": "RESOLVED", "value": 101}
+            },
+        },
+        entity_schema=ENTITY_SCHEMA,
+    )
+
+    with pytest.raises(ContractViolation):
+        assert_luma_contract(
+            {
+                "intent": {"name": "CREATE_APPOINTMENT"},
+                "entity_resolutions": {
+                    "service": {
+                        "resolution": "AMBIGUOUS",
+                        "candidate_values": [101],
+                    }
+                },
+            },
+            entity_schema=ENTITY_SCHEMA,
+        )
+
+
+def test_schema_turn_requires_entity_resolutions_even_when_empty_is_valid():
+    assert_luma_contract(
+        {"intent": {"name": "CREATE_APPOINTMENT"}, "entity_resolutions": {}},
+        entity_schema=ENTITY_SCHEMA,
+    )
+    with pytest.raises(ContractViolation):
+        assert_luma_contract(
+            {"intent": {"name": "CREATE_APPOINTMENT"}},
+            entity_schema=ENTITY_SCHEMA,
+        )
+
+
+def test_conflicting_legacy_projection_cannot_override_authoritative_value():
+    with pytest.raises(ContractViolation):
+        assert_luma_contract(
+            {
+                "intent": {"name": "CREATE_APPOINTMENT"},
+                "facts": {"service_id": "basic"},
+                "entity_resolutions": {
+                    "service": {"resolution": "RESOLVED", "value": 101}
+                },
+            },
+            entity_schema=ENTITY_SCHEMA,
+        )
+
+
+def test_optional_catalogue_semantics_are_backward_compatible_and_strict():
+    assert_luma_contract({"intent": {"name": "CREATE_APPOINTMENT"}})
+    assert_luma_contract({
+        "intent": {"name": "GENERAL_INQUIRY"},
+        "operation": "list_service_categories",
+        "service_category": {"name": "Hair", "resolution": "RESOLVED"},
+        "catalog_selection": {
+            "presentation_ref": "cp_123", "kind": "category", "option": 1
+        },
+    })
+
+    malformed = (
+        {"service_category": "Hair"},
+        {"service_category": {"resolution": "RESOLVED"}},
+        {"catalog_selection": []},
+        {"catalog_selection": {"presentation_ref": "cp_1", "kind": "other", "option": 1}},
+        {"catalog_selection": {"presentation_ref": "cp_1", "kind": "service", "option": True}},
+        {"catalog_selection": {"presentation_ref": "cp_1", "kind": "service", "option": 0}},
+    )
+    for fragment in malformed:
+        with pytest.raises(ContractViolation):
+            assert_luma_contract({"intent": {"name": "CREATE_APPOINTMENT"}, **fragment})

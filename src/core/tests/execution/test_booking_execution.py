@@ -28,6 +28,26 @@ from core.adapters.errors import UpstreamError
 from core.execution.clients.booking_client import BookingClient
 
 
+def test_service_client_sends_only_selected_start_time():
+    client = BookingClient(base_url="http://commerce.test")
+    with patch.object(
+        client,
+        "_request",
+        return_value={"booking": {"id": 123}},
+    ) as request:
+        client.create_booking(
+            organization_id=1,
+            customer_id=2,
+            booking_type="service",
+            item_id=26,
+            start_time="2026-08-17T09:00:00+01:00",
+        )
+
+    payload = request.call_args.kwargs["json"]
+    assert payload["start_time"] == "2026-08-17T09:00:00+01:00"
+    assert "end_time" not in payload
+
+
 def test_create_booking_happy_path_service():
     """
     Test case 1: Happy path – service booking
@@ -55,7 +75,7 @@ def test_create_booking_happy_path_service():
     }
 
     Assert:
-    - booking_client.create_booking() called with starts_at and ends_at
+    - booking_client.create_booking() called with starts_at only
     - starts_at is REQUIRED (test must fail if missing)
     - returned Core facts include: booking_code, status, starts_at, ends_at, currency
     """
@@ -88,7 +108,7 @@ def test_create_booking_happy_path_service():
     # Simulate the client's validation by configuring mock to raise ValueError
     mock_client_missing_time = Mock(spec=BookingClient)
     mock_client_missing_time.create_booking.side_effect = ValueError(
-        "start_time and end_time are required for service bookings"
+        "start_time is required for service bookings"
     )
 
     # Verify that missing starts_at would cause error
@@ -99,7 +119,6 @@ def test_create_booking_happy_path_service():
             booking_type="service",
             item_id=1,  # Would be derived from service_id
             start_time=None,  # Missing!
-            end_time="2026-01-16T15:30:00Z",
         )
         assert False, "Should have raised ValueError for missing start_time"
     except ValueError as e:
@@ -112,7 +131,6 @@ def test_create_booking_happy_path_service():
         booking_type="service",
         item_id=1,  # Would be derived from service_id
         start_time=slots["starts_at"],
-        end_time=slots["ends_at"],
     )
 
     # Assert client was called correctly
@@ -123,7 +141,7 @@ def test_create_booking_happy_path_service():
     assert call_args.kwargs["organization_id"] == 1
     assert call_args.kwargs["booking_type"] == "service"
     assert call_args.kwargs["start_time"] == "2026-01-16T15:00:00Z"
-    assert call_args.kwargs["end_time"] == "2026-01-16T15:30:00Z"
+    assert "end_time" not in call_args.kwargs
 
     # Verify response normalization
     assert "booking" in result
@@ -186,7 +204,6 @@ def test_create_booking_client_failure():
             booking_type="service",
             item_id=1,
             start_time=slots["starts_at"],
-            end_time=slots["ends_at"],
         )
         assert False, "Should have raised UpstreamError"
     except UpstreamError as e:

@@ -21,6 +21,9 @@ class ResumeInstruction:
     text: str
 
 
+_PENDING_CONFIRMATION_SAFE_FALLBACK = "Would you like me to go ahead?"
+
+
 def _session_booking_intent(session: Dict[str, Any]) -> str:
     intent = session.get("intent_name") or session.get("intent") or ""
     if isinstance(intent, dict):
@@ -42,6 +45,59 @@ def _has_active_booking(session: Dict[str, Any]) -> bool:
 def _planning(session: Dict[str, Any]) -> Dict[str, Any]:
     planning = session.get("planning")
     return planning if isinstance(planning, dict) else {}
+
+
+def compose_pending_confirmation_resume(
+    session_state: Optional[Dict[str, Any]],
+    informational_text: Optional[str] = None,
+) -> Optional[str]:
+    """Compose informational text with canonical pending confirmation wording.
+
+    Returns ``None`` outside pending confirmation. Missing authoritative
+    service/date/time evidence yields only the existing safe confirmation
+    question; the LLM must never reconstruct those details from history.
+    """
+    if not isinstance(session_state, dict):
+        return None
+    if get_confirmation_state(session_state) != "pending":
+        return None
+
+    planning = _planning(session_state)
+    slots = planning.get("slots")
+    if not isinstance(slots, dict):
+        suffix = _PENDING_CONFIRMATION_SAFE_FALLBACK
+        return (
+            f"{informational_text.rstrip()}\n\n{suffix}"
+            if isinstance(informational_text, str) and informational_text.strip()
+            else suffix
+        )
+    if not all(slots.get(key) for key in ("service_id", "date", "time")):
+        suffix = _PENDING_CONFIRMATION_SAFE_FALLBACK
+        return (
+            f"{informational_text.rstrip()}\n\n{suffix}"
+            if isinstance(informational_text, str) and informational_text.strip()
+            else suffix
+        )
+
+    entity_schema = planning.get("_entity_schema")
+    if not isinstance(entity_schema, dict):
+        entity_schema = session_state.get("_entity_schema")
+    if not isinstance(entity_schema, dict):
+        entity_schema = None
+
+    from core.rendering.booking_confirmation_renderer import (
+        render_booking_confirmation_prompt,
+    )
+
+    suffix = render_booking_confirmation_prompt(
+        slots,
+        entity_schema=entity_schema,
+    )
+    return (
+        f"{informational_text.rstrip()}\n\n{suffix}"
+        if isinstance(informational_text, str) and informational_text.strip()
+        else suffix
+    )
 
 
 def _missing_slots(session: Dict[str, Any]) -> List[str]:
@@ -363,6 +419,8 @@ def attach_resume_to_handler_render(
     """
     out_facts = dict(facts or {})
     instruction = render_instruction or ""
+    if compose_pending_confirmation_resume(session_state) is not None:
+        return instruction, out_facts
     resume = build_resume_instruction(session_state)
     if resume and resume.text:
         out_facts["resume_instruction"] = resume.text

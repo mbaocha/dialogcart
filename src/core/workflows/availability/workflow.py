@@ -113,6 +113,7 @@ class AvailabilityWorkflow:
         from core.planning.time_resolution import (
             TIME_MATCH_EXACT,
             TIME_MATCH_MISMATCH,
+            TIME_MATCH_NOT_APPLICABLE,
             resolve_time_after_availability,
         )
         from core.workflows.availability.discovery.bridge import (
@@ -124,15 +125,28 @@ class AvailabilityWorkflow:
             resolve_criteria_span,
         )
 
+        if execution_result.get("status") != "succeeded":
+            return slots, session_state, {
+                "kind": "availability_search",
+                "status": "failed",
+            }
         availability = execution_result.get("availability")
         if not isinstance(availability, dict):
-            return slots, session_state, {}
+            return slots, session_state, {
+                "kind": "availability_search",
+                "status": "failed",
+            }
         session_state = session_state if isinstance(session_state, dict) else {}
-        workflow_result: Dict[str, Any] = {"kind": "availability_search"}
+        workflow_result: Dict[str, Any] = {
+            "kind": "availability_search",
+            "status": "succeeded",
+        }
         offers = availability.get("slots")
         if not isinstance(offers, list):
-            offers = []
-            availability["slots"] = offers
+            return slots, session_state, {
+                "kind": "availability_search",
+                "status": "failed",
+            }
 
         # ---- fingerprint ------------------------------------------------
         plan_intent_name = plan.get("intent_name") or plan.get("intent")
@@ -211,6 +225,11 @@ class AvailabilityWorkflow:
             date_proposal=_exec_proposals.get("date_proposal"),
             search_date=search_date,
             slots=slots,
+            unavailable_reason=(
+                availability.get("unavailable_reason")
+                if isinstance(availability.get("unavailable_reason"), str)
+                else None
+            ),
         )
         _time_resolution = _resolution_payload.get("time_resolution")
         if isinstance(_time_resolution, dict):
@@ -336,6 +355,24 @@ class AvailabilityWorkflow:
             date_proposal=_exec_proposals.get("date_proposal"),
             fingerprint_slots=fingerprint_slots,
         )
+        if (
+            execution_result.get("status") == "succeeded"
+            and _resolution_outcome == TIME_MATCH_NOT_APPLICABLE
+        ):
+            from core.planning.pipeline.decision_finalization import (
+                TimeResolutionEvidence,
+                finalize_decision_after_time_resolution,
+            )
+
+            finalize_decision_after_time_resolution(
+                plan,
+                evidence=TimeResolutionEvidence(
+                    outcome=TIME_MATCH_NOT_APPLICABLE,
+                    time_resolution=_time_resolution,
+                    presented_options=list(presented_payload.get("slots") or []),
+                    apply_confirmation_transition=False,
+                ),
+            )
         if not offers:
             from core.planning.recovery_actions import (
                 CHOOSE_ANOTHER_DATE,

@@ -1,6 +1,9 @@
 """Renderer uses facts labels for OFF_TOPIC; resume is a separate section."""
 
+from unittest.mock import patch
+
 from core.rendering.llm_renderer import LlmRenderRequest, _build_system_prompt, _build_user_message
+from core.rendering.off_topic_renderer import inject_off_topic_text
 
 
 def test_system_prompt_avoids_evidence_terminology():
@@ -94,3 +97,45 @@ def test_renderer_omits_facts_section_when_unanswerable():
     assert "Which stock should I invest all my savings in?" in message
     assert "Facts:" not in message
     assert "Factual answer evidence:" not in message
+
+
+def test_off_topic_appends_deterministic_pending_confirmation_once():
+    session = {
+        "confirmation_state": "pending",
+        "planning": {
+            "intent_name": "CREATE_APPOINTMENT",
+            "slots": {
+                "service_id": "integration spa treatment",
+                "date": "2026-08-28",
+                "time": "11:00",
+            },
+        },
+        "conversation": {
+            "history": [
+                {"role": "assistant", "text": "Booked for Thursday at 4 PM."}
+            ]
+        },
+    }
+    result = {
+        "outcome": {
+            "off_topic_query": "Do you work weekends?",
+            "answerable": True,
+            "answer": "We are closed on weekends.",
+        }
+    }
+    with patch(
+        "core.rendering.off_topic_renderer.render_llm",
+        return_value="We are closed on weekends.",
+    ):
+        inject_off_topic_text(
+            result,
+            session_state=session,
+            user_input="Do you work weekends?",
+        )
+
+    text = result["text"]
+    assert text.startswith("We are closed on weekends.")
+    assert text.count("Would you like me to go ahead?") == 1
+    assert "about to book" in text.lower()
+    assert "Thursday" not in text
+    assert "is booked" not in text.lower()

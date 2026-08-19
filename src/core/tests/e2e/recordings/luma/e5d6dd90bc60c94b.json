@@ -16,6 +16,12 @@
     "timezone": "UTC"
   },
   "response": {
+    "entity_resolutions": {
+      "service": {
+        "resolution": "RESOLVED",
+        "value": 26
+      }
+    },
     "facts": {
       "booking_id": null,
       "date_time_pairs": [],

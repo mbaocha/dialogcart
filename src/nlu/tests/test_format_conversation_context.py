@@ -69,6 +69,66 @@ def test_format_conversation_context_renders_compact_assistant_not_full_transcri
     assert _format_conversation_context(ctx) == result
 
 
+def test_format_conversation_context_falls_back_to_messages_for_preceding_ask():
+    result = format_conversation_context(
+        {
+            "last_intent": "CREATE_APPOINTMENT",
+            "missing_slots": ["date", "time", "engine_type", "registration_number"],
+            "messages": [
+                {"role": "user", "text": "Book me an Executive Oil Change"},
+                {"role": "assistant", "text": "What engine type does your vehicle use?"},
+            ],
+            "turns": [
+                {
+                    "user": "Book me an Executive Oil Change",
+                    "intent": "CREATE_APPOINTMENT",
+                }
+            ],
+        }
+    )
+    assert "Asked: What engine type does your vehicle use?" in result
+    assert "Missing slots: date, time, engine_type, registration_number" in result
+
+
+def test_format_conversation_context_includes_missing_slots_and_resolved_service():
+    result = format_conversation_context(
+        {
+            "last_intent": "CREATE_APPOINTMENT",
+            "missing_slots": ["date", "time", "engine_type", "registration_number"],
+            "resolved_service_id": 26,
+            "turns": [{"user": "Book me an Executive Oil Change", "intent": "CREATE_APPOINTMENT"}],
+        }
+    )
+    assert "Missing slots: date, time, engine_type, registration_number" in result
+    assert "Resolved service id: 26" in result
+
+
+def test_format_conversation_context_includes_authoritative_pending_profile_request():
+    result = format_conversation_context(
+        {
+            "last_intent": "CREATE_APPOINTMENT",
+            "pending_profile_request": "CUSTOMER_CONTACT_NAME",
+            "messages": [
+                {
+                    "role": "assistant",
+                    "text": "Before we confirm, may I have your name?",
+                }
+            ],
+            "turns": [{"user": "AS123WQ", "intent": "CREATE_APPOINTMENT"}],
+        }
+    )
+    assert "Pending profile request: CUSTOMER_CONTACT_NAME" in result
+    assert "Asked: Before we confirm, may I have your name?" in result
+
+
+def test_pending_profile_request_alone_is_useful_context():
+    result = format_conversation_context(
+        {"pending_profile_request": {"kind": "CUSTOMER_CONTACT_NAME"}}
+    )
+    assert result
+    assert "Pending profile request: CUSTOMER_CONTACT_NAME" in result
+
+
 def test_compact_assistant_move_extracts_which_question_and_bullets():
     ask, options = compact_assistant_move(
         "Please choose:\n- Petrol\n- Diesel\n\nWhich engine type?"

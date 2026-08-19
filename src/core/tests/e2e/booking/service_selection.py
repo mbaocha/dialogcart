@@ -199,6 +199,7 @@ _register(
         ),
         fixture="scripted_service_revision",
         tags=["booking", "invalidation"],
+        requires_customer_identity=True,
     )
 )
 

@@ -13,7 +13,6 @@ operations, and raw planning dialog acts (CONFIRM_ACTION / REJECT_ACTION).
 
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, Mapping, Optional, Set
 
 from core.adapters.nlu.entity_schema_builder import (
@@ -82,29 +81,17 @@ def _meaningful(value: Any) -> bool:
 
 
 def _norm_service(value: Any) -> Optional[str]:
+    """Normalize structured service identifiers for equality only."""
     if not _meaningful(value):
         return None
     return str(value).strip().casefold()
 
 
-_SERVICE_TOKEN_RE = re.compile(r"[a-z0-9]+")
-
-
-def _service_tokens(value: Any) -> Set[str]:
-    text = _norm_service(value) or ""
-    return {tok for tok in _SERVICE_TOKEN_RE.findall(text) if len(tok) >= 2}
-
-
-def _utterance_has_distinctive_service_token(
-    source_text: Optional[str],
-    claimed: Any,
-    durable_service: Any = None,
-) -> bool:
-    text_tokens = _service_tokens(source_text)
-    if not text_tokens:
-        return False
-    distinctive = _service_tokens(claimed) - _service_tokens(durable_service)
-    return bool(distinctive and distinctive & text_tokens)
+def _norm_service(value: Any) -> Optional[str]:
+    """Normalize structured service identifiers for equality only."""
+    if not _meaningful(value):
+        return None
+    return str(value).strip().casefold()
 
 
 def _raw_dialogue_act_from_payload(
@@ -168,38 +155,6 @@ def _claimed_service_id(payload: Mapping[str, Any]) -> Any:
     return None
 
 
-def _utterance_grounds_service(
-    source_text: Optional[str],
-    claimed: Any,
-    tenant_aliases: Optional[Mapping[str, Any]],
-) -> bool:
-    text = (source_text or "").casefold()
-    if not text:
-        return False
-    claimed_s = _norm_service(claimed)
-    if claimed_s and claimed_s in text:
-        return True
-    if not isinstance(tenant_aliases, Mapping):
-        return False
-    claimed_mapped = None
-    if claimed_s:
-        for phrase, value in tenant_aliases.items():
-            if _norm_service(phrase) == claimed_s:
-                claimed_mapped = value
-                break
-        if claimed_mapped is None:
-            claimed_mapped = claimed
-    for phrase, value in tenant_aliases.items():
-        p = _norm_service(phrase)
-        if not p or p not in text:
-            continue
-        if claimed_s is None:
-            return True
-        if p == claimed_s or value == claimed_mapped:
-            return True
-    return False
-
-
 def has_explicit_current_turn_service(
     payload: Optional[Mapping[str, Any]],
     *,
@@ -210,31 +165,28 @@ def has_explicit_current_turn_service(
 ) -> bool:
     """True when this turn explicitly supplies or corrects service.
 
-    Facts.service_id alone is not enough: NLU may invent a service on a
-    time-only, date-only, or confirmation turn. Uses service_term,
-    service_candidates, utterance grounding against tenant aliases,
-    distinctive claimed-vs-durable tokens, and otherwise trusts a
-    service-purpose turn (no temporal/confirm act).
+    Schema turns use only authoritative entity-resolution evidence. Legacy
+    no-schema turns use structured NLU fields, never the utterance or aliases.
     """
     if not isinstance(payload, Mapping):
         return False
     if _SERVICE_HAS_KEY in payload:
         return bool(payload.get(_SERVICE_HAS_KEY))
 
-    text = source_text if source_text is not None else payload.get("_source_text")
-    source = text if isinstance(text, str) else None
-    if durable_service is None:
-        durable_service = payload.get("_durable_service_id")
+    if payload.get("_entity_resolutions_authoritative"):
+        evidence = payload.get("_entity_resolution_evidence")
+        if not isinstance(evidence, Mapping):
+            return False
+        schema = payload.get("_entity_schema")
+        from core.adapters.nlu.entity_schema_builder import field_for_planning_slot
+
+        field = field_for_planning_slot(schema, "service_id")
+        name = field.get("name") if isinstance(field, dict) else None
+        return isinstance(name, str) and name in evidence
 
     if _service_candidates(payload) or _service_term(payload):
         return True
     claimed = _claimed_service_id(payload)
-    if _utterance_grounds_service(source, claimed, tenant_aliases):
-        return True
-    if _utterance_has_distinctive_service_token(
-        source, claimed, durable_service=durable_service
-    ):
-        return True
 
     act = _raw_dialogue_act_from_payload(payload, raw_dialogue_act=raw_dialogue_act)
     if act in _PLANNING_DIALOG_ACTS:

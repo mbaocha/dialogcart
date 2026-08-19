@@ -1,0 +1,94 @@
+{
+  "key": {
+    "conversation_context": {
+      "last_date_proposal": {
+        "mode": "single_day",
+        "start": "2026-07-20"
+      },
+      "last_intent": "CREATE_APPOINTMENT",
+      "last_search_query": null,
+      "messages": [
+        {
+          "role": "user",
+          "text": "Premium"
+        },
+        {
+          "role": "assistant",
+          "text": "Here are the available times for July 20:\n- 10:00 AM\n- 11:00 AM\nWhich would you like?"
+        }
+      ],
+      "missing_slots": [
+        "time"
+      ],
+      "presented_options": {
+        "options": [
+          {
+            "index": 1,
+            "label": "10:00 AM"
+          },
+          {
+            "index": 2,
+            "label": "11:00 AM"
+          }
+        ],
+        "reference": "avp1_a13283ddc3f6640fd2a840f1"
+      },
+      "temporal_context_version": 1,
+      "turns": [
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "Book me a haircut on july 20"
+        },
+        {
+          "intent": "CREATE_APPOINTMENT",
+          "search_query": null,
+          "user": "Premium"
+        }
+      ]
+    },
+    "domain": "service",
+    "tenant_context": {
+      "aliases": {
+        "flexi haircut + prunning": 1002,
+        "premium haircut": 1001
+      },
+      "booking_mode": "service"
+    },
+    "text": "Are there more times for July 20?",
+    "timezone": "UTC"
+  },
+  "response": {
+    "entity_resolutions": {},
+    "facts": {
+      "booking_id": null,
+      "date_time_pairs": [],
+      "dates": [],
+      "service": null,
+      "service_id": null,
+      "times": []
+    },
+    "intent": {
+      "confidence": 0.95,
+      "name": "AVAILABILITY"
+    },
+    "operation": "browse_next",
+    "temporal": {
+      "confidence": 0.95,
+      "end_date": null,
+      "end_date_expression": null,
+      "end_time": null,
+      "end_time_expression": null,
+      "expression": null,
+      "mode": "none",
+      "resolution": null,
+      "start_date": null,
+      "start_date_expression": null,
+      "start_time": null,
+      "start_time_expression": null
+    },
+    "turn": {
+      "understanding": "UNDERSTOOD"
+    }
+  }
+}

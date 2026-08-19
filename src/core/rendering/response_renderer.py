@@ -9,6 +9,8 @@ from core.rendering.llm_renderer import LlmRenderRequest, render_llm
 
 logger = logging.getLogger(__name__)
 
+CUSTOMER_CONTACT_NAME_PROMPT = "Before we confirm, may I have your name?"
+
 
 # ---------------------------------------------------------------------------
 # Shared helper — used by all injection functions below
@@ -76,6 +78,85 @@ def _service_name_from_decision_or_session(
     return None
 
 
+def _current_turn_changes(
+    result: Dict[str, Any],
+    session_state: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Structured slot changes evidenced by this turn, excluding carried state."""
+    payload = result.get("_merged_luma_response")
+    if not isinstance(payload, dict):
+        return {}
+    prior_slots: Dict[str, Any] = {}
+    if isinstance(session_state, dict):
+        planning = session_state.get("planning")
+        if isinstance(planning, dict) and isinstance(planning.get("slots"), dict):
+            prior_slots = planning["slots"]
+        elif isinstance(session_state.get("slots"), dict):
+            prior_slots = session_state["slots"]
+    from core.planning.planning_evidence import current_turn_slot_deltas
+
+    changes = current_turn_slot_deltas(payload, session_slots=prior_slots)
+    if payload.get("_current_turn_has_time") and payload.get("_current_turn_time"):
+        changes["time"] = payload["_current_turn_time"]
+    if payload.get("_current_turn_has_date") and payload.get("_current_turn_date"):
+        changes["date"] = payload["_current_turn_date"]
+    if "service_id" in changes:
+        from core.adapters.nlu.entity_schema_builder import (
+            catalog_label_for_planning_value,
+        )
+
+        changes["service_id"] = (
+            catalog_label_for_planning_value(
+                payload.get("_entity_schema"), "service_id", changes["service_id"]
+            )
+            or changes["service_id"]
+        )
+    return changes
+
+
+def _acknowledgement_instruction(changes: Dict[str, Any]) -> str:
+    if not changes:
+        return ""
+    rendered = ", ".join(f"{key}={value}" for key, value in changes.items())
+    return (
+        " Begin with one brief acknowledgement of only these values supplied "
+        f"in the current turn: {rendered}. Do not acknowledge carried values."
+    )
+
+
+def _registration_acknowledgement(changes: Dict[str, Any]) -> str:
+    registration = changes.get("registration_number")
+    if registration is None:
+        return ""
+    return f"Thanks—registration {registration} noted. "
+
+
+def _availability_acknowledgement(changes: Dict[str, Any]) -> str:
+    engine_type = changes.get("engine_type")
+    if engine_type is not None:
+        return f"{str(engine_type).title()} engine noted."
+    service = changes.get("service_id")
+    if service is not None:
+        return f"{service} selected."
+    return ""
+
+
+def _prefix_customer_name_acknowledgement(
+    body: str,
+    change: Optional[Dict[str, Any]],
+) -> str:
+    if not isinstance(change, dict):
+        return body
+    new_name = change.get("to")
+    old_name = change.get("from")
+    if not isinstance(new_name, str) or not new_name.strip():
+        return body
+    normalized = new_name.strip()
+    if isinstance(old_name, str) and old_name.strip() and old_name != new_name:
+        return f"No problem—I've updated the contact name to {normalized}. " + body
+    return f"Thanks, {normalized}. " + body
+
+
 def _time_resolution_from_decision(decision: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     resolution = decision.get("time_resolution")
     if isinstance(resolution, dict):
@@ -89,12 +170,21 @@ def _time_resolution_from_decision(decision: Dict[str, Any]) -> Optional[Dict[st
     return None
 
 
-def _mismatch_fallback_text(time_resolution: Optional[Dict[str, Any]]) -> str:
+def _mismatch_fallback_text(
+    time_resolution: Optional[Dict[str, Any]],
+    decision: Optional[Dict[str, Any]] = None,
+) -> str:
     """Deterministic wording when LLM mismatch render produces no text."""
     from core.rendering.availability_renderer import resolve_time_mismatch_text
 
+    decision_facts = decision.get("facts") if isinstance(decision, dict) else None
+    refresh_reason = (
+        decision_facts.get("availability_refresh_reason")
+        if isinstance(decision_facts, dict)
+        else None
+    )
     if not isinstance(time_resolution, dict):
-        return resolve_time_mismatch_text()
+        return resolve_time_mismatch_text(refresh_reason=refresh_reason)
     alternatives = time_resolution.get("alternatives") or []
     return resolve_time_mismatch_text(
         requested_time=(
@@ -116,6 +206,12 @@ def _mismatch_fallback_text(time_resolution: Optional[Dict[str, Any]]) -> str:
         recovery_actions=(
             time_resolution.get("recovery_actions")
             if isinstance(time_resolution.get("recovery_actions"), list)
+            else None
+        ),
+        refresh_reason=refresh_reason,
+        unavailable_reason=(
+            str(time_resolution["unavailable_reason"])
+            if time_resolution.get("unavailable_reason") is not None
             else None
         ),
     )
@@ -202,7 +298,9 @@ def _inject_time_match_mismatch_text(
                 _apply_mismatch_render_text(result, rendered_text)
 
     if not (isinstance(result.get("text"), str) and result["text"].strip()):
-        _apply_mismatch_render_text(result, _mismatch_fallback_text(time_resolution))
+        _apply_mismatch_render_text(
+            result, _mismatch_fallback_text(time_resolution, decision)
+        )
 
 
 def _inject_rendering_text_impl(
@@ -222,6 +320,7 @@ def _inject_rendering_text_impl(
         or decision.get("plan", {}).get("awaiting")
         or (decision.get("facts") or {}).get("awaiting")
     )
+    current_turn_changes = _current_turn_changes(result, session_state)
     # Hard guardrail: mismatch / TIME_SELECTION clarification must never fall
     # through to empty missing-slots clarification (which returns with no text).
     if time_match_outcome == TIME_MATCH_MISMATCH or awaiting == "TIME_SELECTION":
@@ -235,8 +334,19 @@ def _inject_rendering_text_impl(
             if not (isinstance(result.get("text"), str) and result["text"].strip()):
                 _apply_mismatch_render_text(
                     result,
-                    _mismatch_fallback_text(_time_resolution_from_decision(decision)),
+                    _mismatch_fallback_text(
+                        _time_resolution_from_decision(decision), decision
+                    ),
                 )
+        return
+
+    # Confirmation prerequisite: customer contact name is not a booking slot, so it
+    # never appears in missing_slots or promptable_slots. Render from awaiting evidence.
+    if awaiting == "CUSTOMER_CONTACT_NAME":
+        result["text"] = (
+            _registration_acknowledgement(current_turn_changes)
+            + CUSTOMER_CONTACT_NAME_PROMPT
+        )
         return
 
     try:
@@ -313,16 +423,16 @@ def _inject_rendering_text_impl(
         if not ask_next:
             return
         attempt_count = slot_attempts.get(ask_next, 0)
-        last_filled = (
-            (session_state or {}).get("last_filled_slot") if session_state else None
-        )
         ack_note = (
-            f" Start by briefly acknowledging you received {last_filled}."
-            if last_filled and attempt_count < 1
+            _acknowledgement_instruction(current_turn_changes)
+            if attempt_count < 1
             else ""
         )
         retry_note = (
-            " The user was already asked — rephrase naturally." if attempt_count >= 1 else ""
+            " This is a retry: restate the same request briefly without changing "
+            "its meaning."
+            if attempt_count >= 1
+            else ""
         )
         service_candidates = (
             decision.get("service_candidates")
@@ -333,7 +443,7 @@ def _inject_rendering_text_impl(
             catalog_candidates_for_slot,
             description_for_planning_slot,
         )
-        from core.planning.planner.promptable import catalog_labels_for_planning_slot
+        from core.planning.planner.promptable import choice_labels_for_planning_slot
 
         entity_schema = None
         if isinstance(decision.get("_entity_schema"), dict):
@@ -351,7 +461,7 @@ def _inject_rendering_text_impl(
                 service_candidates if isinstance(service_candidates, list) else []
             )
         if not catalog_candidates:
-            catalog_candidates = catalog_labels_for_planning_slot(
+            catalog_candidates = choice_labels_for_planning_slot(
                 entity_schema, ask_next
             )
 
@@ -408,11 +518,22 @@ def _inject_rendering_text_impl(
             if is_promptable_ask
             else "specific missing fields"
         )
+        field_requirement_note = (
+            " This field is optional. Clearly say that the user may skip or "
+            "decline it; Core Planning will determine the next step after a decline."
+            if is_promptable_ask
+            else " This field is required. If the user cannot provide it, explain "
+            "briefly that the request cannot proceed without it and that they may "
+            "provide it when available."
+        )
         render_instruction = (
             f"The user wants to {intent_name.lower().replace('_', ' ')}. "
             f"Ask ONLY for these {ask_kind} (nothing else): {', '.join(render_missing)}."
-            f"{service_hint}{field_hint}{ack_note}{retry_note} "
-            "Do not ask for any other information. Be natural and brief."
+            f"{service_hint}{field_hint}{field_requirement_note}{ack_note}{retry_note} "
+            "Do not ask for any other information. Do not suggest substitute fields, "
+            "alternative requirements, workarounds, or inferred values. Do not claim "
+            "to advance the workflow; Core Planning determines the next step. "
+            "Be natural and brief."
         )
         conversation_history = (session_state or {}).get("messages", [])
         rendered_text = render_llm(
@@ -463,7 +584,10 @@ def _inject_availability_text(
     ):
         return
     try:
-        from core.rendering.availability_renderer import build_availability_render_request
+        from core.rendering.availability_renderer import (
+            build_availability_render_request,
+            render_successful_fresh_availability,
+        )
         from core.workflows.availability.presentation import (
             ensure_presented_availability,
         )
@@ -493,7 +617,9 @@ def _inject_availability_text(
         )
         if not render_request:
             return
-        rendered_text = render_llm(render_request)
+        rendered_text = render_successful_fresh_availability(
+            decision, render_request
+        ) or render_llm(render_request)
         if rendered_text:
             from core.rendering.booking_confirmation_renderer import (
                 prefix_with_revision_acknowledgement,
@@ -506,6 +632,11 @@ def _inject_availability_text(
             rendered_text = prefix_with_revision_acknowledgement(
                 rendered_text, revision_summary
             )
+            acknowledgement = _availability_acknowledgement(
+                _current_turn_changes(result, session_state)
+            )
+            if acknowledgement:
+                rendered_text = f"{acknowledgement}\n\n{rendered_text}"
             result["text"] = rendered_text
     except Exception as e:
         logger.debug(
@@ -574,6 +705,17 @@ def _inject_execution_text(
     if execution_result.get("schema_version") != 1:
         logger.warning("Ignoring unsupported execution result schema")
         return
+    decision_plan = (
+        decision.get("plan")
+        if isinstance(decision, dict) and isinstance(decision.get("plan"), dict)
+        else {}
+    )
+    if (
+        decision_plan.get("status") == "NEEDS_CLARIFICATION"
+        and decision_plan.get("awaiting") == "CUSTOMER_CONTACT_NAME"
+    ):
+        result["text"] = CUSTOMER_CONTACT_NAME_PROMPT
+        return
     if (
         execution_result.get("status") == "succeeded"
         and isinstance(execution_result.get("availability"), dict)
@@ -640,6 +782,49 @@ class ResponseRenderer:
     ) -> None:
         """Inject text from the canonical execution result (best-effort)."""
         _inject_execution_text(result, decision, execution_result, session_state)
+
+    def render_confirmation(
+        self,
+        result: Dict[str, Any],
+        decision: Optional[Dict[str, Any]],
+        session_state: Optional[Dict[str, Any]] = None,
+        entity_schema: Optional[Dict[str, Any]] = None,
+        customer_name_change: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Inject the canonical prompt for a normal confirmation-ready turn."""
+        if isinstance(result.get("text"), str) and result["text"].strip():
+            result["text"] = _prefix_customer_name_acknowledgement(
+                result["text"].strip(), customer_name_change
+            )
+            return
+
+        outcome = result.get("outcome")
+        slots = outcome.get("slots") if isinstance(outcome, dict) else None
+        if not isinstance(slots, dict) or not slots:
+            decision_plan = (
+                decision.get("plan")
+                if isinstance(decision, dict)
+                and isinstance(decision.get("plan"), dict)
+                else {}
+            )
+            slots = decision_plan.get("slots")
+        if (not isinstance(slots, dict) or not slots) and isinstance(
+            session_state, dict
+        ):
+            planning = session_state.get("planning")
+            slots = planning.get("slots") if isinstance(planning, dict) else None
+
+        from core.rendering.booking_confirmation_renderer import (
+            render_booking_confirmation_prompt,
+        )
+
+        confirmation_text = render_booking_confirmation_prompt(
+            slots if isinstance(slots, dict) else {},
+            entity_schema=entity_schema,
+        )
+        result["text"] = _prefix_customer_name_acknowledgement(
+            confirmation_text, customer_name_change
+        )
 
     def render_recovery(
         self,

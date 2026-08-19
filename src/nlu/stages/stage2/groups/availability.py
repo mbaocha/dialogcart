@@ -19,8 +19,10 @@ from ..base_prompt import (
     temporal_instructions,
 )
 from ..browse_operation import normalize_operation, operation_rules
+from ..entity_schema import CompiledBusinessEntities, bookable_item_phrase
 from ..prompt_cache import cache_eligibility, log_usage, system_blocks
 from ...shared.context import format_conversation_context
+from ....entity_resolution import validate_generated_entity_evidence
 from ....temporal.stage2_output import (
     empty_temporal_dict,
     materialize_temporal_ownership,
@@ -30,9 +32,13 @@ logger = logging.getLogger(__name__)
 
 _MODEL = "claude-haiku-4-5-20251001"
 
-_TOOL = build_tool(
-    name="extract_availability_slots",
-    description="Extract slots for AVAILABILITY intent (checking free slots).",
+_AVAILABILITY_TOOL_NAME = "extract_availability_slots"
+_AVAILABILITY_TOOL_DESCRIPTION = (
+    "Extract slots for AVAILABILITY intent (checking free slots)."
+)
+_LEGACY_AVAILABILITY_TOOL_KWARGS = dict(
+    name=_AVAILABILITY_TOOL_NAME,
+    description=_AVAILABILITY_TOOL_DESCRIPTION,
     facts_fields=["service_term"],
     include_temporal=True,
     include_validated_intent=True,
@@ -41,11 +47,33 @@ _TOOL = build_tool(
 )
 
 
+def build_availability_tool(
+    compiled: Optional[CompiledBusinessEntities] = None,
+) -> dict:
+    """Request-scoped AVAILABILITY tool; preserve the legacy shape without a schema."""
+    if compiled is None:
+        return build_tool(**_LEGACY_AVAILABILITY_TOOL_KWARGS)
+    return build_tool(
+        name=_AVAILABILITY_TOOL_NAME,
+        description=_AVAILABILITY_TOOL_DESCRIPTION,
+        facts_schema=compiled.facts_schema,
+        entity_mentions_schema=compiled.mentions_schema,
+        include_temporal=True,
+        include_validated_intent=True,
+        include_service_candidates=True,
+        include_operation=True,
+    )
+
+
+_TOOL = build_availability_tool(None)
+
+
 def _prompt_blocks(
     now: str,
     tenant_context: Dict[str, Any],
     conversation_context: Optional[Dict[str, Any]],
     candidate_intent: str,
+    compiled: Optional[CompiledBusinessEntities] = None,
 ) -> tuple[str, str]:
     aliases = tenant_context.get("aliases", {})
     ctx_block = format_conversation_context(conversation_context or {})
@@ -60,7 +88,7 @@ Extract which service, date, and time window they want to check.
 
 {operation_rules()}
 
-{service_rules(aliases)}
+{compiled.prompt_rules if compiled is not None else service_rules(aliases)}
 
 {temporal_instructions()}"""
     dynamic = f"""DYNAMIC REQUEST CONTEXT
@@ -76,10 +104,11 @@ def _system_prompt(
     tenant_context: Dict[str, Any],
     conversation_context: Optional[Dict[str, Any]],
     candidate_intent: str,
+    compiled: Optional[CompiledBusinessEntities] = None,
 ) -> str:
     """Compatibility view of the ordered prompt blocks."""
     stable, dynamic = _prompt_blocks(
-        now, tenant_context, conversation_context, candidate_intent
+        now, tenant_context, conversation_context, candidate_intent, compiled
     )
     return f"{stable}\n{dynamic}"
 
@@ -95,14 +124,17 @@ class AvailabilityGroupExtractor:
         tenant_context: Dict[str, Any],
         candidate_intent: str,
         conversation_context: Optional[Dict[str, Any]] = None,
+        compiled_entities: Optional[CompiledBusinessEntities] = None,
     ) -> Dict[str, Any]:
+        compiled = compiled_entities
         stable_system, dynamic_system = _prompt_blocks(
-            now, tenant_context, conversation_context, candidate_intent
+            now, tenant_context, conversation_context, candidate_intent, compiled
         )
+        tool = build_availability_tool(compiled)
         cache_ok, prefix_tokens, fingerprint = cache_eligibility(
             self._client,
             model=_MODEL,
-            tool=_TOOL,
+            tool=tool,
             stable_text=stable_system,
         )
         system = system_blocks(stable_system, dynamic_system, eligible=cache_ok)
@@ -114,7 +146,7 @@ class AvailabilityGroupExtractor:
                 model=_MODEL,
                 max_tokens=384,
                 system=system,
-                tools=[_TOOL],
+                tools=[tool],
                 tool_choice={"type": "any"},
                 messages=[{"role": "user", "content": user_content}],
             )
@@ -132,8 +164,10 @@ class AvailabilityGroupExtractor:
             return _empty(candidate_intent)
 
         for block in response.content:
-            if block.type == "tool_use" and block.name == "extract_availability_slots":
-                return _merge(block.input, candidate_intent, text=text)
+            if block.type == "tool_use" and block.name == _AVAILABILITY_TOOL_NAME:
+                return _merge(
+                    block.input, candidate_intent, text=text, compiled=compiled
+                )
 
         logger.warning("AvailabilityGroupExtractor: no tool_use block")
         return _empty(candidate_intent)
@@ -144,23 +178,52 @@ def _merge(
     candidate_intent: str,
     *,
     text: str = "",
+    compiled: Optional[CompiledBusinessEntities] = None,
 ) -> Dict[str, Any]:
     validated = raw.get("validated_intent") or candidate_intent
     confidence = float(raw.get("confidence", 0.8))
-    facts = raw.get("facts") or {}
+    facts = raw.get("facts")
     operation = normalize_operation(raw.get("operation"))
     temporal, temporal_facts, time_constraint = materialize_temporal_ownership(
         raw, confidence=confidence, source_text=text
     )
+    entity_facts: Dict[str, Any] = {}
+    entity_mentions = {}
+    if compiled is not None:
+        # Availability turns commonly carry a date/navigation request while
+        # the model copies a service from conversation context. The explicit
+        # mention bit is authoritative for current-turn extraction: discard
+        # copied values marked unmentioned, then retain strict validation for
+        # every other shape or contradiction.
+        raw_mentions = raw.get("entity_mentions")
+        if isinstance(facts, dict) and isinstance(raw_mentions, dict):
+            facts = dict(facts)
+            for entity in compiled.fields:
+                if raw_mentions.get(entity.name) is False:
+                    facts[entity.name] = None
+        entity_mentions = validate_generated_entity_evidence(
+            facts, raw_mentions, compiled
+        )
+        entity_facts = {
+            name: evidence.raw_value for name, evidence in entity_mentions.items()
+        }
+        service_term = bookable_item_phrase(entity_facts, compiled)
+    else:
+        if not isinstance(facts, dict):
+            facts = {}
+        service_term = facts.get("service_term")
+
     result = {
         "intent": validated,
+        "proposal_response": raw.get("proposal_response"),
         "confidence": confidence,
         "facts": {
             **temporal_facts,
+            **entity_facts,
             "service_id": None,
             "booking_id": None,
         },
-        "service_term": facts.get("service_term"),
+        "service_term": service_term,
         "time_constraint": time_constraint,
         "search_query": None,
         "service_candidates": raw.get("service_candidates") or [],
@@ -168,12 +231,15 @@ def _merge(
     }
     if operation is not None:
         result["operation"] = operation
+    if compiled is not None:
+        result["_entity_mentions"] = entity_mentions
     return result
 
 
 def _empty(candidate_intent: str) -> Dict[str, Any]:
     return {
         "intent": candidate_intent,
+        "proposal_response": None,
         "confidence": 0.0,
         "facts": {
             "dates": [],

@@ -353,6 +353,49 @@ def test_no_canonical_service_id_in_response():
     )
 
 
+def _assert_confidence_telemetry(resp, label):
+    """Validate classified nondeterministic telemetry: type and [0.0, 1.0] range."""
+    intent = resp.get("intent")
+    if isinstance(intent, dict):
+        assert "confidence" in intent, f"{label} intent.confidence missing"
+        value = intent["confidence"]
+        assert isinstance(value, (int, float)) and not isinstance(value, bool), (
+            f"{label} intent.confidence must be a number, got {type(value).__name__}: {value!r}"
+        )
+        assert 0.0 <= float(value) <= 1.0, (
+            f"{label} intent.confidence out of range [0.0, 1.0]: {value!r}"
+        )
+    temporal = resp.get("temporal")
+    if isinstance(temporal, dict):
+        assert "confidence" in temporal, f"{label} temporal.confidence missing"
+        value = temporal["confidence"]
+        assert isinstance(value, (int, float)) and not isinstance(value, bool), (
+            f"{label} temporal.confidence must be a number, got {type(value).__name__}: {value!r}"
+        )
+        assert 0.0 <= float(value) <= 1.0, (
+            f"{label} temporal.confidence out of range [0.0, 1.0]: {value!r}"
+        )
+
+
+def _behavioural_output(resp):
+    """Copy of the response with only classified telemetry confidence removed.
+
+    intent.confidence and temporal.confidence are live-model telemetry.
+    All other fields — intent name, facts, temporal meaning, constraints,
+    understanding, resolutions, operations — remain for equality checks.
+    """
+    view = dict(resp)
+    intent = resp.get("intent")
+    if isinstance(intent, dict):
+        view["intent"] = {key: value for key, value in intent.items() if key != "confidence"}
+    temporal = resp.get("temporal")
+    if isinstance(temporal, dict):
+        view["temporal"] = {
+            key: value for key, value in temporal.items() if key != "confidence"
+        }
+    return view
+
+
 def test_output_independent_of_previous_requests():
     """
     Invariant test: Without conversation_context, Luma output must not depend on previous requests.
@@ -362,7 +405,8 @@ def test_output_independent_of_previous_requests():
     and controlled by the caller; this test covers the no-context path only.
 
     Verifies:
-    1. Same input + same user_id → identical output regardless of intervening requests.
+    1. Same input + same user_id → identical semantic output regardless of intervening requests.
+       Confidence telemetry may differ; it is type/range-checked, not compared for equality.
     2. Fragmentary inputs without booking verbs → UNKNOWN regardless of prior requests.
     3. Explicit booking inputs work regardless of prior fragmentary inputs.
     """
@@ -391,12 +435,17 @@ def test_output_independent_of_previous_requests():
         status3 == 200 and resp3 is not None
     ), f"Third request failed: HTTP {status3}, body={raw3}"
 
-    # Assert that resp1 and resp3 are identical (same input = same output)
-    assert resp1 == resp3, (
-        f"INVARIANT VIOLATION: Same input with same user_id produced different outputs. "
-        f"This violates statelessness - Luma must not depend on previous requests. "
-        f"First response: {json.dumps(resp1, indent=2)}, "
-        f"Third response: {json.dumps(resp3, indent=2)}"
+    # Semantic output must match; live-model confidence is telemetry only.
+    _assert_confidence_telemetry(resp1, "first")
+    _assert_confidence_telemetry(resp3, "third")
+    behavioural_1 = _behavioural_output(resp1)
+    behavioural_3 = _behavioural_output(resp3)
+    assert behavioural_1 == behavioural_3, (
+        f"INVARIANT VIOLATION: Same input with same user_id produced different "
+        f"semantic outputs. This violates statelessness - Luma must not depend "
+        f"on previous requests. "
+        f"First behavioural: {json.dumps(behavioural_1, indent=2)}, "
+        f"Third behavioural: {json.dumps(behavioural_3, indent=2)}"
     )
 
     # Test 2: Fragmentary inputs without booking verbs should return UNKNOWN

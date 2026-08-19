@@ -10,12 +10,20 @@ from __future__ import annotations
 
 from typing import Any, Dict, FrozenSet, List, Mapping, Optional, Set
 
-from core.adapters.nlu.catalog_projection import project_collection
+from core.adapters.nlu.catalog_projection import catalog_item_value, project_collection
 
 _BOOKABLE_NAMES = frozenset({"service", "room_type"})
 _STAFF_NAMES = frozenset({"staff", "technician"})
 _SUPPORTED_TYPES = frozenset({"catalog", "enum", "text"})
-_SUPPORTED_ROLES = frozenset({"bookable_item", "staff"})
+_SUPPORTED_ROLES = frozenset({"bookable_item", "staff", "booking_subject"})
+FORBIDDEN_BOOKING_SUBJECT_KEYS: FrozenSet[str] = frozenset(
+    {"__proto__", "constructor", "prototype"}
+)
+
+
+def booking_subject_key_is_forbidden(name: str) -> bool:
+    """Return whether a configured subject key is unsafe at JSON boundaries."""
+    return name in FORBIDDEN_BOOKING_SUBJECT_KEYS
 
 
 def build_entity_schema(
@@ -108,9 +116,34 @@ def promotable_slot_keys_from_entity_schema(
                 keys.add(resolved)
             keys.add(name)
             continue
+        # Customer profile evidence has a non-booking projection target.
+        if name == "customer_contact_name":
+            continue
         # enum / text: field name is the canonical planning slot.
         keys.add(name)
     return frozenset(keys)
+
+
+def with_customer_contact_name_request(
+    entity_schema: Optional[Mapping[str, Any]],
+) -> Dict[str, Any]:
+    """Add the request-scoped customer-name entity without changing category config."""
+    schema = dict(entity_schema or {"version": 1, "fields": []})
+    fields = [dict(field) for field in schema.get("fields", []) if isinstance(field, Mapping)]
+    if not any(field.get("name") == "customer_contact_name" for field in fields):
+        fields.append({
+            "name": "customer_contact_name",
+            "type": "text",
+            "required": True,
+            "description": (
+                "The booking contact's authoritative personal name, supplied in "
+                "answer to the active customer-name request or explicitly revised "
+                "before booking confirmation. Do not resolve labels "
+                "such as Guest, anonymous, me, or the service recipient's name."
+            ),
+        })
+    schema["fields"] = fields
+    return schema
 
 
 def planning_slot_key_for_field(field: Mapping[str, Any]) -> Optional[str]:
@@ -145,6 +178,8 @@ def required_slot_keys_from_entity_schema(
         if not isinstance(raw, Mapping):
             continue
         if raw.get("required") is not True:
+            continue
+        if raw.get("name") == "customer_contact_name":
             continue
         key = planning_slot_key_for_field(raw)
         if key is None or key in seen:
@@ -259,6 +294,28 @@ def planning_slot_key_for_role(
     return None
 
 
+def entities_with_role(
+    entity_schema: Optional[Mapping[str, Any]],
+    role: str,
+) -> List[Dict[str, Any]]:
+    """Return every explicitly tagged field in declaration order.
+
+    Unlike platform-role helpers, this intentionally does not apply legacy
+    name-based role defaults. It is suitable for multi-valued metadata roles
+    such as ``booking_subject`` where membership must always be explicit.
+    """
+    if not isinstance(entity_schema, Mapping) or not role:
+        return []
+    fields = entity_schema.get("fields")
+    if not isinstance(fields, list):
+        return []
+    return [
+        dict(raw)
+        for raw in fields
+        if isinstance(raw, Mapping) and raw.get("role") == role
+    ]
+
+
 def bookable_item_slot_key(
     entity_schema: Optional[Mapping[str, Any]] = None,
 ) -> str:
@@ -289,6 +346,27 @@ def field_for_planning_slot(
         name = raw.get("name")
         if name == slot_key:
             return dict(raw)
+    return None
+
+
+def catalog_label_for_planning_value(
+    entity_schema: Optional[Mapping[str, Any]],
+    slot_key: str,
+    value: Any,
+) -> Optional[str]:
+    """Return the configured human label for a canonical catalog value."""
+    field = field_for_planning_slot(entity_schema, slot_key)
+    catalog = field.get("catalog") if isinstance(field, Mapping) else None
+    if not isinstance(catalog, Mapping) or value is None:
+        return None
+    canonical = str(value).strip()
+    for label, catalog_value in catalog.items():
+        if (
+            isinstance(label, str)
+            and label.strip()
+            and str(catalog_value).strip() == canonical
+        ):
+            return label.strip()
     return None
 
 
@@ -374,6 +452,10 @@ def _build_entity_field(
     role = entity.get("role")
     if role is not None and role not in _SUPPORTED_ROLES:
         role = None
+    if role == "booking_subject" and booking_subject_key_is_forbidden(name):
+        raise ValueError(
+            f"booking_subject entity name {name!r} is forbidden by the flat JSON contract"
+        )
 
     required = entity.get("required") is True
     # prompt_if_missing only applies to optional entities (default false).
@@ -412,8 +494,26 @@ def _build_entity_field(
             field["prompt_if_missing"] = True
         if has_availability_criteria:
             field["availability_criteria"] = availability_criteria
+        if isinstance(catalog_data, Mapping):
+            raw_items = catalog_data.get(catalog_key)
+            if isinstance(raw_items, list):
+                evidence = []
+                for item in raw_items:
+                    if not isinstance(item, Mapping) or item.get("is_active") is False:
+                        continue
+                    item_name = item.get("name")
+                    if not isinstance(item_name, str) or not item_name.strip():
+                        continue
+                    record = {"id": catalog_item_value(item, item_name), "name": item_name.strip()}
+                    for key in ("description", "category"):
+                        value = item.get(key)
+                        if isinstance(value, str) and value.strip():
+                            record[key] = value.strip()
+                    if "description" in record or "category" in record:
+                        evidence.append(record)
+                if evidence:
+                    field["items"] = evidence
         return field
-
     if field_type == "enum":
         values = entity.get("values")
         if not isinstance(values, list) or not values:
@@ -427,6 +527,8 @@ def _build_entity_field(
             "description": description,
             "values": normalized,
         }
+        if isinstance(role, str):
+            field["role"] = role
         if required:
             field["required"] = True
         if prompt_if_missing:
@@ -441,6 +543,8 @@ def _build_entity_field(
         "type": "text",
         "description": description,
     }
+    if isinstance(role, str):
+        field["role"] = role
     if required:
         field["required"] = True
     if prompt_if_missing:

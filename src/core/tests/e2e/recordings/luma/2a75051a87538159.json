@@ -56,12 +56,13 @@
     "timezone": "UTC"
   },
   "response": {
+    "entity_resolutions": {},
     "facts": {
       "booking_id": null,
       "date_time_pairs": [],
       "dates": [],
       "service": null,
-      "service_id": "flexi haircut + prunning",
+      "service_id": null,
       "times": [
         "11:00"
       ]

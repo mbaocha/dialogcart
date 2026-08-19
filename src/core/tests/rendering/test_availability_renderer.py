@@ -3,7 +3,9 @@
 from core.rendering.availability_renderer import (
     build_availability_browse_status_render_request,
     build_availability_render_request,
+    render_successful_fresh_availability,
 )
+from core.rendering.llm_renderer import LlmRenderRequest
 from core.workflows.availability.presentation import build_presented_availability
 
 
@@ -33,6 +35,149 @@ def test_build_render_request_includes_availability_facts():
     assert req.facts["availability"]["times"]
     assert not req.facts["availability"].get("empty")
     assert "bullet list" in req.render_instruction.lower()
+
+
+def test_fresh_availability_ignores_obsolete_engine_question():
+    decision = {
+        "plan": {
+            "action": "SEARCH_AVAILABILITY",
+            "ask_next": "time",
+            "awaiting": "TIME_SELECTION",
+            "missing_slots": ["time", "registration_number"],
+        },
+        "facts": {
+            "slots": {"service_id": "oil-change", "engine_type": "ev"},
+            "missing_slots": ["time", "registration_number"],
+        },
+    }
+    execution = {
+        "status": "succeeded",
+        "subject": {"service_name": "Executive Oil Change"},
+        "availability": {
+            "slots": [],
+            "search_date": "2026-08-17",
+            "time_resolution": {"outcome": "TIME_MATCH_NOT_APPLICABLE"},
+        },
+    }
+    presented = {
+        "search_date": "2026-08-17",
+        "slots": [{"starts_at": "2026-08-17T09:30:00Z"}],
+        "times": ["9:30 AM", "10:00 AM"],
+        "more_count": 6,
+        "total_unique": 8,
+        "browse_hints": {"has_next": True},
+        "recovery_actions": [{"type": "browse_next"}],
+    }
+    req = build_availability_render_request(
+        decision,
+        execution,
+        presented=presented,
+        conversation_history=[
+            {
+                "role": "assistant",
+                "text": "What's your engine type? Petrol, diesel, hybrid, or EV?",
+            }
+        ],
+    )
+    assert req is not None
+
+    text = render_successful_fresh_availability(decision, req)
+
+    assert text is not None
+    assert "engine" not in text.casefold()
+    assert "9:30 AM" in text
+    assert "10:00 AM" in text
+    assert "6 more times available" in text
+    assert "Which time works best for you?" in text
+    assert "`next`" in text
+
+
+def test_fresh_availability_does_not_invent_question_without_decision_authority():
+    decision = {
+        "plan": {
+            "action": "SEARCH_AVAILABILITY",
+            "ask_next": None,
+            "awaiting": None,
+            "missing_slots": [],
+        }
+    }
+    req = LlmRenderRequest(
+        render_instruction="stale text must not authorize a question",
+        facts={
+            "availability": {
+                "date": "2026-08-17",
+                "times": ["9:30 AM"],
+                "more_count": 0,
+                "browse_hints": {},
+                "recovery_actions": [],
+            },
+            "time_resolution": {"outcome": "TIME_MATCH_NOT_APPLICABLE"},
+        },
+        conversation_history=[
+            {"role": "assistant", "text": "What is your engine type?"}
+        ],
+    )
+
+    text = render_successful_fresh_availability(decision, req)
+
+    assert text == "Available times for 2026-08-17:\n- 9:30 AM"
+
+
+def test_successful_fresh_availability_injection_bypasses_llm_history(monkeypatch):
+    from core.rendering import response_renderer as rr
+
+    monkeypatch.setattr(
+        rr,
+        "render_llm",
+        lambda request: (_ for _ in ()).throw(
+            AssertionError("fresh availability must not call the rendering LLM")
+        ),
+    )
+    result = {
+        "_workflow_result": {
+            "presented_availability": {
+                "search_date": "2026-08-17",
+                "slots": [{"starts_at": "2026-08-17T09:30:00Z"}],
+                "times": ["9:30 AM", "10:00 AM"],
+                "more_count": 0,
+                "total_unique": 2,
+                "browse_hints": {},
+                "recovery_actions": [],
+            }
+        }
+    }
+    decision = {
+        "plan": {
+            "action": "SEARCH_AVAILABILITY",
+            "ask_next": "time",
+            "awaiting": "TIME_SELECTION",
+            "missing_slots": ["time", "registration_number"],
+        }
+    }
+    execution = {
+        "status": "succeeded",
+        "subject": {"service_name": "Executive Oil Change"},
+        "availability": {
+            "slots": [{"starts_at": "2026-08-17T09:30:00Z"}],
+            "search_date": "2026-08-17",
+            "time_resolution": {"outcome": "TIME_MATCH_NOT_APPLICABLE"},
+        },
+    }
+
+    rr._inject_availability_text(
+        result,
+        decision,
+        execution,
+        session_state={
+            "messages": [
+                {"role": "assistant", "text": "What is your engine type?"}
+            ]
+        },
+    )
+
+    assert "9:30 AM" in result["text"]
+    assert "Which time works best for you?" in result["text"]
+    assert "engine" not in result["text"].casefold()
 
 
 def test_explicit_availability_without_current_time_defensively_lists_exact_match():
@@ -491,6 +636,65 @@ def test_resolve_time_mismatch_text_not_in_cache_no_page_claim():
     assert "later page" not in text.lower()
     assert "`next`" not in text
     assert "`previous`" not in text
+
+
+def test_expired_refresh_mismatch_explains_recheck_once():
+    from core.rendering.availability_renderer import resolve_time_mismatch_text
+
+    text = resolve_time_mismatch_text(
+        requested_time="10:30",
+        times=["11:00 AM", "11:30 AM"],
+        refresh_reason="expired",
+    )
+
+    assert text.startswith(
+        "I rechecked availability because the previous results had expired."
+    )
+    assert "10:30 AM isn't available" in text
+    assert "The current available times are 11:00 AM and 11:30 AM" in text
+
+
+def test_expired_refresh_reason_does_not_leak_into_pagination_mismatch():
+    from core.rendering.availability_renderer import resolve_time_mismatch_text
+
+    text = resolve_time_mismatch_text(
+        requested_time="10:30",
+        mismatch_location="EARLIER_PAGE",
+        recovery_actions=[{"type": "browse_previous"}],
+        refresh_reason="expired",
+    )
+
+    assert "previous results had expired" not in text
+    assert "earlier page" in text.lower()
+
+
+def test_business_closed_mismatch_uses_authoritative_closure_wording():
+    from core.rendering.availability_renderer import resolve_time_mismatch_text
+
+    text = resolve_time_mismatch_text(
+        requested_time="09:00",
+        search_date="2026-08-30",
+        alternatives=[],
+        unavailable_reason="business_closed",
+    )
+
+    assert text == (
+        "We're closed on August 30, so 9:00 AM isn't available. "
+        "Would you like to try a different date?"
+    )
+
+
+def test_generic_empty_mismatch_does_not_claim_business_is_closed():
+    from core.rendering.availability_renderer import resolve_time_mismatch_text
+
+    text = resolve_time_mismatch_text(
+        requested_time="09:00",
+        search_date="2026-08-30",
+        alternatives=[],
+        unavailable_reason="availability_rejected",
+    )
+
+    assert "closed" not in text.lower()
 
 
 def test_fresh_search_drops_stale_confirmation_and_time_selection_history():

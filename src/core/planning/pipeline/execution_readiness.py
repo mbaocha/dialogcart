@@ -77,6 +77,16 @@ def build_execution_readiness_evidence(
         _ea_policy = load_planning_policy()
         _ea_result = plan_intent(intent_name, effective_slots, _ea_policy)
         executable_actions = list(_ea_result.get("executable_actions", []))
+    if payload.get("_blocked_entity_slots"):
+        executable_actions = []
+    from core.session.booking_lifecycle import BookingLifecycle, derive_booking_lifecycle
+
+    committed_create = bool(
+        intent_name == "CREATE_APPOINTMENT"
+        and derive_booking_lifecycle(session_state) == BookingLifecycle.COMMITTED
+    )
+    if committed_create:
+        executable_actions = []
 
     flags: Dict[str, Any] = {}
     if intent_name and intent_name != "UNKNOWN":
@@ -100,6 +110,11 @@ def build_execution_readiness_evidence(
         if bound_datetime_cleared:
             flags["time_selection_ready"] = False
             flags["time_selection_required"] = intent_name == "CREATE_APPOINTMENT"
+        if committed_create:
+            flags["availability_ready"] = False
+            flags["availability_resolved"] = False
+            flags["user_confirmation_satisfied"] = False
+            flags["booking_not_committed"] = False
 
     datetime_bound = has_bound_booking_datetime(
         effective_slots,

@@ -12,6 +12,26 @@ The production owner of each conversational turn within Core is **ConversationEn
 
 ---
 
+## Architectural conflict policy
+
+Before implementing a requested change, compare it with the code structure, responsibilities, and ownership boundaries defined in this instruction file and any applicable parent or nested `AGENTS.md` files.
+
+If the requested implementation would conflict with those boundaries:
+
+1. Stop before modifying files.
+2. Identify the specific conflicting instruction.
+3. Explain how the proposed implementation violates the defined code structure, responsibility, or ownership boundary.
+4. Recommend an architecturally compliant alternative.
+5. Wait for explicit user direction before proceeding.
+
+Do not silently reinterpret, weaken, bypass, or override an architectural rule merely to complete an implementation.
+
+If the conflict is uncertain rather than definite, report the concern and inspect the relevant architecture before deciding whether implementation can safely proceed.
+
+This stop requirement applies to implementation work. Investigation, review, and diagnosis may continue in read-only form so that existing or proposed architectural conflicts can be identified and explained.
+
+---
+
 ## Turn orchestration
 
 - The primary durable orchestration lifecycle for a turn is **Planning → Execution → Rendering**.
@@ -30,7 +50,8 @@ The production owner of each conversational turn within Core is **ConversationEn
 
 ## Session
 
-- Core session is the **single owner of persistent booking state** (see root Ownership).
+- Core session is the **single owner of all persistent DialogCart conversation and booking-workflow state** (see root Ownership).
+- External systems remain authoritative for their own business records. Core session retains only the identifiers, outcomes, and continuation state needed to conduct future DialogCart turns.
 - **Session V2 is the canonical runtime and persisted session model.** Nested sections are the source of truth for durable booking conversation state.
 - Transient state during merge, planning, or execution is a processing view—not a competing source of truth.
 - Core merges each NLU response with persisted session before planning or execution.
@@ -47,7 +68,8 @@ The production owner of each conversational turn within Core is **ConversationEn
 - **Planning** owns ``planning.*``, including ``planning.slots`` and ``planning.bound_datetime``.
 - **Execution** results are ephemeral. The projector persists only durable committed identifiers and availability artifacts.
 - **Booking** contains only successfully committed ``booking_id`` and ``booking_code`` values.
-- **SessionProjectorV2** owns durable turn-end writes (no direct storage I/O).
+- **SessionProjectorV2** computes and applies the durable turn-end session projection in memory; it does not perform storage I/O.
+- **Session infrastructure** owns storage I/O for loading and persisting the projected session. HTTP and compatibility entrypoints may invoke that infrastructure but do not own projection rules.
 - **Confirmation gate** owns ``confirmation_state``.
 - **API** owns persisted ``conversation.history``; NLU conversation continuation data lives in ``conversation.memory``.
 - **Capabilities** produce ``capability.active`` and minimal ``capability.results`` continuation facts.
@@ -58,7 +80,8 @@ The production owner of each conversational turn within Core is **ConversationEn
 
 ## Proposals and durable slots
 
-- NLU may surface proposals; Core decides what becomes **durable** session slots.
+- NLU determines whether the current utterance accepts, rejects, or modifies a proposal and identifies the semantic target. Core must not derive that meaning from raw text.
+- Core verifies that the referenced proposal is pending and valid, then promotes or rejects it according to policy; Core decides what becomes **durable** session slots.
 - Temporal proposals are not durable until bound to presented availability or explicitly confirmed.
 - Only durable slots participate in persistence and planning completeness.
 - NLU must not fabricate booking slots absent from the current utterance.
@@ -68,11 +91,14 @@ The production owner of each conversational turn within Core is **ConversationEn
 
 ## Confirmation
 
-- Core owns explicit user approval before irreversible booking actions.
+- NLU interprets the current utterance and supplies structured dialogue evidence such as `ACCEPT_CONFIRMATION`, `REJECT_CONFIRMATION`, or `ANOTHER_REQUEST`.
+- Core owns the confirmation gate before irreversible booking actions: it validates whether confirmation is pending and applies the lifecycle consequence of NLU evidence.
 - `confirmation_state` (`pending`, `confirmed`, cleared) is managed via the confirmation gate.
 - `session.confirmation_state` is the canonical authorization field; it is not nested booking state.
 - Committing steps require confirmation when policy and workflow state demand it.
-- While `pending`, each turn is classified once as `YES`, `NO`, or `ANOTHER_REQUEST`; downstream branches on that decision—not re-derived. The gate does not interpret the request that supersedes confirmation.
+- While `pending`, Core consumes NLU's classification once; downstream branches on that evidence—not a re-derived raw-text classification. The gate does not interpret the user's words or the request that supersedes confirmation.
+- The **confirmation gate** owns confirmation lifecycle evaluation, not language interpretation. It must not recreate a missing NLU classification from raw text.
+- If confirmation evidence is missing or insufficient, Core may conservatively clarify while preserving safe lifecycle state. It must never silently reconstruct acceptance, rejection, or another request.
 - On `ANOTHER_REQUEST`, the gate consumes only confirmation authorization. Planning owns all resulting booking-slot and availability invalidation.
 - `confirmation_state` exists only to authorize a pending irreversible operation; it is not durable booking truth.
 - Lifecycle: `pending` → confirmation required; `confirmed` → transient authorization for the current commit only; cleared → no active workflow.
@@ -107,7 +133,7 @@ The production owner of each conversational turn within Core is **ConversationEn
 - Presentation state must not modify booking slots, proposals, fingerprints, or other durable state.
 - Pagination is presentation state only.
 - NLU emits `AVAILABILITY` with `operation: browse_next | browse_previous | null`.
-- Browse aliases are deliberately small (`next` / `show more` / `more`, `previous` / `show previous` / `back`). Date phrases (`next day`, `previous day`, absolute dates) are SEARCH semantics — never Browse.
+- NLU alone interprets whether phrasing means browse-next, browse-previous, a date/search request, an option reference, or another dialogue act. Core consumes the structured `operation`; it must not maintain browse aliases or inspect raw text to recover one.
 - Core owns the browse execution decision; browsing never executes `SEARCH_AVAILABILITY`.
 - Core may reuse cache, paginate presentation, or execute `SEARCH_AVAILABILITY`.
 - NLU never instructs Core to search.
@@ -127,6 +153,7 @@ Reference: [`AVAILABILITY_INTERACTION_CONTRACT.md`](orchestration/contracts/AVAI
 ## Planner
 
 - Runtime derives business facts from session, slots, fingerprints, confirmation gates, and workflow state.
+- Runtime consumes structured NLU evidence for the current utterance. It must not inspect raw user text to infer semantic facts or transitions.
 - Booking sequencing, slot requirements, and execution-step selection remain **policy-driven** and reusable across intents.
 - Planner infrastructure must stay generic: new booking behaviour extends the fact registry, expresses sequencing in policy, and lets the generic interpreter select the step.
 - Intent classification and some routing concerns (for example handler delegation) may exist **outside** booking sequencing; they must not reinvent booking step selection.
@@ -171,6 +198,39 @@ Planning turns separate **evidence** from **state change**.
 
 ---
 
+## Validation and clarification ownership
+
+- **NLU** owns semantic interpretation, grounding, ambiguity detection, and validation of structured semantic output. Core consumes that output as semantic evidence.
+- **Core** owns workflow and session validation, proposal validity, confirmation authorization, availability validity, and execution eligibility.
+- Core may validate the shape and workflow applicability of NLU evidence, but it must not reconstruct, reinterpret, or revalidate semantic meaning from raw text.
+- When NLU emits structured uncertainty or clarification evidence, Core decides whether clarification is the next workflow action. Rendering owns the resulting user-facing wording.
+- **Capabilities and execution clients** own validation of the external operation constraints, requests, and responses within their contracts. Their validation does not select workflow outcomes.
+- Session schema modules validate session shape only; they do not make semantic, planning, or execution decisions.
+
+---
+
+## Raw-language boundary
+
+NLU is the sole authority for semantic interpretation of raw user language, including affirmation and rejection; confirmation responses; proposal acceptance, rejection, and modification; corrections and replacements; browse/navigation language; option and ordinal references; service/date/time expressions; negation and hypothetical language; and mixed dialogue acts.
+
+Core may consume raw text only to:
+
+- forward it to NLU;
+- retain conversation history;
+- log or trace it;
+- render or transport it without semantic classification.
+
+Core must not use regexes, keyword lists, substring matching, token matching, or other raw-text inspection to infer intent, response acts, slot values, proposal acceptance or rejection, correction, option selection, navigation, negation, or workflow transitions. Prohibited patterns include:
+
+```python
+if pending_proposal and user_text.startswith(("yes", "yeah", "sure")):
+    accept_proposal()
+```
+
+Equivalent regex checks, substring checks, affirmative/negative token sets, service-name matching, ordinal parsing (for example interpreting “first” or “second”), navigation aliases (for example interpreting “next” or “back”), and negation detection inside Core are equally prohibited. This prohibition applies even as a fallback when NLU evidence is absent. Conservative clarification is allowed; silent semantic reconstruction is not.
+
+---
+
 ## Intent policy
 
 Booking sequencing, required slots, execution steps, step modes (exploratory/committing), and intent durability are **policy-driven**. Code reads that policy and derives facts—it must not invent booking behaviour or execution sequencing outside policy. Other routing concerns (for example handler delegation) may use separate declarative policy; they do not replace booking execution policy.
@@ -180,10 +240,10 @@ Booking sequencing, required slots, execution steps, step modes (exploratory/com
 ## Booking execution
 
 - Policy selects the execution step (`plan.action`); it may be `null` when nothing should run.
-- Execution coordination owns eligibility, preparation, client binding, dispatch, and workflow post-hooks needed before rendering.
-- Execution clients perform the operation and return business outcomes; they do not decide the next user action.
+- **Execution coordination** is a Core responsibility. It owns execution eligibility, preparation, client or capability binding, dispatch, and workflow post-hooks needed before rendering. It does not interpret raw language or perform the external operation itself.
+- **Execution clients** are adapters for selected external booking operations. They validate the external request and response contract they own, perform the operation, and return a structured business outcome. They do not mutate session directly or decide the next user action.
 - Rendering produces the user-facing response from plan, execution, and other supplied evidence.
-- HTTP and session infrastructure own persistence of durable state for the following turn—not the turn orchestrator.
+- SessionProjectorV2 computes or applies the durable session projection; session infrastructure performs storage I/O for the following turn. The turn orchestrator owns neither set of rules.
 
 ---
 
@@ -191,8 +251,10 @@ Booking sequencing, required slots, execution steps, step modes (exploratory/com
 
 - Planning decides whether a capability must activate before booking can proceed.
 - Execution and API boundaries coordinate capability execution once planning has selected it.
-- Capabilities return structured results; Core merges durable continuation facts into session.
+- **Capabilities** encapsulate supporting or prerequisite external business operations, such as payment or identity verification. A capability may use an external client, but it remains distinct from Core workflow policy and from the booking-operation adapter selected by execution coordination.
+- Capabilities validate the external constraints and responses within their operation contract and return structured results; Core validates workflow consequences and merges durable continuation facts into session.
 - Capabilities do not own session state, planner logic, or conversation flow.
+- External systems remain authoritative for the business records they own; Core session retains only the identifiers and outcomes required for continuation.
 - Rendering remains responsible for conversational output from capability outcomes and other supplied evidence.
 
 ---
@@ -223,6 +285,30 @@ Booking sequencing, required slots, execution steps, step modes (exploratory/com
 - Rendering consumes that evidence and turns it into the user-facing reply.
 - Rendering must not invent business facts, world knowledge, or other claims absent from supplied evidence.
 - Evidence producers must not emit final conversational wording as a substitute for Rendering.
+
+---
+
+## Test execution policy
+
+Codex must not execute tests after making changes.
+
+This prohibition includes:
+
+- unit, integration, end-to-end, and live-model tests;
+- `pytest`, `unittest`, Jest, Vitest, Playwright, or equivalent test runners;
+- test commands invoked indirectly through scripts, Makefiles, task runners, or CI helpers.
+
+After every implementation:
+
+1. Do not run tests.
+2. Provide the exact recommended test commands for the user to execute.
+3. Separate focused tests from the full regression suite.
+4. Explain briefly what each command verifies.
+5. Report tests as `NOT RUN — awaiting user execution`.
+6. Never claim that tests pass until the user supplies the results.
+7. When the user supplies test results, analyze them and make any required corrections, but still do not execute tests.
+
+Codex may inspect, add, or modify test files. It may run non-test validation commands such as compilation, type checking, linting, formatting checks, and `git diff --check`, unless the user instructs otherwise.
 
 ---
 

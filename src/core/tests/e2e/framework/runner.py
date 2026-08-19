@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import json
 from typing import Any, Tuple
 
@@ -90,22 +91,24 @@ def apply_expect(conv: BookingConversation, expect: Expect) -> None:
 
 
 def _call_hook(hook: Any, ctx: dict) -> None:
+    candidates = (
+        (ctx["conv"], ctx.get("booking_client"), ctx.get("availability_client")),
+        (ctx["conv"], ctx.get("booking_client")),
+        (ctx["conv"],),
+        (),
+    )
     try:
-        return hook(
-            ctx["conv"],
-            ctx.get("booking_client"),
-            ctx.get("availability_client"),
-        )
-    except TypeError:
-        pass
-    try:
-        return hook(ctx["conv"], ctx.get("booking_client"))
-    except TypeError:
-        pass
-    try:
-        return hook(ctx["conv"])
-    except TypeError:
-        return hook()
+        signature = inspect.signature(hook)
+    except (TypeError, ValueError):
+        signature = None
+    if signature is not None:
+        for args in candidates:
+            try:
+                signature.bind(*args)
+            except TypeError:
+                continue
+            return hook(*args)
+    return hook(*candidates[0])
 
 
 def run_bundle(scenario: Scenario, bundle: ConversationBundle) -> BookingConversation:

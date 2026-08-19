@@ -45,7 +45,24 @@ def invoke_nlu_for_planning(
     entity_schema: Optional[Dict[str, Any]] = None,
 ) -> NluInvocationResult:
     """Call NLU and validate contract; return structured ok/failure status."""
-    conversation_context = build_conversation_context(session_state)
+    conversation_context = build_conversation_context(
+        session_state, tenant_context=tenant_context
+    )
+
+    # TEMPORARY_CUSTOMER_NAME_FLOW_DIAGNOSTIC — remove after capture review
+    try:
+        from core.diagnostics.temporary_customer_name_flow_diagnostic import (
+            maybe_begin_before_nlu,
+        )
+
+        maybe_begin_before_nlu(
+            text=text,
+            session_state=session_state,
+            entity_schema=entity_schema,
+            user_id=user_id,
+        )
+    except Exception:
+        pass
 
     luma_payload = {
         "user_id": user_id,
@@ -145,17 +162,66 @@ def invoke_nlu_for_planning(
         )
 
     try:
-        assert_luma_contract(luma_response)
+        assert_luma_contract(luma_response, entity_schema=entity_schema)
+        if (
+            isinstance(conversation_context, dict)
+            and conversation_context.get("temporal_context_version") == 1
+        ):
+            temporal = luma_response.get("temporal")
+            facts = luma_response.get("facts")
+            has_time_evidence = bool(
+                isinstance(temporal, dict)
+                and (
+                    temporal.get("start_time")
+                    or temporal.get("start_time_expression")
+                    or temporal.get("end_time")
+                    or temporal.get("end_time_expression")
+                )
+            ) or bool(isinstance(facts, dict) and facts.get("times"))
+            if has_time_evidence and not (
+                isinstance(temporal, dict)
+                and isinstance(temporal.get("resolution"), dict)
+            ):
+                raise ContractViolation(
+                    "Contract violation: version-1 temporal evidence requires resolution"
+                )
     except ContractViolation as e:
         logger.error(
             f"[LUMA_ERROR_FALLBACK] Contract violation for user {user_id}: {str(e)}"
         )
+        # TEMPORARY_CUSTOMER_NAME_FLOW_DIAGNOSTIC — remove after capture review
+        try:
+            from core.diagnostics.temporary_customer_name_flow_diagnostic import (
+                maybe_record_nlu,
+            )
+
+            maybe_record_nlu(
+                luma_response=luma_response,
+                entity_schema=entity_schema,
+                session_state=session_state,
+            )
+        except Exception:
+            pass
         return NluInvocationResult(
             status="contract_violation",
             luma_response=luma_response,
             raw_luma_response_deep_copy=raw_luma_response_deep_copy,
             error_message=str(e),
         )
+
+    # TEMPORARY_CUSTOMER_NAME_FLOW_DIAGNOSTIC — remove after capture review
+    try:
+        from core.diagnostics.temporary_customer_name_flow_diagnostic import (
+            maybe_record_nlu,
+        )
+
+        maybe_record_nlu(
+            luma_response=luma_response,
+            entity_schema=entity_schema,
+            session_state=session_state,
+        )
+    except Exception:
+        pass
 
     return NluInvocationResult(
         status="ok",

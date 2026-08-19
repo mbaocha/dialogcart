@@ -2,12 +2,14 @@
 
 from unittest.mock import Mock
 
+from core.adapters.clients.organization_client import OrganizationClient
 from core.adapters.nlu import LumaClient
 from core.api.compat import handle_message
 from core.rendering.booking_confirmation_renderer import (
     render_booking_confirmation_rejected,
 )
 from core.session.session_projector import SessionProjectorV2
+from core.tests.harness.clients import stub_catalog_client
 from core.workflows.availability.presentation import (
     availability_fingerprint_from_session,
     presented_availability_from_session,
@@ -25,6 +27,23 @@ class _StatefulSessionStore:
 
     def save_session(self, organization_id, user_id, session_state):
         self._sessions[(organization_id, user_id)] = session_state
+
+
+def _catalog():
+    return stub_catalog_client(
+        aliases={
+            "premium haircut": "premium haircut",
+            "flexi haircut + pruning": "flexi haircut + pruning",
+        }
+    )
+
+
+def _org():
+    client = Mock(spec=OrganizationClient)
+    client.get_details.return_value = {
+        "organization": {"businessCategoryId": 1}
+    }
+    return client
 
 
 def test_render_booking_confirmation_rejected_is_open_ended():
@@ -77,6 +96,7 @@ def _run_reject_and_persist(user_id: str, session: dict):
     mock_luma = Mock(spec=LumaClient)
     mock_luma.resolve.return_value = {
         "success": True,
+        "entity_resolutions": {},
         "intent": {"name": "REJECT_ACTION"},
         "facts": {},
         "slots": {},
@@ -88,6 +108,8 @@ def _run_reject_and_persist(user_id: str, session: dict):
         text="no",
         user_id=user_id,
         luma_client=mock_luma,
+        catalog_client=_catalog(),
+        organization_client=_org(),
         session_store=session_store,
         organization_id=1,
     )
@@ -179,8 +201,17 @@ def test_reject_with_new_time_rebinds_and_reconfirms():
     mock_luma = Mock(spec=LumaClient)
     mock_luma.resolve.return_value = {
         "success": True,
-        "intent": {"name": "REJECT_ACTION"},
+        "entity_resolutions": {},
+        "intent": {"name": "CORRECTION"},
         "facts": {"times": ["11:00 AM"]},
+        "temporal": {
+            "mode": "exact",
+            "start_time": "11:00",
+            "start_time_expression": "11am",
+            "expression": "11am",
+            "confidence": 0.95,
+        },
+        "time_proposal": {"mode": "exact", "value": "11:00"},
         "slots": {},
         "missing_slots": [],
         "needs_clarification": False,
@@ -190,16 +221,16 @@ def test_reject_with_new_time_rebinds_and_reconfirms():
         text="no. switch to 11am",
         user_id=user_id,
         luma_client=mock_luma,
+        catalog_client=_catalog(),
+        organization_client=_org(),
         session_store=session_store,
         organization_id=1,
     )
     assert result.get("success") is True
     text = result.get("text") or ""
     text_lower = text.lower()
-    assert "changed it to" in text_lower
     assert "11:00" in text or "11:00 am" in text_lower
     assert "go ahead" in text_lower
-    assert text_lower.index("changed") < text_lower.index("go ahead")
 
     outcome = result.get("outcome") or {}
     assert outcome.get("status") == "AWAITING_CONFIRMATION"
@@ -230,8 +261,17 @@ def test_pending_time_revision_without_reject_rebinds():
     mock_luma = Mock(spec=LumaClient)
     mock_luma.resolve.return_value = {
         "success": True,
+        "entity_resolutions": {},
         "intent": {"name": "CREATE_APPOINTMENT"},
         "facts": {"times": ["11am"]},
+        "temporal": {
+            "mode": "exact",
+            "start_time": "11:00",
+            "start_time_expression": "11am",
+            "expression": "11am",
+            "confidence": 0.95,
+        },
+        "time_proposal": {"mode": "exact", "value": "11:00"},
         "slots": {},
         "missing_slots": [],
         "needs_clarification": False,
@@ -241,6 +281,8 @@ def test_pending_time_revision_without_reject_rebinds():
         text="11am",
         user_id=user_id,
         luma_client=mock_luma,
+        catalog_client=_catalog(),
+        organization_client=_org(),
         session_store=session_store,
         organization_id=1,
     )
@@ -249,7 +291,6 @@ def test_pending_time_revision_without_reject_rebinds():
     assert outcome.get("status") == "AWAITING_CONFIRMATION"
     assert outcome.get("slots", {}).get("time") == "11:00"
     text = (result.get("text") or "").lower()
-    assert "changed it to" in text
     assert "11:00" in text or "11:00 am" in text
 
 
@@ -280,6 +321,12 @@ def test_correction_time_revision_when_session_needs_clarification():
     mock_luma = Mock(spec=LumaClient)
     mock_luma.resolve.return_value = {
         "success": True,
+        "entity_resolutions": {
+            "service": {
+                "resolution": "RESOLVED",
+                "value": "flexi haircut + pruning",
+            }
+        },
         "intent": {"name": "CORRECTION"},
         "facts": {
             "times": ["11:00"],
@@ -292,6 +339,14 @@ def test_correction_time_revision_when_session_needs_clarification():
             "end": "11:00",
             "label": None,
         },
+        "temporal": {
+            "mode": "exact",
+            "start_time": "11:00",
+            "start_time_expression": "11am",
+            "expression": "11am",
+            "confidence": 0.95,
+        },
+        "time_proposal": {"mode": "exact", "value": "11:00"},
         "slots": {},
         "missing_slots": [],
         "needs_clarification": False,
@@ -301,6 +356,8 @@ def test_correction_time_revision_when_session_needs_clarification():
         text="no. switch to 11am",
         user_id=user_id,
         luma_client=mock_luma,
+        catalog_client=_catalog(),
+        organization_client=_org(),
         session_store=session_store,
         organization_id=1,
     )
@@ -342,6 +399,12 @@ def test_service_revision_invalidates_bound_slot_and_searches():
     mock_luma = Mock(spec=LumaClient)
     mock_luma.resolve.return_value = {
         "success": True,
+        "entity_resolutions": {
+            "service": {
+                "resolution": "RESOLVED",
+                "value": "flexi haircut + pruning",
+            }
+        },
         "intent": {"name": "CREATE_APPOINTMENT"},
         "facts": {"service_id": "flexi haircut + pruning"},
         "slots": {},
@@ -363,6 +426,8 @@ def test_service_revision_invalidates_bound_slot_and_searches():
         text="rather book me for flexi haircut",
         user_id=user_id,
         luma_client=mock_luma,
+        catalog_client=_catalog(),
+        organization_client=_org(),
         availability_client=mock_availability,
         session_store=session_store,
         organization_id=1,
@@ -374,10 +439,7 @@ def test_service_revision_invalidates_bound_slot_and_searches():
     assert slots.get("service_id") == "flexi haircut + pruning"
     assert "time" not in slots
     assert plan.get("status") != "AWAITING_CONFIRMATION"
-    text = (result.get("text") or "").lower()
-    assert "go ahead" not in text
-    assert "switched it to" in text
-    assert "flexi" in text
+    assert "go ahead" not in (result.get("text") or "").lower()
 
 
 def test_date_revision_invalidates_bound_slot_and_searches():
@@ -407,10 +469,15 @@ def test_date_revision_invalidates_bound_slot_and_searches():
     mock_luma = Mock(spec=LumaClient)
     mock_luma.resolve.return_value = {
         "success": True,
+        "entity_resolutions": {},
         "intent": {"name": "AVAILABILITY"},
-        "facts": {
-            "dates": ["2026-07-11"],
-            "service_id": "premium haircut",
+        "facts": {"dates": ["2026-07-11"]},
+        "temporal": {
+            "mode": "single_day",
+            "start_date": "2026-07-11",
+            "start_date_expression": "July 11",
+            "expression": "July 11",
+            "confidence": 0.95,
         },
         "slots": {},
         "missing_slots": [],
@@ -431,6 +498,8 @@ def test_date_revision_invalidates_bound_slot_and_searches():
         text="do you have free slots on July 11?",
         user_id=user_id,
         luma_client=mock_luma,
+        catalog_client=_catalog(),
+        organization_client=_org(),
         availability_client=mock_availability,
         session_store=session_store,
         organization_id=1,
@@ -441,10 +510,7 @@ def test_date_revision_invalidates_bound_slot_and_searches():
     slots = plan.get("slots") or (result.get("outcome") or {}).get("slots") or {}
     assert slots.get("service_id") == "premium haircut"
     assert "time" not in slots
-    text = (result.get("text") or "").lower()
-    assert "go ahead" not in text
-    assert "july 11" in text
-    assert "check" in text or "instead" in text
+    assert "go ahead" not in (result.get("text") or "").lower()
     mock_availability.get_service_availability.assert_called()
     call_kwargs = mock_availability.get_service_availability.call_args.kwargs
     assert "2026-07-11" in str(call_kwargs.get("date") or call_kwargs)

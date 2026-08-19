@@ -646,9 +646,21 @@ _register(
             ),
             after=_assert_rebind_after_interruption,
         ),
+        Turn(
+            "yes",
+            Expect(action="CONFIRM_APPOINTMENT", confirmation=None),
+            after=_assert_booking_created_with_exact_payload(
+                expected_item_id=PREMIUM_SERVICE_ITEM_ID,
+                expected_service_id=PREMIUM_SERVICE,
+                expected_date=_JULY_21,
+                expected_time="11:00",
+                abandoned_values=(TARGET_DATE, "10:00"),
+            ),
+        ),
         fixture="scripted_confirmation_interruption",
         tags=["booking", "confirmation", "interruption", "date-revision"],
         id="change-date-during-confirmation",
+        requires_customer_identity=True,
     )
 )
 
@@ -711,9 +723,21 @@ _register(
             ),
             after=_assert_rebind_after_interruption,
         ),
+        Turn(
+            "yes",
+            Expect(action="CONFIRM_APPOINTMENT", confirmation=None),
+            after=_assert_booking_created_with_exact_payload(
+                expected_item_id=FLEXI_SERVICE_ITEM_ID,
+                expected_service_id=FLEXI_SERVICE,
+                expected_date=TARGET_DATE,
+                expected_time="11:00",
+                abandoned_values=("10:00", PREMIUM_SERVICE),
+            ),
+        ),
         fixture="scripted_confirmation_interruption",
         tags=["booking", "confirmation", "interruption", "service-revision"],
         id="switch-service-during-confirmation",
+        requires_customer_identity=True,
     )
 )
 
@@ -1003,6 +1027,51 @@ def _assert_confirmation_time_revision(conv, booking, availability) -> None:
         assert_no_search_since(conv, availability, baseline)
 
 
+def _assert_unsolicited_service_ignored_on_time_only_turn(
+    conv, booking, availability
+) -> None:
+    """Time-only current-turn evidence must keep durable Flexi.
+
+    Adversarial invented-Premium overwrite is covered deterministically by
+    ``core/tests/planning/test_unsolicited_service_overwrite.py``. Live recache
+    must not be required to reproduce that malformed NLU payload.
+    """
+    raw = getattr(getattr(conv, "luma_client", None), "last_response", None) or {}
+    facts = raw.get("facts") if isinstance(raw.get("facts"), dict) else {}
+    resolutions = raw.get("entity_resolutions")
+    if not isinstance(resolutions, dict):
+        resolutions = {}
+    temporal = raw.get("temporal") if isinstance(raw.get("temporal"), dict) else {}
+    resolution = (
+        temporal.get("resolution")
+        if isinstance(temporal.get("resolution"), dict)
+        else {}
+    )
+    # The v1 contract deliberately omits copied facts.times for a presented
+    # selection. Verify the semantic reference; Core separately verifies and
+    # binds the trusted canonical offer.
+    if resolution.get("kind") == "presented_option":
+        assert resolution.get("option") == 2, (
+            f"turn {conv.turn}: 09:30 must reference displayed option 2, "
+            f"got {resolution!r}"
+        )
+    else:
+        times = facts.get("times") or []
+        assert any(str(item).startswith("09:30") for item in times), (
+            f"turn {conv.turn}: explicit time reply must carry 09:30, got {facts!r}"
+        )
+    assert not facts.get("service") and not facts.get("service_id"), (
+        f"turn {conv.turn}: time-only reply must omit service facts, got {facts!r}"
+    )
+    assert "service" not in resolutions, (
+        f"turn {conv.turn}: time-only reply must omit service resolutions, "
+        f"got {resolutions!r}"
+    )
+    assert_service_preserved(conv, FLEXI_SERVICE)
+    _assert_no_booking(conv, booking)
+    _capture_pre_revision_search(conv, booking, availability)
+
+
 def _assert_rejected_time_replaced_with_eleven(conv, booking, _availability) -> None:
     """Rejecting 10:00 with a bare-hour replacement proposes 11:00 instead."""
     assert_returns_to_pending_confirmation(conv)
@@ -1085,7 +1154,7 @@ _register(
                 session_slots={"service_id": FLEXI_SERVICE},
                 slot_contains={"time": "09:30"},
             ),
-            after=_capture_pre_revision_search,
+            after=_assert_unsolicited_service_ignored_on_time_only_turn,
         ),
         Turn(
             "switch to 10am",
@@ -1105,9 +1174,21 @@ _register(
             trace="1",
             after=_assert_confirmation_time_revision,
         ),
+        Turn(
+            "yes",
+            Expect(action="CONFIRM_APPOINTMENT", confirmation=None),
+            after=_assert_booking_created_with_exact_payload(
+                expected_item_id=FLEXI_SERVICE_ITEM_ID,
+                expected_service_id=FLEXI_SERVICE,
+                expected_date=TARGET_DATE,
+                expected_time="10:00",
+                abandoned_values=(PREMIUM_SERVICE, "09:30"),
+            ),
+        ),
         fixture="scripted_confirmation_time_revision",
         tags=["booking", "confirmation", "interruption", "time-revision", "bug1"],
         id="correction-time-revision-during-confirmation",
+        requires_customer_identity=True,
     )
 )
 
@@ -1151,9 +1232,21 @@ _register(
             ),
             after=_assert_rejected_time_replaced_with_eleven,
         ),
+        Turn(
+            "yes",
+            Expect(action="CONFIRM_APPOINTMENT", confirmation=None),
+            after=_assert_booking_created_with_exact_payload(
+                expected_item_id=PREMIUM_SERVICE_ITEM_ID,
+                expected_service_id=PREMIUM_SERVICE,
+                expected_date=TARGET_DATE,
+                expected_time="11:00",
+                abandoned_values=("10:00",),
+            ),
+        ),
         fixture="scripted_confirm",
         tags=["booking", "confirmation", "time-revision", "bare-hour", "regression"],
         id="pending-confirmation-bare-hour-replaces-time",
+        requires_customer_identity=True,
     )
 )
 
@@ -1251,8 +1344,8 @@ def _assert_stale_confirmation_cannot_execute(
     conv,
     booking,
     *,
-    superseded_values: tuple[str, ...],
-    expected_service: Optional[str] = None,
+    superseded_values: tuple[Any, ...],
+    expected_service: Any = None,
 ) -> None:
     assert booking.create_booking.call_count == 0, (
         f"turn {conv.turn}: stale confirmation must not dispatch create_booking, "
@@ -1270,7 +1363,8 @@ def _assert_stale_confirmation_cannot_execute(
     projection = _authoritative_booking_projection(sess)
     rendered_projection = repr(projection)
     for value in superseded_values:
-        assert value not in rendered_projection, (
+        needle = str(value)
+        assert needle not in rendered_projection, (
             f"turn {conv.turn}: superseded value {value!r} survived in "
             f"authoritative booking projections: {projection!r}"
         )
@@ -1378,10 +1472,10 @@ def _assert_rejected_time_cleared(conv, booking, _availability=None) -> None:
 def _assert_exact_revised_booking(
     *,
     item_id: int,
-    service_id: str,
+    service_id: Any,
     date: str,
     time: str,
-    superseded_values: tuple[str, ...],
+    superseded_values: tuple[Any, ...],
     superseded_item_id: Optional[int] = None,
 ):
     exact = _assert_booking_created_with_exact_payload(
@@ -1617,19 +1711,13 @@ def _assert_reconfirm_july_21_at_10am(conv, booking, availability) -> None:
 
 def _assert_booking_after_interruption(conv, booking, _availability) -> None:
     """CREATE_APPOINTMENT must commit Premium on July 21 at 10:00 only."""
-    conv._assert(
-        booking.create_booking.called,
-        f"turn {conv.turn}: expected create_booking after yes",
-    )
-    conv._assert(
-        booking.create_booking.call_count == 1,
-        (
-            f"turn {conv.turn}: expected exactly one create_booking, "
-            f"got {booking.create_booking.call_count}"
-        ),
-    )
+    _assert_booking_created(conv, booking, _availability)
     call = booking.create_booking.call_args
     kwargs = call.kwargs if call else {}
+    conv._assert(
+        kwargs.get("item_id") == PREMIUM_SERVICE_ITEM_ID,
+        f"turn {conv.turn}: expected Premium item_id in payload, got {kwargs!r}",
+    )
     start_time = str(kwargs.get("start_time") or "")
     conv._assert(
         start_time.startswith(f"{_JULY_21}T10:00"),
@@ -1662,27 +1750,9 @@ def _assert_booking_after_interruption(conv, booking, _availability) -> None:
             f"{sess.get('customer_id')!r} vs {payload_customer_id!r}"
         ),
     )
-    slots = _planning_slots(conv)
-    conv._assert(
-        slots.get("service_id") == PREMIUM_SERVICE,
-        (
-            f"turn {conv.turn}: expected Premium service on booking, "
-            f"got {slots.get('service_id')!r}"
-        ),
-    )
-    time_value = str(slots.get("time") or "")
-    date_value = str(slots.get("date") or "").split("T")[0].split(" ")[0]
-    conv._assert(
-        time_value.startswith("10"),
-        f"turn {conv.turn}: expected booked time 10:00, got {time_value!r}",
-    )
-    conv._assert(
-        date_value == _JULY_21,
-        f"turn {conv.turn}: expected booked date {_JULY_21!r}, got {date_value!r}",
-    )
     sess = conv.session() or {}
     booking_state = sess.get("booking") if isinstance(sess.get("booking"), dict) else {}
-    booking_id = booking_state.get("booking_id") or slots.get("booking_id")
+    booking_id = booking_state.get("booking_id")
     conv._assert(
         bool(booking_id),
         f"turn {conv.turn}: expected booking_id after successful commit, got {booking_id!r}",
@@ -1767,11 +1837,7 @@ _register(
                 planner="READY",
                 stage="CONFIRM",
                 action="CONFIRM_APPOINTMENT",
-                intent="CREATE_APPOINTMENT",
                 confirmation=None,
-                session_slots={"service_id": PREMIUM_SERVICE},
-                slot_contains={"time": "10"},
-                missing_slots=[],
             ),
             after=_assert_booking_after_interruption,
         ),
@@ -2964,6 +3030,18 @@ def _assert_handler_delegated_preserves(conv, booking, availability) -> None:
         f"turn {conv.turn}: handler reply should answer FAQ and/or resume booking, "
         f"got {text!r}"
     )
+    conv._assert(
+        "you're about to book" in lowered or "you are about to book" in lowered,
+        f"turn {conv.turn}: pending confirmation must use canonical unconfirmed wording: {text!r}",
+    )
+    conv._assert(
+        lowered.count("would you like me to go ahead?") == 1,
+        f"turn {conv.turn}: canonical confirmation suffix must appear exactly once: {text!r}",
+    )
+    conv._assert(
+        "is booked" not in lowered and "has been booked" not in lowered,
+        f"turn {conv.turn}: interruption resume claimed completion before execution: {text!r}",
+    )
 
 
 _register(
@@ -3021,8 +3099,6 @@ _register(
                 stage="CONFIRM",
                 action="CONFIRM_APPOINTMENT",
                 confirmation=None,
-                session_slots={"service_id": PREMIUM_SERVICE},
-                slot_contains={"time": "10"},
             ),
             after=_assert_booking_created,
         ),
@@ -3064,30 +3140,20 @@ _register(
         Turn(
             "10am",
             Expect(
-                response_status="AWAITING_CONFIRMATION",
-                planner="AWAITING_CONFIRMATION",
-                stage="CONFIRM",
-                awaiting="USER_CONFIRMATION",
-                action=None,
-                confirmation="pending",
-                session_slots={"service_id": PREMIUM_SERVICE},
-                slot_contains={"time": "10"},
-            ),
-            after=_assert_no_booking,
-        ),
-        Turn(
-            "yes",
-            Expect(
+                response_status="NEEDS_CLARIFICATION",
                 planner="NEEDS_CLARIFICATION",
-                confirmation="pending",
+                stage="CONFIRM",
+                awaiting="CUSTOMER_CONTACT_NAME",
+                action=None,
+                confirmation=None,
                 session_slots={"service_id": PREMIUM_SERVICE},
                 slot_contains={"time": "10"},
                 response_text_present=True,
             ),
-            after=_assert_identity_blocked_yes,
+            after=_assert_no_booking,
         ),
         Turn(
-            "ok",
+            "Godswill Mbaocha",
             Expect(
                 confirmation="pending",
                 session_slots={"service_id": PREMIUM_SERVICE},
@@ -3104,8 +3170,6 @@ _register(
                 stage="CONFIRM",
                 action="CONFIRM_APPOINTMENT",
                 confirmation=None,
-                session_slots={"service_id": PREMIUM_SERVICE},
-                slot_contains={"time": "10"},
             ),
             after=_assert_booking_created,
         ),
@@ -3157,8 +3221,6 @@ _register(
                 stage="CONFIRM",
                 action="CONFIRM_APPOINTMENT",
                 confirmation=None,
-                session_slots={"service_id": PREMIUM_SERVICE},
-                slot_contains={"time": "10"},
             ),
             after=_assert_retry_single_success,
         ),

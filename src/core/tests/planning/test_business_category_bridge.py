@@ -1,14 +1,19 @@
 """Focused tests: business category owns schema; booking_domain owns workflow."""
 
+import pytest
+
 from core.adapters.cache.org_domain_cache import (
     BUSINESS_CATEGORY_IDS,
     OrgDomainCache,
 )
 from core.adapters.nlu.entity_schema_builder import (
     build_entity_schema,
+    planning_slot_key_for_field,
+    promotable_slot_keys_from_entity_schema,
     required_slot_keys_from_entity_schema,
     search_criteria_slot_keys_from_entity_schema,
 )
+from core.session.slot_operations import filter_slots_by_domain
 from core.config.business_category_loader import (
     clear_business_category_cache,
     get_booking_domain,
@@ -38,11 +43,17 @@ def test_booking_domain_metadata_on_categories():
     assert get_booking_domain("hotel") == "reservation"
 
 
-def test_beauty_salon_entities_match_legacy_service_shape():
+def test_beauty_salon_entities_include_required_service_recipient():
     entities = get_category_entities("beauty_salon")
     names = [e.get("name") for e in entities]
-    assert names == ["service"]
+    assert names == ["service", "service_recipient"]
     assert entities[0].get("catalog") == "services"
+    assert entities[1].get("type") == "text"
+    assert entities[1].get("role") == "booking_subject"
+    assert entities[1].get("required") is True
+    assert entities[1].get("description") == (
+        "The name of the person for whom the service is being booked."
+    )
 
 
 def test_car_service_has_required_business_entities():
@@ -50,6 +61,8 @@ def test_car_service_has_required_business_entities():
     by_name = {e["name"]: e for e in entities}
     assert by_name["engine_type"].get("required") is True
     assert by_name["registration_number"].get("required") is True
+    assert by_name["engine_type"].get("role") == "booking_subject"
+    assert by_name["registration_number"].get("role") == "booking_subject"
     assert by_name["staff"].get("role") == "staff"
     assert by_name["staff"].get("required") is not True
 
@@ -115,12 +128,130 @@ def test_entity_schema_from_business_category():
     assert "Oil Change" in service_field["catalog"]
 
 
-def test_beauty_salon_entity_schema_unchanged_shape():
+def test_hypothetical_enum_and_text_subjects_are_schema_driven(monkeypatch):
+    declarations = [
+        {
+            "name": "vehicle_type",
+            "type": "enum",
+            "role": "booking_subject",
+            "required": False,
+            "values": ["suv", "saloon", "hatchback"],
+        },
+        {
+            "name": "vehicle_notes",
+            "type": "text",
+            "role": "booking_subject",
+            "required": False,
+        },
+    ]
+    monkeypatch.setattr(
+        "core.config.business_category_loader.get_category_entities",
+        lambda _category: declarations,
+    )
+
+    schema = build_entity_schema("test_vehicle_service")
+    assert schema is not None
+    assert [(field["name"], field["role"]) for field in schema["fields"]] == [
+        ("vehicle_type", "booking_subject"),
+        ("vehicle_notes", "booking_subject"),
+    ]
+    assert [planning_slot_key_for_field(field) for field in schema["fields"]] == [
+        "vehicle_type",
+        "vehicle_notes",
+    ]
+    assert promotable_slot_keys_from_entity_schema(schema) == frozenset(
+        {"vehicle_type", "vehicle_notes"}
+    )
+    assert filter_slots_by_domain(
+        {"vehicle_type": "suv", "vehicle_notes": "rear wheel"},
+        "CREATE_APPOINTMENT",
+        entity_schema=schema,
+    ) == {"vehicle_type": "suv", "vehicle_notes": "rear wheel"}
+    assert "vehicle_type" not in search_criteria_slot_keys_from_entity_schema(schema)
+    assert "vehicle_notes" not in search_criteria_slot_keys_from_entity_schema(schema)
+
+
+def test_subject_role_and_availability_criteria_are_independent():
+    schema = {
+        "version": 1,
+        "fields": [
+            {
+                "name": "vehicle_type",
+                "type": "enum",
+                "role": "booking_subject",
+                "values": ["suv"],
+                "availability_criteria": True,
+            },
+            {
+                "name": "vehicle_notes",
+                "type": "text",
+                "role": "booking_subject",
+            },
+        ],
+    }
+    criteria = search_criteria_slot_keys_from_entity_schema(schema)
+    assert "vehicle_type" in criteria
+    assert "vehicle_notes" not in criteria
+
+
+def test_required_subject_role_uses_existing_required_semantics():
+    schema = {
+        "version": 1,
+        "fields": [
+            {
+                "name": "vehicle_type",
+                "type": "enum",
+                "role": "booking_subject",
+                "required": True,
+                "values": ["suv"],
+            },
+            {
+                "name": "vehicle_notes",
+                "type": "text",
+                "role": "booking_subject",
+                "required": False,
+            },
+        ],
+    }
+    assert required_slot_keys_from_entity_schema(schema) == ["vehicle_type"]
+
+
+@pytest.mark.parametrize("forbidden", ["__proto__", "constructor", "prototype"])
+def test_schema_composition_rejects_forbidden_subject_keys(monkeypatch, forbidden):
+    monkeypatch.setattr(
+        "core.config.business_category_loader.get_category_entities",
+        lambda _category: [
+            {"name": forbidden, "type": "text", "role": "booking_subject"}
+        ],
+    )
+    with pytest.raises(ValueError, match="forbidden"):
+        build_entity_schema("invalid_subject")
+
+
+def test_forbidden_name_is_not_globally_banned_for_other_roles(monkeypatch):
+    monkeypatch.setattr(
+        "core.config.business_category_loader.get_category_entities",
+        lambda _category: [{"name": "constructor", "type": "text"}],
+    )
+    schema = build_entity_schema("non_subject")
+    assert schema is not None
+    assert schema["fields"][0]["name"] == "constructor"
+def test_beauty_salon_entity_schema_includes_required_service_recipient():
     projected = {"services": {"Premium Haircut": "premium haircut"}}
     schema = build_entity_schema("beauty_salon", projected_collections=projected)
     assert schema is not None
-    assert [f["name"] for f in schema["fields"]] == ["service"]
-    assert required_slot_keys_from_entity_schema(schema) == []
+    assert [f["name"] for f in schema["fields"]] == [
+        "service",
+        "service_recipient",
+    ]
+    recipient = next(
+        field for field in schema["fields"] if field["name"] == "service_recipient"
+    )
+    assert recipient["role"] == "booking_subject"
+    assert recipient["description"] == (
+        "The name of the person for whom the service is being booked."
+    )
+    assert required_slot_keys_from_entity_schema(schema) == ["service_recipient"]
 
 
 def test_car_planning_requiredness_composed():

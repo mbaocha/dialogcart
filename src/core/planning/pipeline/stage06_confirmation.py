@@ -143,6 +143,8 @@ def _maybe_enter_booking_confirmation_pending(
 
     session_state: Optional[Dict[str, Any]],
 
+    customer_name_prerequisite: Any,
+
 ) -> Optional[str]:
 
     if intent_name != "CREATE_APPOINTMENT":
@@ -159,11 +161,14 @@ def _maybe_enter_booking_confirmation_pending(
 
     )
 
-    if has_committed_create_appointment(effective_slots) or has_committed_create_appointment(
-        session_slots, session_state=session_state
-    ):
+    from core.session.booking_lifecycle import BookingLifecycle, derive_booking_lifecycle
 
-        return confirmation_state
+    if (
+        derive_booking_lifecycle(session_state) == BookingLifecycle.COMMITTED
+        or has_committed_create_appointment(effective_slots)
+        or has_committed_create_appointment(session_slots, session_state=session_state)
+    ):
+        return None
 
     if confirmation_state is not None:
 
@@ -174,6 +179,10 @@ def _maybe_enter_booking_confirmation_pending(
         return confirmation_state
 
     if not has_bound_booking_datetime(effective_slots, session_state, payload):
+
+        return confirmation_state
+
+    if not customer_name_prerequisite.satisfied:
 
         return confirmation_state
 
@@ -313,6 +322,12 @@ def resolve_confirmation(
 
     payload = working_turn.payload
 
+    from core.customer_identification import customer_name_confirmation_prerequisite
+
+    customer_name_prerequisite = customer_name_confirmation_prerequisite(
+        session_state
+    )
+
     availability_reshow = False
 
     slots_adjusted = False
@@ -339,6 +354,16 @@ def resolve_confirmation(
 
         confirmation_state = get_confirmation_state(session_state)
 
+    if (
+        slot_state.intent_name == "CREATE_APPOINTMENT"
+        and not customer_name_prerequisite.satisfied
+        and confirmation_state == "pending"
+    ):
+        lifecycle_evidence, consume_evidence = _supersede_lifecycle_evidence(
+            reason="customer_name_prerequisite_missing"
+        )
+        confirmation_state = None
+
 
 
     # Gate YES / continuation: user acceptance is turn evidence only
@@ -364,6 +389,7 @@ def resolve_confirmation(
                 reason_code="REJECT_CONFIRMATION",
             ),
             slots_adjusted=True,
+            customer_name_prerequisite=customer_name_prerequisite,
         )
 
     availability_op = is_availability_turn_operation(turn_operation)
@@ -546,6 +572,8 @@ def resolve_confirmation(
 
             session_state=session_state,
 
+            customer_name_prerequisite=customer_name_prerequisite,
+
         )
 
         # Same-turn rebind re-entered pending: do not request consume (would
@@ -594,6 +622,8 @@ def resolve_confirmation(
         availability_invalidation=availability_invalidation,
 
         bound_datetime_clear=bound_datetime_clear,
+
+        customer_name_prerequisite=customer_name_prerequisite,
 
     )
 

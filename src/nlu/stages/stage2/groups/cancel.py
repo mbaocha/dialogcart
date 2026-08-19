@@ -88,6 +88,7 @@ def _merge(raw: Dict[str, Any], candidate_intent: str) -> Dict[str, Any]:
     facts = raw.get("facts") or {}
     return {
         "intent": validated,
+        "proposal_response": raw.get("proposal_response"),
         "confidence": float(raw.get("confidence", 0.8)),
         "facts": {
             "dates": [],
@@ -104,6 +105,7 @@ def _merge(raw: Dict[str, Any], candidate_intent: str) -> Dict[str, Any]:
 def _empty(candidate_intent: str) -> Dict[str, Any]:
     return {
         "intent": candidate_intent,
+        "proposal_response": None,
         "confidence": 0.0,
         "facts": {"dates": [], "times": [], "date_time_pairs": [], "service_id": None, "booking_id": None},
         "time_constraint": None,

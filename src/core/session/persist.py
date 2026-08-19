@@ -57,6 +57,53 @@ def _apply_service_candidates_to_session(
         session_state.pop("service_candidates", None)
 
 
+def _apply_catalogue_presentation_to_session(
+    session_state: Dict[str, Any],
+    merged_luma_response: Optional[Dict[str, Any]],
+) -> None:
+    """Persist only the current trusted discovery presentation while service is missing."""
+    presentation = (
+        merged_luma_response.get("_catalogue_presentation")
+        if isinstance(merged_luma_response, dict)
+        else None
+    )
+    missing = session_state.get("missing_slots") or []
+    if "service_id" in missing and isinstance(presentation, dict):
+        session_state["catalogue_presentation"] = presentation
+    elif "service_id" not in missing or (
+        isinstance(merged_luma_response, dict)
+        and "_catalogue_presentation" in merged_luma_response
+    ):
+        session_state.pop("catalogue_presentation", None)
+
+
+def _apply_pending_entity_resolutions_to_session(
+    session_state: Dict[str, Any],
+    merged_luma_response: Optional[Dict[str, Any]],
+    outcome: Optional[Dict[str, Any]],
+) -> None:
+    """Retain compact uncertainty only while the workflow is clarifying it."""
+    pending = None
+    for source in (outcome, merged_luma_response):
+        if not isinstance(source, dict):
+            continue
+        candidate = source.get("pending_entity_resolutions")
+        if not isinstance(candidate, list):
+            facts = source.get("facts")
+            candidate = (
+                facts.get("pending_entity_resolutions")
+                if isinstance(facts, dict)
+                else None
+            )
+        if isinstance(candidate, list) and candidate:
+            pending = candidate
+            break
+    if session_state.get("status") == "NEEDS_CLARIFICATION" and pending:
+        session_state["pending_entity_resolutions"] = pending
+    else:
+        session_state.pop("pending_entity_resolutions", None)
+
+
 from core.session.appointment_extensions import apply_create_appointment_extensions
 from core.session.intent_persist import (
     resolve_durable_intent_for_session,
@@ -256,6 +303,16 @@ def assemble_session_projection_fields(
         Session state dictionary (WITH missing_slots if present), or None when the
         lifecycle rules clear session (ephemeral READY / ephemeral EXECUTED).
     """
+    # A turn that was not semantically applied cannot change durable workflow
+    # state. Preserve the prior session exactly so a later understood turn can
+    # resume, reject, or supersede it through the normal planning pipeline.
+    if (
+        isinstance(outcome, dict)
+        and outcome.get("message_applied") is False
+        and previous_session_state is not None
+    ):
+        return previous_session_state
+
     # If merged_luma_response is None (empty/error Luma response), preserve previous session state
     # This handles cases where Luma API errors or empty responses occur
     # Planning recovery / the API layer may already have handled this; still preserve session here
@@ -805,6 +862,10 @@ def assemble_session_projection_fields(
         session_state.pop("date_constraint", None)
 
     _apply_service_candidates_to_session(session_state, merged_luma_response, outcome)
+    _apply_catalogue_presentation_to_session(session_state, merged_luma_response)
+    _apply_pending_entity_resolutions_to_session(
+        session_state, merged_luma_response, outcome
+    )
 
     normalize_session_guards(session_state)
 

@@ -147,5 +147,6 @@ def inject_bare_ordinal_expression(
         end_time=temporal.end_time,
         mode="none",
         confidence=temporal.confidence,
+        resolution=temporal.resolution,
     )
     return apply_temporal(slm, filled)

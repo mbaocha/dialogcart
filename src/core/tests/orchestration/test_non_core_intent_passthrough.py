@@ -20,6 +20,7 @@ class TestNonCoreIntentPassthrough:
         mock_luma_instance = Mock()
         mock_luma_instance.resolve.return_value = {
             "success": True,
+            "entity_resolutions": {},
             "intent": {"name": "BOOKING_INQUIRY", "confidence": 0.95},
             "slots": {},
             "booking": {},

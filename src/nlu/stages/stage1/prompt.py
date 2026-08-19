@@ -107,17 +107,22 @@ When context shows an active booking intent AND user replaces/corrects a slot
 {reject_action_dialog_act_section()}
 BOOKING VERB RULE:
 An explicit booking verb (book, schedule, reserve, cancel, modify, change, reschedule) is
-sufficient to classify the intent — even when the service is generic or unspecified.
-Service resolution is Stage 2's responsibility. Never return UNKNOWN when a booking verb is present.
+sufficient to classify the intent when the booking type is identifiable — even when the
+service is generic or unspecified.
+Service resolution is Stage 2's responsibility. Do not return UNKNOWN when a booking verb
+is present and appointment vs reservation can be identified from the utterance.
 Exception (pending proposal only): when CONVERSATION CONTEXT shows a pending proposed
 action awaiting confirmation, short authorize-the-proposal imperatives ("book it",
 "reserve it", "schedule it") are CONFIRM_ACTION per the dialog-act rule above — not
-CREATE_*. Cold start / no pending proposal is unchanged.
+CREATE_*. Cold start / no pending proposal: never CONFIRM_ACTION; if booking type is not
+identifiable (bare "book it"), emit UNKNOWN — do not guess CREATE_APPOINTMENT or
+CREATE_RESERVATION.
 
 GENERAL_INQUIRY vs OFF_TOPIC vs UNKNOWN:
   GENERAL_INQUIRY — business-scoped FAQ (hours, location, policies, payments, store info).
   OFF_TOPIC — coherent request outside this business (world knowledge, jokes, unrelated tech).
-  UNKNOWN — not understood (gibberish, bare fragments with no clear act).
+  UNKNOWN — not understood (gibberish, bare fragments with no clear act), or cold-start
+  booking language whose appointment vs reservation type cannot be identified.
   "where are you located?"              → GENERAL_INQUIRY
   "how much is a premium haircut?"      → QUOTE (or GENERAL_INQUIRY if no price intent)
   "who is the president of Nigeria?"    → OFF_TOPIC
@@ -129,7 +134,7 @@ COLD-START examples (no CONVERSATION CONTEXT):
   "haircut tomorrow"               → UNKNOWN  (no booking verb)
   "friday"                         → UNKNOWN  (bare weekday, no context)
   "book haircut at 10am"           → CREATE_APPOINTMENT
-  "book it"                        → CREATE_APPOINTMENT  (no pending proposal → not CONFIRM_ACTION)
+  "book it"                        → UNKNOWN  (no pending proposal; type not identifiable → not CONFIRM_ACTION, do not guess CREATE_*)
   "i want to book a service"       → CREATE_APPOINTMENT  (booking verb present; service unspecified)
   "book something for friday"      → CREATE_APPOINTMENT  (booking verb present; service unspecified)
   "i'd like to make a reservation" → CREATE_RESERVATION  (booking verb present)

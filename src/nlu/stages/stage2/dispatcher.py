@@ -26,6 +26,10 @@ from .groups.create import CreateGroupExtractor
 from .groups.faq import FAQGroupExtractor
 from .groups.modify import ModifyGroupExtractor
 from .groups.view import ViewGroupExtractor
+from .semantic_validation import (
+    canonical_confirmation_pending,
+    validate_final_stage2_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +41,11 @@ _GROUP_EXTRACTORS = {
     "view":         ViewGroupExtractor,
     "faq":          FAQGroupExtractor,
 }
+
+# Stage 2 output-contract capability. These are the only group extractors that
+# accept ``compiled_entities`` and therefore must emit strict typed mention
+# evidence for schema-backed entity resolution.
+_SCHEMA_ENTITY_GROUPS = frozenset({"create", "availability"})
 
 # Instantiated lazily per group — one instance per worker process
 _instances: Dict[str, Any] = {}
@@ -83,6 +92,41 @@ def _resolve_routing_group(intent: str) -> Optional[str]:
     return get_stage2_group(intent)
 
 
+def _pending_confirmation_initial_intent(
+    intent: str,
+    conversation_context: Optional[Dict[str, Any]],
+) -> str:
+    """Route legacy dialogue candidates through the pending workflow's Stage 2 group."""
+    if intent not in {"CONFIRM_ACTION", "REJECT_ACTION"}:
+        return intent
+    if not canonical_confirmation_pending(conversation_context):
+        return intent
+
+    ctx = conversation_context if isinstance(conversation_context, dict) else {}
+    proposals = ctx.get("pending_assistant_proposals")
+    if isinstance(proposals, list):
+        for proposal in reversed(proposals):
+            if not isinstance(proposal, dict) or proposal.get("status") != "PENDING":
+                continue
+            for key in ("workflow_intent", "underlying_intent", "intent", "operation"):
+                candidate = proposal.get(key)
+                if isinstance(candidate, str) and get_stage2_group(candidate):
+                    return candidate
+
+    # Compatibility fallback for current Core context, which does not yet project
+    # the final confirmation as a proposal object with an underlying workflow.
+    for key in ("active_booking_intent", "last_intent"):
+        candidate = ctx.get(key)
+        if isinstance(candidate, str) and get_stage2_group(candidate):
+            return candidate
+    return intent
+
+
+def supports_schema_entity_extraction(intent: str) -> bool:
+    """Whether the Stage 2 contract selected for ``intent`` extracts schema entities."""
+    return _resolve_routing_group(intent) in _SCHEMA_ENTITY_GROUPS
+
+
 def _run_group_extractor(
     group: str,
     candidate_intent: str,
@@ -100,8 +144,9 @@ def _run_group_extractor(
         "candidate_intent": candidate_intent,
         "conversation_context": conversation_context,
     }
-    # CREATE-only: forward already-compiled entities (no schema interpretation here).
-    if group == "create" and compiled_entities is not None:
+    # Schema-aware booking extractors consume the already-compiled contract;
+    # the dispatcher does not reinterpret it.
+    if group in _SCHEMA_ENTITY_GROUPS and compiled_entities is not None:
         kwargs["compiled_entities"] = compiled_entities
     return extractor.extract(**kwargs)
 
@@ -119,7 +164,8 @@ def extract_slots(
     The returned dict is compatible with the existing normalization pipeline:
     {intent, confidence, facts, time_constraint, search_query, service_term, temporal, ...}
     """
-    routed_group = _resolve_routing_group(intent)
+    initial_intent = _pending_confirmation_initial_intent(intent, conversation_context)
+    routed_group = _resolve_routing_group(initial_intent)
 
     if routed_group is None:
         logger.debug("Stage2 dispatcher: no group for intent=%r, skipping slot extraction", intent)
@@ -129,7 +175,7 @@ def extract_slots(
 
     result = _run_group_extractor(
         routed_group,
-        intent,
+        initial_intent,
         text,
         now,
         tenant_context,
@@ -137,11 +183,13 @@ def extract_slots(
         compiled_entities=compiled_entities,
     )
 
-    final_intent = result.get("intent", intent)
-    if final_intent != intent:
+    initial_result_intent = result.get("intent", initial_intent)
+    initial_proposal_response = result.get("proposal_response")
+    final_intent = initial_result_intent
+    if final_intent != initial_intent:
         logger.info(
             "Stage2 re-route: %r → %r (group=%r text=%r)",
-            intent, final_intent, routed_group, text,
+            initial_intent, final_intent, routed_group, text,
         )
 
     final_group = get_stage2_group(final_intent)
@@ -160,4 +208,21 @@ def extract_slots(
             compiled_entities=compiled_entities,
         )
 
-    return _ensure_temporal(result)
+        destination_intent = result.get("intent", final_intent)
+        destination_proposal_response = result.get("proposal_response")
+        if (
+            destination_intent != initial_result_intent
+            or destination_proposal_response != initial_proposal_response
+        ):
+            logger.info(
+                "[NLU_STAGE2_REDISPATCH_EVIDENCE] initial_intent=%r "
+                "destination_intent=%r initial_proposal_response=%r "
+                "destination_proposal_response=%r",
+                initial_result_intent,
+                destination_intent,
+                initial_proposal_response,
+                destination_proposal_response,
+            )
+
+    result = _ensure_temporal(result)
+    return validate_final_stage2_result(result, conversation_context)

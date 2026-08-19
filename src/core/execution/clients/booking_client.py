@@ -4,7 +4,9 @@ Booking API Client
 Thin HTTP client for calling booking internal API.
 """
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Mapping, Optional
+
+from core.execution.booking_subject import BookingSubjectPrimitive
 
 from core.execution.clients.base_client import BaseClient
 
@@ -34,9 +36,9 @@ class BookingClient(BaseClient):
         *,
         # Service booking parameters
         start_time: Optional[str] = None,
-        end_time: Optional[str] = None,
         staff_id: Optional[int] = None,
         addons: Optional[List[Dict[str, Any]]] = None,
+        booking_subject: Optional[Mapping[str, BookingSubjectPrimitive]] = None,
         # Reservation booking parameters
         check_in: Optional[str] = None,
         check_out: Optional[str] = None,
@@ -52,9 +54,9 @@ class BookingClient(BaseClient):
             booking_type: Type of booking ("service" or "reservation")
             item_id: Service or room item identifier
             start_time: Service booking start time (ISO-8601 with timezone)
-            end_time: Service booking end time (ISO-8601 with timezone)
             staff_id: Staff member ID for service bookings (optional)
             addons: Service booking addons (optional)
+            booking_subject: Validated service subject snapshot (optional)
             check_in: Reservation check-in time (ISO-8601 with timezone)
             check_out: Reservation check-out time (ISO-8601 with timezone)
             guests: Number of guests for reservations (default: 1)
@@ -68,22 +70,21 @@ class BookingClient(BaseClient):
             ValueError: If required parameters are missing for the booking type
         """
         if booking_type == "service":
-            if not start_time or not end_time:
-                raise ValueError(
-                    "start_time and end_time are required for service bookings"
-                )
+            if not start_time:
+                raise ValueError("start_time is required for service bookings")
             payload = {
                 "organization_id": organization_id,
                 "customer_id": customer_id,
                 "booking_type": "service",
                 "item_id": item_id,
                 "start_time": start_time,
-                "end_time": end_time,
             }
             if staff_id is not None:
                 payload["staff_id"] = staff_id
             if addons:
                 payload["addons"] = addons
+            if booking_subject is not None:
+                payload["booking_subject"] = dict(booking_subject)
         elif booking_type == "reservation":
             if not check_in or not check_out:
                 raise ValueError(

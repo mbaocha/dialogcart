@@ -48,6 +48,7 @@ class SessionProjectorV2:
         *,
         working_session_state: Optional[Dict[str, Any]] = None,
         workflow_result: Optional[Dict[str, Any]] = None,
+        post_commit_transition: Optional[Dict[str, Any]] = None,
         capability_result: Optional[Dict[str, Any]] = None,
         handler_conversation_update: Optional[Dict[str, Any]] = None,
         conversation_messages: Optional[List[Dict[str, Any]]] = None,
@@ -87,6 +88,7 @@ class SessionProjectorV2:
             working_session_state=working_session_state,
             merged_luma_response=merged_luma_response,
             workflow_result=workflow_result,
+            post_commit_transition=post_commit_transition,
             capability_result=capability_result,
             handler_conversation_update=handler_conversation_update,
             conversation_messages=conversation_messages,
@@ -107,6 +109,7 @@ class SessionProjectorV2:
         working_session_state: Optional[Dict[str, Any]],
         merged_luma_response: Optional[Dict[str, Any]],
         workflow_result: Optional[Dict[str, Any]],
+        post_commit_transition: Optional[Dict[str, Any]],
         capability_result: Optional[Dict[str, Any]],
         handler_conversation_update: Optional[Dict[str, Any]],
         conversation_messages: Optional[List[Dict[str, Any]]],
@@ -120,6 +123,8 @@ class SessionProjectorV2:
         presentation = availability.setdefault("presentation", {})
 
         if isinstance(working_session_state, dict):
+            if isinstance(working_session_state.get("metadata"), dict):
+                working["metadata"] = copy.deepcopy(working_session_state["metadata"])
             from core.workflows.availability.presentation import (
                 apply_availability_artifacts,
                 availability_cache_from_session,
@@ -147,6 +152,15 @@ class SessionProjectorV2:
 
             if working_session_state.get("customer_id") is not None:
                 working["customer_id"] = working_session_state["customer_id"]
+            if isinstance(working_session_state.get("customer_contact"), dict):
+                working["customer_contact"] = copy.deepcopy(
+                    working_session_state["customer_contact"]
+                )
+            source_planning = working_session_state.get("planning")
+            if isinstance(source_planning, dict):
+                working.setdefault("planning", {})["pending_profile_request"] = (
+                    source_planning.get("pending_profile_request")
+                )
 
         if isinstance(merged_luma_response, dict) and not preserve_booking_authorization:
             from core.session.confirmation_gate import (
@@ -159,22 +173,46 @@ class SessionProjectorV2:
             if isinstance(merged_bound, dict) and merged_bound.get("start"):
                 planning["bound_datetime"] = merged_bound
                 working["resolved_datetime_range"] = merged_bound
-            else:
-                planning["bound_datetime"] = None
-                working.pop("resolved_datetime_range", None)
 
             set_confirmation_state(working, get_confirmation_state(merged_luma_response))
 
         if isinstance(workflow_result, dict):
             # Workflow envelope still uses flat key names for one-turn transfer;
             # map into nested availability only.
+            is_availability_search = (
+                workflow_result.get("kind") == "availability_search"
+            )
+            search_result = workflow_result.get("last_execution_result")
+            authoritative_search = (
+                is_availability_search
+                and workflow_result.get("status") == "succeeded"
+                and search_result is not None
+            )
+
+            if is_availability_search and not authoritative_search:
+                from core.workflows.availability.presentation import (
+                    clear_availability_artifacts,
+                )
+
+                clear_availability_artifacts(working)
+                metadata = working.setdefault("metadata", {})
+                metadata.setdefault("artifacts", {})["availability"] = None
+                workflow_result = {}
+                search_result = None
+
             fingerprint = workflow_result.get("availability_fingerprint")
             if fingerprint is not None:
                 availability["fingerprint"] = fingerprint
 
-            search_result = workflow_result.get("last_execution_result")
             if search_result is not None:
                 cache["search_result"] = search_result
+
+            # The availability workflow owns this typed result discriminator.
+            # Pagination and unrelated execution results must preserve cache age.
+            if authoritative_search:
+                from core.session.freshness import stamp_availability_created
+
+                stamp_availability_created(working)
 
             presented = workflow_result.get("presented_availability")
             if presented is not None:
@@ -213,6 +251,13 @@ class SessionProjectorV2:
             conversation["pending_proposals"] = copy.deepcopy(
                 source_conversation["pending_proposals"]
             )
+        if (
+            isinstance(source_conversation, dict)
+            and isinstance(source_conversation.get("history"), list)
+            and not conversation.get("history")
+        ):
+            conversation["history"] = copy.deepcopy(source_conversation["history"])
+            working["messages"] = copy.deepcopy(source_conversation["history"])
         if isinstance(assistant_proposals, list):
             conversation["pending_proposals"] = copy.deepcopy(assistant_proposals)
         if isinstance(assistant_proposal_updates, list):
@@ -239,3 +284,14 @@ class SessionProjectorV2:
             history = history[-10:]
             conversation["history"] = history
             working["messages"] = list(history)
+
+        # Apply lifecycle closure last so no optional compatibility overlay can
+        # restore authorization after a successful create.
+        if isinstance(post_commit_transition, dict):
+            from core.session.booking_lifecycle import apply_post_commit_transition_v2
+
+            apply_post_commit_transition_v2(working, post_commit_transition)
+
+        from core.session.freshness import sync_confirmation_freshness
+
+        sync_confirmation_freshness(working)

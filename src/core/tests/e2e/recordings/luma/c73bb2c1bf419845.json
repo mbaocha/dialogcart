@@ -16,6 +16,20 @@
     "timezone": "UTC"
   },
   "response": {
+    "entity_resolutions": {
+      "engine_type": {
+        "resolution": "RESOLVED",
+        "value": "petrol"
+      },
+      "registration_number": {
+        "resolution": "RESOLVED",
+        "value": "AB12 CDE"
+      },
+      "service": {
+        "resolution": "RESOLVED",
+        "value": 26
+      }
+    },
     "facts": {
       "booking_id": null,
       "date_time_pairs": [
@@ -42,7 +56,7 @@
       "name": "CREATE_APPOINTMENT"
     },
     "temporal": {
-      "confidence": 0.95,
+      "confidence": 0.98,
       "end_date": null,
       "end_date_expression": null,
       "end_time": null,

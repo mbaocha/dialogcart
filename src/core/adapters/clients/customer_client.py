@@ -54,6 +54,77 @@ class CustomerClient(BaseClient):
             )
         return customer
 
+    def lookup_by_contact(
+        self,
+        *,
+        organization_id: int,
+        phone: Optional[str] = None,
+        email: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Read an existing tenant customer by exact phone/email contact."""
+        organization_id = _positive_int(organization_id, "organization_id")
+        if not phone and not email:
+            raise ValueError("phone or email is required")
+        params: Dict[str, Any] = {}
+        if phone:
+            params["phone"] = phone
+        if email:
+            params["email"] = email
+        body = self._request_allow_404(
+            "GET",
+            f"/api/internal/organizations/{organization_id}/customers",
+            params=params,
+        )
+        if body is None:
+            return None
+        if not isinstance(body, dict) or body.get("success") is not True:
+            raise UpstreamError("Customer lookup response was not successful")
+        customer = _extract_customer(body)
+        if customer is None:
+            raise UpstreamError("Customer lookup response missing customer record")
+        returned_id = _positive_int_or_none(customer.get("id"))
+        returned_org_id = _positive_int_or_none(customer.get("organizationId"))
+        if returned_id is None:
+            raise UpstreamError("Customer lookup returned an invalid customer id")
+        if returned_org_id != organization_id:
+            raise UpstreamError("Customer lookup returned a mismatched organization id")
+        return customer
+
+    def update_name_by_id(
+        self,
+        *,
+        organization_id: int,
+        customer_id: int,
+        name: str,
+    ) -> Dict[str, Any]:
+        """Update a known tenant customer's name and return Commerce authority."""
+        organization_id = _positive_int(organization_id, "organization_id")
+        customer_id = _positive_int(customer_id, "customer_id")
+        body = self._request(
+            "PATCH",
+            f"/api/internal/organizations/{organization_id}/customers/{customer_id}",
+            json={"name": name},
+        )
+        if not isinstance(body, dict) or body.get("success") is not True:
+            raise UpstreamError("Customer name update response was not successful")
+        data = body.get("data")
+        customer = data.get("customer") if isinstance(data, dict) else None
+        if not isinstance(customer, dict):
+            raise UpstreamError("Customer name update response missing customer record")
+
+        returned_id = _positive_int_or_none(customer.get("id"))
+        returned_org_id = _positive_int_or_none(customer.get("organizationId"))
+        from core.customer_identification import normalize_authoritative_name
+
+        returned_name = normalize_authoritative_name(customer.get("name"))
+        if returned_id != customer_id:
+            raise UpstreamError("Customer name update returned a mismatched customer id")
+        if returned_org_id != organization_id:
+            raise UpstreamError("Customer name update returned a mismatched organization id")
+        if returned_name is None:
+            raise UpstreamError("Customer name update returned an invalid customer name")
+        return customer
+
     def belongs_to_organization(
         self, customer_id: int, organization_id: int
     ) -> bool:
@@ -83,3 +154,20 @@ def _extract_customer(body: Any) -> Optional[Dict[str, Any]]:
     if data.get("id") is not None:
         return data
     return None
+
+
+def _positive_int(value: Any, field: str) -> int:
+    parsed = _positive_int_or_none(value)
+    if parsed is None:
+        raise ValueError(f"{field} must be a positive integer")
+    return parsed
+
+
+def _positive_int_or_none(value: Any) -> Optional[int]:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None

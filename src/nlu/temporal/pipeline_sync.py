@@ -75,6 +75,7 @@ def clear_temporal_dates(temporal: Temporal) -> Temporal:
         end_time=temporal.end_time,
         mode="none",
         confidence=temporal.confidence,
+        resolution=temporal.resolution,
     )
 
 
@@ -115,6 +116,7 @@ def clear_temporal_times(temporal: Temporal) -> Temporal:
         end_time=None,
         mode=mode,
         confidence=temporal.confidence,
+        resolution=temporal.resolution,
     )
 
 

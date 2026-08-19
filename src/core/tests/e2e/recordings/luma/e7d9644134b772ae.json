@@ -13,6 +13,12 @@
     "timezone": "UTC"
   },
   "response": {
+    "entity_resolutions": {
+      "service": {
+        "resolution": "RESOLVED",
+        "value": 1001
+      }
+    },
     "facts": {
       "booking_id": null,
       "date_time_pairs": [],
@@ -35,6 +41,7 @@
       "end_time_expression": null,
       "expression": "tomorrow",
       "mode": "single_day",
+      "resolution": null,
       "start_date": "2026-07-02",
       "start_date_expression": "tomorrow",
       "start_time": null,

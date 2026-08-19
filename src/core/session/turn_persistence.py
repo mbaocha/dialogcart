@@ -162,6 +162,7 @@ def project_and_persist_turn_result(
             }
 
     workflow_result = result.get("_workflow_result")
+    post_commit_transition = result.get("_post_commit_transition")
     projected = SessionProjectorV2().project(
         outcome=projection_outcome,
         outcome_status=status,
@@ -172,6 +173,11 @@ def project_and_persist_turn_result(
         working_session_state=working_session_state,
         workflow_result=(
             workflow_result if isinstance(workflow_result, dict) else None
+        ),
+        post_commit_transition=(
+            post_commit_transition
+            if isinstance(post_commit_transition, dict)
+            else None
         ),
         capability_result=capability_result,
         handler_conversation_update=handler_conversation_update,

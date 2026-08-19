@@ -58,6 +58,33 @@ def catalog_labels_for_planning_slot(
     return labels
 
 
+def choice_labels_for_planning_slot(
+    entity_schema: Optional[Mapping[str, Any]],
+    slot_key: str,
+) -> List[str]:
+    """Configured choices for a catalog or enum planning slot."""
+    field = field_for_planning_slot(entity_schema, slot_key)
+    if not field:
+        return []
+    if field.get("type") == "catalog":
+        return catalog_labels_for_planning_slot(entity_schema, slot_key)
+    if field.get("type") != "enum":
+        return []
+
+    values = field.get("values")
+    if not isinstance(values, list):
+        return []
+    labels: List[str] = []
+    seen: Set[str] = set()
+    for value in values:
+        label = str(value).strip() if value is not None else ""
+        if not label or label in seen:
+            continue
+        seen.add(label)
+        labels.append(label)
+    return labels
+
+
 def _slot_filled(slots: Mapping[str, Any], key: str) -> bool:
     value = slots.get(key)
     return value is not None and value != ""

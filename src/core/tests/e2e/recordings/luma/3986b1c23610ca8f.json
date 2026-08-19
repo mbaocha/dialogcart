@@ -13,6 +13,12 @@
     "timezone": "UTC"
   },
   "response": {
+    "entity_resolutions": {
+      "service": {
+        "resolution": "RESOLVED",
+        "value": 1001
+      }
+    },
     "facts": {
       "booking_id": null,
       "date_time_pairs": [],
@@ -33,10 +39,10 @@
       "end_date_expression": null,
       "end_time": null,
       "end_time_expression": null,
-      "expression": "July 10",
+      "expression": "july 10",
       "mode": "single_day",
       "start_date": "2026-07-10",
-      "start_date_expression": "July 10",
+      "start_date_expression": "july 10",
       "start_time": null,
       "start_time_expression": null
     },

@@ -2,6 +2,34 @@ from core.execution.result import normalize_execution_result
 from core.rendering.llm_renderer import LlmRenderRequest, _build_user_message
 
 
+def test_booking_result_resolves_numeric_service_id_to_catalog_label():
+    result = normalize_execution_result(
+        {
+            "action": "CONFIRM_APPOINTMENT",
+            "intent_name": "CREATE_APPOINTMENT",
+            "slots": {
+                "organization_id": 2,
+                "service_id": 26,
+                "start_time": "2026-08-17T09:00:00+01:00",
+            },
+            "_entity_schema": {
+                "version": 1,
+                "fields": [
+                    {
+                        "name": "service",
+                        "type": "catalog",
+                        "role": "bookable_item",
+                        "catalog": {"Executive Oil Change": 26},
+                    }
+                ],
+            },
+        },
+        {"booking": {"id": 13, "booking_code": "ORG2-000013"}},
+    )
+
+    assert result["subject"]["service_name"] == "Executive Oil Change"
+
+
 def test_normalizes_availability_result():
     result = normalize_execution_result(
         {

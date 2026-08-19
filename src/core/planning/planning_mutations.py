@@ -30,6 +30,119 @@ from core.session.invalidation import (
 )
 
 
+def apply_authoritative_entity_resolution_mutations(
+    working_turn: Any,
+) -> None:
+    """Apply NLU entity grounding evidence to the working planning state.
+
+    Omitted entities produce no evidence entry and therefore no mutation.
+    Resolved canonical values replace compatibility projections. Unresolved or
+    ambiguous mentions block a stale value and carry clarification evidence.
+    """
+    from core.adapters.nlu.entity_resolution_contract import EntityResolutionState
+    from core.adapters.nlu.entity_schema_builder import (
+        field_availability_criteria,
+        field_for_planning_slot,
+        promotable_slot_keys_from_entity_schema,
+    )
+
+    evidence = getattr(working_turn, "entity_resolution_evidence", None)
+    if not isinstance(evidence, dict):
+        return
+    payload = working_turn.payload
+    slots = dict(payload.get("slots") or {})
+    facts = dict(payload.get("facts") or {})
+    raw_turn_slots = dict(payload.get("_raw_luma_slots") or {})
+    schema = payload.get("_entity_schema")
+    promotable_slot_keys = promotable_slot_keys_from_entity_schema(schema)
+    blocked = []
+    pending = []
+
+    for item in evidence.values():
+        slot_key = item.slot_key
+        # Request-scoped profile evidence is consumed by its owning projection
+        # path. It must remain in entity_resolution_evidence without becoming a
+        # planning mutation or durable booking slot.
+        if slot_key not in promotable_slot_keys:
+            continue
+        try:
+            from core.tracing.decision_trace import decide as trace_decide
+            from core.tracing.reason_codes import (
+                ENTITY_RESOLUTION_APPLIED,
+                ENTITY_RESOLUTION_BLOCKED,
+            )
+
+            trace_decide(
+                "entity_resolution_application",
+                subsystem="planning",
+                winner=item.resolution.value,
+                reason_code=(
+                    ENTITY_RESOLUTION_APPLIED
+                    if item.resolution == EntityResolutionState.RESOLVED
+                    else ENTITY_RESOLUTION_BLOCKED
+                ),
+                reason_text=(
+                    f"NLU {item.resolution.value} evidence controls planning slot {slot_key}."
+                ),
+                node_id=f"decision.planner.entity_resolution.{item.entity_name}",
+                inputs_evaluated={"entity_name": item.entity_name, "slot_key": slot_key},
+            )
+        except Exception:
+            pass
+        if item.resolution == EntityResolutionState.RESOLVED:
+            slots[slot_key] = item.value
+            facts[slot_key] = item.value
+            raw_turn_slots[slot_key] = item.value
+            continue
+
+        payload["slots"] = dict(slots)
+        payload["facts"] = dict(facts)
+        field = field_for_planning_slot(schema, slot_key)
+        affects_availability = bool(field and field_availability_criteria(field))
+        clear_booking_state(
+            payload,
+            clear_time=False,
+            clear_availability=affects_availability,
+            clear_service=slot_key == "service_id",
+            clear_extra_slots={slot_key},
+            clear_confirmation=True,
+            reason=f"entity_resolution_{item.resolution.value.lower()}",
+        )
+        slots = dict(payload.get("slots") or slots)
+        facts.pop(slot_key, None)
+        raw_turn_slots.pop(slot_key, None)
+        blocked.append(slot_key)
+        pending_item = {
+            "entity_name": item.entity_name,
+            "slot_key": slot_key,
+            "resolution": item.resolution.value,
+        }
+        if item.resolution == EntityResolutionState.AMBIGUOUS:
+            pending_item["candidate_values"] = list(item.candidate_values)
+            if slot_key == "service_id":
+                # Existing rendering/context transport; candidates remain the
+                # canonical NLU values and are never recomputed in Core.
+                payload["service_candidates"] = list(item.candidate_values)
+        pending.append(pending_item)
+
+    payload["facts"] = facts
+    payload["_raw_luma_slots"] = raw_turn_slots
+    if blocked:
+        payload["_blocked_entity_slots"] = blocked
+        payload["_pending_entity_resolutions"] = pending
+        payload["needs_clarification"] = True
+        first = pending[0]
+        payload["clarification_reason"] = (
+            "ENTITY_AMBIGUOUS"
+            if first["resolution"] == EntityResolutionState.AMBIGUOUS.value
+            else "ENTITY_UNRESOLVED"
+        )
+        payload["clarification_data"] = {"entity_resolution": first}
+        payload["issues"] = {"entity_resolutions": pending}
+    slots = sync_working_slot_projections(payload, slots)
+    working_turn.effective_collected_slots = slots
+
+
 def _clock_hhmm(value: Any) -> Optional[str]:
     """Normalize a clock-like value to HH:MM for reject restatement checks."""
     if value is None:

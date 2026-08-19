@@ -18,6 +18,7 @@ from core.tests.e2e.framework.fixtures import (
     live_luma,
 )
 from core.tests.e2e.framework.runner import run_bundle
+from core.tests.harness.recording_render_client import RecordingRenderClient
 
 _DATE_PHRASES = {
     # Keep TARGET_DATE (2026-07-03) as raw ISO so recorded Luma keys for
@@ -140,6 +141,23 @@ def _deterministic_booking_llm(monkeypatch):
         facts = getattr(request, "facts", None) or {}
         if not isinstance(facts, dict):
             facts = {}
+        execution = facts.get("execution")
+        if (
+            isinstance(execution, dict)
+            and execution.get("status") == "succeeded"
+            and isinstance(execution.get("subject"), dict)
+            and execution["subject"].get("kind") == "booking"
+        ):
+            subject = execution["subject"]
+            refs = execution.get("refs") if isinstance(execution.get("refs"), dict) else {}
+            service_name = subject.get("service_name")
+            booking_code = refs.get("booking_code")
+            lines = ["Your appointment is confirmed!"]
+            if isinstance(service_name, str) and service_name.strip():
+                lines.append(f"**Service:** {service_name.strip()}")
+            if isinstance(booking_code, str) and booking_code.strip():
+                lines.append(f"**Booking reference:** {booking_code.strip()}")
+            return "\n\n".join(lines)
         availability = facts.get("availability")
         if not isinstance(availability, dict):
             availability = {}
@@ -368,7 +386,7 @@ def _deterministic_booking_llm(monkeypatch):
         if clarification_target == "date":
             return "What date or day would you like me to check availability for?"
         if clarification_target == "engine_type":
-            return "What engine type does your vehicle use?"
+            return "What engine type does your vehicle use: petrol, diesel, hybrid, or EV?"
         if clarification_target == "registration_number":
             return "What is your vehicle registration number?"
         if clarification_target == "time":
@@ -428,7 +446,10 @@ def test_conversation_dsl_expect_aliases():
     ("ask_next", "expected"),
     [
         ("date", "What date or day would you like me to check availability for?"),
-        ("engine_type", "What engine type does your vehicle use?"),
+        (
+            "engine_type",
+            "What engine type does your vehicle use: petrol, diesel, hybrid, or EV?",
+        ),
         ("registration_number", "What is your vehicle registration number?"),
     ],
 )
@@ -532,13 +553,37 @@ def _run_with_category_faq_mock(scenario, bundle) -> None:
         "structured_context": conv.structured_business_context,
         "no_hit": False,
     }
-    with patch("extensions.handlers.adapters.rag.FaqClient") as mock_faq:
+    handler_render = conv.handler_render_client
+    if handler_render is None:
+        stable_handler_inputs = {
+            "how much does a haircut cost?",
+            "tell me about premium haircut",
+            "go on",
+        }
+        handler_render = RecordingRenderClient(
+            {
+                turn.user: {
+                    "text": "Haircuts start at $25 and include a wash.",
+                    "selected_entities": [],
+                    "metadata": {"source": "booking-e2e"},
+                }
+                for turn in scenario.turns
+                if turn.user.strip().casefold() in stable_handler_inputs
+            }
+        )
+        conv.handler_render_client = handler_render
+    with patch("extensions.handlers.adapters.rag.FaqClient") as mock_faq, patch(
+        "core.api.message.render_handler_response", handler_render.render
+    ):
         mock_faq.return_value.retrieve.return_value = faq_data
         run_bundle(scenario, bundle)
 
 
 @pytest.mark.parametrize("scenario", _booking_scenario_params())
 def test_booking_scenario(scenario, api_client, monkeypatch):
+    for name, value in scenario.environment.items():
+        monkeypatch.setenv(name, value)
+
     # Availability layout from scenario.fixture; vertical from owning module.
     if scenario.fixture == "booking":
         # Match historic booking_conversation multi-slot layout (10, 11).
@@ -554,6 +599,7 @@ def test_booking_scenario(scenario, api_client, monkeypatch):
         api_client,
         monkeypatch,
         business_category=business_category,
+        catalog_service_records=getattr(scenario, "catalog_service_records", None),
         **params,
     )
     try:

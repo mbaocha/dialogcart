@@ -11,7 +11,6 @@ from core.tracing.reason_codes import (
     BROWSE_NOT_DETECTED,
     BROWSE_OPERATION_DETECTED,
     BROWSE_PREVIOUS,
-    BROWSE_TEXT_INFERRED,
     INPUT_IGNORED_NOT_APPLICABLE,
     PAGINATION_HANDLED,
     PAGINATION_SKIPPED,
@@ -47,7 +46,6 @@ def emit_browse_resolve_trace(
     merged: Optional[Mapping[str, Any]],
     browse: Optional[Mapping[str, Any]],
     source: str = "structured",
-    text_inferred: bool = False,
 ) -> Optional[str]:
     trace = TurnTrace.current()
     if trace is None:
@@ -72,7 +70,6 @@ def emit_browse_resolve_trace(
                 "operation": operation,
                 "browse": dict(browse) if isinstance(browse, dict) else None,
                 "source": source,
-                "text_inferred": text_inferred,
             },
             node_id=BROWSE_EVIDENCE_SIGNAL_ID,
             source="luma_response",
@@ -85,27 +82,17 @@ def emit_browse_resolve_trace(
             "BROWSE_RESOLVE",
             subsystem="orchestration",
             winner=direction,
-            reason_code=BROWSE_TEXT_INFERRED if text_inferred else BROWSE_OPERATION_DETECTED,
-            reason_text=(
-                f"Browse direction {direction!r} inferred from user text"
-                if text_inferred
-                else f"Browse direction {direction!r} from structured operation"
-            ),
+            reason_code=BROWSE_OPERATION_DETECTED,
+            reason_text=f"Browse direction {direction!r} from structured operation",
             node_id=BROWSE_RESOLVE_ID,
             depends_on=[signal_id] if signal_id else [],
             category=ROUTING_CATEGORY,
             candidates=[
                 Candidate(
                     id="structured",
-                    matched=source == "structured" and not text_inferred,
+                    matched=source == "structured",
                     reason_code=BROWSE_OPERATION_DETECTED,
                     reason_text="Structured NLU operation field",
-                ),
-                Candidate(
-                    id="text_fallback",
-                    matched=text_inferred,
-                    reason_code=BROWSE_TEXT_INFERRED,
-                    reason_text="Text fallback with cached availability",
                 ),
             ],
         )

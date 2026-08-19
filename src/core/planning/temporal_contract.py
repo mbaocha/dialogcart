@@ -28,6 +28,7 @@ _TEMPORAL_KEYS = (
     "end_time",
     "mode",
     "confidence",
+    "resolution",
 )
 
 
@@ -44,6 +45,7 @@ def empty_temporal(confidence: Optional[float] = None) -> Dict[str, Any]:
         "end_time": None,
         "mode": "none",
         "confidence": confidence,
+        "resolution": None,
     }
 
 
@@ -74,6 +76,9 @@ def normalize_temporal(raw: Optional[Mapping[str, Any]]) -> Dict[str, Any]:
                 if mode in ("none", "single_day", "range", "flexible")
                 else "none"
             )
+        elif key == "resolution":
+            resolution = raw.get("resolution")
+            base["resolution"] = dict(resolution) if isinstance(resolution, dict) else None
         else:
             base[key] = _opt_str(raw.get(key))
     if base["mode"] in (None, "none"):
@@ -111,6 +116,9 @@ def temporal_has_time_material(temporal: Optional[Mapping[str, Any]]) -> bool:
         or temporal.get("start_time_expression")
         or temporal.get("end_time")
         or temporal.get("end_time_expression")
+        # Resolution is authoritative current-turn time evidence even when it
+        # intentionally carries no copied clock value.
+        or isinstance(temporal.get("resolution"), dict)
     )
 
 
@@ -170,6 +178,10 @@ def time_proposal_from_temporal(
     temporal: Optional[Mapping[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     if not isinstance(temporal, dict):
+        return None
+    resolution = temporal.get("resolution")
+    kind = resolution.get("kind") if isinstance(resolution, dict) else None
+    if kind in ("ambiguous_meridiem", "presented_option", "invalid_option_reference"):
         return None
     if temporal.get("start_time"):
         return {"mode": "exact", "value": temporal["start_time"]}
@@ -252,6 +264,7 @@ def merge_temporals(
     if has_time:
         for key in _TIME_FIELD_KEYS:
             merged[key] = current.get(key)
+        merged["resolution"] = current.get("resolution")
 
     # Prefer current overall expression when either axis updated; else keep session.
     if current.get("expression"):

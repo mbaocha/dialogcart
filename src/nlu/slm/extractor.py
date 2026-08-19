@@ -317,7 +317,8 @@ Numeric format is DD/MM (day first): "04/03"→day=4,month=3→2026-03-04.
 Exact times → mode=exact, start=HH:MM, end=HH:MM (same value), label=null; also in facts.times.
   ("3pm"→15:00, "9am"→09:00, "noon"→12:00, "midnight"→00:00)
 Dotted / colon clocks under an active booking intent:
-  "1.30" / "1:30" → 01:30; "1.30pm" → 13:30; "13:30" → 13:30.
+  Bare "1.30" / "1:30" is ambiguous unless grounded to structured presented options;
+  "1.30pm" → 13:30; "13:30" → 13:30.
 "after X" → mode=exact, start=HH:MM, end="23:59" (open-ended lower bound).
 "from X" / "by X" → mode=exact, start=end=HH:MM.
 Named windows (morning/afternoon/evening/night) → mode=fuzzy, label=<name>, times=[].

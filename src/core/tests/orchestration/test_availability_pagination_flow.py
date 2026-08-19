@@ -14,6 +14,7 @@ import pytest
 
 from core.session.turn_persistence import project_and_persist_turn_result
 from core.adapters.clients.catalog_client import CatalogClient
+from core.adapters.cache.catalog_cache import catalog_cache
 from core.adapters.clients.organization_client import OrganizationClient
 from core.execution.clients.availability_client import AvailabilityClient
 from core.adapters.nlu import LumaClient
@@ -101,7 +102,10 @@ def _mock_catalog_client() -> Mock:
     mock_catalog = Mock(spec=CatalogClient)
     mock_catalog.get_services.return_value = {
         "catalog_last_updated_at": "2026-01-01T00:00:00Z",
-        "services": [{"id": 18, "name": SERVICE, "is_active": True}],
+        "services": [
+            {"id": 18, "name": SERVICE, "is_active": True},
+            {"id": 19, "name": "flexi haircut + prunning", "is_active": True},
+        ],
     }
     mock_catalog.get_reservation.return_value = {"room_types": [], "extras": []}
     return mock_catalog
@@ -112,11 +116,21 @@ def _luma_response(**overrides: Any) -> Dict[str, Any]:
         "success": True,
         "intent": {"name": "CREATE_APPOINTMENT"},
         "facts": {},
+        "entity_resolutions": {},
         "slots": {},
         "missing_slots": [],
         "needs_clarification": False,
     }
     base.update(overrides)
+    facts = base.get("facts")
+    if (
+        isinstance(facts, dict)
+        and facts.get("service_id") is not None
+        and "entity_resolutions" not in overrides
+    ):
+        base["entity_resolutions"] = {
+            "service": {"resolution": "RESOLVED", "value": 18}
+        }
     return base
 
 
@@ -130,6 +144,9 @@ def _run_turn(
     org_client: Mock,
     catalog_client: Optional[Mock] = None,
 ) -> Dict[str, Any]:
+    # Each turn supplies its own deterministic catalog double. Avoid inheriting
+    # another test's organization-1 catalog through the process-wide cache.
+    catalog_cache._mem_cache.pop((1, "service"), None)
     mock_luma = Mock(spec=LumaClient)
     mock_luma.resolve.return_value = luma_response
     return handle_message(
@@ -280,8 +297,8 @@ def test_show_more_displays_different_page(pagination_harness):
     assert _page_index(session) == 1
 
 
-def test_show_more_with_create_appointment_intent_no_operation(pagination_harness):
-    """Live-Luma shape: CREATE_APPOINTMENT NLU, no operation, text-only browse."""
+def test_show_more_without_structured_operation_does_not_browse(pagination_harness):
+    """Core must not reconstruct a missing NLU browse operation from raw text."""
     user_id, session_store, availability_client, org_client = pagination_harness
     session = _setup_paginated_search(user_id, availability_client, org_client, session_store)
     first_page = _presented_starts(session)
@@ -305,13 +322,12 @@ def test_show_more_with_create_appointment_intent_no_operation(pagination_harnes
     pagination = result.get("availability_pagination") or (
         (result.get("outcome") or {}).get("availability_pagination")
     )
-    assert pagination is not None
-    assert pagination.get("page_index") == 1
+    assert pagination is None
 
     session = session_store.get_session(1, user_id)
     second_page = _presented_starts(session)
-    assert second_page != first_page
-    assert _page_index(session) == 1
+    assert second_page == first_page
+    assert _page_index(session) == 0
 
 
 def test_show_more_never_searches_again(pagination_harness):
@@ -464,6 +480,9 @@ def test_service_change_resets_pagination(pagination_harness):
         luma_response=_luma_response(
             facts={"service_id": "flexi haircut + prunning"},
             slots={"service_id": "flexi haircut + prunning"},
+            entity_resolutions={
+                "service": {"resolution": "RESOLVED", "value": 19}
+            },
             missing_slots=["time"],
         ),
         session_store=session_store,

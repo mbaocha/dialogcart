@@ -102,19 +102,16 @@ def resolve_org_id(business_category: str) -> int:
 
 
 def _get_customer_id() -> int | None:
-    value = os.getenv("CUSTOMER_ID") or os.getenv("TEST_CUSTOMER_ID")
-    if not value:
-        return None
-    try:
-        return max(1, int(value))
-    except (TypeError, ValueError):
-        return None
+    """The WhatsApp simulator never claims a Commerce customer primary key."""
+    return None
 
 
 def _get_customer_phone() -> str | None:
-    value = os.getenv("CUSTOMER_PHONE") or os.getenv("TEST_CUSTOMER_PHONE")
-    if not value:
-        return None
+    value = (
+        os.getenv("CUSTOMER_PHONE")
+        or os.getenv("TEST_CUSTOMER_PHONE")
+        or "+15550000002"
+    )
     stripped = value.strip()
     return stripped or None
 
@@ -128,11 +125,8 @@ def _get_customer_email() -> str | None:
 
 
 def _get_customer_name() -> str | None:
-    value = os.getenv("CUSTOMER_NAME") or os.getenv("TEST_CUSTOMER_NAME")
-    if not value:
-        return None
-    stripped = value.strip()
-    return stripped or None
+    """The simulator collects names conversationally; it never pre-seeds one."""
+    return None
 
 
 def _get_core_base_url() -> str:
@@ -252,6 +246,7 @@ def _print_banner(
     core_url: str,
     user_id: str,
     customer_id: int | None,
+    customer_phone: str | None,
 ) -> None:
     booking_domain = resolve_booking_domain_for_org(org_id)
     print("\nDialogCart Chat (HTTP → core API)")
@@ -264,9 +259,14 @@ def _print_banner(
     )
     luma_url = os.getenv("LUMA_BASE_URL", "http://localhost:9002")
     internal_url = os.getenv("INTERNAL_API_BASE_URL", "http://localhost:3000")
-    print(
-        f"  core={core_url}  user={user_id}  customer={customer_id or 'unset'}"
+    customer_identity = (
+        str(customer_id)
+        if customer_id is not None
+        else "resolve-by-phone"
+        if customer_phone
+        else "anonymous"
     )
+    print(f"  core={core_url}  user={user_id}  customer={customer_identity}")
     print(f"  luma={luma_url}  internal={internal_url}")
     print(
         "  Commands: quit  reset  switch <category>  debug  trace  "
@@ -471,6 +471,15 @@ def switch_business_category(
     return category, org_id
 
 
+def parse_switch_command(user_text: str) -> str | None:
+    """Return the category only for the exact local ``switch`` command shape."""
+    parts = user_text.strip().lower().split()
+    if len(parts) != 2 or parts[0] != "switch":
+        return None
+    category = parts[1]
+    return category if category in supported_business_categories() else None
+
+
 def chat_loop(
     user_id: str,
     timezone: str,
@@ -493,6 +502,7 @@ def chat_loop(
         core_url=core_url,
         user_id=user_id,
         customer_id=customer_id,
+        customer_phone=customer_phone,
     )
     if trace:
         print(f"  trace view: {trace_view}")
@@ -529,16 +539,18 @@ def chat_loop(
                 _print_help()
                 continue
 
-            if cmd0 == "switch":
-                if len(parts) < 2 or not parts[1].strip():
-                    print(
-                        "[switch] usage: switch <business_category>\n"
-                        f"  supported: {', '.join(supported_business_categories())}"
-                    )
-                    continue
+            if cmd == "switch":
+                print(
+                    "[switch] usage: switch <business_category>\n"
+                    f"  supported: {', '.join(supported_business_categories())}"
+                )
+                continue
+
+            switch_target = parse_switch_command(user_text)
+            if switch_target is not None:
                 try:
                     new_category, new_org = switch_business_category(
-                        business_category, parts[1]
+                        business_category, switch_target
                     )
                 except ValueError as e:
                     print(f"[switch error] {e}")
@@ -562,6 +574,7 @@ def chat_loop(
                     core_url=core_url,
                     user_id=user_id,
                     customer_id=customer_id,
+                    customer_phone=customer_phone,
                 )
                 continue
 

@@ -73,7 +73,14 @@ def _resolve_confirmation(**overrides):
     )
     defaults = {
         "attached_request": attached_request,
-        "session_state": None,
+        "session_state": {
+            "customer_id": 1,
+            "customer_contact": {
+                "customer_id": 1,
+                "authoritative_name": "Test Customer",
+                "name_status": "authoritative",
+            }
+        },
         "gate_booking_intent": "CREATE_APPOINTMENT",
         "user_id": "test",
     }
@@ -116,6 +123,61 @@ def test_booking_workflow_consumes_confirmation_after_successful_commit():
     assert slots["booking_id"] == "bk-99"
     assert get_confirmation_state(session_state) is None
     assert get_confirmation_state(merged) is None
+    assert plan["_post_commit_transition"] == {
+        "kind": "CREATE_APPOINTMENT_COMMITTED",
+        "booking_id": "bk-99",
+        "booking_code": None,
+        "completed_slot_keys": ["booking_id"],
+    }
+
+
+def test_booking_workflow_does_not_emit_second_transition_for_committed_session():
+    session_state = {
+        "booking": {"booking_id": "bk-99", "booking_code": "ORG-99"},
+        "planning": {"intent_name": None},
+        "confirmation_state": None,
+    }
+    plan = {"action": "CONFIRM_APPOINTMENT", "slots": {}}
+
+    BookingWorkflow().process_result(
+        execution_result={
+            "status": "succeeded",
+            "refs": {"booking_id": "bk-99", "booking_code": "ORG-99"},
+            "subject": {},
+        },
+        plan=plan,
+        slots={},
+        action="CONFIRM_APPOINTMENT",
+        session_state=session_state,
+    )
+
+    assert "_post_commit_transition" not in plan
+
+
+def test_booking_workflow_failure_and_malformed_success_preserve_retry_state():
+    for execution_result in (
+        {"status": "failed", "refs": {}, "subject": {}},
+        {"status": "succeeded", "refs": {}, "subject": {}},
+    ):
+        session = {"confirmation_state": "pending"}
+        merged = {"confirmation_state": "pending"}
+        plan = {
+            "action": "CONFIRM_APPOINTMENT",
+            "slots": {"service_id": "premium"},
+            "_merged_luma_response": merged,
+        }
+
+        BookingWorkflow().process_result(
+            execution_result=execution_result,
+            plan=plan,
+            slots=dict(plan["slots"]),
+            action="CONFIRM_APPOINTMENT",
+            session_state=session,
+        )
+
+        assert "_post_commit_transition" not in plan
+        assert get_confirmation_state(session) == "pending"
+        assert get_confirmation_state(merged) == "pending"
 
 
 def test_stage_confirmation_yes_keeps_pending_and_satisfies():
@@ -299,12 +361,36 @@ def test_stage_confirmation_skips_pending_when_booking_id_exists():
     assert get_confirmation_state(payload) is None
 
 
+def test_stage_confirmation_committed_lifecycle_wins_over_pending_session():
+    payload = _commit_ready_payload()
+    decision = _resolve_confirmation(
+        payload=payload,
+        session_state={
+            "booking": {"booking_id": "bk-1", "booking_code": "ORG-1"},
+            "planning": {
+                "intent_name": "CREATE_APPOINTMENT",
+                "slots": dict(payload["slots"]),
+            },
+            "confirmation_state": "pending",
+        },
+    )
+
+    assert decision.confirmation_state is None
+    assert decision.awaiting_user_confirmation is False
+
+
 def test_stage_confirmation_clears_on_no():
     from core.planning.planning_mutations import apply_confirmation_planning_mutations
 
     session = {
         "intent_name": "CREATE_APPOINTMENT",
         "confirmation_state": "pending",
+        "customer_id": 1,
+        "customer_contact": {
+            "customer_id": 1,
+            "authoritative_name": "Test Customer",
+            "name_status": "authoritative",
+        },
         "slots": {
             "service_id": "premium",
             "date": "2026-07-10",
@@ -508,6 +594,7 @@ def test_stage_confirmation_clears_on_another_request():
     session = {
         "intent_name": "CREATE_APPOINTMENT",
         "confirmation_state": "pending",
+        "customer_id": 1,
         "slots": {
             "service_id": "premium",
             "date": "2026-07-10",
@@ -519,6 +606,11 @@ def test_stage_confirmation_clears_on_another_request():
         },
         "presented_availability": {"search_date": "2026-07-10", "slots": []},
         "availability_fingerprint": "fp-test",
+        "customer_contact": {
+            "customer_id": 1,
+            "authoritative_name": "Test Customer",
+            "name_status": "authoritative",
+        },
     }
     working_turn = WorkingTurn(
         payload=payload,

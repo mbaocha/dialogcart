@@ -41,14 +41,28 @@ def apply_create_appointment_extensions(
         )
 
     if merged_luma_response and isinstance(merged_luma_response, dict):
+        from core.session.invalidation import REVISION_INVALIDATED_PRIOR_TIME_KEY
+
         bound_range = merged_luma_response.get("resolved_datetime_range")
         if isinstance(bound_range, dict) and bound_range.get("start"):
             session_state["resolved_datetime_range"] = bound_range
             logger.debug(
                 "[DATETIME_RANGE] Persisting resolved_datetime_range from planning merge"
             )
-        else:
+        elif (
+            merged_luma_response.get("_bound_datetime_cleared")
+            or merged_luma_response.get(REVISION_INVALIDATED_PRIOR_TIME_KEY)
+            or merged_luma_response.get("_booking_confirmation_rejected")
+        ):
             session_state.pop("resolved_datetime_range", None)
             facts = session_state.get("facts")
             if isinstance(facts, dict):
                 facts.pop("resolved_datetime_range", None)
+        elif isinstance(previous_session_state, dict):
+            previous_bound = previous_session_state.get("resolved_datetime_range")
+            if not isinstance(previous_bound, dict):
+                previous_planning = previous_session_state.get("planning")
+                if isinstance(previous_planning, dict):
+                    previous_bound = previous_planning.get("bound_datetime")
+            if isinstance(previous_bound, dict) and previous_bound.get("start"):
+                session_state["resolved_datetime_range"] = dict(previous_bound)

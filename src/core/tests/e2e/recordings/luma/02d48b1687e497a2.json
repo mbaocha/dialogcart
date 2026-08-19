@@ -13,6 +13,15 @@
     "timezone": "UTC"
   },
   "response": {
+    "entity_resolutions": {
+      "service": {
+        "candidate_values": [
+          1001,
+          1002
+        ],
+        "resolution": "AMBIGUOUS"
+      }
+    },
     "facts": {
       "booking_id": null,
       "date_time_pairs": [
@@ -39,7 +48,7 @@
       "flexi haircut + prunning"
     ],
     "temporal": {
-      "confidence": 0.98,
+      "confidence": 0.95,
       "end_date": null,
       "end_date_expression": null,
       "end_time": "09:00",

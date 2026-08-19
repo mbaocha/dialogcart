@@ -226,7 +226,7 @@ def assert_cleared_confirmation_binding(conv: BookingConversation) -> None:
     )
 
 
-def assert_service_preserved(conv: BookingConversation, service_id: str) -> None:
+def assert_service_preserved(conv: BookingConversation, service_id: Any) -> None:
     slots = _planning_slots(conv.session())
     conv._assert(
         slots.get("service_id") == service_id,

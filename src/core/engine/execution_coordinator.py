@@ -57,6 +57,339 @@ class ExecutionRunResult:
 
 
 class ExecutionCoordinator:
+    def persist_customer_contact_evidence(
+        self,
+        *,
+        plan: Dict[str, Any],
+        session_state: Optional[Dict[str, Any]],
+        organization_id: int,
+        kwargs: Dict[str, Any],
+    ) -> bool:
+        """Route current-turn profile evidence to the customer client."""
+        from core.customer_identification import (
+            authoritative_contact,
+            authorize_customer_contact_name,
+            customer_channel_fingerprint,
+        )
+
+        merged_response = plan.get("_merged_luma_response")
+        authorized = authorize_customer_contact_name(
+            session_state, merged_response
+        )
+        client = kwargs.get("customer_client")
+        phone = kwargs.get("customer_phone")
+        email = kwargs.get("customer_email")
+        from core.adapters.customer_resolver import coerce_positive_customer_id
+
+        customer_id = coerce_positive_customer_id(kwargs.get("customer_id"))
+        if customer_id is None and isinstance(session_state, dict):
+            customer_id = coerce_positive_customer_id(session_state.get("customer_id"))
+
+        # TEMPORARY_CUSTOMER_NAME_FLOW_DIAGNOSTIC — remove after capture review
+        try:
+            from core.diagnostics.temporary_customer_name_flow_diagnostic import (
+                record_persist_phase,
+            )
+
+            record_persist_phase(
+                session_state=session_state,
+                merged_response=merged_response,
+                authorized_value=(
+                    authorized.value if authorized is not None else None
+                ),
+                organization_id=organization_id,
+                customer_id=customer_id,
+                phone=phone,
+                email=email,
+            )
+        except Exception:
+            pass
+
+        if authorized is None:
+            return True
+        if client is None:
+            # TEMPORARY_CUSTOMER_NAME_FLOW_DIAGNOSTIC — remove after capture review
+            try:
+                from core.diagnostics.temporary_customer_name_flow_diagnostic import (
+                    record_commerce_result,
+                    record_projection_after_persist,
+                )
+
+                record_commerce_result(
+                    operation=(
+                        "update_name_by_id"
+                        if customer_id is not None
+                        else "upsert"
+                    ),
+                    organization_id=organization_id,
+                    customer_id=customer_id,
+                    submitted_name=authorized.value,
+                    phone=phone,
+                    email=email,
+                    success=False,
+                    exception_type="MissingCustomerClient",
+                )
+                record_projection_after_persist(
+                    session_state=session_state,
+                    name_change=None,
+                    persist_ok=False,
+                )
+            except Exception:
+                pass
+            return False
+        try:
+            if customer_id is not None:
+                customer = client.update_name_by_id(
+                    organization_id=organization_id,
+                    customer_id=customer_id,
+                    name=authorized.value,
+                )
+                # TEMPORARY_CUSTOMER_NAME_FLOW_DIAGNOSTIC — remove after capture review
+                try:
+                    from core.diagnostics.temporary_customer_name_flow_diagnostic import (
+                        record_commerce_result,
+                    )
+
+                    record_commerce_result(
+                        operation="update_name_by_id",
+                        organization_id=organization_id,
+                        customer_id=customer_id,
+                        submitted_name=authorized.value,
+                        phone=phone,
+                        email=email,
+                        returned_customer=customer,
+                        success=True,
+                    )
+                except Exception:
+                    pass
+            else:
+                if not phone and not email:
+                    logger.warning(
+                        "CONTACT_PERSIST_NO_CHANNEL organization_id=%s",
+                        organization_id,
+                    )
+                    # TEMPORARY_CUSTOMER_NAME_FLOW_DIAGNOSTIC — remove after capture review
+                    try:
+                        from core.diagnostics.temporary_customer_name_flow_diagnostic import (
+                            record_commerce_result,
+                            record_projection_after_persist,
+                        )
+
+                        record_commerce_result(
+                            operation="upsert",
+                            organization_id=organization_id,
+                            customer_id=customer_id,
+                            submitted_name=authorized.value,
+                            phone=phone,
+                            email=email,
+                            success=False,
+                            exception_type="MissingContactChannel",
+                        )
+                        record_projection_after_persist(
+                            session_state=session_state,
+                            name_change=None,
+                            persist_ok=False,
+                        )
+                    except Exception:
+                        pass
+                    return False
+                customer = client.upsert(
+                    organization_id=organization_id,
+                    name=authorized.value,
+                    phone=phone,
+                    email=email,
+                )
+                # TEMPORARY_CUSTOMER_NAME_FLOW_DIAGNOSTIC — remove after capture review
+                try:
+                    from core.diagnostics.temporary_customer_name_flow_diagnostic import (
+                        record_commerce_result,
+                    )
+
+                    record_commerce_result(
+                        operation="upsert",
+                        organization_id=organization_id,
+                        customer_id=customer_id,
+                        submitted_name=authorized.value,
+                        phone=phone,
+                        email=email,
+                        returned_customer=customer,
+                        success=True,
+                    )
+                except Exception:
+                    pass
+        except Exception as exc:
+            # TEMPORARY_CUSTOMER_NAME_FLOW_DIAGNOSTIC — remove after capture review
+            try:
+                from core.diagnostics.temporary_customer_name_flow_diagnostic import (
+                    record_commerce_result,
+                    record_projection_after_persist,
+                )
+
+                record_commerce_result(
+                    operation=(
+                        "update_name_by_id"
+                        if customer_id is not None
+                        else "upsert"
+                    ),
+                    organization_id=organization_id,
+                    customer_id=customer_id,
+                    submitted_name=authorized.value,
+                    phone=phone,
+                    email=email,
+                    success=False,
+                    exception_type=type(exc).__name__,
+                )
+                record_projection_after_persist(
+                    session_state=session_state,
+                    name_change=None,
+                    persist_ok=False,
+                )
+            except Exception:
+                pass
+            if customer_id is not None:
+                logger.exception(
+                    "CONTACT_PERSIST_BY_ID_FAILED organization_id=%s customer_id=%s",
+                    organization_id,
+                    customer_id,
+                )
+            else:
+                logger.exception("Customer contact-name persistence failed")
+            return False
+        returned_customer_id = customer.get("id") if isinstance(customer, dict) else None
+        returned_name = customer.get("name") if isinstance(customer, dict) else None
+        returned_organization_id = (
+            customer.get("organizationId") if isinstance(customer, dict) else None
+        )
+        if returned_organization_id != organization_id:
+            logger.warning(
+                "CONTACT_PERSIST_AUTHORITY_MISMATCH organization_id=%s operation=%s",
+                organization_id,
+                "update_name_by_id" if customer_id is not None else "upsert",
+            )
+            return False
+        from core.customer_identification import normalize_authoritative_name
+
+        normalized_submitted_name = normalize_authoritative_name(authorized.value)
+        normalized_returned_name = normalize_authoritative_name(returned_name)
+        if (
+            normalized_submitted_name is None
+            or normalized_returned_name is None
+            or normalized_submitted_name.casefold()
+            != normalized_returned_name.casefold()
+        ):
+            logger.warning(
+                "CONTACT_PERSIST_IDENTITY_CONFLICT organization_id=%s operation=%s",
+                organization_id,
+                "update_name_by_id" if customer_id is not None else "upsert",
+            )
+            plan["_customer_contact_identity_conflict"] = {
+                "detected": True,
+                "reason_code": "CUSTOMER_CONTACT_NAME_AUTHORITY_CONFLICT",
+            }
+            return False
+        if customer_id is not None:
+            if (
+                returned_customer_id != customer_id
+                or returned_organization_id != organization_id
+            ):
+                logger.error(
+                    "CONTACT_PERSIST_BY_ID_FAILED organization_id=%s customer_id=%s "
+                    "failure_category=authority_mismatch",
+                    organization_id,
+                    customer_id,
+                )
+                # TEMPORARY_CUSTOMER_NAME_FLOW_DIAGNOSTIC — remove after capture review
+                try:
+                    from core.diagnostics.temporary_customer_name_flow_diagnostic import (
+                        record_projection_after_persist,
+                    )
+
+                    record_projection_after_persist(
+                        session_state=session_state,
+                        name_change=None,
+                        persist_ok=False,
+                    )
+                except Exception:
+                    pass
+                return False
+        existing_contact = (
+            session_state.get("customer_contact")
+            if isinstance(session_state, dict)
+            else None
+        )
+        channel_fingerprint = customer_channel_fingerprint(
+            phone=phone, email=email
+        )
+        if channel_fingerprint is None and isinstance(existing_contact, dict):
+            existing_fingerprint = existing_contact.get("channel_fingerprint")
+            if isinstance(existing_fingerprint, str):
+                channel_fingerprint = existing_fingerprint
+        contact = authoritative_contact(
+            returned_customer_id,
+            returned_name,
+            channel_fingerprint=channel_fingerprint,
+        )
+        if contact is None or not isinstance(session_state, dict):
+            if customer_id is not None:
+                logger.error(
+                    "CONTACT_PERSIST_BY_ID_FAILED organization_id=%s customer_id=%s "
+                    "failure_category=invalid_projection",
+                    organization_id,
+                    customer_id,
+                )
+            # TEMPORARY_CUSTOMER_NAME_FLOW_DIAGNOSTIC — remove after capture review
+            try:
+                from core.diagnostics.temporary_customer_name_flow_diagnostic import (
+                    record_projection_after_persist,
+                )
+
+                record_projection_after_persist(
+                    session_state=session_state,
+                    name_change=None,
+                    persist_ok=False,
+                )
+            except Exception:
+                pass
+            return False
+        previous_contact = session_state.get("customer_contact")
+        previous_name = (
+            previous_contact.get("authoritative_name")
+            if isinstance(previous_contact, dict)
+            else None
+        )
+        plan["_customer_contact_name_change"] = {
+            "from": previous_name,
+            "to": contact["authoritative_name"],
+        }
+        session_state["customer_id"] = returned_customer_id
+        session_state["customer_contact"] = contact
+        session_state.setdefault("planning", {})["pending_profile_request"] = None
+        from core.planning.pipeline.decision_finalization import (
+            finalize_decision_after_customer_name_persisted,
+        )
+
+        finalize_decision_after_customer_name_persisted(plan)
+        # TEMPORARY_CUSTOMER_NAME_FLOW_DIAGNOSTIC — remove after capture review
+        try:
+            from core.diagnostics.temporary_customer_name_flow_diagnostic import (
+                record_projection_after_persist,
+            )
+
+            record_projection_after_persist(
+                session_state=session_state,
+                name_change=plan.get("_customer_contact_name_change"),
+                persist_ok=True,
+            )
+        except Exception:
+            pass
+        if customer_id is not None:
+            logger.info(
+                "CONTACT_PERSIST_BY_ID_SUCCESS organization_id=%s customer_id=%s",
+                organization_id,
+                customer_id,
+            )
+        return True
+
     """Coordinates adapter prep, dispatch, and workflow hooks."""
 
     def resolve(
@@ -407,6 +740,9 @@ class ExecutionCoordinator:
                 result["_workflow_result"] = workflow_result
             result.setdefault("ui_actions", [])
             result["_merged_luma_response"] = plan.get("_merged_luma_response")
+            post_commit_transition = plan.get("_post_commit_transition")
+            if isinstance(post_commit_transition, dict):
+                result["_post_commit_transition"] = dict(post_commit_transition)
 
             from core.planning.planner.plan_builder import (
                 overlay_post_execution_planning_on_outcome,

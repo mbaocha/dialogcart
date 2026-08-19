@@ -62,6 +62,31 @@ def test_merge_empty_current_keeps_session():
     assert merged["start_date"] == "2026-07-23"
 
 
+def test_merge_presented_option_resolution_replaces_prior_time_material():
+    session = {
+        "start_date": "2026-07-23",
+        "start_time": "10:00",
+        "start_time_expression": "10am",
+        "mode": "single_day",
+    }
+    current = {
+        "expression": "1:30 PM",
+        "resolution": {
+            "kind": "presented_option",
+            "presentation_ref": "avp1_test",
+            "option": 1,
+        },
+        "mode": "none",
+    }
+
+    merged = merge_temporals(session, current)
+
+    assert merged["start_date"] == "2026-07-23"
+    assert merged["start_time"] is None
+    assert merged["start_time_expression"] is None
+    assert merged["resolution"] == current["resolution"]
+
+
 def test_merge_new_date_replaces_old_date_fields_as_pair():
     session = {
         "start_date": "2026-07-23",

@@ -42,8 +42,9 @@ booking intent.
 CLOCK FORMS (when last_intent OR active_booking_intent is a booking intent):
 Unambiguous clock expressions such as "1.30", "1:30", "1.30pm", "13:30", "3pm"
 → booking slot-fill under that booking intent;
-→ populate facts.times and temporal start_time (e.g. "1.30" / "1:30" → "01:30",
-  "1.30pm" → "13:30", "3pm" → "15:00");
+→ explicit clocks populate facts.times and temporal start_time (e.g. "1.30pm" →
+  "13:30", "3pm" → "15:00"); bare 12-hour clocks use temporal.resolution and are
+  ambiguous unless uniquely grounded to structured presented options;
 → NEVER CONFIRM_ACTION merely because the previous assistant asked which time
   works best or re-showed available times.
 A time-selection prompt ("Which time works best?", "Please choose one of these

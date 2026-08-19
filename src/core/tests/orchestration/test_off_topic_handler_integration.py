@@ -26,7 +26,13 @@ PREMIUM = "premium haircut"
 
 
 def _catalog():
-    return stub_catalog_client()
+    return stub_catalog_client(
+        aliases={
+            "haircut": "haircut",
+            PREMIUM: PREMIUM,
+            "flexi haircut": "flexi haircut",
+        }
+    )
 
 
 def _org_mock() -> Mock:
@@ -40,6 +46,7 @@ def _org_mock() -> Mock:
 def _off_topic_luma_payload() -> dict:
     return {
         "success": True,
+        "entity_resolutions": {},
         "intent": {"name": "OFF_TOPIC", "confidence": 0.95},
         "facts": {
             "dates": [],
@@ -61,6 +68,7 @@ def _off_topic_luma_payload() -> dict:
 def _unknown_luma_payload() -> dict:
     return {
         "success": True,
+        "entity_resolutions": {},
         "intent": {"name": "UNKNOWN", "confidence": 0.2},
         "facts": {
             "dates": [],
@@ -79,6 +87,7 @@ def _unknown_luma_payload() -> dict:
 def _general_inquiry_luma_payload(search_query: str = "available services") -> dict:
     return {
         "success": True,
+        "entity_resolutions": {},
         "intent": {"name": "GENERAL_INQUIRY", "confidence": 0.95},
         "facts": {
             "dates": [],
@@ -235,6 +244,7 @@ class TestOffTopicHandlerIntegration:
         scripts = {
             "book haircut": {
                 "success": True,
+                "entity_resolutions": {},
                 "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
                 "facts": {
                     "dates": [],
@@ -250,6 +260,9 @@ class TestOffTopicHandlerIntegration:
             },
             "premium": {
                 "success": True,
+                "entity_resolutions": {
+                    "service": {"resolution": "RESOLVED", "value": PREMIUM}
+                },
                 "intent": {"name": "CREATE_APPOINTMENT", "confidence": 0.95},
                 "facts": {
                     "service_id": PREMIUM,

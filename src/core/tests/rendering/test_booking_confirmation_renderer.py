@@ -21,6 +21,42 @@ def test_render_booking_confirmation_prompt_formats_slots():
     assert "Would you like me to go ahead?" in text
 
 
+def test_render_booking_confirmation_prompt_resolves_numeric_catalog_id():
+    text = render_booking_confirmation_prompt(
+        {
+            "service_id": 26,
+            "date": "2026-08-17",
+            "time": "09:00",
+        },
+        entity_schema={
+            "version": 1,
+            "fields": [
+                {
+                    "name": "service",
+                    "type": "catalog",
+                    "role": "bookable_item",
+                    "catalog": {
+                        "Executive Oil Change": 26,
+                        "Premium Full Service": 27,
+                    },
+                }
+            ],
+        },
+    )
+
+    assert "book an Executive Oil Change" in text
+    assert "book a 26" not in text
+
+
+def test_render_booking_confirmation_prompt_hides_unmapped_numeric_id():
+    text = render_booking_confirmation_prompt(
+        {"service_id": 26, "date": "2026-08-17", "time": "09:00"}
+    )
+
+    assert "book an appointment" in text
+    assert "book a 26" not in text
+
+
 def test_render_revision_acknowledgement_time():
     text = render_revision_acknowledgement(
         {"changes": [{"field": "time", "from": "09:00", "to": "11:00"}]}

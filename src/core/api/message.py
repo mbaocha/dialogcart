@@ -37,7 +37,7 @@ import copy
 import logging
 import os
 import uuid
-from typing import Optional
+from typing import Mapping, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -46,7 +46,7 @@ from pydantic import BaseModel, Field
 # Import app module which loads .env files
 import core.app  # noqa: F401
 from core.api.capability_boundary import apply_capability_to_result
-from core.adapters.customer_resolver import resolve_tenant_customer
+from core.adapters.customer_resolver import resolve_tenant_customer_projection
 from core.adapters.clients.customer_client import CustomerClient
 from core.adapters.errors import ContractViolation, UpstreamError
 from core.execution.clients.availability_client import AvailabilityClient
@@ -222,9 +222,33 @@ async def post_message(request: MessageRequest, http_request: Request):
         # Keep the unfiltered session so HANDLER_DELEGATED can preserve booking state
         _raw_session = working_session
 
+        from core.customer_identification import (
+            customer_channel_fingerprint,
+            reusable_authoritative_contact,
+        )
+
+        incoming_channel_fingerprint = customer_channel_fingerprint(
+            phone=request.customer_phone,
+            email=request.customer_email,
+        )
+        reusable_contact = reusable_authoritative_contact(_raw_session)
+        stored_channel_fingerprint = (
+            reusable_contact.get("channel_fingerprint")
+            if isinstance(reusable_contact, Mapping)
+            else None
+        )
+        if (
+            isinstance(_raw_session, dict)
+            and incoming_channel_fingerprint is not None
+            and stored_channel_fingerprint != incoming_channel_fingerprint
+        ):
+            # Re-resolve legacy, malformed, or differently-bound projections.
+            _raw_session["customer_id"] = None
+            _raw_session["customer_contact"] = None
+
         # Resolve or create tenant customer at ingress (never invent at booking dispatch).
         # Chat user_id is a session key only — not a commerce customer primary key.
-        resolved_customer_id = resolve_tenant_customer(
+        resolved_customer = resolve_tenant_customer_projection(
             organization_id=request.organization_id,
             customer_client=_customer_client,
             session=_raw_session if isinstance(_raw_session, dict) else None,
@@ -233,8 +257,33 @@ async def post_message(request: MessageRequest, http_request: Request):
             email=request.customer_email,
             name=request.customer_name,
         )
+        resolved_customer_id = (
+            resolved_customer.get("id")
+            if isinstance(resolved_customer, Mapping)
+            else None
+        )
         if resolved_customer_id is not None and isinstance(_raw_session, dict):
             _raw_session["customer_id"] = resolved_customer_id
+            existing_contact = _raw_session.get("customer_contact")
+            if (
+                isinstance(existing_contact, dict)
+                and existing_contact.get("customer_id") != resolved_customer_id
+            ):
+                _raw_session["customer_contact"] = None
+        if isinstance(_raw_session, dict):
+            from core.customer_identification import authoritative_contact
+            persisted_name = (
+                resolved_customer.get("name")
+                if isinstance(resolved_customer, Mapping)
+                else None
+            )
+            contact = authoritative_contact(
+                resolved_customer_id,
+                persisted_name,
+                channel_fingerprint=incoming_channel_fingerprint,
+            )
+            if contact is not None:
+                _raw_session["customer_contact"] = contact
 
         if not decision_trace_enabled:
             logger.info(
@@ -268,6 +317,9 @@ async def post_message(request: MessageRequest, http_request: Request):
             session_state=_raw_session,
             availability_client=_availability_client,
             booking_client=_booking_client,
+            customer_client=_customer_client,
+            customer_phone=request.customer_phone,
+            customer_email=request.customer_email,
             organization_id=request.organization_id,
             customer_id=resolved_customer_id,
             timezone=request.timezone,
@@ -347,9 +399,15 @@ async def post_message(request: MessageRequest, http_request: Request):
             # Render via LLM — extension owns the instruction, core executes it.
             # Resume uses the same workflow_resume mechanism as OFF_TOPIC.
             if handler_result.render_instruction:
-                from core.rendering.workflow_resume import attach_resume_to_handler_render
+                from core.rendering.workflow_resume import (
+                    attach_resume_to_handler_render,
+                    compose_pending_confirmation_resume,
+                )
 
                 conversation_history = (_raw_session or {}).get("messages", [])
+                confirmation_suffix = compose_pending_confirmation_resume(
+                    _raw_session or {}
+                )
                 render_instruction, render_facts = attach_resume_to_handler_render(
                     handler_result.render_instruction,
                     session_state=_raw_session or {},
@@ -364,6 +422,10 @@ async def post_message(request: MessageRequest, http_request: Request):
                     )
                 )
                 rendered_text = handler_render_result.text
+                if confirmation_suffix:
+                    rendered_text = compose_pending_confirmation_resume(
+                        _raw_session or {}, rendered_text
+                    )
                 structured_context = render_facts.get("structured_context")
                 try:
                     result["_handler_assistant_proposals"] = create_assistant_proposals(
@@ -411,6 +473,8 @@ async def post_message(request: MessageRequest, http_request: Request):
                 current_working_session = (
                     result.get("_working_session") or working_session
                 )
+                from core.customer_identification import apply_pending_profile_projection
+                apply_pending_profile_projection(current_working_session, outcome)
                 projection_status = resolve_projection_status(outcome, result=result)
 
                 if outcome_status in (

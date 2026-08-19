@@ -13,6 +13,7 @@ Uses the shared rendering LLM client (``core.rendering.llm_client``).
 
 import json
 import logging
+import os
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
@@ -24,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 _FALLBACK_TEXT = "I'm unable to respond right now. Please try again."
 _MAX_TOKENS = 512
+_HANDLER_MAX_TOKENS = 2048
 _HANDLER_JSON_FENCE = re.compile(
     r"```(?:json)?[ \t]*\r?\n(?P<payload>[\s\S]*?)\r?\n```"
 )
@@ -94,7 +96,10 @@ def coerce_handler_render_result(value: Any) -> HandlerRenderResult:
     for item in value.get("selected_entities") or []:
         if not isinstance(item, dict):
             raise TypeError("selected_entities entries must be mappings")
-        selections.append(HandlerEntitySelection(**item))
+        normalized = dict(item)
+        if "entity_type" not in normalized and "type" in normalized:
+            normalized["entity_type"] = normalized.pop("type")
+        selections.append(HandlerEntitySelection(**normalized))
     metadata = value.get("metadata") or {}
     if not isinstance(metadata, dict):
         raise TypeError("handler renderer metadata must be a mapping")
@@ -253,6 +258,12 @@ def _provider_text_or_fallback(raw_text: Any) -> str:
     return rendered
 
 
+def _looks_like_handler_envelope(raw: str) -> bool:
+    """Return whether provider text is an attempted structured handler result."""
+    stripped = raw.lstrip()
+    return stripped.startswith(("```", "{", "["))
+
+
 def render_llm(request: LlmRenderRequest) -> str:
     """
     Call Claude to produce user-facing text from a render request.
@@ -342,6 +353,16 @@ def render_llm(request: LlmRenderRequest) -> str:
                         else None
                     )
                 ),
+                refresh_reason=(
+                    str(availability["refresh_reason"])
+                    if availability.get("refresh_reason") is not None
+                    else None
+                ),
+                unavailable_reason=(
+                    str(time_resolution["unavailable_reason"])
+                    if time_resolution.get("unavailable_reason") is not None
+                    else None
+                ),
             )
 
     try:
@@ -350,6 +371,17 @@ def render_llm(request: LlmRenderRequest) -> str:
             sc = {}
         system_prompt = _build_system_prompt(sc)
         user_message = _build_user_message(request)
+        # TEMPORARY_AVAILABILITY_RENDER_DIAGNOSTIC
+        # Remove after the captured reproduction is reviewed.
+        if os.environ.get("DIALOGCART_DUMP_AVAILABILITY_RENDER") == "1":
+            try:
+                from core.rendering.temporary_availability_render_diagnostic import (
+                    maybe_dump_availability_render,
+                )
+
+                maybe_dump_availability_render(request, user_message)
+            except Exception:
+                pass
 
         client = get_anthropic_client()
         response = client.messages.create(
@@ -383,12 +415,13 @@ def render_handler_response(request: LlmRenderRequest) -> HandlerRenderResult:
             "\nReturn one JSON object with keys text, selected_entities, and metadata. "
             "selected_entities is an array of catalog entities you explicitly recommend "
             "in text; copy entity_type/type, id as catalog_id, and name as display_name "
-            "from Business Knowledge. Use an empty array when no entity is recommended."
+            "from Business Knowledge. Listing available offerings is not a recommendation. "
+            "Use an empty array when no entity is explicitly recommended."
         )
         client = get_anthropic_client()
         response = client.messages.create(
             model=resolve_model(),
-            max_tokens=_MAX_TOKENS,
+            max_tokens=_HANDLER_MAX_TOKENS,
             system=system_prompt,
             messages=[{"role": "user", "content": _build_user_message(request)}],
         )
@@ -398,7 +431,16 @@ def render_handler_response(request: LlmRenderRequest) -> HandlerRenderResult:
         try:
             return coerce_handler_render_result(json.loads(payload))
         except (json.JSONDecodeError, TypeError, ValueError):
-            logger.warning("Handler renderer returned unstructured output; ignoring selections")
+            if _looks_like_handler_envelope(raw):
+                logger.warning(
+                    "Handler renderer returned invalid structured output; "
+                    "returning safe fallback and ignoring selections"
+                )
+                return HandlerRenderResult(text=_FALLBACK_TEXT)
+            logger.warning(
+                "Handler renderer returned legacy unstructured output; "
+                "ignoring selections"
+            )
             return HandlerRenderResult(text=raw)
     except RuntimeError:
         logger.warning("ANTHROPIC_API_KEY not set — returning fallback handler result")

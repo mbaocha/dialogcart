@@ -10,6 +10,7 @@ import sys
 from fastapi import FastAPI
 
 from core.api import message
+from core.config.session_freshness import load_session_freshness_settings
 
 # Wire up application logging before uvicorn.run() is called.
 # Uvicorn's dictConfig only configures uvicorn.* loggers, so handlers added
@@ -31,6 +32,12 @@ _api_msg_logger = logging.getLogger("core.api.message")
 _api_msg_logger.setLevel(logging.INFO)
 _api_msg_logger.addHandler(_log_handler)
 _api_msg_logger.propagate = False
+
+_freshness_settings = load_session_freshness_settings()
+_api_msg_logger.info(
+    "Availability TTL: %s seconds",
+    _freshness_settings.availability_ttl_seconds,
+)
 
 # Create FastAPI app
 app = FastAPI(

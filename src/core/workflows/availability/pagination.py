@@ -6,7 +6,6 @@ import logging
 from typing import Any, Dict, Optional
 
 from core.workflows.availability.browse import (
-    extract_availability_browse,
     resolve_browse_intent,
 )
 from core.rendering.availability_renderer import (
@@ -307,24 +306,13 @@ def try_handle_availability_browse_turn(
         )
         return None
 
-    facts_obj = merged.get("facts")
-    facts_operation = (
-        facts_obj.get("operation")
-        if isinstance(facts_obj, dict)
-        else None
-    )
-    explicit_browse = extract_availability_browse(merged)
     logger.debug(
         "[AVAILABILITY_PAGINATION] probe user_id=%s merged_keys=%s intent=%s "
-        "availability_browse=%s operation=%s facts.operation=%s "
-        "extract_browse=%s resolved_browse=%s",
+        "operation=%s resolved_browse=%s",
         user_id,
         list(merged.keys()),
         intent_name,
-        merged.get("availability_browse"),
         merged.get("operation"),
-        facts_operation,
-        explicit_browse,
         browse_intent,
     )
 
